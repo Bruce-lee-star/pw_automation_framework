@@ -93,6 +93,13 @@ public final class RolePickerScripts {
     /** 强制面板重建 + 开启面板（墓碑门控置 1）。 */
     public static final String PANEL_FORCE_AND_ENABLE_JS = loadScript("panel-force-and-enable-js.js");
 
+    /**
+     * 每轮自愈探针：判断该页"拾取库是否存在 / 面板 DOM 是否丢失"，库在而面板丢失时就地调用门面重建。
+     * 返回 {@code ''}=正常 / {@code 'panel'}=面板已重建 / {@code 'none'}=库也丢失（由 Java 侧重挂）/
+     * {@code 'err'}=探针自身异常（如文档正在导航）。供 RolePickerPanelController 主循环每轮调用。
+     */
+    public static final String HEAL_PANEL_AND_LIB_JS = loadScript("heal-panel-and-lib-js.js");
+
     /** ensurePickingActive：会话置位 + 注入反向翻译表（nls 经 JSON.parse 复原），门控函数存在则调用否则注入 START_SCRIPT。 */
     public static final String SET_NLS_AND_SESSION_JS = concat(loadScript("set-nls-and-session-js-head.js"), START_SCRIPT, loadScript("set-nls-and-session-js-tail.js"));
 

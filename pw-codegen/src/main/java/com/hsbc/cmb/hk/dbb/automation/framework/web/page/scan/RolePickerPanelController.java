@@ -429,6 +429,33 @@ public final class RolePickerPanelController {
         for (Page pg : pageNames.keySet()) {
             if (!pg.isClosed()) refreshPageClass(pc, pg);
         }
+        // 【F1 每轮自愈：面板 / 拾取库的"存在性"检查】上一段只保证页类正确；本段保证每个被跟踪页上确实
+        // 【有面板、有拾取库】。这是此前唯一完全没有兜底的环节：跨源 popup 拿不到 localStorage 的会话标志
+        // （gate-init 不注入拾取库），而 followPage 的一次性 evaluate 若在加载期失败，该页会既无库也无面板，
+        // 且【永不恢复】（表现为"新页面没有重建 panel"）。
+        // 探针返回值：'' 正常 / 'panel' 面板 DOM 丢失（已在浏览器侧就地重建）/ 'none' 拾取库也丢了
+        // （本段先把面板拉回来，库由紧随其后的 ensurePickingActive 重挂 START_SCRIPT 负责）。
+        // 用 pickerEvalSoft（2s 超时）：本段是"每轮重做、丢掉无害"的调用，超时不允许拖慢主循环。
+        if (active.get()) {
+            for (Page pg : pageNames.keySet()) {
+                if (pg.isClosed()) continue;
+                try {
+                    Object healRes = RoleElementPicker.pickerEvalSoft(pg, RolePickerScripts.HEAL_PANEL_AND_LIB_JS);
+                    String heal = healRes == null ? "" : String.valueOf(healRes);
+                    if ("panel".equals(heal)) {
+                        log.info("[picker][heal] panel was missing on a tracked page and has been rebuilt (url={})", pg.url());
+                    } else if ("none".equals(heal)) {
+                        log.warn("[picker][heal] picker library missing on a tracked page: restoring the panel now,"
+                                + " the library itself is re-attached by ensurePickingActive (url={})", pg.url());
+                        RoleElementPicker.pickerEvalSoft(pg, RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
+                        RoleElementPicker.pickerEvalSoft(pg, RolePickerScripts.PANEL_SCRIPT);
+                    }
+                } catch (Exception healEx) {
+                    // 导航瞬间文档不稳定导致的探针失败属预期：下一轮重来（幂等），故只记 debug。
+                    log.debug("[picker][heal] probe skipped this round (page may be navigating): {}", healEx.getMessage());
+                }
+            }
+        }
         // 自愈式保活：会话处于拾取中时，校验每个被跟踪页的点击捕获监听是否仍存活，
         // 丢失则立即重挂 START_SCRIPT（含 nls）——覆盖"页面变化（跳转/URL change/SPA 整文档替换/
         // frame 内部跳转）后监听被静默丢弃"的所有边界，保证任何时刻都能继续拾取。
