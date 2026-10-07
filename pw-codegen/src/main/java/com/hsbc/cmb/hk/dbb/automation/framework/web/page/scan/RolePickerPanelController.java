@@ -548,6 +548,14 @@ public final class RolePickerPanelController {
                 // 导致随后的显式 accept/dismiss 报 "No dialog is showing"（日志曾出现的告警）。
                 if (dialog != null) {
                     String t = dialog.type() != null ? dialog.type().toLowerCase() : "alert";
+                    // 【F4 beforeunload 特判】离开页面时的"确认离开"不是业务动作：只放行（accept），
+                    // 绝不往下回填 dialog 标记 —— 否则产物里会凭空多出一个业务弹窗 + acceptAlert 插桩。
+                    // 注：JS 侧 markLastPickDialog 同步做了同样的短路（双保险口径一致）。
+                    if ("beforeunload".equals(t)) {
+                        dialog.accept();
+                        log.debug("[picker] beforeunload dialog auto-accepted (not recorded as a business action)");
+                        return;
+                    }
                     if ("confirm".equals(t) || "prompt".equals(t)) dialog.dismiss();
                     else dialog.accept();
                 }

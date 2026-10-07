@@ -140,6 +140,9 @@
                 // 生成 step 时前置插桩 acceptAlert/dismissAlert（与 page.onDialog 双保险、幂等）。
                 function markLastPickDialog(type) {
                   try {
+                    // 【F4 beforeunload 特判】"确认离开页面"不是业务动作：不打标记、不回传，
+                    // 避免产物里凭空多出业务弹窗与 acceptAlert 插桩（与 Java onDialog 的短路口径一致）。
+                    if (type === 'beforeunload') return;
                     var sig = window.__lastPickSig || '';
                     if (!sig) return;
                     var pick = window.__sigToPick ? window.__sigToPick[sig] : null;
