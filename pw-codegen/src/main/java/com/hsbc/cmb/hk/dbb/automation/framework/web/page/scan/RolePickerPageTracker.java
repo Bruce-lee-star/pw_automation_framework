@@ -280,6 +280,11 @@ final class RolePickerPageTracker {
             String cls = RolePickerClassNameResolver.resolvePageClassForUrl(newPage.url(), pageNames.values(), urlToClass);
             pageNames.put(newPage, cls);
             openedPages.add(newPage);
+            // 【F2：先注册本页监听、后搬运状态】原实现把"本页自己的 onFrameNavigated / onPopup / onDialog /
+            // onClose 注册"放在方法末尾。而 popup 触发时该页常立刻从 about:blank 重定向到真实 URL：若注册
+            // 发生在重定向之后，本页自己的 onFrameNavigated 会【错过】这次导航 ⇒ 该页再也不会被跨域强制
+            // 重注入 / 重建面板，表现为"新页面没有重建 panel"。故把注册提前到状态搬运之前（幂等，末尾不再重复）。
+            RoleElementPicker.registerPopupFollow(ctx, newPage, opener);
             // 关键修复：打开新页面【不再】把默认页当前步收尾成一个 step。step 的唯一边界是"开始→停止"，
             // 弹窗打开/关闭都只是同一 step 内的交互，绝不该切分出额外 step（用户明确要求"只有一个条件：开始-停止"）。
             // 因此此处只把 opener 的"进行中 step"（__currentStep，已带各元素原 _pageClass）整体搬运到新页继续累积，
@@ -308,18 +313,53 @@ final class RolePickerPageTracker {
             //   ① context 级门控 addInitScript 在每个新文档早期自动跑，同源导航读得到 localStorage 开关即注入；
             //   ② onFrameNavigated 对跨域导航强制 start() 重注入（RolePickerSessionState.LAST_PICK_ORIGIN 未污染故能正确判跨域）。
             // 故弹出瞬间即具备基础监听，导航完成后即被真实库接管，用户体感"立即能拾取、不卡"。
+            // 【F3：等加载 + 有界重试，失败不再静默】
+            // onPopup 触发时新页文档常仍是 about:blank 或正在加载，一次性 evaluate 必然失败；原实现只 warn
+            // 吞掉 ⇒ 该页可能永久没有监听、没有面板（用户观感"新页面没有重建 panel"）。现对两处注入各重试
+            // 最多 3 次（退避 300ms）；仍失败则打印可判定告警，并交由两条兜底接管：① 每轮"面板/库存在性自愈"；
+            // ② 已提前注册（F2）的本页 onFrameNavigated，跨域导航时会强制重注入并重建面板。
             if (sessionActive) {
-                try { RoleElementPicker.start(newPage, nlsReverseJson); } catch (Exception ex) {
-                    log.warn("[picker] failed to inject into the new page (ignorable during navigation; will be re-injected by onFrameNavigated): {}", ex.getMessage());
+                boolean injected = false;
+                for (int attempt = 1; attempt <= 3 && !injected; attempt++) {
+                    try {
+                        RoleElementPicker.start(newPage, nlsReverseJson);
+                        injected = true;
+                    } catch (Exception ex) {
+                        log.warn("[picker] inject attempt {}/3 into the followed page failed (url={}): {}",
+                                attempt, newPage.url(), ex.getMessage());
+                        if (attempt < 3) {
+                            try { Thread.sleep(300L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                        }
+                    }
+                }
+                if (!injected) {
+                    log.warn("[picker] picker library could not be injected into the followed page after 3 attempts;"
+                            + " the per-round heal and the page's own onFrameNavigated will retry (url={})", newPage.url());
                 }
             }
-            // 面板脚本：初始文档也先注入一次；若后续导航重建，onFrameNavigated/PANEL addInitScript 会兜底。
-            try { pickerEval(newPage, RolePickerScripts.PANEL_SCRIPT); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker", ignore); }
+            // 面板脚本：初始文档也先注入一次（同样等加载 + 有界重试）；若后续导航重建，PANEL addInitScript 会兜底。
+            boolean panelInjected = false;
+            for (int attempt = 1; attempt <= 3 && !panelInjected; attempt++) {
+                try {
+                    pickerEval(newPage, RolePickerScripts.PANEL_SCRIPT);
+                    panelInjected = true;
+                } catch (Exception ex) {
+                    log.warn("[picker] panel injection attempt {}/3 into the followed page failed (url={}): {}",
+                            attempt, newPage.url(), ex.getMessage());
+                    if (attempt < 3) {
+                        try { Thread.sleep(300L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                    }
+                }
+            }
+            if (!panelInjected) {
+                log.warn("[picker] panel could not be rebuilt in the followed page after 3 attempts;"
+                        + " the per-round heal will retry (url={})", newPage.url());
+            }
             current.set(newPage);
             // 记录新页初始快照（含搬运来的并集），供导航重建（onFrameNavigated）与关闭回退（onClose）使用。
             snapshots.put(newPage, RoleElementPicker.readPickStateJson(newPage));
-            // 新页面若再弹窗/再开页，继续跟随；把"是否处于拾取态"传下去，供其 onClose 回退父页时恢复。
-            RoleElementPicker.registerPopupFollow(ctx, newPage, opener);
+            // 新页面若再弹窗/再开页，继续跟随：该注册已提前到本方法开头（见 F2 说明），此处不再重复注册，
+            // 否则会把 onPopup/onDialog/onClose/onFrameNavigated 挂两遍（同一事件被处理两次）。
             log.info("[picker] injected an independent panel into the new page ({}); the default panel is retained.", cls);
         } catch (Exception e) {
             log.warn("[picker] page following failed: {}", e.getMessage());
