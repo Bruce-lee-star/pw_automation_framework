@@ -34,6 +34,10 @@ public final class CapturedExchange {
     private final long monitorTimeoutMs;
     /** 记录创建时刻（epoch millis，供 CAPTURE 快照的 recordedAt 使用）。 */
     private final long recordedAtMillis;
+    /** 命中规则的能力渠道集合（MOCK/MODIFY/MONITOR/DELAY）——仅用于采集记录的分渠道标注。 */
+    private final java.util.Set<String> channels;
+    /** 命中规则的主渠道（优先级 MONITOR > DELAY > MODIFY > MOCK）；无渠道时为 null。 */
+    private final String primaryChannel;
 
     private volatile Integer responseStatus;
     private volatile Map<String, String> responseHeaders;
@@ -49,8 +53,16 @@ public final class CapturedExchange {
     /** 断言失败是否已结算（入失败队列）；CAS 保证每条失败只结算一次（防多路径重复上报）。 */
     private final AtomicBoolean settled = new AtomicBoolean(false);
 
+    /** 兼容构造（旧 8 参签名）：不携带渠道信息（channels 为空集、primaryChannel 为 null）。 */
     CapturedExchange(String method, String url, String pattern, Map<String, String> requestHeaders,
                      String postDataPreview, long requestTimeNanos, Integer expectStatus, long monitorTimeoutMs) {
+        this(method, url, pattern, requestHeaders, postDataPreview, requestTimeNanos, expectStatus,
+                monitorTimeoutMs, null, null);
+    }
+
+    CapturedExchange(String method, String url, String pattern, Map<String, String> requestHeaders,
+                     String postDataPreview, long requestTimeNanos, Integer expectStatus, long monitorTimeoutMs,
+                     java.util.Set<String> channels, String primaryChannel) {
         this.method = method;
         this.url = url;
         this.pattern = pattern;
@@ -60,6 +72,19 @@ public final class CapturedExchange {
         this.expectStatus = expectStatus;
         this.monitorTimeoutMs = monitorTimeoutMs;
         this.recordedAtMillis = System.currentTimeMillis();
+        this.channels = channels == null ? java.util.Set.of()
+                : Collections.unmodifiableSet(new java.util.LinkedHashSet<>(channels));
+        this.primaryChannel = primaryChannel;
+    }
+
+    /** 命中的能力渠道（不可变；静态分析要求不直接返回可变字段）。 */
+    java.util.Set<String> channels() {
+        return Collections.unmodifiableSet(channels);
+    }
+
+    /** 主渠道（优先级最高者）；无渠道时为 null。 */
+    String primaryChannel() {
+        return primaryChannel;
     }
 
     public String method() {
