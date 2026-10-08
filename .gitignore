@@ -90,3 +90,8 @@ _clean_diag*.ps1
 /tools/debug_*.ps1
 /tools/scan_*.ps1
 /tools/convert_*.ps1
+
+# ---------- IDE 团队协作簿记（运行时状态，非项目源码；.codebuddy 本体保留）----------
+# 这些文件由 IDE 的 agent team 在运行时写入（config.json / <member>.json / team-lead.json），
+# 曾因 git add -A 被误提交进仓库一次，故显式忽略；.codebuddy 下的其它项目数据不受影响。
+.codebuddy/teams/
