@@ -45,7 +45,24 @@ public record CapturedApiCall(String pattern, String method, String url,
                               Map<String, String> requestHeaders, String requestBodyPreview,
                               Integer responseStatus, Map<String, String> responseHeaders,
                               String responseBody, boolean responseBodyTruncated,
-                              long durationMs, boolean timedOut, long recordedAtMillis) {
+                              long durationMs, boolean timedOut, long recordedAtMillis,
+                              Set<String> channels, String primaryChannel) {
+
+    /**
+     * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null。
+     *
+     * <p>目的：本次只为采集记录增加"分渠道"信息，既有调用点（派发链证据、monitor 结果渲染等）
+     * 不需要跟着改签名，避免大范围牵动；需要标注渠道的新调用点走全参构造即可。
+     */
+    public CapturedApiCall(String pattern, String method, String url,
+                           Map<String, String> requestHeaders, String requestBodyPreview,
+                           Integer responseStatus, Map<String, String> responseHeaders,
+                           String responseBody, boolean responseBodyTruncated,
+                           long durationMs, boolean timedOut, long recordedAtMillis) {
+        this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
+                responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
+                Set.of(), null);
+    }
 
     /** 敏感头键（小写比较）：值一律打码。 */
     private static final Set<String> SENSITIVE_HEADERS = Set.of(
@@ -60,10 +77,20 @@ public record CapturedApiCall(String pattern, String method, String url,
     /** 日志展示用 JSON 缩进器（线程安全，复用同一实例）。 */
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    /** 防御性拷贝构造：header 快照不可变 + 敏感头脱敏。 */
+    /** 防御性拷贝构造：header 快照不可变 + 敏感头脱敏 + 渠道集合不可变。 */
     public CapturedApiCall {
         requestHeaders = sanitize(requestHeaders);
         responseHeaders = sanitize(responseHeaders);
+        // 渠道集合同样做防御性拷贝：静态分析（SpotBugs EI_EXPOSE_REP/REP2）对
+        // "持有调用方传入的可变集合"会直接拦构建（pw-core 的 CapturedApiCallView 已踩过两次）。
+        channels = channels == null ? Set.of()
+                : java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(channels));
+    }
+
+    /** 只读视图：静态分析要求访问器不得直接返回可变类型字段（与 pw-core 的 CapturedApiCallView 同处理）。 */
+    @Override
+    public Set<String> channels() {
+        return java.util.Collections.unmodifiableSet(channels);
     }
 
     /** 请求体预览上限（与 {@code CapturedExchange} 对齐）。 */
