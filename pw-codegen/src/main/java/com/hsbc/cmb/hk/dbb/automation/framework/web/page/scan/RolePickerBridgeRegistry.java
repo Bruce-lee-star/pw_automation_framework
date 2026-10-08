@@ -331,6 +331,31 @@ final class RolePickerBridgeRegistry {
 
     /** 控制台兜底桥：context 级 onConsoleMessage 捕获所有页面的 __roleOnPick::/__roleOnDelete:: 兜底回传与拾取链路报错，即使绑定失效回传也不丢失。 */
     private static void registerConsoleBridge(BrowserContext ctx) {
+        // 【F4 续：context 级 dialog 兜底 —— context 级"唯一处理点"】
+        // 逐页 page.onDialog 只覆盖"已被 picker 跟踪并注册过的页"；未跟踪页 / 注册完成前弹出的
+        // alert-confirm-prompt 此前无人处理（只依赖 Playwright 对未监听弹窗的默认 dismiss）。这里在
+        // context 级补一道，覆盖该 context 下所有页；口径与逐页版一致：beforeunload 放行且不记录、
+        // confirm/prompt 拒绝、其余接受。
+        // 【为什么不会重复处理而丢标记】逐页版的 accept/dismiss 已单独包 try/catch（见
+        // RolePickerPanelController 的 page.onDialog）：本处若先关掉弹窗，逐页版那次 accept/dismiss 只会
+        // 抛 "No dialog is showing" 被吞掉，而其后的"回填 dialog 标记"照常执行（该标记只依赖
+        // window.__lastPickSig，不依赖 dialog 是否仍处于打开状态），故标记不会丢，最多多一条 debug。
+        ctx.onDialog(dialog -> {
+            try {
+                if (dialog == null) return;
+                String t = dialog.type() != null ? dialog.type().toLowerCase() : "alert";
+                if ("beforeunload".equals(t)) {
+                    dialog.accept();
+                    return;
+                }
+                if ("confirm".equals(t) || "prompt".equals(t)) dialog.dismiss();
+                else dialog.accept();
+                log.info("[picker] context-level onDialog handled a {} dialog on {}", t,
+                        dialog.page() != null ? dialog.page().url() : "(unknown page)");
+            } catch (Exception ex) {
+                log.warn("[picker] context-level onDialog handling error (ignored): {}", ex.getMessage());
+            }
+        });
         ctx.onConsoleMessage(msg -> {
             String t = msg.text();
             if (t == null) return;

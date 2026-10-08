@@ -547,17 +547,24 @@ public final class RolePickerPanelController {
                 // 必须在 page.evaluate 之前处理：Playwright 在 dialog 仍显示时调用 evaluate 会自动处理 dialog，
                 // 导致随后的显式 accept/dismiss 报 "No dialog is showing"（日志曾出现的告警）。
                 if (dialog != null) {
-                    String t = dialog.type() != null ? dialog.type().toLowerCase() : "alert";
-                    // 【F4 beforeunload 特判】离开页面时的"确认离开"不是业务动作：只放行（accept），
-                    // 绝不往下回填 dialog 标记 —— 否则产物里会凭空多出一个业务弹窗 + acceptAlert 插桩。
-                    // 注：JS 侧 markLastPickDialog 同步做了同样的短路（双保险口径一致）。
-                    if ("beforeunload".equals(t)) {
-                        dialog.accept();
-                        log.debug("[picker] beforeunload dialog auto-accepted (not recorded as a business action)");
-                        return;
+                    // 【F4 续】accept/dismiss 单独包 try/catch：context 级 onDialog 也会处理同一个弹窗，
+                    // 若它先关掉了弹窗，此处会抛 "No dialog is showing"。绝不能让这个异常中断后面的
+                    // "回填 dialog 标记"（该标记只依赖 window.__lastPickSig，不依赖 dialog 是否仍打开）。
+                    try {
+                        String t = dialog.type() != null ? dialog.type().toLowerCase() : "alert";
+                        // 【F4 beforeunload 特判】离开页面时的"确认离开"不是业务动作：只放行（accept），
+                        // 绝不往下回填 dialog 标记 —— 否则产物里会凭空多出一个业务弹窗 + acceptAlert 插桩。
+                        // 注：JS 侧 markLastPickDialog 同步做了同样的短路（双保险口径一致）。
+                        if ("beforeunload".equals(t)) {
+                            dialog.accept();
+                            log.debug("[picker] beforeunload dialog auto-accepted (not recorded as a business action)");
+                            return;
+                        }
+                        if ("confirm".equals(t) || "prompt".equals(t)) dialog.dismiss();
+                        else dialog.accept();
+                    } catch (Exception dlgEx) {
+                        log.debug("[picker] dialog was already handled by the context-level onDialog: {}", dlgEx.getMessage());
                     }
-                    if ("confirm".equals(t) || "prompt".equals(t)) dialog.dismiss();
-                    else dialog.accept();
                 }
                 // 再读 sig 回写 Java 内存态（此时 dialog 已处理，evaluate 安全；浏览器侧 __rolePickClick
                 // 的 setTimeout(0) 也会经 __roleOnPick 回传带 dialog 标记的元素，二者幂等）。
