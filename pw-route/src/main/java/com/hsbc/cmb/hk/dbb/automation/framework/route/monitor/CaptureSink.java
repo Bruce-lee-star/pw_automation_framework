@@ -303,4 +303,115 @@ public final class CaptureSink {
     public long bodyReadFailureCount() {
         return bodyReadFailures.get();
     }
+
+    // ==================== 索引查询 / 重置 / 跨模块视图（业务读取 API 采集信息） ====================
+
+    /**
+     * 清空该 sink 的全部采集数据（用例收尾调用；幂等）。
+     *
+     * <p>清三处：消费队列 {@code captured}、只增历史 {@code history}、在途等待 {@code pendingByPattern}，
+     * 并把四个可观测计数归零 —— 这样即便同一 Context 被跨 scenario 复用，也不会残留上一条用例的采集数据。
+     */
+    public void reset() {
+        captured.clear();
+        history.clear();
+        pendingByPattern.clear();
+        count.set(0);
+        dropped.set(0);
+        timedOutCount.set(0);
+        bodyReadFailures.set(0);
+    }
+
+    /** 全部采集记录（非消费式；数据源 = 只增 history）。 */
+    public List<CapturedApiCall> all() {
+        return new ArrayList<>(history);
+    }
+
+    /** 每个 pattern 的最近一次记录（非消费式；保持 pattern 首次出现顺序）。 */
+    public List<CapturedApiCall> allLastPerPattern() {
+        java.util.Map<String, CapturedApiCall> last = new java.util.LinkedHashMap<>();
+        for (CapturedApiCall c : history) {
+            if (c != null && c.pattern() != null) {
+                last.put(c.pattern(), c);
+            }
+        }
+        return new ArrayList<>(last.values());
+    }
+
+    /** 指定 endpoint 的最近一次记录：先按 pattern 精确匹配，再退化为 URL 前缀匹配；无则 null。 */
+    public CapturedApiCall lastOf(String endpoint) {
+        CapturedApiCall hit = null;
+        for (CapturedApiCall c : history) {
+            if (c == null || endpoint == null) {
+                continue;
+            }
+            if (endpoint.equals(c.pattern()) || (c.url() != null && c.url().startsWith(endpoint))) {
+                hit = c;
+            }
+        }
+        return hit;
+    }
+
+    /** 指定 URL 的全部记录（非消费式）。 */
+    public List<CapturedApiCall> byUrl(String url) {
+        List<CapturedApiCall> out = new ArrayList<>();
+        for (CapturedApiCall c : history) {
+            if (c != null && url != null && url.equals(c.url())) {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    /** 指定渠道的全部记录（大小写不敏感；渠道名 MOCK / MODIFY / MONITOR / DELAY）。 */
+    public List<CapturedApiCall> byChannel(String channel) {
+        List<CapturedApiCall> out = new ArrayList<>();
+        if (channel == null) {
+            return out;
+        }
+        String want = channel.toUpperCase(java.util.Locale.ROOT);
+        for (CapturedApiCall c : history) {
+            if (c != null && c.channels().contains(want)) {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    /** 等待首个满足条件的记录（非消费式轮询；20ms 间隔）；超时返回 null。 */
+    public CapturedApiCall waitFor(java.util.function.Predicate<CapturedApiCall> predicate, long timeoutMs) {
+        if (predicate == null) {
+            return null;
+        }
+        long deadline = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
+        while (true) {
+            for (CapturedApiCall c : history) {
+                if (c != null && predicate.test(c)) {
+                    return c;
+                }
+            }
+            if (System.nanoTime() >= deadline) {
+                return null;
+            }
+            try {
+                Thread.sleep(20L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+    }
+
+    /** 转换为跨模块只读视图（业务侧读取；pw-core 的 View 内部已对集合做不可变拷贝）。 */
+    public static com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView toView(
+            CapturedApiCall c) {
+        if (c == null) {
+            return null;
+        }
+        return new com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView(
+                c.pattern(), c.method(), c.url(),
+                c.requestHeaders(), c.requestBodyPreview(), c.responseStatus(), c.responseHeaders(),
+                c.responseBody(), c.responseBodyTruncated(), c.durationMs(), c.timedOut(),
+                c.recordedAtMillis(), c.channels());
+    }
 }
