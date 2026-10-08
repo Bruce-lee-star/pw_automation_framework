@@ -259,6 +259,87 @@ public final class ApiSpec {
         }
     }
 
+    // ==================== 采集渠道（API 信息采集的分渠道标注与采集判定） ====================
+
+    /** 采集渠道名：MONITOR（默认采集类型）。 */
+    public static final String CHANNEL_MONITOR = "MONITOR";
+    /** 采集渠道名：DELAY。 */
+    public static final String CHANNEL_DELAY = "DELAY";
+    /** 采集渠道名：MODIFY（对应 {@link RouteCapability#MODIFY_REQUEST}，对外统一叫 MODIFY）。 */
+    public static final String CHANNEL_MODIFY = "MODIFY";
+    /** 采集渠道名：MOCK。 */
+    public static final String CHANNEL_MOCK = "MOCK";
+
+    /**
+     * 本规则命中的<b>全部</b>能力渠道——用于采集记录的"分渠道"标注。
+     *
+     * <p>判定口径与 {@code RouteDispatcher} 的 hasDelay/hasModify/hasMock/hasMonitor
+     * <b>完全一致</b>（该处改为直接复用本方法，避免两份判定漂移）：DELAY = 未停止且携带 delay 参数；
+     * MODIFY / MOCK / MONITOR 同理要求"未停止 + 字段就绪"。
+     *
+     * @return 不可变集合（可能为空集：无任何活跃渠道的规则不会被采集）
+     */
+    public java.util.Set<String> activeChannels() {
+        java.util.Set<String> channels = new java.util.LinkedHashSet<>(4);
+        if (!isStopped(RouteCapability.MONITOR) && hasMonitorFields()) {
+            channels.add(CHANNEL_MONITOR);
+        }
+        if (!isStopped(RouteCapability.DELAY) && (delayMs > 0 || delayMinMs > 0 || delayMaxMs > 0)) {
+            channels.add(CHANNEL_DELAY);
+        }
+        if (!isStopped(RouteCapability.MODIFY_REQUEST) && hasModifyFields()) {
+            channels.add(CHANNEL_MODIFY);
+        }
+        if (!isStopped(RouteCapability.MOCK) && hasMockFields()) {
+            channels.add(CHANNEL_MOCK);
+        }
+        return java.util.Collections.unmodifiableSet(channels);
+    }
+
+    /**
+     * 本规则的<b>主渠道</b>——采集"是否入库"的判定依据（配合 {@code route.capture.all.type}）。
+     *
+     * <p>优先级：{@code MONITOR > DELAY > MODIFY > MOCK}。MONITOR 高于 DELAY 的原因：
+     * {@code .monitor().delay()} 本质是"被延迟的观测规则"，按默认口径（只采 MONITOR）就应被采到；
+     * 同时记录里仍保留完整 {@code channels}（含 DELAY），故"延迟的 api 信息"照样能查到。
+     *
+     * @return 渠道名（见 {@code CHANNEL_*}）；无任何活跃渠道时返回 {@code null}
+     */
+    public String primaryChannel() {
+        java.util.Set<String> channels = activeChannels();
+        if (channels.contains(CHANNEL_MONITOR)) {
+            return CHANNEL_MONITOR;
+        }
+        if (channels.contains(CHANNEL_DELAY)) {
+            return CHANNEL_DELAY;
+        }
+        if (channels.contains(CHANNEL_MODIFY)) {
+            return CHANNEL_MODIFY;
+        }
+        if (channels.contains(CHANNEL_MOCK)) {
+            return CHANNEL_MOCK;
+        }
+        // 【宽松回退：口径二】没有任何"字段就绪"渠道时，按规则【声明的主能力】判定 ——
+        // 即"声明了 .monitor() 就算 MONITOR 类型"（反之裸 .mock()/.modifyRequest()/.delay() 归各自渠道，
+        // 仍受 route.capture.all.type 控制，不会因此被默认采集）。
+        RouteCapability declared = capability();
+        if (declared == null) {
+            return null;
+        }
+        switch (declared) {
+            case MONITOR:
+                return CHANNEL_MONITOR;
+            case DELAY:
+                return CHANNEL_DELAY;
+            case MODIFY_REQUEST:
+                return CHANNEL_MODIFY;
+            case MOCK:
+                return CHANNEL_MOCK;
+            default:
+                return null;
+        }
+    }
+
     /**
      * 合并另一条同 pattern 规则（V1 单规则多能力位模型：后注册覆盖先注册、匹配条件后者优先、
      * 集合类字段 union、disabled 集合 union）。返回不可变新实例。

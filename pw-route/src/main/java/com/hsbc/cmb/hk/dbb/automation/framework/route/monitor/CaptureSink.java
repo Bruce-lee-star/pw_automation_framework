@@ -81,10 +81,16 @@ public final class CaptureSink {
      * @return true 表示已进入「等待响应」索引——调用方应据此启动响应轮询
      */
     public boolean recordRequest(Request request, ApiSpec spec) {
-        // 【默认全采（对齐 master 三个 Handler 自动入库）】原先只有显式 .capture() 的规则才入库，
-        // 导致业务拿不到 api 信息（未加 .capture() 时 dump 恒为空）。现任何规则类型命中即入库，
-        // 渠道由 spec 的能力位标注（见 ApiSpec.activeChannels），不再以 captureEnabled 作闸门。
-        // captureBody() 仍然有效：它只控制"是否读响应体"，不影响是否入采集库。
+        // 【采集范围判定】默认【只采集主渠道为 MONITOR 的规则】；其余三类（DELAY / MODIFY / MOCK）
+        // 需显式 .capture()，或把系统属性 route.capture.all.type 置为 true 才采集。
+        // MONITOR 优先于 DELAY：.monitor().delay() 的主渠道是 MONITOR ⇒ 默认即被采到，而记录里仍带
+        // 完整 channels（含 DELAY），故"被延迟的 api 信息"照样能查到（分渠道查询不受影响）。
+        // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。
+        if (!spec.captureEnabled()
+                && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
+                && !Boolean.parseBoolean(System.getProperty("route.capture.all.type", "false"))) {
+            return false;
+        }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
         pendingByPattern.computeIfAbsent(spec.pattern(), k -> new ConcurrentLinkedQueue<>()).add(snapshot);
         return true;
@@ -101,8 +107,14 @@ public final class CaptureSink {
      * @param response 已到达的真实响应（本地持有）；null 安全（忽略）
      */
     public void onResponseForSpec(ApiSpec spec, Response response) {
-        // 默认全采：与 recordRequest 口径一致，不再以 captureEnabled 作闸门（spec 为空的场景仍需短路）。
+        // 与 recordRequest 完全同一口径：显式 capture() / 主渠道 MONITOR / route.capture.all.type=true
+        // 三者之一才归档响应侧（spec 为空的场景仍先短路）。
         if (spec == null || response == null) {
+            return;
+        }
+        if (!spec.captureEnabled()
+                && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
+                && !Boolean.parseBoolean(System.getProperty("route.capture.all.type", "false"))) {
             return;
         }
         ConcurrentLinkedQueue<CapturedExchange> pending = pendingByPattern.get(spec.pattern());
