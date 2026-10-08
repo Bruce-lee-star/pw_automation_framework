@@ -218,12 +218,14 @@ public final class CaptureSink {
     private final ConcurrentLinkedQueue<CapturedApiCall> history = new ConcurrentLinkedQueue<>();
 
     private static CapturedApiCall toDto(CapturedExchange snapshot, String body, boolean truncated) {
+        // 分渠道透传：与 ofRequest 同源（channels=全部命中渠道，primaryChannel=优先级最高者）。
         return new CapturedApiCall(
                 snapshot.pattern(), snapshot.method(), snapshot.url(),
                 snapshot.requestHeaders(), snapshot.postDataPreview(),
                 snapshot.responseStatus(), snapshot.responseHeaders(),
                 body, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
-                snapshot.recordedAtMillis());
+                snapshot.recordedAtMillis(),
+                snapshot.channels(), snapshot.primaryChannel());
     }
 
     /**

@@ -289,7 +289,9 @@ public final class CapturedExchange {
         String postData = request.postData();
         String preview = postData == null ? null
                 : (postData.length() > POST_DATA_PREVIEW_MAX ? postData.substring(0, POST_DATA_PREVIEW_MAX) + "...[truncated]" : postData);
+        // 分渠道标注：把命中规则的渠道集合与主渠道一次带进快照（后续 dump/peek 与 View 转换直接可用）。
         return new CapturedExchange(request.method(), request.url(), spec.pattern(),
-                request.headers(), preview, System.nanoTime(), spec.expectStatus(), spec.monitorTimeoutMs());
+                request.headers(), preview, System.nanoTime(), spec.expectStatus(), spec.monitorTimeoutMs(),
+                spec.activeChannels(), spec.primaryChannel());
     }
 }
