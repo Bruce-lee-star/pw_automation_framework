@@ -186,16 +186,20 @@ public class CaptureSinkTest {
     }
 
     @Test
-    public void nonCaptureRuleNotRecorded() {
+    public void nonCaptureRuleIsCapturedByDefault() {
         ApiSpec spec = ApiSpec.builder("/api/plain", RouteCapability.MONITOR)
-                .build(); // 未开启 capture
+                .build(); // 未开启 capture：默认全采（对齐 master：Monitor/Mock/Modify 三个 Handler 均自动入库）
         CaptureSink sink = newSink(100, 30_000);
 
         sink.recordRequest(mockRequest("https://host/api/plain"), spec);
         sink.onResponseForSpec(spec, mockResponse("https://host/api/plain", 200));
 
-        assertTrue( "未开启 capture 的规则不得采集", sink.dump().isEmpty());
-        assertEquals((long) 0, (long) sink.size());
+        // 行为变更（本次需求）：原先"未开启 capture ⇒ 不入库"，导致业务未加 .capture() 时完全拿不到
+        // api 信息；现改为默认全采，故该规则同样产出 1 条快照（渠道标注由 spec.activeChannels 提供）。
+        List<CapturedApiCall> calls = sink.dump();
+        assertEquals("默认全采：未显式 capture 的规则也必须入采集库", (long) 1, (long) calls.size());
+        assertEquals((long) 200L, (long) calls.get(0).responseStatus());
+        assertEquals((Object) "/api/plain", (Object) calls.get(0).pattern());
     }
 
     @Test

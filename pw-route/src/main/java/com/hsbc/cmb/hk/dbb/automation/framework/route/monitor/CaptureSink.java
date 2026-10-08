@@ -81,9 +81,10 @@ public final class CaptureSink {
      * @return true 表示已进入「等待响应」索引——调用方应据此启动响应轮询
      */
     public boolean recordRequest(Request request, ApiSpec spec) {
-        if (!spec.captureEnabled()) {
-            return false;
-        }
+        // 【默认全采（对齐 master 三个 Handler 自动入库）】原先只有显式 .capture() 的规则才入库，
+        // 导致业务拿不到 api 信息（未加 .capture() 时 dump 恒为空）。现任何规则类型命中即入库，
+        // 渠道由 spec 的能力位标注（见 ApiSpec.activeChannels），不再以 captureEnabled 作闸门。
+        // captureBody() 仍然有效：它只控制"是否读响应体"，不影响是否入采集库。
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
         pendingByPattern.computeIfAbsent(spec.pattern(), k -> new ConcurrentLinkedQueue<>()).add(snapshot);
         return true;
@@ -100,7 +101,8 @@ public final class CaptureSink {
      * @param response 已到达的真实响应（本地持有）；null 安全（忽略）
      */
     public void onResponseForSpec(ApiSpec spec, Response response) {
-        if (spec == null || response == null || !spec.captureEnabled()) {
+        // 默认全采：与 recordRequest 口径一致，不再以 captureEnabled 作闸门（spec 为空的场景仍需短路）。
+        if (spec == null || response == null) {
             return;
         }
         ConcurrentLinkedQueue<CapturedExchange> pending = pendingByPattern.get(spec.pattern());
