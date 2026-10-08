@@ -186,20 +186,54 @@ public class CaptureSinkTest {
     }
 
     @Test
-    public void nonCaptureRuleIsCapturedByDefault() {
-        ApiSpec spec = ApiSpec.builder("/api/plain", RouteCapability.MONITOR)
-                .build(); // 未开启 capture：默认全采（对齐 master：Monitor/Mock/Modify 三个 Handler 均自动入库）
-        CaptureSink sink = newSink(100, 30_000);
+    public void bareMonitorRuleIsCapturedByDefault() {
+        ApiSpec spec = ApiSpec.builder("/api/plain", RouteCapability.MONITOR).build(); // 裸 monitor：零 monitor 参数
+        assertEquals("声明即算 MONITOR 类型（口径二回退）", "MONITOR", spec.primaryChannel());
 
+        CaptureSink sink = newSink(100, 30_000);
         sink.recordRequest(mockRequest("https://host/api/plain"), spec);
         sink.onResponseForSpec(spec, mockResponse("https://host/api/plain", 200));
 
-        // 行为变更（本次需求）：原先"未开启 capture ⇒ 不入库"，导致业务未加 .capture() 时完全拿不到
-        // api 信息；现改为默认全采，故该规则同样产出 1 条快照（渠道标注由 spec.activeChannels 提供）。
         List<CapturedApiCall> calls = sink.dump();
-        assertEquals("默认全采：未显式 capture 的规则也必须入采集库", (long) 1, (long) calls.size());
+        assertEquals("默认只采 MONITOR：MONITOR 规则无需显式 capture 即入库", (long) 1, (long) calls.size());
         assertEquals((long) 200L, (long) calls.get(0).responseStatus());
         assertEquals((Object) "/api/plain", (Object) calls.get(0).pattern());
+    }
+
+    @Test
+    public void bareMockRuleIsNotCapturedByDefaultUnlessAllTypesEnabled() {
+        ApiSpec spec = ApiSpec.builder("/api/plain-mock", RouteCapability.MOCK).build(); // 裸 mock
+        assertEquals("裸 mock 的主渠道是 MOCK", "MOCK", spec.primaryChannel());
+
+        CaptureSink sink = newSink(100, 30_000);
+        sink.recordRequest(mockRequest("https://host/api/plain-mock"), spec);
+        sink.onResponseForSpec(spec, mockResponse("https://host/api/plain-mock", 200));
+        assertTrue("默认只采 MONITOR：MOCK 规则不入采集库", sink.dump().isEmpty());
+
+        String prev = System.getProperty("route.capture.all.type");
+        try {
+            System.setProperty("route.capture.all.type", "true");
+            sink.recordRequest(mockRequest("https://host/api/plain-mock"), spec);
+            sink.onResponseForSpec(spec, mockResponse("https://host/api/plain-mock", 200));
+            assertEquals("route.capture.all.type=true 后 MOCK 规则应被采集", (long) 1, (long) sink.dump().size());
+        } finally {
+            if (prev == null) {
+                System.clearProperty("route.capture.all.type");
+            } else {
+                System.setProperty("route.capture.all.type", prev);
+            }
+        }
+    }
+
+    @Test
+    public void explicitCaptureStillForcesCollectionForAnyChannel() {
+        ApiSpec spec = ApiSpec.builder("/api/plain-cap", RouteCapability.MOCK).capture(true).build();
+        CaptureSink sink = newSink(100, 30_000);
+
+        sink.recordRequest(mockRequest("https://host/api/plain-cap"), spec);
+        sink.onResponseForSpec(spec, mockResponse("https://host/api/plain-cap", 200));
+
+        assertEquals("显式 .capture() 必须强制采集（向后兼容，与主渠道无关）", (long) 1, (long) sink.dump().size());
     }
 
     @Test
