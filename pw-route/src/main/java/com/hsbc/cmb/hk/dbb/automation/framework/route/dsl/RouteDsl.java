@@ -881,7 +881,14 @@ public final class RouteDsl {
             return body(body);
         }
 
-        /** 二进制 Mock 响应体（对齐现有 RouteDsl.mockBody(byte[])；优先级高于 String body）。 */
+        /**
+         * 二进制 Mock 响应体（对齐现有 RouteDsl.mockBody(byte[])；优先级高于 String body）。
+         *
+         * <p><b>当前限制（务必注意）</b>：本方法把字节按 <b>UTF-8 转成 String</b> 后交给
+         * {@code mockBody(String)} 通道，故对<b>非文本</b>体（图片 / protobuf / gzip / 任意二进制）
+         * 会<b>损坏</b>——UTF-8 解码不是无损往返。文本体（JSON / XML / 纯文本）不受影响。
+         * 字节保真通道（{@code byte[]} mock 组件 + byte[] fulfill）落地后，本方法将改走该通道。
+         */
         public MockDsl mockBody(byte[] bodyBytes) {
             Objects.requireNonNull(bodyBytes, "bodyBytes");
             b.mockBody(new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));

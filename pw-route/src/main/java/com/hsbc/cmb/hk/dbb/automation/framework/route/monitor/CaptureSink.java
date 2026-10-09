@@ -80,7 +80,8 @@ public final class CaptureSink {
      * 注入构造：策略由装配方（{@code RouteRuntimeImpl}）解析并冻结一次后注入，
      * 使请求侧与响应侧闸门判定恒为同一快照。
      *
-     * @param io               IO 执行器
+     * @param io               IO 执行器（<b>当前未被本类使用</b>：采集路径在响应轮询线程就地完成
+     *                         字节快照与留存；保留该参数以便将来把留存派发到有界 IO 池）
      * @param maxCaptured      采集队列上限
      * @param defaultTimeoutMs 未响应定案窗口（毫秒）
      * @param policy           已冻结的采集策略
@@ -424,7 +425,13 @@ public final class CaptureSink {
         return out;
     }
 
-    /** 指定渠道的全部记录（大小写不敏感；渠道名 MOCK / MODIFY / MONITOR / DELAY）。 */
+    /**
+     * 指定渠道的全部记录（大小写不敏感）。
+     *
+     * <p><b>匹配口径</b>：比对记录<b>声明的</b> {@code channels()}，<b>不</b>回落到 {@code primaryChannel()}。
+     * 因此裸 {@code .monitor()} 规则（未声明额外渠道）虽然 {@code primaryChannel()} 为 {@code MONITOR}，
+     * 但 {@code byChannel("MONITOR")} <b>查不到</b>它——按渠道查只对显式声明渠道的规则有意义。
+     */
     public List<CapturedApiCall> byChannel(String channel) {
         List<CapturedApiCall> out = new ArrayList<>();
         if (channel == null) {
