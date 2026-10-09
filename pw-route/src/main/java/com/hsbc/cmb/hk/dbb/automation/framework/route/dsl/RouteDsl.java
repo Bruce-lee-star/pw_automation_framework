@@ -907,6 +907,62 @@ public final class RouteDsl {
         }
 
         /**
+         * 用一条<b>采集记录</b>作为 Mock 响应 —— 采集到回放的桥（<b>注册期即时快照</b>）。
+         *
+         * <p><b>为什么必须即时快照</b>：采集体由 {@code CaptureSink} 拥有，{@code reset()} 或
+         * history 驱逐时会 {@code close()} 载体（文件型即删除临时文件，见 {@code CapturedBody} 契约）。
+         * 若本方法只留存载体/临时文件引用，回放将读到已删文件（FILE 档抛异常）或脏读（MEMORY/GZIP 档
+         * 静默返回）—— 故这里在注册期就把状态码、响应头、内容类型、响应体<b>文字</b>拷入本 Mock 规格。
+         *
+         * <p>文本口径复用 {@code responseBody()}（由内容类型决定字符集、无内容类型回落 UTF-8，
+         * 且载体已解码缓存）；二进制<b>保真</b>通道（{@code byte[]}）另有一批，本方法先覆盖
+         * 常见 JSON/文本回放。
+         *
+         * @param captured 采集记录（非 null）
+         * @return 本 DSL（链式）
+         */
+        public MockDsl fromCaptured(CapturedApiCall captured) {
+            Objects.requireNonNull(captured, "captured");
+            return capturedSnapshot(captured.responseStatus(), captured.responseHeaders(),
+                    captured.contentType(), captured.responseBody());
+        }
+
+        /**
+         * {@link #fromCaptured(CapturedApiCall)} 的门面版本（供经 SPI 查询得到的只读视图使用）。
+         *
+         * @param captured 采集视图（非 null）
+         * @return 本 DSL（链式）
+         */
+        public MockDsl fromCaptured(
+                com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView captured) {
+            Objects.requireNonNull(captured, "captured");
+            return capturedSnapshot(captured.responseStatus(), captured.responseHeaders(),
+                    captured.contentType(), captured.responseBody());
+        }
+
+        /** 把采集到的响应要素即时写入本 Mock 规格（局部变量即快照，不留存任何采集侧引用）。 */
+        private MockDsl capturedSnapshot(Integer status, Map<String, String> headers,
+                                          String contentType, String body) {
+            if (status != null) {
+                b.mockStatus(status);
+            }
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null) {
+                        header(e.getKey(), e.getValue());
+                    }
+                }
+            }
+            if (contentType != null) {
+                b.mockContentType(contentType);
+            }
+            if (body != null) {
+                b.mockBody(body);
+            }
+            return this;
+        }
+
+        /**
          * 从 classpath 资源读取响应体模板（注册时读取，失败快速失败）。
          * 可链式 {@link #replaceField(String, Object)} 做字段覆盖（纯静态，不访问真实服务器）。
          */
