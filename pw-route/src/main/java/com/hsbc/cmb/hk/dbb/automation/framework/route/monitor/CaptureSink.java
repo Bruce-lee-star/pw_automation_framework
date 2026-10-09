@@ -2,7 +2,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
@@ -51,7 +50,6 @@ public final class CaptureSink {
 
     private final int maxCaptured;
     private final long defaultTimeoutMs;
-    private final RouteIoExecutor io;
     /** 已定案快照队列（业务线程 dump 消费）。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> captured = new ConcurrentLinkedQueue<>();
     /** pattern → 未收到响应的请求快照（响应配对索引）。 */
@@ -71,8 +69,8 @@ public final class CaptureSink {
     private final com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy capturePolicy;
 
     /** 便捷构造：策略在本类内冻结一次（等价 {@code RouteCapturePolicy.resolveNow()}）。 */
-    public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs) {
-        this(io, maxCaptured, defaultTimeoutMs,
+    public CaptureSink(int maxCaptured, long defaultTimeoutMs) {
+        this(maxCaptured, defaultTimeoutMs,
                 com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy.resolveNow());
     }
 
@@ -80,15 +78,16 @@ public final class CaptureSink {
      * 注入构造：策略由装配方（{@code RouteRuntimeImpl}）解析并冻结一次后注入，
      * 使请求侧与响应侧闸门判定恒为同一快照。
      *
-     * @param io               IO 执行器（<b>当前未被本类使用</b>：采集路径在响应轮询线程就地完成
-     *                         字节快照与留存；保留该参数以便将来把留存派发到有界 IO 池）
+     * <p><b>无 IO 执行器参数</b>：采集路径在响应轮询线程<b>就地</b>完成字节快照与留存
+     * （{@code Response.body()} 是协议调用，必须趁句柄存活时读；提交到 IO 池排队会因句柄被回收
+     * 而永远采不到 body），故本类不承载也不再接收 IO 执行器。
+     *
      * @param maxCaptured      采集队列上限
      * @param defaultTimeoutMs 未响应定案窗口（毫秒）
      * @param policy           已冻结的采集策略
      */
-    public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs,
+    public CaptureSink(int maxCaptured, long defaultTimeoutMs,
                        com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy policy) {
-        this.io = io;
         this.maxCaptured = maxCaptured;
         this.defaultTimeoutMs = defaultTimeoutMs;
         this.capturePolicy = policy;
@@ -467,9 +466,10 @@ public final class CaptureSink {
     /**
      * 指定渠道的全部记录（大小写不敏感）。
      *
-     * <p><b>匹配口径</b>：比对记录<b>声明的</b> {@code channels()}，<b>不</b>回落到 {@code primaryChannel()}。
-     * 因此裸 {@code .monitor()} 规则（未声明额外渠道）虽然 {@code primaryChannel()} 为 {@code MONITOR}，
-     * 但 {@code byChannel("MONITOR")} <b>查不到</b>它——按渠道查只对显式声明渠道的规则有意义。
+     * <p><b>匹配口径</b>：命中"记录<b>声明的</b> {@code channels()} 含该渠道" <b>或</b>
+     * "{@code primaryChannel()} 等于该渠道"。故裸 {@code .monitor()} 规则（未声明额外渠道）
+     * 也能被 {@code byChannel("MONITOR")} 查到 —— 与 {@link ApiSpec#CHANNEL_MONITOR} 在采集闸门
+     * 中的判定口径（看 {@code primaryChannel()}）一致，避免"采集按主渠道、查询按声明渠道"的分裂。
      */
     public List<CapturedApiCall> byChannel(String channel) {
         List<CapturedApiCall> out = new ArrayList<>();
@@ -478,7 +478,7 @@ public final class CaptureSink {
         }
         String want = channel.toUpperCase(java.util.Locale.ROOT);
         for (CapturedApiCall c : history) {
-            if (c != null && c.channels().contains(want)) {
+            if (c != null && (c.channels().contains(want) || want.equalsIgnoreCase(c.primaryChannel()))) {
                 out.add(c);
             }
         }

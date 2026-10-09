@@ -50,7 +50,7 @@ public class CaptureSinkConcurrencyTest {
                 .capture(true)
                 .captureBody(true)
                 .build();
-        CaptureSink sink = new CaptureSink(io, 100_000, 60_000);
+        CaptureSink sink = new CaptureSink(100_000, 60_000);
 
         int workers = 8;
         int perWorker = 20;
@@ -111,7 +111,7 @@ public class CaptureSinkConcurrencyTest {
         ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR)
                 .capture(true)
                 .build();
-        CaptureSink sink = new CaptureSink(io, 100, 30_000);
+        CaptureSink sink = new CaptureSink(100, 30_000);
 
         for (int i = 0; i < 50; i++) {
             String url = "https://host/api/users/" + i;

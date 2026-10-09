@@ -33,7 +33,7 @@ public class CaptureSinkTest {
     private RouteIoExecutor io;
 
     private CaptureSink newSink(int maxCaptured, long timeoutMs) {
-        return new CaptureSink(io, maxCaptured, timeoutMs);
+        return new CaptureSink(maxCaptured, timeoutMs);
     }
 
     @After

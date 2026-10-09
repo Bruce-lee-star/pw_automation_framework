@@ -105,7 +105,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         this.monitor = new MonitorSink(io, this::retireByPurpose);
         // 采集配置在本刻唯一解析并冻结（RouteCapturePolicy）：两个采集闸门共用同一快照
         this.capturePolicy = RouteCapturePolicy.resolveNow();
-        this.capture = new CaptureSink(io, config.maxCaptured(), config.captureTimeoutMs(), this.capturePolicy);
+        this.capture = new CaptureSink(config.maxCaptured(), config.captureTimeoutMs(), this.capturePolicy);
         this.sweeper = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
             public Thread newThread(Runnable r) {

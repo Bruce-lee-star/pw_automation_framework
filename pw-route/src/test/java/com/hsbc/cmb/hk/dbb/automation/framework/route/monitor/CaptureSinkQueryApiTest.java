@@ -24,9 +24,8 @@ import static org.mockito.Mockito.when;
  * 的非消费语义、{@code dump} 的消费语义、{@code waitFor} 的事件驱动等待（不轮询空转）与超时、
  * {@code reset} 的清空（队列 + 在途等待 + 计数）。
  *
- * <p>夹具说明：{@code CaptureSink} 的 {@code io} 参数当前<b>未被本类路径使用</b>
- * （采集路径在响应轮询线程同步完成字节快照与留存），故本类传 {@code null} 以最小化夹具；
- * 若将来 {@code io} 被真正使用（如派发留存到 IO 池），这里需改为真实执行器。
+ * <p>夹具说明：{@code CaptureSink} 不接收 IO 执行器 —— 采集路径在响应轮询线程<b>就地</b>完成
+ * 字节快照与留存，故夹具无需构造任何执行器。
  */
 public class CaptureSinkQueryApiTest {
 
@@ -34,7 +33,7 @@ public class CaptureSinkQueryApiTest {
 
     @Before
     public void setUp() {
-        sink = new CaptureSink(null, 100, 30_000);
+        sink = new CaptureSink(100, 30_000);
     }
 
     private static ApiSpec monitor(String pattern) {
@@ -82,6 +81,10 @@ public class CaptureSinkQueryApiTest {
             }
         }
         assertTrue("未知渠道必须为空", sink.byChannel("NOT_A_CHANNEL").isEmpty());
+        assertEquals("裸 monitor 规则虽未声明渠道，仍须按主渠道查到（primaryChannel 兜底）",
+                2, sink.byChannel("MONITOR").size());
+        assertEquals("裸 monitor 规则虽未声明渠道，仍须按主渠道查到（primaryChannel 兜底）",
+                2, sink.byChannel("monitor").size());
         assertNotNull(sink.lastOf("https://host/api/a"));
         assertEquals("查询不得消费记录", 2, sink.all().size());
     }
@@ -121,7 +124,7 @@ public class CaptureSinkQueryApiTest {
 
     @Test
     public void historyStaysBoundedAfterTheConsumerDrainsTheQueue() {
-        sink = new CaptureSink(null, 1, 30_000);   // 上限 1 条
+        sink = new CaptureSink(1, 30_000);   // 上限 1 条
         capture("https://host/api/a");
         assertEquals(1, sink.dump().size());       // 消费侧抽干：count 归零，但 history 仍存旧记录
         capture("https://host/api/b");             // 此时入队必须触发 history 驱逐
