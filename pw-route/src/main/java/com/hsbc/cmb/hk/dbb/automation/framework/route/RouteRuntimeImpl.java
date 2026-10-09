@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GenerationRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCallRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.PatternBinder;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.HangWatchdog;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.RouteBinderRegistry;
@@ -561,11 +562,20 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         //  可见告警，绝不重建 Context</b> —— 路由是辅助设施，其状态不确定性不得绑架会话/Context 生命周期）。
         //  注：close() 可能由 context.onClose 在事件线程触发，此处 flush 是同步协议调用（沿用原行为、
         //  经 GuardedDriverCall 有界）；T6（驱动调用单线程化）会一并收口该路径。
+        //  A（2026-10-09）：信道已被判定不可用时**不再发起 unroute**（不做无意义的驱动调用）。
+        //  注意：unroute 超时**正是**该判定的来源 ⇒ 本项只消除重复，挡不住第一次（那需要 UI 侧信号）。
+        final boolean channelUsable = GuardedDriverCallRegistry.instance().isChannelUsable();
         int confirmed = 0;
         int unconfirmed = 0;
         for (Map.Entry<String, PatternBinder> e : binders.entrySet()) {
             recordArmedDuration(e.getKey()); // T1：定稿剩余规则的 armed 时长
-            if (contextClosing || e.getValue().closeConfirmed()) {
+            boolean ok;
+            if (contextClosing || !channelUsable) {
+                ok = contextClosing;      // 连接关闭中 ⇒ 无需确证；信道不可用 ⇒ 不发起驱动调用
+            } else {
+                ok = e.getValue().closeConfirmed();
+            }
+            if (ok) {
                 confirmed++;
             } else {
                 unconfirmed++;
@@ -575,15 +585,10 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         if (unconfirmed > 0) {
             unconfirmedRetirements.addAndGet(unconfirmed);
             markDegraded();
-            //  级别下调为 WARN（2026-10-09 口径）：本项**不是用例失败原因**。
-            //  实测因果链：UI 侧点击先失败（Caused by 驱动侧 Cannot find command to respond）⇒ 该连接随后
-            //  对任何命令都不再应答 ⇒ 收尾的 unroute 超时 10s ⇒ 规则未被确证。即"未确证"是**次生现象**，
-            //  且路由是辅助设施（其不确定性不得绑架会话/Context —— 见本方法上方不变式 I-9）。
-            //  故此处只做「可观测的实情报告」，不再以 ERROR 形式与用例失败混在一起、避免误导排障。
-            LOGGER.warn("[Route] teardown flush UNCONFIRMED for {} rule(s) on context @{} — route state not "
-                            + "verifiable after resync; likely the connection was already broken by an earlier "
-                            + "driver failure in this scenario. Route is a helper facility: this is NOT a cause of "
-                            + "the scenario failure. Context/session are NOT rebuilt (I-1); observability signal only",
+            //  WARN 而非 ERROR：实证因果链是"UI 侧驱动失败 → 连接失联 → unroute 超时 → 未确证"，
+            //  本项是次生现象，不是用例失败原因（路由是辅助设施，不变式 I-9）。
+            LOGGER.warn("[Route] teardown UNCONFIRMED {} rule(s) @{} — connection already broken earlier; "
+                            + "route is a helper, not a failure cause",
                     unconfirmed, System.identityHashCode(context));
         }
         VerboseLogging.logInfoIfVerbose(LOGGER,

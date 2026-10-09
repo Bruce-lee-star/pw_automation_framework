@@ -256,9 +256,8 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             LOGGER.error("[Route] driver channel explicitly RESET (epoch -> {}); caller must have rebuilt the connection first",
                     DRIVER_EPOCH.get());
         } else {
-            LOGGER.warn("[Route] driver channel RESET again (epoch -> {}) within {}ms of the previous ERROR — "
-                            + "same failure window, already reported once; caller must have rebuilt the connection first",
-                    DRIVER_EPOCH.get(), RESET_ERROR_DEDUP_MS);
+            LOGGER.warn("[Route] driver channel RESET again (epoch -> {}); same failure window, already reported",
+                    DRIVER_EPOCH.get());
         }
     }
 }
