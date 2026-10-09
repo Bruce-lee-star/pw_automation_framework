@@ -53,8 +53,9 @@ public final class RouteConfig {
      * 构造：并发/队列参数由本实例承载。
      *
      * <p>采集范围与响应体阈值（{@link #DEFAULT_CAPTURE_ALL_TYPES} / {@link #DEFAULT_CAPTURE_INLINE_MAX_BYTES} /
-     * {@link #DEFAULT_CAPTURE_GZIP_MAX_BYTES}）<b>不再由实例承载</b>，改由 {@code RouteCaptureSettings}
-     * 按「环境变量 → 系统属性 → 配置文件属性 → 上述默认值」动态解析（每级现读，故不可缓存为实例快照）。
+     * {@link #DEFAULT_CAPTURE_GZIP_MAX_BYTES}）<b>不再由实例承载</b>：层序在 {@code ConfigKeys} 声明、
+     * 解析由 {@code ConfigSource} 承担，{@code RouteCapturePolicy} 在 RouteRuntime 构造期按
+     * 「环境变量 → 系统属性 → 配置文件属性 → 上述默认值」解析一次并<b>冻结</b>（故运行期改配置需新 runtime）。
      */
     public RouteConfig(int maxPending, int ioThreads, int ioQueueCapacity,
                          int opsMaxConcurrent, long ioAwaitTimeoutSeconds, long sweepIntervalMs,

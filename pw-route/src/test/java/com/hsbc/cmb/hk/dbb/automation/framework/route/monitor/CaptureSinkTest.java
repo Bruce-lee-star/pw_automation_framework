@@ -222,7 +222,8 @@ public class CaptureSinkTest {
         assertTrue("默认只采 MONITOR：MOCK 规则不入采集库", sink.dump().isEmpty());
 
         // 打开统一配置键 route.capture.all.type（系统属性层）后，同一规则应被采集；
-        // 采集闸门现读该键（RouteCaptureSettings：环境变量 → 系统属性 → 配置文件属性 → 默认值）。
+        // 采集闸门按该键的声明式层序解析，且策略在 sink 构造期冻结（RouteCapturePolicy：
+        // 环境变量 → 系统属性 → 配置文件属性 → 默认值）——故本用例必须先设属性、后构造 sink。
         // 注意：System 属性是 JVM 全局，本用例独占该键的读写，结束前显式写回默认值，不依赖 clearProperty。
         String prev = System.getProperty("route.capture.all.type");
         try {

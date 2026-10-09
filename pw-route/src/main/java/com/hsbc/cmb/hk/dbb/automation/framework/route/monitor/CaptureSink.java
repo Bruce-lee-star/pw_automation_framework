@@ -100,8 +100,8 @@ public final class CaptureSink {
      */
     public boolean recordRequest(Request request, ApiSpec spec) {
         // 【采集范围判定】默认【只采集主渠道为 MONITOR 的规则】；其余三类（DELAY / MODIFY / MOCK）
-        // 需显式 .capture()，或把配置键 route.capture.all.type 置为 true 才采集（解析优先级：环境变量 → 系统属性 → 配置文件属性
-        // → 默认值，见 {@code RouteCaptureSettings}）。
+        // 需显式 .capture()，或把配置键 route.capture.all.type 置为 true 才采集（层序在 ConfigKeys 声明：
+        // 环境变量 → 系统属性 → 配置文件属性 → 默认值；闸门用的是构造期冻结的 {@code RouteCapturePolicy}）。
         // MONITOR 优先于 DELAY：.monitor().delay() 的主渠道是 MONITOR ⇒ 默认即被采到，而记录里仍带
         // 完整 channels（含 DELAY），故"被延迟的 api 信息"照样能查到（分渠道查询不受影响）。
         // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。

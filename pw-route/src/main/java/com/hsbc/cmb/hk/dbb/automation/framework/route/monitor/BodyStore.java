@@ -16,7 +16,8 @@ import java.util.zip.GZIPOutputStream;
  * 响应体留存（<b>内部使用</b>）：按大小与类型在"内存原字节 / 内存 gzip / 临时文件"三档之间自动选择，
  * 使"整响应不截断"在超大 body 下**不撑爆堆**，同时对业务保持同一套读取语义。
  *
- * <p><b>三档策略</b>（阈值均为"固定常量 + 系统属性可覆盖"，不引入配置文件项）：
+ * <p><b>三档策略</b>（阈值由装配方冻结的 {@code RouteCapturePolicy} 提供：层序在 {@code ConfigKeys}
+ * 声明、解析由 {@code ConfigSource} 承担，不再由本类自带任何配置读取）：
  * <ol>
  *   <li>{@code len <= route.capture.inline.max.bytes}（默认 256 KB）⇒ 原字节持内存；</li>
  *   <li>文本型（json / xml / html / text / form，按 {@code content-type} 判定）且
@@ -25,8 +26,10 @@ import java.util.zip.GZIPOutputStream;
  *   <li>其余 ⇒ <b>落盘临时文件</b>，本对象只持 {@code Path} + 长度。</li>
  * </ol>
  *
- * <p><b>线程模型（调用方注意）</b>：gzip 与落盘都是 IO，{@link #of(byte[], String)} 会同步完成它们。
- * 采集路径必须把本调用交给既有有界 IO 池执行（事件/调度线程只做"趁句柄存活时快照字节"这一步）。
+ * <p><b>线程模型（当前实现）</b>：gzip 与落盘是 CPU/IO 工作，{@link #of(byte[], String, int, int)} 在
+ * <b>响应轮询线程</b>上同步完成 —— 与改造前"在该线程整体解码整条 body"同量级（故非新增负担），
+ * 且字节已趁句柄存活时快照完毕，不引入新的句柄竞态。代价：超大 body 的 gzip/落盘占用该线程。
+ * 若将来改为派发到有界 IO 池，必须保住"入队即时可见"（dump/peek 立即可见）的语义。
  *
  * <p><b>生命周期</b>：落盘文件由 {@link #close()} 删除；{@code CaptureSink} 在 {@code reset()} 与该记录
  * 被 history 驱逐时关闭本实例，另保留 JVM 退出兜底。完整契约见 {@link CapturedBody}
