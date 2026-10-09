@@ -1025,6 +1025,19 @@ public enum ConfigKeys {
     /** API 捕获响应体最大体积（MB），超出即截断。 */
     API_CAPTURE_MAX_RESPONSE_SIZE_MB("api.capture.max.response.size.mb", "50", "API 捕获响应体最大体积（MB），超出即截断"),
 
+    // ===================== Route 采集（对应 RouteConfig.DEFAULT_CAPTURE_*）=====================
+    //  优先级：环境变量 → 系统属性 → 配置文件属性 → 下列默认值（见 RouteCaptureSettings）。
+    //  默认值须与 RouteConfig.DEFAULT_CAPTURE_* 同值（由 RouteCaptureSettingsTest 防漂移）。
+
+    /** 采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK（显式 .capture() 始终强制采集）。 */
+    ROUTE_CAPTURE_ALL_TYPE("route.capture.all.type", "false", "路由采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK"),
+
+    /** 响应体内联阈值（字节）：不超过即原字节持内存。 */
+    ROUTE_CAPTURE_INLINE_MAX_BYTES("route.capture.inline.max.bytes", "262144", "路由采集响应体内联阈值（字节）"),
+
+    /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
+    ROUTE_CAPTURE_GZIP_MAX_BYTES("route.capture.gzip.max.bytes", "8388608", "路由采集响应体文本型 gzip 上限（字节）"),
+
     /** Monitor API 响应是否持久化到数据库。 */
     MONITOR_DB_STORE_ENABLED("monitor.db.store.enabled", "false", "Monitor API 响应数据库持久化"),
 

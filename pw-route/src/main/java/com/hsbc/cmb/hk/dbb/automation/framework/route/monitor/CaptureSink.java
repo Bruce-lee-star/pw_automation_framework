@@ -52,13 +52,6 @@ public final class CaptureSink {
     private final int maxCaptured;
     private final long defaultTimeoutMs;
     private final RouteIoExecutor io;
-    /**
-     * 运行时配置（统一配置类 {@code RouteConfig}）：采集范围（{@code captureAllTypes}）与
-     * 响应体留存阈值（{@code captureInlineMaxBytes} / {@code captureGzipMaxBytes}）均由此提供，
-     * 本类不再自带配置解析。
-     */
-    private final com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig config;
-
     /** 已定案快照队列（业务线程 dump 消费）。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> captured = new ConcurrentLinkedQueue<>();
     /** pattern → 未收到响应的请求快照（响应配对索引）。 */
@@ -74,20 +67,14 @@ public final class CaptureSink {
     /** 响应体读取失败数（可观测；失败仍保留核心快照）。 */
     private final AtomicLong bodyReadFailures = new AtomicLong();
 
-    /** 兼容构造：采集配置取 {@code RouteConfig.DEFAULTS}（既有构造点无需改动）。 */
+    /**
+     * 构造：采集范围不再由实例承载，改由 {@code RouteCaptureSettings} 现读
+     * {@code route.capture.all.type}（环境变量 → 系统属性 → 配置文件属性 → 默认值）。
+     */
     public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs) {
-        this(io, maxCaptured, defaultTimeoutMs,
-                com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig.DEFAULTS);
-    }
-
-    /** 全参构造：采集范围与 body 阈值取自统一配置类。 */
-    public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs,
-                       com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig config) {
         this.io = io;
         this.maxCaptured = maxCaptured;
         this.defaultTimeoutMs = defaultTimeoutMs;
-        this.config = config == null
-                ? com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig.DEFAULTS : config;
     }
 
     /**
@@ -97,13 +84,14 @@ public final class CaptureSink {
      */
     public boolean recordRequest(Request request, ApiSpec spec) {
         // 【采集范围判定】默认【只采集主渠道为 MONITOR 的规则】；其余三类（DELAY / MODIFY / MOCK）
-        // 需显式 .capture()，或把系统属性 route.capture.all.type 置为 true 才采集。
+        // 需显式 .capture()，或把配置键 route.capture.all.type 置为 true 才采集（解析优先级：环境变量 → 系统属性 → 配置文件属性
+        // → 默认值，见 {@code RouteCaptureSettings}）。
         // MONITOR 优先于 DELAY：.monitor().delay() 的主渠道是 MONITOR ⇒ 默认即被采到，而记录里仍带
         // 完整 channels（含 DELAY），故"被延迟的 api 信息"照样能查到（分渠道查询不受影响）。
         // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !config.captureAllTypes()) {
+                && !RouteCaptureSettings.allTypes()) {
             return false;
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
@@ -129,7 +117,7 @@ public final class CaptureSink {
         }
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !config.captureAllTypes()) {
+                && !RouteCaptureSettings.allTypes()) {
             return;
         }
         ConcurrentLinkedQueue<CapturedExchange> pending = pendingByPattern.get(spec.pattern());

@@ -49,34 +49,19 @@ public final class RouteConfig {
     private final long sweepIntervalMs;
     private final int maxCaptured;
     private final long captureTimeoutMs;
-    private final boolean captureAllTypes;
-    private final int captureInlineMaxBytes;
-    private final int captureGzipMaxBytes;
-
     /**
-     * 兼容构造：采集三项取默认值（{@link #DEFAULT_CAPTURE_ALL_TYPES} 等）。
+     * 构造：并发/队列参数由本实例承载。
      *
-     * <p>保留旧签名是为了让既有构造点零改动；需要调整采集范围/阈值时用下面的全参构造。
+     * <p>采集范围与响应体阈值（{@link #DEFAULT_CAPTURE_ALL_TYPES} / {@link #DEFAULT_CAPTURE_INLINE_MAX_BYTES} /
+     * {@link #DEFAULT_CAPTURE_GZIP_MAX_BYTES}）<b>不再由实例承载</b>，改由 {@code RouteCaptureSettings}
+     * 按「环境变量 → 系统属性 → 配置文件属性 → 上述默认值」动态解析（每级现读，故不可缓存为实例快照）。
      */
     public RouteConfig(int maxPending, int ioThreads, int ioQueueCapacity,
                          int opsMaxConcurrent, long ioAwaitTimeoutSeconds, long sweepIntervalMs,
                          int maxCaptured, long captureTimeoutMs) {
-        this(maxPending, ioThreads, ioQueueCapacity, opsMaxConcurrent, ioAwaitTimeoutSeconds,
-                sweepIntervalMs, maxCaptured, captureTimeoutMs,
-                DEFAULT_CAPTURE_ALL_TYPES, DEFAULT_CAPTURE_INLINE_MAX_BYTES, DEFAULT_CAPTURE_GZIP_MAX_BYTES);
-    }
-
-    /** 全参构造（采集三项显式指定）。 */
-    public RouteConfig(int maxPending, int ioThreads, int ioQueueCapacity,
-                         int opsMaxConcurrent, long ioAwaitTimeoutSeconds, long sweepIntervalMs,
-                         int maxCaptured, long captureTimeoutMs,
-                         boolean captureAllTypes, int captureInlineMaxBytes, int captureGzipMaxBytes) {
         if (maxPending <= 0 || ioThreads <= 0 || ioQueueCapacity <= 0 || opsMaxConcurrent <= 0
                 || maxCaptured <= 0 || captureTimeoutMs <= 0) {
             throw new IllegalArgumentException("concurrency bounds must be > 0");
-        }
-        if (captureInlineMaxBytes <= 0 || captureGzipMaxBytes <= 0) {
-            throw new IllegalArgumentException("capture body thresholds must be > 0");
         }
         this.maxPending = maxPending;
         this.ioThreads = ioThreads;
@@ -86,24 +71,6 @@ public final class RouteConfig {
         this.sweepIntervalMs = sweepIntervalMs;
         this.maxCaptured = maxCaptured;
         this.captureTimeoutMs = captureTimeoutMs;
-        this.captureAllTypes = captureAllTypes;
-        this.captureInlineMaxBytes = captureInlineMaxBytes;
-        this.captureGzipMaxBytes = captureGzipMaxBytes;
-    }
-
-    /** 是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK。 */
-    public boolean captureAllTypes() {
-        return captureAllTypes;
-    }
-
-    /** 响应体内联阈值（字节）。 */
-    public int captureInlineMaxBytes() {
-        return captureInlineMaxBytes;
-    }
-
-    /** 响应体文本型 gzip 上限（字节）。 */
-    public int captureGzipMaxBytes() {
-        return captureGzipMaxBytes;
     }
 
     public int maxPending() {
