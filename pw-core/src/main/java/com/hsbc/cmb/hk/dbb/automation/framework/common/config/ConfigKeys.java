@@ -1030,9 +1030,14 @@ public enum ConfigKeys {
     //  （框架其余键仍为系统属性优先 ⇒ 语义零变化）。默认值须与 RouteConfig.DEFAULT_CAPTURE_* 同值
     //  （由 RouteCapturePolicyTest 防漂移）。
 
-    /** 采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK（显式 .capture() 始终强制采集）。 */
+    /**
+     * 采集范围：{@code false}（默认）只采集 MONITOR；{@code true} 连 DELAY / MODIFY / MOCK 一并采集。
+     *
+     * <p>优先级：逐规则 {@code .capture(false)}（显式关闭）<b>优先于</b>本开关；
+     * 逐规则显式 {@code .capture(true)} 与 {@code .monitor()} 的隐式采集独立于本开关。
+     */
     ROUTE_CAPTURE_ALL_TYPE("route.capture.all.type", "false",
-            "路由采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK",
+            "路由采集范围：false 只采 MONITOR；true 连 DELAY / MODIFY / MOCK 一并采（逐规则 .capture(false) 优先）",
             ConfigSource.ENV_FIRST_PRECEDENCE),
 
     /** 响应体内联阈值（字节）：不超过即原字节持内存。 */

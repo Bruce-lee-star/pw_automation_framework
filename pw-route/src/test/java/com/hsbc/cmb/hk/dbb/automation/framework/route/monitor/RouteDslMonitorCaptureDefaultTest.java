@@ -133,4 +133,52 @@ public class RouteDslMonitorCaptureDefaultTest {
 
         assertTrue("显式 .capture(false) 后不得产生采集记录", calls.isEmpty());
     }
+
+    /**
+     * 优先级①（最高）：逐规则显式关压过全局 {@code route.capture.all.type=true}。
+     *
+     * <p>规则带 {@code expectStatus} ⇒ 仍是活跃规则（会 dispatch），故本用例真正走到采集闸门，
+     * 而不是靠"规则不活跃"侥幸通过。
+     */
+    @Test
+    public void explicitOffBeatsTheGlobalAllTypesSwitch() {
+        withAllTypesProperty(() -> {
+            mockContext();
+            RouteEngine.runtimeOf(ctx);   // 策略在运行时创建时冻结 ⇒ 属性必须先设
+
+            RouteDsl.on(ctx).api("/api/off").monitor().expectStatus(200)
+                    .capture(false).captureBody(false).done().start();
+
+            List<CapturedApiCall> calls = driveAndCollect("https://host/api/off", OFF_BODY, 1_000L);
+            assertTrue("显式 .capture(false) 必须压过全局 route.capture.all.type=true", calls.isEmpty());
+        });
+    }
+
+    /** 优先级④（兜底）：{@code route.capture.all.type=true} 时，非 MONITOR 主渠道的规则也应被采集。 */
+    @Test
+    public void allTypesAlsoCapturesRulesThatAreNotMonitor() {
+        withAllTypesProperty(() -> {
+            mockContext();
+            RouteEngine.runtimeOf(ctx);
+
+            RouteDsl.on(ctx).api("/api/m").mock().status(200).contentType("application/json")
+                    .mockBody("{\"mocked\":true}").done().start();
+
+            List<CapturedApiCall> calls = driveAndCollect("https://host/api/m", CAP_BODY, 5_000L);
+            assertEquals("allTypes=true 时 MOCK 规则也应被采集", 1, calls.size());
+            assertEquals("该记录主渠道是 MOCK（默认 false 时不会被采）",
+                    "MOCK", calls.get(0).primaryChannel());
+        });
+    }
+
+    /** 在 {@code route.capture.all.type=true} 下执行，结束后写回原值（不依赖 clearProperty）。 */
+    private static void withAllTypesProperty(Runnable body) {
+        String prev = System.getProperty("route.capture.all.type");
+        try {
+            System.setProperty("route.capture.all.type", "true");
+            body.run();
+        } finally {
+            System.setProperty("route.capture.all.type", prev == null ? "false" : prev);
+        }
+    }
 }

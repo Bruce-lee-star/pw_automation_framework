@@ -101,6 +101,14 @@ public final class ApiSpec {
      * 显式采集保持"横切观测、不随能力停止"的既有语义（见 {@link #captureActive()}）。
      */
     private final boolean captureImplicit;
+    /**
+     * 调用方是否<b>显式关闭</b>了采集（{@code .capture(false)}）。
+     *
+     * <p><b>采集判定的最高优先级</b>：压过"主渠道 MONITOR 默认采"与全局
+     * {@code route.capture.all.type=true}（逐规则意图优先于全局兜底），
+     * 见 {@code CaptureSink} 的两处闸门与 {@link #captureActive()}。
+     */
+    private final boolean captureExplicitlyOff;
     /** 是否采集响应体（默认 false；开启后经 IO 线程读取，受 captureBodyLimitBytes 截断）。 */
     private final boolean captureBody;
     /** 响应体采集截断上限（字节，默认 {@value CaptureLimits#DEFAULT_BODY_LIMIT_BYTES}）。 */
@@ -154,6 +162,7 @@ public final class ApiSpec {
         this.minMatches = b.minMatches;
         this.capture = b.capture;
         this.captureImplicit = b.captureImplicit;
+        this.captureExplicitlyOff = b.captureExplicitlyOff;
         this.captureBody = b.captureBody;
         this.captureBodyLimitBytes = b.captureBodyLimitBytes;
         this.times = b.times;
@@ -208,6 +217,7 @@ public final class ApiSpec {
         this.minMatches = from.minMatches;
         this.capture = from.capture;
         this.captureImplicit = from.captureImplicit;
+        this.captureExplicitlyOff = from.captureExplicitlyOff;
         this.captureBody = from.captureBody;
         this.captureBodyLimitBytes = from.captureBodyLimitBytes;
         this.times = from.times;
@@ -463,6 +473,8 @@ public final class ApiSpec {
         b.capture = b.capture || o.capture;
         // 显式优先：任一侧显式设置过 capture，合并结果即视为显式（不随 MONITOR 停止）
         b.captureImplicit = b.captureImplicit && o.captureImplicit;
+        // 显式关闭保守传染：同 pattern 任一段要求不采，合并结果即不采
+        b.captureExplicitlyOff = b.captureExplicitlyOff || o.captureExplicitlyOff;
         b.captureBody = b.captureBody || o.captureBody;
         b.autoStopOnMatch = b.autoStopOnMatch || o.autoStopOnMatch;
         b.onlyMainFrame = b.onlyMainFrame && o.onlyMainFrame;
@@ -599,6 +611,14 @@ public final class ApiSpec {
     /** 采集是否由 {@code .monitor()} 默认带来（未被显式设置过）。 */
     public boolean captureImplicit() {
         return captureImplicit;
+    }
+
+    /**
+     * 调用方是否<b>显式关闭</b>了采集（{@code .capture(false)}）—— 采集判定的最高优先级，
+     * 压过主渠道 MONITOR 默认与全局 {@code route.capture.all.type=true}。
+     */
+    public boolean captureExplicitlyOff() {
+        return captureExplicitlyOff;
     }
 
     public boolean captureBodyEnabled() {
@@ -758,6 +778,7 @@ public final class ApiSpec {
         private int minMatches = DEFAULT_MIN_MATCHES;
         private boolean capture;
         private boolean captureImplicit;
+        private boolean captureExplicitlyOff;
         private boolean captureBody;
         /** 默认响应体截断上限（64 KiB，与 CaptureLimits.DEFAULT_BODY_LIMIT_BYTES 对齐）。 */
         private int captureBodyLimitBytes = DEFAULT_CAPTURE_BODY_LIMIT_BYTES;
@@ -812,6 +833,7 @@ public final class ApiSpec {
             this.minMatches = s.minMatches;
             this.capture = s.capture;
             this.captureImplicit = s.captureImplicit;
+            this.captureExplicitlyOff = s.captureExplicitlyOff;
             this.captureBody = s.captureBody;
             this.captureBodyLimitBytes = s.captureBodyLimitBytes;
             this.times = s.times;
@@ -1021,6 +1043,7 @@ public final class ApiSpec {
         public Builder capture(boolean enable) {
             this.capture = enable;
             this.captureImplicit = false;   // 显式设置 ⇒ 采集与 MONITOR 生命周期解耦
+            this.captureExplicitlyOff = !enable;   // 显式关：最高优先级（压过全局 allTypes）
             return this;
         }
 
@@ -1031,6 +1054,7 @@ public final class ApiSpec {
         public Builder captureByMonitorDefault() {
             this.capture = true;
             this.captureImplicit = true;
+            this.captureExplicitlyOff = false;
             return this;
         }
 
