@@ -104,9 +104,15 @@ public class PlaywrightListener implements StepListener {
     // 用于防止testSuiteFinished被多次调用时重复输出日志
     private static volatile boolean testSuiteFinishedLogged = false;
 
-    //  Rerun 检测：跟踪当前是第几次 run（0 = 首次运行，>=1 = rerun 轮次）
+    //  轮次跟踪：当前是本次 JVM 里第几次 testRunFinished（0 = 尚未结束过任何一轮，>=1 = 已结束 >=1 轮）
     private static volatile int currentRunNumber = 0;
-    private static volatile boolean rerunStartedLogged = false;
+    /**
+     * 本轮横幅是否已打印（每个轮次只打一次，避免同一轮重复刷屏）。
+     *
+     * <p>原字段名为 {@code rerunStartedLogged}，但它的语义从来只是"横幅已打"——名字里带 rerun
+     * 会诱导读者以为"这就是重跑"，与本类正在修正的误报同源，故一并更名。</p>
+     */
+    private static volatile boolean roundBannerLogged = false;
 
     /**
      *  阶段识别：Serenity CucumberWithSerenity 在 discovery 和 execution 两个阶段
@@ -129,6 +135,16 @@ public class PlaywrightListener implements StepListener {
     // 普通 HashSet 在并发 add 下结构损坏；改用并发安全 Set。add 原子返回「是否已存在」，
     // 使下方「重复 Story 即进入 execution 阶段」的判重无需额外加锁。
     private final Set<String> seenStoryNames = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * 本 JVM 内**见过一次就不再清空**的 story 名集合 —— 用于区分"同一套件重跑"与"另一个套件开始"。
+     *
+     * <p>与 {@link #seenStoryNames} 的区别：后者在 {@code testRunFinished} 时清空（它服务于
+     * discovery/execution 阶段识别），而本集合跨轮次保留。判定见 {@link #testSuiteStarted(Story)}：
+     * 同名 story 再现 ⇒ 同一套件被再次执行（**才可能**是 failsafe 的失败重跑）；新 story ⇒ 只是另一个
+     * 套件/另一个插件阶段开始，**不是重跑**。</p>
+     */
+    private final Set<String> storyNamesEverSeen = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** scenario 标识单调序号：保证同名 scenario（如 Scenario Outline 各示例行）也拿到唯一 id，避免按用例串联时串扰。 */
     private static final java.util.concurrent.atomic.AtomicLong SCENARIO_SEQ = new java.util.concurrent.atomic.AtomicLong();
@@ -982,11 +998,28 @@ public class PlaywrightListener implements StepListener {
         //  重置：允许新 suite 再次触发清理
         testSuiteFinishedLogged = false;
 
-        //  Rerun 日志：testRunFinished() 之后首次 testSuiteStarted 即为 rerun
-        if (currentRunNumber > 0 && !rerunStartedLogged) {
-            rerunStartedLogged = true;
+        //  轮次横幅（只有观测事实，不断言原因）。
+        //
+        //  修正由来（2026-10-09 实测）：原实现把"testRunFinished 之后**任意** suite 开始"一律记为
+        //  "RERUN STARTING - Round N (Maven Failsafe rerunFailingTestsCount)"。但同一 JVM 里
+        //  testRunFinished 会因多种原因发生：① 另一个 IT 套件开始（如 surefire 阶段之后再跑 failsafe，
+        //  或另一个测试类）；② 另一个插件阶段；③ 真正的 failsafe 失败重跑（rerunFailingTestsCount）。
+        //  原文案把三者一律说成"失败重跑"，实际排障中已把"另一个套件开始"误读为"有失败被重跑"。
+        //  现按 story 名判别，只陈述可观测事实：
+        //    - 同名 story 再次出现 ⇒ 同一套件被再次执行（**可能**是 failsafe 重跑，需看构建输出确认）；
+        //    - 新 story ⇒ 只是另一个套件开始，**不是**重跑。
+        if (currentRunNumber > 0 && !roundBannerLogged) {
+            roundBannerLogged = true;
+            boolean sameSuite = !storyNamesEverSeen.add(storyName);
             logger.info("==========================================================================");
-            logger.info("  RERUN STARTING - Round {} (Maven Failsafe rerunFailingTestsCount)", currentRunNumber);
+            if (sameSuite) {
+                logger.info("  SUITE RE-EXECUTED - Round {} for '{}' (same suite seen before;"
+                        + " consistent with a failsafe rerun, confirm from the build output)",
+                        currentRunNumber, storyName);
+            } else {
+                logger.info("  NEW SUITE STARTING - Round {} for '{}' (different suite; this is NOT a rerun)",
+                        currentRunNumber, storyName);
+            }
             logger.info("==========================================================================");
         }
     }
@@ -1413,9 +1446,9 @@ public class PlaywrightListener implements StepListener {
 
         logger.info(getPerformanceStats());
 
-        //  标记当前 run 结束，为下一次 rerun 做准备
+        //  标记当前 run 结束（下一轮开始时才可能打印轮次横幅；不代表发生了重跑）
         currentRunNumber++;
-        rerunStartedLogged = false;
+        roundBannerLogged = false;
     }
 
     public static String getPerformanceStats() {
