@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GenerationRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCallRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.PatternBinder;
@@ -562,16 +563,18 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         //  可见告警，绝不重建 Context</b> —— 路由是辅助设施，其状态不确定性不得绑架会话/Context 生命周期）。
         //  注：close() 可能由 context.onClose 在事件线程触发，此处 flush 是同步协议调用（沿用原行为、
         //  经 GuardedDriverCall 有界）；T6（驱动调用单线程化）会一并收口该路径。
-        //  A（2026-10-09）：信道已被判定不可用时**不再发起 unroute**（不做无意义的驱动调用）。
-        //  注意：unroute 超时**正是**该判定的来源 ⇒ 本项只消除重复，挡不住第一次（那需要 UI 侧信号）。
-        final boolean channelUsable = GuardedDriverCallRegistry.instance().isChannelUsable();
+        //  A+B（2026-10-09）：信道已不可用**或** UI 侧已上报"本场景驱动异常"时，不再发起 unroute。
+        //  A 只挡重复（unroute 超时正是"不可用"的来源）；B 由 UI 侧在步骤因 Playwright 异常失败时上报
+        //  （见 DriverFailureSignal），使**第一次**也不再等待 —— 因此 route 不会把 UI 的失败放大成自己的报错。
+        final boolean driverBroken = !GuardedDriverCallRegistry.instance().isChannelUsable()
+                || DriverFailureSignal.reported();
         int confirmed = 0;
         int unconfirmed = 0;
         for (Map.Entry<String, PatternBinder> e : binders.entrySet()) {
             recordArmedDuration(e.getKey()); // T1：定稿剩余规则的 armed 时长
             boolean ok;
-            if (contextClosing || !channelUsable) {
-                ok = contextClosing;      // 连接关闭中 ⇒ 无需确证；信道不可用 ⇒ 不发起驱动调用
+            if (contextClosing || driverBroken) {
+                ok = contextClosing;      // 连接关闭中 ⇒ 无需确证；驱动/信道已坏 ⇒ 不发起驱动调用
             } else {
                 ok = e.getValue().closeConfirmed();
             }
@@ -587,10 +590,11 @@ public final class RouteRuntimeImpl implements RouteRuntime {
             markDegraded();
             //  WARN 而非 ERROR：实证因果链是"UI 侧驱动失败 → 连接失联 → unroute 超时 → 未确证"，
             //  本项是次生现象，不是用例失败原因（路由是辅助设施，不变式 I-9）。
-            LOGGER.warn("[Route] teardown UNCONFIRMED {} rule(s) @{} — connection already broken earlier; "
+            LOGGER.warn("[Route] teardown UNCONFIRMED {} rule(s) @{} — driver/channel already broken; "
                             + "route is a helper, not a failure cause",
                     unconfirmed, System.identityHashCode(context));
         }
+        DriverFailureSignal.reset();   // B：消费即清零（本场景收尾已过，下一个场景重新开始）
         VerboseLogging.logInfoIfVerbose(LOGGER,
                 "[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown, {} unconfirmed",
                 retiredByPurpose.get(), confirmed, unconfirmed);

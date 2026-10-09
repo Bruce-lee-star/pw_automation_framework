@@ -608,6 +608,9 @@ public class PlaywrightListener implements StepListener {
                 shortMsg = shortMsg.substring(0, 197) + "...";
             }
         }
+        //  B（2026-10-09）：失败链含 Playwright 异常 ⇒ 单向告知 route"本场景驱动连接已不可信"，
+        //  使其收尾跳过 unroute 等待（route 看不到 UI 的失败；且不依赖 context 是否已关闭的时序）。
+        reportDriverFailureIfPlaywright(failure.getException());
         //  去重：同一异常实例只完整打印一次，后续任何级别均静默（不降级也不打 debug）
         if (ListenerGuard.shouldReportFailure(failure.getException(), shortMsg)) {
             logger.error("Step failure detected: {}", shortMsg);
@@ -992,6 +995,24 @@ public class PlaywrightListener implements StepListener {
         VerboseLogging.logDebugIfVerbose(logger, "Test suite started for class: {}", testClass);
         //  重置：允许新 suite 再次触发清理
         testSuiteFinishedLogged = false;
+    }
+
+    /**
+     * 失败链中含 Playwright 异常时，向 route 上报"驱动连接已不可信"（单向信号；幂等）。
+     *
+     * <p>只上报、不清零：route 收尾读取后会自行清除，故本类无需"每场景清零"钩子。</p>
+     *
+     * @param t 步骤失败的异常（可为 null）
+     */
+    private static void reportDriverFailureIfPlaywright(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            String msg = c.getMessage();
+            if (c instanceof com.microsoft.playwright.PlaywrightException
+                    || (msg != null && msg.contains("PlaywrightException"))) {
+                com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal.report();
+                return;
+            }
+        }
     }
 
     @Override
