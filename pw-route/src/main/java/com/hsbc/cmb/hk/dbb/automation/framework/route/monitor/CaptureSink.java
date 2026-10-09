@@ -148,7 +148,7 @@ public final class CaptureSink {
         if (spec.captureBodyEnabled()) {
             captureBodyNow(snapshot, spec, response);
         } else {
-            enqueue(snapshot, null, null, null, false);
+            enqueue(snapshot, null, null, false);
         }
     }
 
@@ -174,37 +174,55 @@ public final class CaptureSink {
             LOGGER.warn("[Route] capture body unavailable (driver handle reclaimed / page closed) "
                             + "pattern='{}' url='{}': {}",
                     spec.pattern(), snapshot.url(), t.toString());
-            enqueue(snapshot, null, null, contentType, false);
+            enqueue(snapshot, null, contentType, false);
             return;
         }
         try {
             // 【不截断】整响应保留 —— 供业务"取整响应 → 改指定节点 → 当 mock 回放"使用。
             // captureBodyLimitBytes 字段保留（兼容旧写法）但不再参与截断；截断标志恒为 false。
-            // 原始字节同时透传：业务需要精确回放或自行解析时用 bytes，不必再经受字符串往返。
-            String body = new String(bytes, MediaType.parse(contentType).charset());
-            enqueue(snapshot, body, bytes, contentType, false);
+            // 【阈值生效点】由装配方冻结的采集策略决定留存形态：≤inlineMax 内存原字节；
+            // 文本型且 ≤gzipMax 内存 gzip；否则落盘临时文件（落盘失败 fail-open 退回内存）。
+            // 本方法不再整体解码字符串：文本改由 CapturedBody.text(charset) 按需解码并缓存，
+            // 编码口径仍由 contentType 决定（访问器内解析），故不再有"字符串往返"的堆峰值。
+            CapturedBody body = BodyStore.of(bytes, contentType,
+                    capturePolicy.inlineMaxBytes(), capturePolicy.gzipMaxBytes());
+            enqueue(snapshot, body, contentType, false);
         } catch (Throwable t) {
-            // 编码失败（理论上不会）：同样 fail-open，保留核心快照 + 原始字节
+            // of() 内部已 fail-open（gzip/落盘失败均退回内存）；此处兜住任何意外并退回内存原字节
             bodyReadFailures.incrementAndGet();
-            enqueue(snapshot, null, bytes, contentType, false);
+            LOGGER.debug("[Route] capture body retention failed, falling back to in-memory bytes: {}",
+                    t.toString());
+            try {
+                enqueue(snapshot, BodyStore.of(bytes, contentType, Integer.MAX_VALUE, 0), contentType, false);
+            } catch (Throwable fallbackFailure) {
+                enqueue(snapshot, null, contentType, false);
+            }
         }
     }
 
     /** 定案入队（队列满则丢弃并计数）；定案即打一行日志（请求/响应头 + 体 + 耗时，头已脱敏、体已截断）。 */
-    private void enqueue(CapturedExchange snapshot, String body, byte[] bodyBytes, String contentType,
+    private void enqueue(CapturedExchange snapshot, CapturedBody body, String contentType,
                          boolean truncated) {
         if (count.get() >= maxCaptured) {
             dropped.incrementAndGet();
+            if (body != null) {
+                body.close();   // 丢弃即释放载体（文件型删临时文件），避免失去引用后泄漏
+            }
             return;
         }
-        CapturedApiCall call = toDto(snapshot, body, bodyBytes, contentType, truncated);
+        CapturedApiCall call = toDto(snapshot, body, contentType, truncated);
         captured.add(call);
         // 非消费式历史（peek 用）：与消费式队列并行维护，保证"用例收尾复核真实流量"不会被
         // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
         // 事件驱动、生产者无锁：历史写入走并发队列，随后仅发一次无阻塞信号（AQS 单次 CAS，不 park、不阻塞）
         history.add(call);
         while (history.size() > maxCaptured) {
-            history.poll();
+            CapturedApiCall evicted = history.poll();
+            // 驱逐即释放；注意 evicted 可能仍被消费队列 captured 持有（同一对象），
+            // 故仅在"不是本次刚入队的这条"时关闭 —— 否则会关掉已交付/待交付对象的文件。
+            if (evicted != null && evicted != call && evicted.body() != null) {
+                evicted.body().close();
+            }
         }
         recordArrival.release();
         count.incrementAndGet();
@@ -245,17 +263,17 @@ public final class CaptureSink {
      */
     private final java.util.concurrent.Semaphore recordArrival = new java.util.concurrent.Semaphore(0);
 
-    private static CapturedApiCall toDto(CapturedExchange snapshot, String body, byte[] bodyBytes,
-                                         String contentType, boolean truncated) {
+    private static CapturedApiCall toDto(CapturedExchange snapshot, CapturedBody body, String contentType,
+                                         boolean truncated) {
         // 分渠道透传：与 ofRequest 同源（channels=全部命中渠道，primaryChannel=优先级最高者）。
         return new CapturedApiCall(
                 snapshot.pattern(), snapshot.method(), snapshot.url(),
                 snapshot.requestHeaders(), snapshot.postDataPreview(),
                 snapshot.responseStatus(), snapshot.responseHeaders(),
-                body, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
+                null, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
-                contentType, bodyBytes, null);   // 载体（CapturedBody）由 ③ 接线时填入
+                contentType, null, body);
     }
 
     /**
@@ -308,7 +326,7 @@ public final class CaptureSink {
                     snapshot.markTimedOut();
                     timedOutCount.incrementAndGet();
                     pending.remove(snapshot);
-                    enqueue(snapshot, null, null, null, false);
+                    enqueue(snapshot, null, null, false);
                 }
             }
         }
@@ -343,6 +361,10 @@ public final class CaptureSink {
      * 并把四个可观测计数归零 —— 这样即便同一 Context 被跨 scenario 复用，也不会残留上一条用例的采集数据。
      */
     public void reset() {
+        // 生命周期（契约见 CapturedBody）：sink 拥有响应体载体，reset 即释放（文件型删临时文件）。
+        // captured 与 history 可能持有同一对象，close 幂等；pendingByPattern 只存请求侧快照，无载体。
+        closeBodies(captured);
+        closeBodies(history);
         captured.clear();
         history.clear();
         pendingByPattern.clear();
@@ -350,6 +372,15 @@ public final class CaptureSink {
         dropped.set(0);
         timedOutCount.set(0);
         bodyReadFailures.set(0);
+    }
+
+    /** 关闭一批记录持有的响应体载体（幂等；文件型由此删除临时文件）。 */
+    private static void closeBodies(java.util.Collection<CapturedApiCall> calls) {
+        for (CapturedApiCall call : calls) {
+            if (call != null && call.body() != null) {
+                call.body().close();
+            }
+        }
     }
 
     /** 全部采集记录（非消费式；数据源 = 只增 history）。 */
