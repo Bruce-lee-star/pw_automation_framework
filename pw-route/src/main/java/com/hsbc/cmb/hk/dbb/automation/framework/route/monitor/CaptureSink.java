@@ -232,7 +232,11 @@ public final class CaptureSink {
                 evicted.body().close();
             }
         }
-        recordArrival.release();
+        // 通知等待者：版本前进 + 释放与"等待者数量 + 1"相当的许可。
+        // 单次 release 只唤醒一个等待者，多等待者时其余会错过本应得到的唤醒；
+        // 多释放的许可可累积，由等待者在"确无新记录"时清理，不会丢失。
+        recordVersion.incrementAndGet();
+        recordArrival.release(recordArrival.getQueueLength() + 1);
         count.incrementAndGet();
         // 捕获结果 → Serenity 报告：报告要能回答"采到了什么、成功没"。**纯采集规则没有响应侧期望**，
         // 不进入 MonitorSink 的观测队列，其结果只能从这里出来，故不能省。
@@ -270,6 +274,20 @@ public final class CaptureSink {
      * （对采集热路径<b>绝对零影响</b>），消费者无固定间隔轮询。
      */
     private final java.util.concurrent.Semaphore recordArrival = new java.util.concurrent.Semaphore(0);
+    /**
+     * 记录到达版本号：每次入队自增。等待者据此判断"自本次扫描以来是否已有新记录"，
+     * 从而只在<b>确无新记录</b>时清理陈旧许可 —— 避免多等待者场景下清掉他人应得的唤醒（丢唤醒）。
+     */
+    private final java.util.concurrent.atomic.AtomicLong recordVersion =
+            new java.util.concurrent.atomic.AtomicLong();
+    /**
+     * reset 代际戳：自增表示"历史已清空"，阻塞中的等待者据此立即返回 null 而非干等超时。
+     *
+     * <p>用 {@code AtomicLong} 而非 {@code volatile long}：并发 reset 下 {@code volatile++} 不是原子操作
+     * （静态分析 {@code VO_VOLATILE_INCREMENT} 会直接拦下构建）。
+     */
+    private final java.util.concurrent.atomic.AtomicLong resetStamp =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private static CapturedApiCall toDto(CapturedExchange snapshot, CapturedBody body, String contentType,
                                          boolean truncated) {
@@ -380,9 +398,10 @@ public final class CaptureSink {
         dropped.set(0);
         timedOutCount.set(0);
         bodyReadFailures.set(0);
-        // 唤醒可能阻塞在 waitFor 的等待者：history 已清空，其 predicate 恒不满足，
-        // 若不通知只能等到超时（reset 通常在用例收尾，不该让等待线程白等）。
-        recordArrival.release();
+        // 结束所有等待者：resetStamp 自增让 waitFor 立即返回 null（历史已清空，再等无意义），
+        // 并按等待者数量释放许可把阻塞中的线程叫醒（单次 release 只唤醒一个）。
+        resetStamp.incrementAndGet();
+        recordArrival.release(recordArrival.getQueueLength() + 1);
     }
 
     /** 关闭一批记录持有的响应体载体（幂等；文件型由此删除临时文件）。 */
@@ -463,9 +482,9 @@ public final class CaptureSink {
         }
         long deadline = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
         while (true) {
-            // 1) 丢弃陈旧许可：过期信号至多造成一次空转（许可可累积，故不会丢唤醒）
-            recordArrival.drainPermits();
-            // 2) 扫描（无锁；history 为并发队列，且生产者不持锁 ⇒ 无死锁/无锁竞争）
+            long stampAtScan = resetStamp.get();
+            long versionAtScan = recordVersion.get();
+            // 1) 扫描（无锁；history 为并发队列，且生产者不持锁 ⇒ 无死锁、无锁竞争）
             for (CapturedApiCall c : history) {
                 if (c != null && predicate.test(c)) {
                     return c;
@@ -475,8 +494,17 @@ public final class CaptureSink {
             if (remainingNs <= 0L) {
                 return null;
             }
-            // 3) 等待新记录信号：被唤醒后回到步骤 1 重新扫描
-            //    （先扫描后等待 + 等待前排空许可 ⇒ 任意交错下都不会丢唤醒）
+            // 2) 期间发生 reset（历史已清空）⇒ 立即返回，不干等超时
+            if (resetStamp.get() != stampAtScan) {
+                return null;
+            }
+            // 3) 自扫描以来已有新记录 ⇒ 立即重扫，无需等待
+            if (recordVersion.get() != versionAtScan) {
+                continue;
+            }
+            // 4) 确无新记录，此刻清理陈旧许可不会吞掉任何等待者应得的唤醒
+            recordArrival.drainPermits();
+            // 5) 等待新记录信号；被唤醒后回到步骤 1 重新扫描
             boolean signalled;
             try {
                 signalled = recordArrival.tryAcquire(remainingNs, java.util.concurrent.TimeUnit.NANOSECONDS);

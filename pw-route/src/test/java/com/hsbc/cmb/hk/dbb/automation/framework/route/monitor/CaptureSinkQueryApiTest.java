@@ -10,6 +10,7 @@ import org.junit.Test;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -116,5 +117,39 @@ public class CaptureSinkQueryApiTest {
         assertTrue("历史清空", sink.all().isEmpty());
         assertTrue("消费队列清空", sink.peek().isEmpty());
         assertNull("在途等待也被清掉", sink.waitFor(c -> true, 50));
+    }
+
+    @Test
+    public void everyWaiterIsWokenWhenARecordArrives() throws Exception {
+        java.util.concurrent.CountDownLatch armed = new java.util.concurrent.CountDownLatch(2);
+        java.util.concurrent.atomic.AtomicReference<CapturedApiCall> first =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<CapturedApiCall> second =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.function.Predicate<CapturedApiCall> match =
+                c -> "https://host/api/a".equals(c.url());
+
+        Thread t1 = new Thread(() -> {
+            armed.countDown();
+            first.set(sink.waitFor(match, 5_000));
+        });
+        Thread t2 = new Thread(() -> {
+            armed.countDown();
+            second.set(sink.waitFor(match, 5_000));
+        });
+        t1.start();
+        t2.start();
+        assertTrue("两个等待者应已启动", armed.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        // 给两个等待者进入阻塞的机会（可中断的有界 park，非 Thread.sleep）
+        java.util.concurrent.locks.LockSupport.parkNanos(100_000_000L);
+
+        capture("https://host/api/a");   // 单次入队必须唤醒"所有"等待者
+
+        t1.join(2_000);
+        t2.join(2_000);
+        assertFalse("等待线程不得仍在运行", t1.isAlive() || t2.isAlive());
+        assertNotNull("等待者 1 必须被唤醒并命中", first.get());
+        assertNotNull("等待者 2 也必须被唤醒并命中（旧实现单次 release 只唤醒一个，会在此暴露）",
+                second.get());
     }
 }
