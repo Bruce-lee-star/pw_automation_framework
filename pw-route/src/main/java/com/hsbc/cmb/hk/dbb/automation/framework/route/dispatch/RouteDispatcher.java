@@ -545,8 +545,12 @@ public final class RouteDispatcher {
 
     /**
      * MODIFY 阶段（链路第 2 步）：无 body 级修改则直接入链尾（headers/method 由链尾 resume 应用）；
-     * 有 body 级修改则交 IO 线程做内容类型感知修改，再入链尾。链尾 {@link #mockOrResume} 据 MOCK 是否命中
+     * 有 body 级修改则<b>就地（调用线程）</b>做内容类型感知修改，再入链尾。链尾 {@link #mockOrResume} 据 MOCK 是否命中
      * 决定 fulfill 短路或 resume 真实网络。
+     *
+     * <p><b>O1b：本阶段就地执行</b>。{@code Request.postData()} / {@code Request.headers()} 都是<b>本地字段读</b>
+     * （不产生驱动往返，见 vendored {@code RequestImpl} 实现），故无需 IO 池；反之若派发到 IO 池，链尾的
+     * MOCK intercept 取真实响应（同步驱动调用）就会在<b>另一个线程</b>上泵同一条连接 —— 正是 O1 要消除的竞态来源。</p>
      */
     private void modifyStage(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime,
                              Consumer<String> terminal) {
@@ -560,7 +564,8 @@ public final class RouteDispatcher {
             runtime.claims().markTerminal(claim, false);
             return;
         }
-        boolean submitted = runtime.io().trySubmit("modify-body:" + spec.pattern(), () -> {
+        // O1b：就地执行（见方法 javadoc）——不派发 IO 池，避免链尾 MOCK 的同步 fetch 落到别的线程上。
+        Runnable modifyTask = () -> {
             if (claim.isTerminal()) {
                 return;
             }
@@ -595,11 +600,8 @@ public final class RouteDispatcher {
                     runtime.claims().markTerminal(claim, false);
                 }
             }
-        });
-        if (!submitted) {
-            RouteAction.fallback(route);
-            runtime.claims().markTerminal(claim, false);
-        }
+        };
+        modifyTask.run();
     }
 
     private static void logReplacementFailures(String pattern, List<String> failures) {
@@ -616,6 +618,15 @@ public final class RouteDispatcher {
      * <p>对照 playwright-java-1.62.0 {@code Router.handle}：handler 返回时未终结且未 fallback →
      * 返回 {@code PendingHandler}，请求由驱动侧挂起，只能被后续异步终结（本方法的延迟回调）或 sweep 兜底放行——
      * 因此<b>绝不允许在调度延迟任务之后立即 resume</b>（历史缺陷：立即放行导致 delay 空操作）。</p>
+     *
+     * <p><b>已知残留（O1b 的第二半：当前只文档化，未修）</b>：若该 spec 同时声明了 intercept MOCK
+     * （{@code spec.mockIntercept()}），到点回调里继续的 MOCK 阶段会在<b>调度器线程</b>上取真实响应
+     * —— 那是一次同步驱动调用，即该组合下 fetch <b>不在调用线程</b>，仍会与主线程并发驱动同一条连接
+     * （O1/O1b 已消除的竞态面在此组合下重新出现）。当前 E2E 覆盖不到该组合（delay 用例走 monitor 采集，
+     * 不是 intercept）。修法（P1）：在 <b>DELAY 阶段（仍在调用线程）</b>预取并<b>物化</b>
+     * （status + headers + body bytes，随即 dispose 句柄），再交由到点回调只做 {@code fulfillWithBody}
+     * —— 交付段因此<b>零同步驱动调用</b>。风险与缓解见提交说明（B1 多余请求 / B2 fail-open 丢失 /
+     * B3 热路径回归 / B4 快照时刻提前）。</p>
      */
     private void dispatchDelayChain(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime,
                                     Runnable afterDelay, HitTrace trace) {
