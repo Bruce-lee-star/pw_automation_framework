@@ -146,6 +146,35 @@ public class PlaywrightListener implements StepListener {
      */
     private final Set<String> storyNamesEverSeen = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    /** 轮次横幅语义（包级可见：供单测直接断言，无需日志捕获夹具）。 */
+    enum RoundBanner { NONE, SAME_SUITE_RE_EXECUTED, NEW_SUITE }
+
+    /**
+     * 判定"新一轮开始"的横幅语义，并原子消费本轮横幅名额（每轮只打一次）。
+     *
+     * <p>为什么单独抽出来：原实现把判定与日志写在一处，判据既不可单测也不可复用；抽成包级方法后，
+     * 单测可直接断言语义，日志只负责呈现。</p>
+     *
+     * @param storyName 新开始的 story 名（null ⇒ 不可判定，返回 {@link RoundBanner#NONE}）
+     * @return {@link RoundBanner#NONE}＝首轮（尚未有 testRunFinished）或本轮横幅已打；
+     *         {@link RoundBanner#SAME_SUITE_RE_EXECUTED}＝同名 suite 再现（**才可能**是 failsafe 失败重跑）；
+     *         {@link RoundBanner#NEW_SUITE}＝另一个 suite 开始（**不是**重跑）
+     */
+    RoundBanner classifyRoundStart(String storyName) {
+        if (currentRunNumber <= 0 || roundBannerLogged || storyName == null) {
+            return RoundBanner.NONE;
+        }
+        roundBannerLogged = true;
+        return storyNamesEverSeen.add(storyName)
+                ? RoundBanner.NEW_SUITE : RoundBanner.SAME_SUITE_RE_EXECUTED;
+    }
+
+    /** 仅测试用：重置轮次相关静态状态（package-private；生产代码不调用）。 */
+    static void resetRoundStateForTest() {
+        currentRunNumber = 0;
+        roundBannerLogged = false;
+    }
+
     /** scenario 标识单调序号：保证同名 scenario（如 Scenario Outline 各示例行）也拿到唯一 id，避免按用例串联时串扰。 */
     private static final java.util.concurrent.atomic.AtomicLong SCENARIO_SEQ = new java.util.concurrent.atomic.AtomicLong();
 
@@ -1008,11 +1037,10 @@ public class PlaywrightListener implements StepListener {
         //  现按 story 名判别，只陈述可观测事实：
         //    - 同名 story 再次出现 ⇒ 同一套件被再次执行（**可能**是 failsafe 重跑，需看构建输出确认）；
         //    - 新 story ⇒ 只是另一个套件开始，**不是**重跑。
-        if (currentRunNumber > 0 && !roundBannerLogged) {
-            roundBannerLogged = true;
-            boolean sameSuite = !storyNamesEverSeen.add(storyName);
+        RoundBanner banner = classifyRoundStart(storyName);
+        if (banner != RoundBanner.NONE) {
             logger.info("==========================================================================");
-            if (sameSuite) {
+            if (banner == RoundBanner.SAME_SUITE_RE_EXECUTED) {
                 logger.info("  SUITE RE-EXECUTED - Round {} for '{}' (same suite seen before;"
                         + " consistent with a failsafe rerun, confirm from the build output)",
                         currentRunNumber, storyName);
