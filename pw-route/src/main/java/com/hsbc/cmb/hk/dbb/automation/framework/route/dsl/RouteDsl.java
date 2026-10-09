@@ -26,6 +26,13 @@ import java.util.Objects;
  *   <li>注册动作本身只做内存操作 + 原生 route() 绑定，注册/注销不触发全局状态清理。</li>
  * </ul>
  *
+ * <p><b>采集默认开启</b>：{@code .monitor()} 段默认即采集（记录 + 响应体，响应体按
+ * {@code captureBodyLimitBytes} 截断，默认 64 KiB），业务层无需再写 {@code .capture()} /
+ * {@code .captureBody(true)}；要关闭用 {@code .capture(false)} / {@code .captureBody(false)}。
+ * 该默认被视为"隐式采集"，随 MONITOR 能力一起失效（{@code stopMonitor} 后不再采集、也不再抢请求）；
+ * 显式 {@code .capture(...)} 保持"横切观测、不随能力停止"的既有语义。
+ * 采集结果可经 {@code peekCaptured}/{@code dumpCaptured}（pw-route 门面）或 SPI 只读视图查询。
+ *
  * <p><b>采集 → 回放</b>：{@code MockDsl.fromCaptured(...)} 把采集记录（或 SPI 只读视图）转为 Mock 规则，
  * 语义是<b>注册期即时快照</b> —— 不留存任何采集载体 / 临时文件引用，故采集器的 {@code reset()} 与驱逐
  * 不会影响已注册的回放规则（契约见 {@code CapturedBody}）。文本体走文本通道；<b>非文本体走字节保真
@@ -731,16 +738,32 @@ public final class RouteDsl {
         /**
          * 开启该 pattern 的 API 信息采集（请求/响应快照；经 RouteDsl.dumpCaptured 消费）。
          *
+         * <p><b>在 {@code .monitor()} 段默认已开启</b>（连同响应体），业务层无需再调用本方法；
+         * 本方法保留给 {@code .mock()} / {@code .modifyRequest()} / {@code .delay()} 段，
+         * 用于让"非 MONITOR 主渠道"的规则也参与采集。
+         *
          * <p>capture 是横切观测：不参与终结所有权、不改变请求流，与 mock/modify/delay/monitor
          * 能力共存无竞态——同一请求同时被能力处理与被采集（响应侧挂载于 context.onResponse，
-         * 事件线程零阻塞，响应体读取交 IO 线程）。
+         * 事件线程零阻塞，响应体读取在响应轮询线程就地快照）。
          */
         public T capture() {
             b.capture(true);
             return self();
         }
 
-        /** 是否采集响应体（默认 false；开启后经 IO 线程读取，按 captureBodyLimitBytes 截断）。 */
+        /**
+         * 显式开关采集（{@code .monitor()} 段默认 {@code true}；{@code false} 可关闭，
+         * 例如只想做断言而不采集响应体）。
+         */
+        public T capture(boolean enable) {
+            b.capture(enable);
+            return self();
+        }
+
+        /**
+         * 是否采集响应体（{@code .monitor()} 段默认 {@code true}；{@code false} 可关闭）。
+         * 开启后按 {@link #captureBodyLimitBytes(int)} 截断（默认 64 KiB）。
+         */
         public T captureBody(boolean enable) {
             b.captureBody(enable);
             return self();
@@ -796,6 +819,14 @@ public final class RouteDsl {
 
         private MonitorDsl(ApiSpec.Builder b) {
             super(b);
+            // 默认即采集（记录 + 响应体）：业务层只写 .monitor() 就会被采集，不必再写
+            // .capture().captureBody(true)。需要关闭时用 .capture(false) / .captureBody(false)；
+            // 体积用 captureBodyLimitBytes(n) 控制（默认 64 KiB 截断）。
+            // 该默认同时让"纯观测规则"（无断言字段）成为活跃能力位（dispatcher 的 hasCapture），
+            // 故 .api(p).monitor().done() 也照常拦到该请求并记录，而不会因"无能力位"被跳过。
+            // 标记为"隐式"：随 MONITOR 能力停止而失效（stopMonitor 即停止观测，不残留采集）。
+            b.captureByMonitorDefault();
+            b.captureBody(true);
         }
 
         public MonitorDsl expectStatus(int status) {

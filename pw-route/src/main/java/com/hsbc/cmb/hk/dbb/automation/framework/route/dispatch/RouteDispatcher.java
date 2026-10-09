@@ -96,8 +96,10 @@ public final class RouteDispatcher {
         boolean hasMock = !spec.isStopped(RouteCapability.MOCK) && spec.hasMockFields();
         boolean hasMonitor = !spec.isStopped(RouteCapability.MONITOR) && spec.hasMonitorFields();
         // CAPTURE 是横切观测，不是可停止的能力位（无 RouteCapability.CAPTURE 枚举），
-        // 故以 spec.captureEnabled() 单独判定；纯采集规则（如 .monitor().capture() 不带断言）必须照常观测。
-        boolean hasCapture = spec.captureEnabled();
+        // 故以 spec.captureActive() 单独判定；纯采集规则（.monitor() 不带断言）必须照常观测。
+        // 注意 captureActive 而非 captureEnabled：由 .monitor() 默认带来的采集随 stopMonitor 失效，
+        // 而显式 .capture(...) 仍保持"不随能力停止"的既有语义（否则 stopMonitor 会残留抢请求）。
+        boolean hasCapture = spec.captureActive();
 
         if (!hasDelay && !hasModify && !hasMock && !hasMonitor && !hasCapture) {
             // 无任何活跃能力位（全部停止或纯无观测）→ 链式裁决交给下一个 pattern / 真实网络

@@ -105,7 +105,8 @@ public final class CaptureSink {
         // MONITOR 优先于 DELAY：.monitor().delay() 的主渠道是 MONITOR ⇒ 默认即被采到，而记录里仍带
         // 完整 channels（含 DELAY），故"被延迟的 api 信息"照样能查到（分渠道查询不受影响）。
         // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。
-        if (!spec.captureEnabled()
+        // 用 captureActive()（而非 captureEnabled()）：.monitor() 默认带来的采集在 stopMonitor 后失效。
+        if (!spec.captureActive()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
                 && !capturePolicy.allTypes()) {
             return false;
@@ -131,7 +132,7 @@ public final class CaptureSink {
         if (spec == null || response == null) {
             return;
         }
-        if (!spec.captureEnabled()
+        if (!spec.captureActive()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
                 && !capturePolicy.allTypes()) {
             return;

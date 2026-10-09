@@ -94,6 +94,13 @@ public final class ApiSpec {
     // ── CAPTURE 参数（横切采集：与能力正交，对 mock/modify/delay/monitor 统一生效）──
     /** 是否采集该 pattern 的 API 信息（请求/响应快照，含 dump 消费）。 */
     private final boolean capture;
+    /**
+     * 采集是否由 {@code .monitor()} 的<b>默认</b>带来（而非调用方显式 {@code .capture(...)}）。
+     *
+     * <p>判据用途：隐式采集随 MONITOR 能力一起失效（{@code stopMonitor} 后不再采、也不再抢请求），
+     * 显式采集保持"横切观测、不随能力停止"的既有语义（见 {@link #captureActive()}）。
+     */
+    private final boolean captureImplicit;
     /** 是否采集响应体（默认 false；开启后经 IO 线程读取，受 captureBodyLimitBytes 截断）。 */
     private final boolean captureBody;
     /** 响应体采集截断上限（字节，默认 {@value CaptureLimits#DEFAULT_BODY_LIMIT_BYTES}）。 */
@@ -146,6 +153,7 @@ public final class ApiSpec {
         this.autoStopOnMatch = b.autoStopOnMatch;
         this.minMatches = b.minMatches;
         this.capture = b.capture;
+        this.captureImplicit = b.captureImplicit;
         this.captureBody = b.captureBody;
         this.captureBodyLimitBytes = b.captureBodyLimitBytes;
         this.times = b.times;
@@ -199,6 +207,7 @@ public final class ApiSpec {
         this.autoStopOnMatch = from.autoStopOnMatch;
         this.minMatches = from.minMatches;
         this.capture = from.capture;
+        this.captureImplicit = from.captureImplicit;
         this.captureBody = from.captureBody;
         this.captureBodyLimitBytes = from.captureBodyLimitBytes;
         this.times = from.times;
@@ -452,6 +461,8 @@ public final class ApiSpec {
         b.disabled.addAll(o.disabled);
         b.record = b.record || o.record;
         b.capture = b.capture || o.capture;
+        // 显式优先：任一侧显式设置过 capture，合并结果即视为显式（不随 MONITOR 停止）
+        b.captureImplicit = b.captureImplicit && o.captureImplicit;
         b.captureBody = b.captureBody || o.captureBody;
         b.autoStopOnMatch = b.autoStopOnMatch || o.autoStopOnMatch;
         b.onlyMainFrame = b.onlyMainFrame && o.onlyMainFrame;
@@ -571,6 +582,23 @@ public final class ApiSpec {
 
     public boolean captureEnabled() {
         return capture;
+    }
+
+    /**
+     * 采集是否<b>当前生效</b>：显式 {@code .capture(...)} 恒生效；由 {@code .monitor()} 默认带来的
+     * 采集在 MONITOR 能力被停止后失效 —— {@code stopMonitor} 的语义是"停止观测该 pattern"，
+     * 不该残留采集（否则规则仍会抢请求、仍产生采集记录）。
+     *
+     * <p>活跃位判定（{@code RouteDispatcher}）与采集闸门（{@code CaptureSink}）统一用本方法，
+     * 避免"两处各判一套"。
+     */
+    public boolean captureActive() {
+        return capture && (!captureImplicit || !isStopped(RouteCapability.MONITOR));
+    }
+
+    /** 采集是否由 {@code .monitor()} 默认带来（未被显式设置过）。 */
+    public boolean captureImplicit() {
+        return captureImplicit;
     }
 
     public boolean captureBodyEnabled() {
@@ -729,6 +757,7 @@ public final class ApiSpec {
         private boolean autoStopOnMatch;
         private int minMatches = DEFAULT_MIN_MATCHES;
         private boolean capture;
+        private boolean captureImplicit;
         private boolean captureBody;
         /** 默认响应体截断上限（64 KiB，与 CaptureLimits.DEFAULT_BODY_LIMIT_BYTES 对齐）。 */
         private int captureBodyLimitBytes = DEFAULT_CAPTURE_BODY_LIMIT_BYTES;
@@ -782,6 +811,7 @@ public final class ApiSpec {
             this.autoStopOnMatch = s.autoStopOnMatch;
             this.minMatches = s.minMatches;
             this.capture = s.capture;
+            this.captureImplicit = s.captureImplicit;
             this.captureBody = s.captureBody;
             this.captureBodyLimitBytes = s.captureBodyLimitBytes;
             this.times = s.times;
@@ -990,6 +1020,17 @@ public final class ApiSpec {
         /** 开启该 pattern 的 API 信息采集（请求/响应快照；dumpCaptured 消费）。 */
         public Builder capture(boolean enable) {
             this.capture = enable;
+            this.captureImplicit = false;   // 显式设置 ⇒ 采集与 MONITOR 生命周期解耦
+            return this;
+        }
+
+        /**
+         * {@code .monitor()} 段的默认采集：置 true 并标记为<b>隐式</b>
+         * （随 MONITOR 能力停止而失效，见 {@link ApiSpec#captureActive()}）。
+         */
+        public Builder captureByMonitorDefault() {
+            this.capture = true;
+            this.captureImplicit = true;
             return this;
         }
 
