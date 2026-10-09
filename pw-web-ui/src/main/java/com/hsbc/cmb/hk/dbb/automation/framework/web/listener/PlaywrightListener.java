@@ -1005,10 +1005,11 @@ public class PlaywrightListener implements StepListener {
      * @param t 步骤失败的异常（可为 null）
      */
     private static void reportDriverFailureIfPlaywright(Throwable t) {
+        //  按【类型】判定，**不做错误串匹配**：文本匹配会假阳性（消息里恰好含该字样 ⇒ 污染信号、
+        //  使 route 少做一次收尾确证、掩盖真问题），也会假阴性（包装链路未保留类名时漏报）。
+        //  更精确的上报点是"捕获该异常的层"（见 PageElement）；此处为兜住其它路径的保险丝。
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
-            String msg = c.getMessage();
-            if (c instanceof com.microsoft.playwright.PlaywrightException
-                    || (msg != null && msg.contains("PlaywrightException"))) {
+            if (c instanceof com.microsoft.playwright.PlaywrightException) {
                 com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal.report();
                 return;
             }
