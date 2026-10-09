@@ -46,7 +46,8 @@ public record CapturedApiCall(String pattern, String method, String url,
                               Integer responseStatus, Map<String, String> responseHeaders,
                               String responseBody, boolean responseBodyTruncated,
                               long durationMs, boolean timedOut, long recordedAtMillis,
-                              Set<String> channels, String primaryChannel) {
+                              Set<String> channels, String primaryChannel,
+                              String contentType, byte[] responseBodyBytes) {
 
     /**
      * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null。
@@ -61,7 +62,7 @@ public record CapturedApiCall(String pattern, String method, String url,
                            long durationMs, boolean timedOut, long recordedAtMillis) {
         this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
                 responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
-                Set.of(), null);
+                Set.of(), null, null, null);
     }
 
     /** 敏感头键（小写比较）：值一律打码。 */
@@ -85,12 +86,24 @@ public record CapturedApiCall(String pattern, String method, String url,
         // "持有调用方传入的可变集合"会直接拦构建（pw-core 的 CapturedApiCallView 已踩过两次）。
         channels = channels == null ? Set.of()
                 : java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(channels));
+        // 数组不是不可变类型：不拷贝会被静态分析判为"存了外部可变对象"（EI_EXPOSE_REP2）并拦下构建。
+        responseBodyBytes = responseBodyBytes == null ? null : responseBodyBytes.clone();
     }
 
     /** 只读视图：静态分析要求访问器不得直接返回可变类型字段（与 pw-core 的 CapturedApiCallView 同处理）。 */
     @Override
     public Set<String> channels() {
         return java.util.Collections.unmodifiableSet(channels);
+    }
+
+    /**
+     * 原始响应体字节的<b>副本</b>（数组是不可变类型的例外：不拷贝等于暴露内部表示，静态分析会拦构建）。
+     *
+     * <p>仅在开启 {@code captureBody} 时有值；文本型与二进制型都会有值，供"精确回放/自行解析"使用。
+     */
+    @Override
+    public byte[] responseBodyBytes() {
+        return responseBodyBytes == null ? null : responseBodyBytes.clone();
     }
 
     /** 请求体预览上限（与 {@code CapturedExchange} 对齐）。 */

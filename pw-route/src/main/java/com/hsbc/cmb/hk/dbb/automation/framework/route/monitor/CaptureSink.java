@@ -225,7 +225,10 @@ public final class CaptureSink {
                 snapshot.responseStatus(), snapshot.responseHeaders(),
                 body, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
-                snapshot.channels(), snapshot.primaryChannel());
+                snapshot.channels(), snapshot.primaryChannel(),
+                // 【下一步接线】contentType 与原始字节：待 CapturedExchange 增加对应字段后由 toDto 透传，
+                // 现先传 null 占位，保证模型先行扩展、编译与行为均不受影响。
+                null, null);
     }
 
     /**
@@ -412,6 +415,6 @@ public final class CaptureSink {
                 c.pattern(), c.method(), c.url(),
                 c.requestHeaders(), c.requestBodyPreview(), c.responseStatus(), c.responseHeaders(),
                 c.responseBody(), c.responseBodyTruncated(), c.durationMs(), c.timedOut(),
-                c.recordedAtMillis(), c.channels());
+                c.recordedAtMillis(), c.channels(), c.contentType(), c.responseBodyBytes());
     }
 }

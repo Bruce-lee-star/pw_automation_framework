@@ -43,7 +43,9 @@ public record CapturedApiCallView(
         long durationMs,
         boolean timedOut,
         long recordedAtMillis,
-        Set<String> channels) {
+        Set<String> channels,
+        String contentType,
+        byte[] responseBodyBytes) {
 
     /**
      * 紧凑构造：对可变集合做防御性拷贝并包成不可修改视图。
@@ -60,6 +62,14 @@ public record CapturedApiCallView(
                 : Collections.unmodifiableMap(new LinkedHashMap<>(responseHeaders));
         channels = channels == null ? Set.of()
                 : Collections.unmodifiableSet(new LinkedHashSet<>(channels));
+        // 数组同样防御性拷贝：不拷贝会被静态分析判为暴露内部表示（EI_EXPOSE_REP / REP2）。
+        responseBodyBytes = responseBodyBytes == null ? null : responseBodyBytes.clone();
+    }
+
+    /** 原始响应体字节的<b>副本</b>（仅开启 captureBody 时有值；文本型与二进制型均有值）。 */
+    @Override
+    public byte[] responseBodyBytes() {
+        return responseBodyBytes == null ? null : responseBodyBytes.clone();
     }
 
     /**
