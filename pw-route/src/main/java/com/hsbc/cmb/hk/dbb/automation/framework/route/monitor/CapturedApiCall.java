@@ -78,10 +78,18 @@ public record CapturedApiCall(String pattern, String method, String url,
     /** 日志展示用 JSON 缩进器（线程安全，复用同一实例）。 */
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    /** 防御性拷贝构造：header 快照不可变 + 敏感头脱敏 + 渠道集合不可变。 */
+    /**
+     * 防御性拷贝构造：只做"不可变快照"，<b>不做脱敏</b>。
+     *
+     * <p>口径：<b>数据层保真、渲染层脱敏</b>。业务需要拿到真实响应（例如取整响应、改指定节点后
+     * 当 mock 回放），故 header 原值必须保留；脱敏只在 {@link #detail()} 等<b>渲染路径</b>做
+     * （见 {@code renderDetail} 里对 {@code sanitize(...)} 的调用），日志/报告因此不会泄露。
+     */
     public CapturedApiCall {
-        requestHeaders = sanitize(requestHeaders);
-        responseHeaders = sanitize(responseHeaders);
+        requestHeaders = requestHeaders == null ? Map.of()
+                : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(requestHeaders));
+        responseHeaders = responseHeaders == null ? Map.of()
+                : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(responseHeaders));
         // 渠道集合同样做防御性拷贝：静态分析（SpotBugs EI_EXPOSE_REP/REP2）对
         // "持有调用方传入的可变集合"会直接拦构建（pw-core 的 CapturedApiCallView 已踩过两次）。
         channels = channels == null ? Set.of()
@@ -271,14 +279,15 @@ public record CapturedApiCall(String pattern, String method, String url,
         if (durationMs >= 0) {
             appendField(d, "duration", durationMs + "ms");
         }
-        appendHeaders(d, "reqHeaders", requestHeaders);
+        // 渲染期脱敏：记录里是原始值，日志/报告必须打码（sanitize 只在此处使用）
+        appendHeaders(d, "reqHeaders", sanitize(requestHeaders));
         appendBody(d, "reqBody", requestBodyPreview, false);
         if (timedOut) {
             appendField(d, "response", "[timeout]");
         } else {
             appendField(d, "response", responseStatus);
         }
-        appendHeaders(d, "respHeaders", responseHeaders);
+        appendHeaders(d, "respHeaders", sanitize(responseHeaders));
         appendBody(d, "respBody", responseBody, responseBodyTruncated);
         d.append('}');
         return d.toString();

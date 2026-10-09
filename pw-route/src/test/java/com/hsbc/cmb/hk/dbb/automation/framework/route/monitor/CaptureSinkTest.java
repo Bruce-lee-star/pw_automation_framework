@@ -93,7 +93,7 @@ public class CaptureSinkTest {
     }
 
     @Test
-    public void sensitiveHeadersAreMasked() {
+    public void sensitiveHeadersAreKeptRawInTheRecordAndMaskedInRendering() {
         ApiSpec spec = ApiSpec.builder("/api/login", RouteCapability.MONITOR)
                 .capture(true)
                 .build();
@@ -103,11 +103,17 @@ public class CaptureSinkTest {
         sink.onResponseForSpec(spec, mockResponse("https://host/api/login", 200));
 
         CapturedApiCall call = sink.dump().get(0);
-        assertEquals("请求头 authorization 值必须脱敏", (Object) SensitiveDataSanitizer.maskToken(),
+        // 数据层保真：业务需要真实值（取整响应 → 改指定节点 → 当 mock 回放）
+        assertEquals("记录里必须保留原始 authorization", (Object) "Bearer secret-token-abc",
                 (Object) call.requestHeaders().get("authorization"));
-        assertEquals("响应头 set-cookie 值必须脱敏", (Object) SensitiveDataSanitizer.maskToken(),
+        assertEquals("记录里必须保留原始 set-cookie", (Object) "sid=abc123",
                 (Object) call.responseHeaders().get("set-cookie"));
         assertEquals("非敏感头保持原样", (Object) "application/json", (Object) call.requestHeaders().get("content-type"));
+        // 渲染层脱敏：日志/报告不得出现原始敏感值，但仍要展示被打码的头
+        String rendered = call.detail();
+        assertFalse("渲染文本不得出现原始 token", rendered.contains("secret-token-abc"));
+        assertFalse("渲染文本不得出现原始 cookie 值", rendered.contains("sid=abc123"));
+        assertTrue("渲染文本仍需展示（已打码的）敏感头", rendered.contains("authorization"));
     }
 
     @Test
