@@ -43,8 +43,13 @@ public final class ApiCaptureQueryRegistry {
             synchronized (ApiCaptureQueryRegistry.class) {
                 if (!initialized) {
                     try {
+                        // 触发实现类初始化：其静态块会自注册（幂等）。forName 默认 initialize=true，
+                        // 故静态块必然在此刻执行，随后无需再反射实例化（避免白建第二个无状态实例）。
                         Class<?> impl = Class.forName(IMPL_CLASS);
-                        query = (ApiCaptureQuery) impl.getDeclaredConstructor().newInstance();
+                        if (query == null) {
+                            // 兜底：实现类未自注册（例如将来的版本去掉了静态块）时，仍按旧路径实例化。
+                            query = (ApiCaptureQuery) impl.getDeclaredConstructor().newInstance();
+                        }
                     } catch (Exception | LinkageError e) {
                         // pw-route 未在 classpath：降级为 null，由调用方返回空结果（不抛错、不刷屏）
                         query = null;
