@@ -233,6 +233,13 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
      * <p><b>只在确认连接已换（或套件收尾）之后调用</b>：在途调用未收尾时单方面换线程正是本类要杜绝的
      * "第二个消息泵"。会话层换 {@code Playwright} 实例后调用它，即可让信道与新连接对齐。</p>
      */
+    /** 上一次按 ERROR 报过的 reset 时刻（毫秒）；同一故障窗口内的重复 reset 降级为 WARN，避免一次故障刷多条 ERROR。 */
+    private static final java.util.concurrent.atomic.AtomicLong LAST_RESET_ERROR_MS =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+
+    /** 重复 reset 的降噪窗口（毫秒）：窗口内只报一次 ERROR。 */
+    private static final long RESET_ERROR_DEDUP_MS = 10_000L;
+
     public static void resetChannel() {
         ExecutorService fresh = newDriverExecutor();
         ExecutorService previous = DRIVER.getAndSet(fresh);
@@ -240,7 +247,18 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             previous.shutdownNow();
         }
         UNUSABLE.set(false);
-        LOGGER.error("[Route] driver channel explicitly RESET (epoch -> {}); caller must have rebuilt the connection first",
-                DRIVER_EPOCH.get());
+        //  降噪（2026-10-09）：一次驱动故障常伴随多次 channel reset（epoch 每次都变，故按 epoch 去重无效）。
+        //  同一 10s 窗口内只报一条 ERROR，其余降为 WARN 并标注"同一故障窗口内重复" —— 既保留首条真信号，
+        //  又不把一次故障刷成多条 ERROR 与用例失败混在一起。
+        long now = System.currentTimeMillis();
+        long last = LAST_RESET_ERROR_MS.get();
+        if (now - last > RESET_ERROR_DEDUP_MS && LAST_RESET_ERROR_MS.compareAndSet(last, now)) {
+            LOGGER.error("[Route] driver channel explicitly RESET (epoch -> {}); caller must have rebuilt the connection first",
+                    DRIVER_EPOCH.get());
+        } else {
+            LOGGER.warn("[Route] driver channel RESET again (epoch -> {}) within {}ms of the previous ERROR — "
+                            + "same failure window, already reported once; caller must have rebuilt the connection first",
+                    DRIVER_EPOCH.get(), RESET_ERROR_DEDUP_MS);
+        }
     }
 }

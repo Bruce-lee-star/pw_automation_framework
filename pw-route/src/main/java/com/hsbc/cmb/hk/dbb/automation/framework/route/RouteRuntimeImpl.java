@@ -575,8 +575,15 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         if (unconfirmed > 0) {
             unconfirmedRetirements.addAndGet(unconfirmed);
             markDegraded();
-            LOGGER.error("[Route] teardown flush UNCONFIRMED for {} rule(s) on context @{} — route state not "
-                            + "verifiable after resync. Context/session are NOT rebuilt (I-1); observability signal only",
+            //  级别下调为 WARN（2026-10-09 口径）：本项**不是用例失败原因**。
+            //  实测因果链：UI 侧点击先失败（Caused by 驱动侧 Cannot find command to respond）⇒ 该连接随后
+            //  对任何命令都不再应答 ⇒ 收尾的 unroute 超时 10s ⇒ 规则未被确证。即"未确证"是**次生现象**，
+            //  且路由是辅助设施（其不确定性不得绑架会话/Context —— 见本方法上方不变式 I-9）。
+            //  故此处只做「可观测的实情报告」，不再以 ERROR 形式与用例失败混在一起、避免误导排障。
+            LOGGER.warn("[Route] teardown flush UNCONFIRMED for {} rule(s) on context @{} — route state not "
+                            + "verifiable after resync; likely the connection was already broken by an earlier "
+                            + "driver failure in this scenario. Route is a helper facility: this is NOT a cause of "
+                            + "the scenario failure. Context/session are NOT rebuilt (I-1); observability signal only",
                     unconfirmed, System.identityHashCode(context));
         }
         VerboseLogging.logInfoIfVerbose(LOGGER,
