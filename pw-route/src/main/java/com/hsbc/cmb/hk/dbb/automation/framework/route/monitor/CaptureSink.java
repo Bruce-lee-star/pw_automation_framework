@@ -201,14 +201,12 @@ public final class CaptureSink {
         captured.add(call);
         // 非消费式历史（peek 用）：与消费式队列并行维护，保证"用例收尾复核真实流量"不会被
         // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
-        // 事件驱动：状态写入（history）与通知在同一监视器内完成 —— 既不丢唤醒，也不产生"裸通知"（NN_NAKED_NOTIFY）
-        synchronized (recordArrival) {
-            history.add(call);
-            while (history.size() > maxCaptured) {
-                history.poll();
-            }
-            recordArrival.notifyAll();
+        // 事件驱动、生产者无锁：历史写入走并发队列，随后仅发一次无阻塞信号（AQS 单次 CAS，不 park、不阻塞）
+        history.add(call);
+        while (history.size() > maxCaptured) {
+            history.poll();
         }
+        recordArrival.release();
         count.incrementAndGet();
         // 捕获结果 → Serenity 报告：报告要能回答"采到了什么、成功没"。**纯采集规则没有响应侧期望**，
         // 不进入 MonitorSink 的观测队列，其结果只能从这里出来，故不能省。
@@ -241,10 +239,11 @@ public final class CaptureSink {
     /** 非消费式历史快照（{@link #peek()} 的数据源）：只增（按 {@code maxCaptured} 限量），不受 dump 影响。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> history = new ConcurrentLinkedQueue<>();
     /**
-     * 记录到达监视器：入队点在其上 {@code notifyAll}，{@link #waitFor} 在其上条件等待
-     * —— 事件驱动、无固定间隔轮询（框架内禁止 {@code Thread.sleep}）。
+     * 记录到达信号（无锁信号量）：入队点仅做一次无阻塞 {@code release()}，等待者
+     * {@code tryAcquire(剩余时间)} —— 生产者不持任何锁、不被任何等待者阻塞
+     * （对采集热路径<b>绝对零影响</b>），消费者无固定间隔轮询。
      */
-    private final Object recordArrival = new Object();
+    private final java.util.concurrent.Semaphore recordArrival = new java.util.concurrent.Semaphore(0);
 
     private static CapturedApiCall toDto(CapturedExchange snapshot, String body, byte[] bodyBytes,
                                          String contentType, boolean truncated) {
@@ -409,31 +408,36 @@ public final class CaptureSink {
         return out;
     }
 
-    /** 等待首个满足条件的记录（非消费式轮询；20ms 间隔）；超时返回 null。 */
+    /** 等待首个满足条件的记录（非消费式；事件驱动，无固定间隔轮询）；超时或中断返回 null。 */
     public CapturedApiCall waitFor(java.util.function.Predicate<CapturedApiCall> predicate, long timeoutMs) {
         if (predicate == null) {
             return null;
         }
         long deadline = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
-        synchronized (recordArrival) {
-            while (true) {
-                // 先扫描后等待，且扫描在监视器内 ⇒ 与入队点的 notifyAll 无丢唤醒窗口
-                for (CapturedApiCall c : history) {
-                    if (c != null && predicate.test(c)) {
-                        return c;
-                    }
+        while (true) {
+            // 1) 丢弃陈旧许可：过期信号至多造成一次空转（许可可累积，故不会丢唤醒）
+            recordArrival.drainPermits();
+            // 2) 扫描（无锁；history 为并发队列，且生产者不持锁 ⇒ 无死锁/无锁竞争）
+            for (CapturedApiCall c : history) {
+                if (c != null && predicate.test(c)) {
+                    return c;
                 }
-                long remainingNs = deadline - System.nanoTime();
-                if (remainingNs <= 0L) {
-                    return null;
-                }
-                // 事件驱动等待：由入队点 notifyAll 唤醒，无固定间隔轮询（框架内禁止 Thread.sleep）
-                try {
-                    recordArrival.wait(remainingNs / 1_000_000L, (int) (remainingNs % 1_000_000L));
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return null;
-                }
+            }
+            long remainingNs = deadline - System.nanoTime();
+            if (remainingNs <= 0L) {
+                return null;
+            }
+            // 3) 等待新记录信号：被唤醒后回到步骤 1 重新扫描
+            //    （先扫描后等待 + 等待前排空许可 ⇒ 任意交错下都不会丢唤醒）
+            boolean signalled;
+            try {
+                signalled = recordArrival.tryAcquire(remainingNs, java.util.concurrent.TimeUnit.NANOSECONDS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+            if (!signalled && System.nanoTime() >= deadline) {
+                return null;   // 等待超时且无新信号 ⇒ 无匹配记录
             }
         }
     }
