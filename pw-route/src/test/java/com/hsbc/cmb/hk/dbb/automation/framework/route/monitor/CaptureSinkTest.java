@@ -221,19 +221,15 @@ public class CaptureSinkTest {
         sink.onResponseForSpec(spec, mockResponse("https://host/api/plain-mock", 200));
         assertTrue("默认只采 MONITOR：MOCK 规则不入采集库", sink.dump().isEmpty());
 
-        String prev = System.getProperty("route.capture.all.type");
-        try {
-            System.setProperty("route.capture.all.type", "true");
-            sink.recordRequest(mockRequest("https://host/api/plain-mock"), spec);
-            sink.onResponseForSpec(spec, mockResponse("https://host/api/plain-mock", 200));
-            assertEquals("route.capture.all.type=true 后 MOCK 规则应被采集", (long) 1, (long) sink.dump().size());
-        } finally {
-            if (prev == null) {
-                System.clearProperty("route.capture.all.type");
-            } else {
-                System.setProperty("route.capture.all.type", prev);
-            }
-        }
+        // 统一配置类 RouteConfig 打开 captureAllTypes 后，同一规则应被采集
+        // （口径来自配置实例，不再依赖系统属性 —— 这也是与框架统一配置类对齐后的正确形态）。
+        com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig allTypes =
+                new com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig(
+                        16, 2, 64, 8, 35L, 2_000L, 1_000, 30_000L, true, 262_144, 8_388_608);
+        CaptureSink capturing = new CaptureSink(io, 100, 30_000, allTypes);
+        capturing.recordRequest(mockRequest("https://host/api/plain-mock"), spec);
+        capturing.onResponseForSpec(spec, mockResponse("https://host/api/plain-mock", 200));
+        assertEquals("captureAllTypes=true 后 MOCK 规则应被采集", (long) 1, (long) capturing.dump().size());
     }
 
     @Test

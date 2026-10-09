@@ -24,6 +24,12 @@ public final class RouteConfig {
     public static final int DEFAULT_MAX_CAPTURED = 1_000;
     /** 未响应采集请求的超时定案窗口（毫秒，30s；与 monitor 默认超时一致）。 */
     public static final long DEFAULT_CAPTURE_TIMEOUT_MS = 30_000L;
+    /** 采集范围默认值：只采 MONITOR；true 时追加 DELAY / MODIFY / MOCK（显式 .capture() 始终强制采集）。 */
+    public static final boolean DEFAULT_CAPTURE_ALL_TYPES = false;
+    /** 响应体内联阈值（字节）：不超过即原字节持内存。 */
+    public static final int DEFAULT_CAPTURE_INLINE_MAX_BYTES = 262_144;
+    /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
+    public static final int DEFAULT_CAPTURE_GZIP_MAX_BYTES = 8_388_608;
 
     public static final RouteConfig DEFAULTS = new RouteConfig(
             DEFAULT_MAX_PENDING,
@@ -43,13 +49,34 @@ public final class RouteConfig {
     private final long sweepIntervalMs;
     private final int maxCaptured;
     private final long captureTimeoutMs;
+    private final boolean captureAllTypes;
+    private final int captureInlineMaxBytes;
+    private final int captureGzipMaxBytes;
 
+    /**
+     * 兼容构造：采集三项取默认值（{@link #DEFAULT_CAPTURE_ALL_TYPES} 等）。
+     *
+     * <p>保留旧签名是为了让既有构造点零改动；需要调整采集范围/阈值时用下面的全参构造。
+     */
     public RouteConfig(int maxPending, int ioThreads, int ioQueueCapacity,
                          int opsMaxConcurrent, long ioAwaitTimeoutSeconds, long sweepIntervalMs,
                          int maxCaptured, long captureTimeoutMs) {
+        this(maxPending, ioThreads, ioQueueCapacity, opsMaxConcurrent, ioAwaitTimeoutSeconds,
+                sweepIntervalMs, maxCaptured, captureTimeoutMs,
+                DEFAULT_CAPTURE_ALL_TYPES, DEFAULT_CAPTURE_INLINE_MAX_BYTES, DEFAULT_CAPTURE_GZIP_MAX_BYTES);
+    }
+
+    /** 全参构造（采集三项显式指定）。 */
+    public RouteConfig(int maxPending, int ioThreads, int ioQueueCapacity,
+                         int opsMaxConcurrent, long ioAwaitTimeoutSeconds, long sweepIntervalMs,
+                         int maxCaptured, long captureTimeoutMs,
+                         boolean captureAllTypes, int captureInlineMaxBytes, int captureGzipMaxBytes) {
         if (maxPending <= 0 || ioThreads <= 0 || ioQueueCapacity <= 0 || opsMaxConcurrent <= 0
                 || maxCaptured <= 0 || captureTimeoutMs <= 0) {
             throw new IllegalArgumentException("concurrency bounds must be > 0");
+        }
+        if (captureInlineMaxBytes <= 0 || captureGzipMaxBytes <= 0) {
+            throw new IllegalArgumentException("capture body thresholds must be > 0");
         }
         this.maxPending = maxPending;
         this.ioThreads = ioThreads;
@@ -59,6 +86,24 @@ public final class RouteConfig {
         this.sweepIntervalMs = sweepIntervalMs;
         this.maxCaptured = maxCaptured;
         this.captureTimeoutMs = captureTimeoutMs;
+        this.captureAllTypes = captureAllTypes;
+        this.captureInlineMaxBytes = captureInlineMaxBytes;
+        this.captureGzipMaxBytes = captureGzipMaxBytes;
+    }
+
+    /** 是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK。 */
+    public boolean captureAllTypes() {
+        return captureAllTypes;
+    }
+
+    /** 响应体内联阈值（字节）。 */
+    public int captureInlineMaxBytes() {
+        return captureInlineMaxBytes;
+    }
+
+    /** 响应体文本型 gzip 上限（字节）。 */
+    public int captureGzipMaxBytes() {
+        return captureGzipMaxBytes;
     }
 
     public int maxPending() {

@@ -52,6 +52,12 @@ public final class CaptureSink {
     private final int maxCaptured;
     private final long defaultTimeoutMs;
     private final RouteIoExecutor io;
+    /**
+     * 运行时配置（统一配置类 {@code RouteConfig}）：采集范围（{@code captureAllTypes}）与
+     * 响应体留存阈值（{@code captureInlineMaxBytes} / {@code captureGzipMaxBytes}）均由此提供，
+     * 本类不再自带配置解析。
+     */
+    private final com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig config;
 
     /** 已定案快照队列（业务线程 dump 消费）。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> captured = new ConcurrentLinkedQueue<>();
@@ -68,10 +74,20 @@ public final class CaptureSink {
     /** 响应体读取失败数（可观测；失败仍保留核心快照）。 */
     private final AtomicLong bodyReadFailures = new AtomicLong();
 
+    /** 兼容构造：采集配置取 {@code RouteConfig.DEFAULTS}（既有构造点无需改动）。 */
     public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs) {
+        this(io, maxCaptured, defaultTimeoutMs,
+                com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig.DEFAULTS);
+    }
+
+    /** 全参构造：采集范围与 body 阈值取自统一配置类。 */
+    public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs,
+                       com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig config) {
         this.io = io;
         this.maxCaptured = maxCaptured;
         this.defaultTimeoutMs = defaultTimeoutMs;
+        this.config = config == null
+                ? com.hsbc.cmb.hk.dbb.automation.framework.route.RouteConfig.DEFAULTS : config;
     }
 
     /**
@@ -87,7 +103,7 @@ public final class CaptureSink {
         // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !RouteCaptureConfig.allTypes()) {
+                && !config.captureAllTypes()) {
             return false;
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
@@ -113,7 +129,7 @@ public final class CaptureSink {
         }
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !RouteCaptureConfig.allTypes()) {
+                && !config.captureAllTypes()) {
             return;
         }
         ConcurrentLinkedQueue<CapturedExchange> pending = pendingByPattern.get(spec.pattern());

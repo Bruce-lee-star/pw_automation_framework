@@ -64,15 +64,17 @@ final class BodyStore {
      *
      * @param bytes       原始响应体（不会被持有引用：本方法内部按需拷贝）
      * @param contentType 响应 {@code content-type}（可为 null；用于判断是否文本型与 charset）
+     * @param inlineMax   内联阈值（字节）——由 {@code RouteConfig} 传入，避免本类自带配置解析
+     * @param gzipMax     文本型 gzip 上限（字节）——同上
      */
-    static BodyStore of(byte[] bytes, String contentType) {
+    static BodyStore of(byte[] bytes, String contentType, int inlineMax, int gzipMax) {
         if (bytes == null) {
             return new BodyStore(Storage.MEMORY, null, null, 0L, contentType);
         }
-        if (bytes.length <= RouteCaptureConfig.inlineMaxBytes()) {
+        if (bytes.length <= inlineMax) {
             return new BodyStore(Storage.MEMORY, bytes.clone(), null, bytes.length, contentType);
         }
-        if (isTextual(contentType) && bytes.length <= RouteCaptureConfig.gzipMaxBytes()) {
+        if (isTextual(contentType) && bytes.length <= gzipMax) {
             byte[] gz = gzip(bytes);
             if (gz != null && gz.length < bytes.length) {
                 return new BodyStore(Storage.GZIP, gz, null, bytes.length, contentType);
