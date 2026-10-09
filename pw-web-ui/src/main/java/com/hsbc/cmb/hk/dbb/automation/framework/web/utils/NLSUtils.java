@@ -45,8 +45,9 @@ public final class NLSUtils {
      *
      * <p> 跨线程修正（两轮）：
      *
-     * <p><b>第一轮</b>：原实现纯 {@code ThreadLocal}，在 Monitor 的 onResponse 回调线程里
-     * {@code setLanguage} 后，测试主线程读不到（线程副本隔离）。改为「全局 + 线程级覆盖」双轨。
+     * <p><b>第一轮</b>：原实现纯 {@code ThreadLocal}，在<b>响应回调线程</b>（API 响应处理回调，
+     * 非测试主线程）里 {@code setLanguage} 后，测试主线程读不到（线程副本隔离）。
+     * 改为「全局 + 线程级覆盖」双轨。
      *
      * <p><b>第二轮（本次修复 —— 覆盖遮蔽 bug）</b>：双轨的判定原为「线程覆盖优先，否则回退全局」，
      * 这会产生<b>陈旧值遮蔽</b>：

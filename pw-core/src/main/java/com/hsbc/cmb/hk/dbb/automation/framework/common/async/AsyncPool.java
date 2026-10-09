@@ -69,11 +69,21 @@ public final class AsyncPool {
     private static volatile ScheduledThreadPoolExecutor SCHEDULER;
 
     /**
-     *  串行单线程执行器 — 专用于 Monitor 用户回调（onResponse）。
-     * <p>Playwright route 拦截在事件线程触发，若直接在该线程执行用户回调，用户无法预期
-     * "回调里修改的全局/共享状态（如 NLSUtils.setLanguage）对主线程不可见"（ThreadLocal 隔离）。
-     * 统一桥接到本串行线程后，所有回调在<b>同一受管上下文线程</b>顺序执行，配合已全局化的
-     * 框架状态（NLSUtils 等），用户业务代码无需理解线程模型即可"影响主线程"。
+     * 串行单线程执行器 — <b>遗留</b>：为 V1「Monitor 用户回调线程」而建，当前<b>无调用方</b>。
+     *
+     * <p><b>现役语义（route V2）</b>：采集 / 监控的响应侧<b>不订阅</b> {@code context.onResponse}
+     * —— 该订阅是驱动侧 {@code Object doesn't exist: response@…} 竞态的唯一触发源，已被刻意移除；
+     * 响应改由 {@code RouteRuntimeImpl} 在 route 分发入口持 {@code Request} 轮询
+     * {@code Request#existingResponse()} 后按 spec 投递（见 {@code CaptureSink}/{@code MonitorSink}），
+     * 因此不存在"需要桥接到专用回调线程"的用户回调。
+     *
+     * <p>保留的执行器语义（若将来重新需要回调串行化）：Playwright route 拦截在事件线程触发，
+     * 用户回调若直接在该线程执行，其修改的全局/共享状态（如 {@code NLSUtils.setLanguage}）对主线程
+     * 不可见（ThreadLocal 隔离）；桥接到本串行线程后，回调在<b>同一受管上下文线程</b>顺序执行，
+     * 配合已全局化的框架状态，用户业务代码无需理解线程模型。
+     *
+     * <p><b>待清理</b>：{@link #runOnMonitorCallbackThread(Runnable)} 与
+     * {@link #getMonitorCallbackDroppedCount()} 目前均无调用方；确认无外部使用者后可整体删除。
      */
     /**
      *  Monitor 回调队列容量上限。
@@ -697,8 +707,11 @@ public final class AsyncPool {
     }
 
     /**
-     *  在 Monitor 回调专用串行线程上执行任务（顺序、与主流程共享上下文）。
-     * 用于 onResponse 回调，使用户在回调中修改的全局/共享状态对主线程可见。
+     * 在「Monitor 回调专用」串行线程上执行任务（顺序、与主流程共享上下文）。
+     *
+     * <p><b>当前无调用方</b>：route V2 的采集 / 监控不再有 {@code context.onResponse} 回调
+     * （响应改由 route 通道 {@code Request#existingResponse()} 轮询投递，见类注释），
+     * 故本方法是历史兼容入口。若将来重新需要"回调里修改的全局状态对主线程可见"，它是现成的桥。
      * task 为 null 静默跳过。
      */
     public static void runOnMonitorCallbackThread(Runnable task) {
