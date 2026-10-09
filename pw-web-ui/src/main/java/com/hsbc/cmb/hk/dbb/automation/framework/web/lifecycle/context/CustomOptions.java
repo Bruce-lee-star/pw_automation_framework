@@ -103,4 +103,15 @@ public interface CustomOptions {
      * @return this，支持链式调用
      */
     CustomOptions disableCustomOptions();
+
+    /**
+     * 清空自定义选项（与 master 分支同名方法的调用形态保持一致）。
+     *
+     * <p>语义说明：master 的 {@code clearAll()} 只把 {@code customContextOptionsFlag} 置回 false
+     * （<b>不</b>清 storageState 等其它 per-thread 值），本默认实现委托 {@link #disableCustomOptions()}，
+     * 语义完全等同；确需彻底复位请用 {@code CustomOptionsManager.removeAllThreadLocals()}。
+     */
+    default CustomOptions clearAll() {
+        return disableCustomOptions();
+    }
 }
