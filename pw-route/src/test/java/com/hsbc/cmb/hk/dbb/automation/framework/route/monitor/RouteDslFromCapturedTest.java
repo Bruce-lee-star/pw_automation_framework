@@ -111,9 +111,9 @@ public class RouteDslFromCapturedTest {
 
         // 含非法 UTF-8 序列（0xFF / 0x80）与 0x00：任何字符串往返都会损坏
         byte[] binary = new byte[] {0x00, (byte) 0xFF, 0x1F, (byte) 0x8B, (byte) 0x80, 0x7F};
-        RouteDsl.on(ctx).api("/api/bin").mock()
-                .status(200).contentType("application/octet-stream").mockBody(binary)
-                .register();
+        // 回归（A-1）：只设字节体、无 status/contentType，也必须是"有活跃能力位"的静态 mock。
+        // 修复前该规则被 hasMockFields() 判为无能力位 ⇒ dispatch 直接 fallback ⇒ 永不 fulfill。
+        RouteDsl.on(ctx).api("/api/bin").mock().mockBody(binary).register();
 
         Consumer<Route> handler = captureHandler();
         Request request = mockRequest("https://host/api/bin");

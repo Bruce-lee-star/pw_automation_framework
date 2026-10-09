@@ -243,7 +243,9 @@ public final class ApiSpec {
 
     /** 同 {@link #hasModifyFields()}：MOCK 能力是否携带伪造/拦截参数。 */
     public boolean hasMockFields() {
-        return mockStatus != null || mockBody != null || mockContentType != null
+        // mockBodyBytes 必须计入：否则"只设字节体"的规则会被判为"无活跃能力位"，
+        // RouteDispatcher 直接 fallback ⇒ 规则静默失效（字节通道引入时的真实缺陷）。
+        return mockStatus != null || mockBody != null || mockBodyBytes != null || mockContentType != null
                 || !mockHeaders.isEmpty() || mockIntercept;
     }
 
@@ -463,6 +465,7 @@ public final class ApiSpec {
             case MOCK:
                 b.mockStatus = null;
                 b.mockBody = null;
+                b.mockBodyBytes = null;
                 b.mockContentType = null;
                 b.mockHeaders.clear();
                 b.mockIntercept = false;

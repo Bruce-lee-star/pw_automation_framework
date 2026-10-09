@@ -207,12 +207,22 @@ final class BodyStore implements CapturedBody {
     }
 
     private static Path spillToFile(byte[] bytes) {
+        Path tmp = null;
         try {
-            Path tmp = Files.createTempFile("route-capture-", ".bin");
+            tmp = Files.createTempFile("route-capture-", ".bin");
             Files.write(tmp, bytes);
             tmp.toFile().deleteOnExit();
             return tmp;
         } catch (IOException e) {
+            // 写盘失败（磁盘满 / 中断）：已创建的临时文件必须就地清理，否则无人负责 → 永久泄漏。
+            // 本方法以 null 表示"落盘不可用"，由 of(...) fail-open 退回内存。
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException cleanupFailure) {
+                    tmp.toFile().deleteOnExit();   // 立即删不掉 → 交给 JVM 退出兜底，绝不静默丢引用
+                }
+            }
             return null;
         }
     }
