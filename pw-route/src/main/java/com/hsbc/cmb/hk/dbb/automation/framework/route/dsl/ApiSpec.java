@@ -517,6 +517,16 @@ public final class ApiSpec {
         return mockBodyBytes == null ? null : mockBodyBytes.clone();
     }
 
+    /**
+     * 字节体长度（<b>不拷贝数组</b>）。供只读语义处（证据描述等）取长度，
+     * 避免为了一行日志多克隆一份大数组。
+     *
+     * @return 字节数；未设置字节体时为 0
+     */
+    public int mockBodyBytesLength() {
+        return mockBodyBytes == null ? 0 : mockBodyBytes.length;
+    }
+
     public String mockContentType() {
         return mockContentType;
     }

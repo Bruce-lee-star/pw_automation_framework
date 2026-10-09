@@ -343,9 +343,9 @@ public final class RouteDispatcher {
             RouteAction.fulfill(route, spec);
             runtime.claims().markTerminal(claim, true);
             // 证据描述区分两个体通道：字节体报字节数（字符串体报字符数），避免"body=empty"的误导
-            byte[] staticBytes = spec.mockBodyBytes();
-            String bodyDesc = staticBytes != null
-                    ? staticBytes.length + " bytes"
+            int staticBytesLength = spec.mockBodyBytesLength();   // 只取长度：不为一行日志克隆大数组
+            String bodyDesc = staticBytesLength > 0
+                    ? staticBytesLength + " bytes"
                     : (spec.mockBody() == null ? "empty" : spec.mockBody().length() + " chars");
             reportOutcome("MOCK RESULT", spec, request, spec.mockStatus(), spec.mockHeaders(), spec.mockBody(),
                     "static fulfill (status=" + (spec.mockStatus() == null ? "default 200" : spec.mockStatus())

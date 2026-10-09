@@ -42,6 +42,9 @@ final class BodyStore implements CapturedBody {
     /** 留存形态。 */
     private enum Storage { MEMORY, GZIP, FILE }
 
+    /** 落盘专用临时目录（懒创建，见 {@link #spillDir()}）。 */
+    private static volatile Path spillDir;
+
     private final Storage storage;
     private final String contentType;
     /** MEMORY=原字节；GZIP=gzip 字节；FILE=null。 */
@@ -213,21 +216,60 @@ final class BodyStore implements CapturedBody {
     private static Path spillToFile(byte[] bytes) {
         Path tmp = null;
         try {
-            tmp = Files.createTempFile("route-capture-", ".bin");
+            tmp = Files.createTempFile(spillDir(), "capture-", ".bin");
             Files.write(tmp, bytes);
-            tmp.toFile().deleteOnExit();
-            return tmp;
+            return tmp;   // 每个文件的清理责任在 close()（成功删）+ 目录级退出钩子（兜底）
         } catch (IOException e) {
             // 写盘失败（磁盘满 / 中断）：已创建的临时文件必须就地清理，否则无人负责 → 永久泄漏。
             // 本方法以 null 表示"落盘不可用"，由 of(...) fail-open 退回内存。
-            if (tmp != null) {
-                try {
-                    Files.deleteIfExists(tmp);
-                } catch (IOException cleanupFailure) {
-                    tmp.toFile().deleteOnExit();   // 立即删不掉 → 交给 JVM 退出兜底，绝不静默丢引用
-                }
-            }
+            deleteQuietly(tmp);
             return null;
+        }
+    }
+
+    /**
+     * 采集落盘专用临时目录（懒创建；JVM 退出时整目录清理）。
+     *
+     * <p>刻意<b>不</b>使用 per-file {@code File.deleteOnExit()}：{@code DeleteOnExitHook} 的条目是
+     * 只增集合，长跑套件下每个落盘体都会永久占用一条 → 堆缓慢增长。改为"一个目录 + 一个退出钩子"，
+     * 条目数与落盘次数无关。
+     */
+    private static Path spillDir() throws IOException {
+        Path dir = spillDir;
+        if (dir != null) {
+            return dir;
+        }
+        synchronized (BodyStore.class) {
+            if (spillDir == null) {
+                Path created = Files.createTempDirectory("route-capture-");
+                Runtime.getRuntime().addShutdownHook(
+                        new Thread(() -> deleteRecursively(created), "route-capture-cleanup"));
+                spillDir = created;
+            }
+            return spillDir;
+        }
+    }
+
+    /** 退出清理：递归删除临时目录（尽力而为，绝不阻塞进程退出）。 */
+    private static void deleteRecursively(Path dir) {
+        try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(BodyStore::deleteQuietly);
+        } catch (IOException e) {
+            // 目录不存在 / 不可遍历：退出阶段无需处理
+            return;
+        }
+    }
+
+    /** 尽力删除（退出清理用；失败不影响进程退出，交给操作系统清理临时目录）。 */
+    private static boolean deleteQuietly(Path path) {
+        if (path == null) {
+            return false;
+        }
+        try {
+            return Files.deleteIfExists(path);
+        } catch (IOException e) {
+            // 删除失败：不阻塞、不抛出（退出清理与失败路径都适用）
+            return false;
         }
     }
 }
