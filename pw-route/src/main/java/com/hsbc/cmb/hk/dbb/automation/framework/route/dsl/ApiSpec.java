@@ -40,6 +40,13 @@ public final class ApiSpec {
     // ── MOCK 参数 ──
     private final Integer mockStatus;
     private final String mockBody;
+    /**
+     * 二进制 Mock 响应体（字节<b>保真</b>通道）：非 null 时优先于 {@link #mockBody}。
+     *
+     * <p>供图片 / protobuf / gzip 等<b>非文本</b>体使用 —— 走 {@code mockBody(String)} 通道会因
+     * UTF-8 往返而损坏。不可变：构造期做防御性拷贝（数组非不可变类型）。
+     */
+    private final byte[] mockBodyBytes;
     private final String mockContentType;
     private final Map<String, String> mockHeaders;
     /** 显式 intercept 语义：拦截真实响应（与静态 mockBody 互斥）。 */
@@ -108,6 +115,8 @@ public final class ApiSpec {
         this.disabled = Collections.unmodifiableSet(new LinkedHashSet<>(b.disabled));
         this.mockStatus = b.mockStatus;
         this.mockBody = b.mockBody;
+        // 数组非不可变类型：构造期防御性拷贝，避免外部后续改动影响"不可变规则"
+        this.mockBodyBytes = b.mockBodyBytes == null ? null : b.mockBodyBytes.clone();
         this.mockContentType = b.mockContentType;
         this.mockHeaders = Collections.unmodifiableMap(new LinkedHashMap<>(b.mockHeaders));
         this.mockIntercept = b.mockIntercept;
@@ -160,6 +169,7 @@ public final class ApiSpec {
         this.disabled = Collections.unmodifiableSet(new LinkedHashSet<>(disabled));
         this.mockStatus = from.mockStatus;
         this.mockBody = from.mockBody;
+        this.mockBodyBytes = from.mockBodyBytes;   // 已由构造期拷贝持有，内部不可变实例间共享只读数组
         this.mockContentType = from.mockContentType;
         this.mockHeaders = from.mockHeaders;
         this.mockIntercept = from.mockIntercept;
@@ -498,6 +508,11 @@ public final class ApiSpec {
         return mockBody;
     }
 
+    /** 二进制 Mock 响应体（<b>副本</b>；未设置时 null）。 */
+    public byte[] mockBodyBytes() {
+        return mockBodyBytes == null ? null : mockBodyBytes.clone();
+    }
+
     public String mockContentType() {
         return mockContentType;
     }
@@ -659,6 +674,7 @@ public final class ApiSpec {
         private final Set<RouteCapability> disabled = new LinkedHashSet<>();
         private Integer mockStatus;
         private String mockBody;
+        private byte[] mockBodyBytes;
         private String mockContentType;
         private final Map<String, String> mockHeaders = new LinkedHashMap<>();
         private boolean mockIntercept;
@@ -768,6 +784,17 @@ public final class ApiSpec {
 
         public Builder mockBody(String body) {
             this.mockBody = body;
+            return this;
+        }
+
+        /**
+         * 二进制 Mock 响应体（<b>字节保真</b>；非 null 时优先于 {@link #mockBody(String)}）。
+         *
+         * @param bodyBytes 原始响应体字节（构造 ApiSpec 时会做防御性拷贝）
+         */
+        public Builder mockBodyBytes(byte[] bodyBytes) {
+            // 入口即拷贝：不持有调用方数组（静态分析 EI_EXPOSE_REP2 会拦"存外部可变对象"）
+            this.mockBodyBytes = bodyBytes == null ? null : bodyBytes.clone();
             return this;
         }
 
