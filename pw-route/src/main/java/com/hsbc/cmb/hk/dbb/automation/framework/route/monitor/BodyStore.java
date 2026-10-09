@@ -35,13 +35,8 @@ import java.util.zip.GZIPOutputStream;
  */
 final class BodyStore {
 
-    /** 内联阈值：不超过它就直接持原字节。 */
-    private static final int INLINE_MAX =
-            Integer.getInteger("route.capture.inline.max.bytes", 262_144);
-
-    /** 文本型 gzip 上限：不超过它就用内存 gzip（超过则落盘）。 */
-    private static final int GZIP_MAX =
-            Integer.getInteger("route.capture.gzip.max.bytes", 8_388_608);
+    /** 阈值统一走 RouteCaptureConfig（系统属性 > 环境变量 > classpath 配置文件 > 默认）；每次取用现读，单测可切换。 */
+    // 说明：不再用 static final 快照，改为调用处读配置，使"运行中调整阈值"在测试里也可验证。
 
     /** 留存形态。 */
     private enum Storage { MEMORY, GZIP, FILE }
@@ -74,10 +69,10 @@ final class BodyStore {
         if (bytes == null) {
             return new BodyStore(Storage.MEMORY, null, null, 0L, contentType);
         }
-        if (bytes.length <= INLINE_MAX) {
+        if (bytes.length <= RouteCaptureConfig.inlineMaxBytes()) {
             return new BodyStore(Storage.MEMORY, bytes.clone(), null, bytes.length, contentType);
         }
-        if (isTextual(contentType) && bytes.length <= GZIP_MAX) {
+        if (isTextual(contentType) && bytes.length <= RouteCaptureConfig.gzipMaxBytes()) {
             byte[] gz = gzip(bytes);
             if (gz != null && gz.length < bytes.length) {
                 return new BodyStore(Storage.GZIP, gz, null, bytes.length, contentType);

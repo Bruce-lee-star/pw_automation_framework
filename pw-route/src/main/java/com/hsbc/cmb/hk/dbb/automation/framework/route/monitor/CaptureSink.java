@@ -87,7 +87,7 @@ public final class CaptureSink {
         // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !Boolean.parseBoolean(System.getProperty("route.capture.all.type", "false"))) {
+                && !RouteCaptureConfig.allTypes()) {
             return false;
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
@@ -113,7 +113,7 @@ public final class CaptureSink {
         }
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !Boolean.parseBoolean(System.getProperty("route.capture.all.type", "false"))) {
+                && !RouteCaptureConfig.allTypes()) {
             return;
         }
         ConcurrentLinkedQueue<CapturedExchange> pending = pendingByPattern.get(spec.pattern());
