@@ -415,13 +415,23 @@ public final class RouteDispatcher {
         final RouteAction.RequestSnapshot fallbackSnapshot =
                 hasStaticBody ? null : RouteAction.RequestSnapshot.of(route.request());
         final APIRequestContext fallbackCtx = hasStaticBody ? null : runtime.request();
-        boolean submitted = runtime.io().trySubmit("mock:" + spec.pattern(), () -> {
+        // ── O1：连接级单泵（就地执行，不派发 IO 池）────────────────────────────
+        // intercept 取真实响应是**同步驱动调用**；而 Playwright 的 Connection 由"等待者线程"
+        // 分发消息（ChannelOwner.processOneMessage → Connection.dispatch），其对象表 objects 与
+        // 回调表 callbacks 都是**非线程安全**的 HashMap（1.63 上游逐行相同，见该版本源码）。
+        // 派发到 IO 池 ⇒ 这条连接被"回调线程 + IO 池线程"（并发时还有主线程 UI 调用）同时驱动 ⇒
+        // 命中竞态：假 "Object doesn't exist: xxx@" 与应答被误判丢弃（⇒ unroute 10s 超时 ⇒
+        // 毒化 ⇒ RESET）。实测：把多个 fetch 彼此串行化无效（A/B 开与关失败数完全一致），
+        // 因为并发方不只是 fetch —— 唯有"不再新增驱动线程"才能消除。
+        // 代价：本线程阻塞约一次网络往返（数百 ms，受 RequestOptions 超时上限约束）。
+        // 静态体分支（纯 CPU、无驱动调用）一并就地执行，行为等价。
+        Runnable mockTask = () -> {
             if (claim.isTerminal()) {
                 return;
             }
             try {
                 if (hasStaticBody) {
-                    // 静态体 + 字段替换：IO 线程替换后 fulfill
+                    // 静态体 + 字段替换：就地（调用线程）替换后 fulfill
                     Map<String, String> headers = new LinkedHashMap<>(spec.mockHeaders());
                     if (spec.mockContentType() != null) {
                         headers.put("content-type", spec.mockContentType());
@@ -461,7 +471,8 @@ public final class RouteDispatcher {
                     return;
                 }
                 // intercept：用事件线程取好的快照 + context.request() 取真实响应（不依赖 frame/Request 句柄）
-                // fetchMs 计入结果证据：这是框架在 IO 线程上真做的一次网络往返，是 intercept 的主成本项。
+                // fetchMs 计入结果证据：这是框架**在调用线程上就地**真做的一次网络往返（O1：不派发到
+                // IO 池，以免并发驱动同一条连接），是 intercept 的主成本项。
                 Optional<APIResponse> response = Optional.empty();
                 long fetchStartNs = System.nanoTime();
                 if (fallbackCtx != null && fallbackSnapshot != null) {
@@ -511,6 +522,11 @@ public final class RouteDispatcher {
                     // 避免 body buffer 滞留至 GC/context 关闭（对原 route.fetch 与 replay 路径同时生效）
                     try {
                         apiResponse.dispose();
+                        // 探针：登记"最近一次释放的响应"，供 fetch 失败时对照
+                        // （见 RouteAction#noteApiResponseDisposed）。用已捕获的快照 URL，
+                        // 不在 finally 里触碰 route 句柄——避免句柄回收反噬失败路径。
+                        RouteAction.noteApiResponseDisposed(
+                                fallbackSnapshot == null ? null : fallbackSnapshot.url());
                     } catch (Exception ignore) {
                         LOGGER.debug("[Route] apiResponse.dispose ignored: {}", ignore.toString());
                     }
@@ -523,12 +539,8 @@ public final class RouteDispatcher {
                     runtime.claims().markTerminal(claim, false);
                 }
             }
-        });
-        if (!submitted) {
-            // 队列满 → 立即 fail-open
-            RouteAction.fallback(route);
-            runtime.claims().markTerminal(claim, false);
-        }
+        };
+        mockTask.run();
     }
 
     /**

@@ -14,6 +14,9 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 终结动作 —— 对 Playwright Route 的全部终结调用的统一出口。
@@ -33,6 +36,60 @@ public final class RouteAction {
 
     /** fetch 同步请求的超时（毫秒），与 Playwright APIRequestContext 默认一致。 */
     public static final long DEFAULT_FETCH_TIMEOUT_MS = 30_000L;
+
+    /**
+     * 诊断探针（默认<b>开</b>；<b>纯日志、行为零改动</b>）：intercept 的 fetch 失败时打印判定所需的
+     * 全部事实 —— 全局在飞 fetch 数、本次序号、失败 URL、最近一次 {@code APIResponse.dispose()} 的
+     * 响应（url@时刻）与异常全文。
+     *
+     * <p><b>已得结论（两趟 A/B，2026-10-09）</b>：该异常抛在 {@code APIRequestContext.fetch(...)}
+     * <b>内部</b>，来自驱动 {@code Connection.getExistingObject}（引用的句柄已被回收），且落点随机
+     * （{@code frame@}/{@code request@}/{@code worker@}/{@code response@} 随趟次漂移）；
+     * <b>与"我们自己的多个 fetch 并发"无关</b> —— 5/6 次失败时在飞数=1，且串行化开关开/关两趟的
+     * 失败数、失败场景、毒化与 reset 次数完全一致，故本类<b>不再提供串行化开关</b>。
+     *
+     * <p>真实条件是"连接共享泵"：谁在等回包谁就泵这条连接，任一在等回包的调用（主线程 UI 调用、
+     * 驱动线程的 {@code bind}/{@code unroute}、我们的 fetch）都可能被死句柄消息撞上。
+     *
+     * <p>关闭：{@code -Droute.fetch.probe=false} 或环境变量 {@code ROUTE_FETCH_PROBE=false}。
+     */
+    private static final boolean FETCH_PROBE = flag("route.fetch.probe", "ROUTE_FETCH_PROBE", true);
+
+    /** 全局在飞 intercept fetch 数（探针用；多 Context 并行时为其总和）。 */
+    private static final AtomicInteger FETCH_INFLIGHT = new AtomicInteger();
+
+    /** intercept fetch 全局序号（探针用）。 */
+    private static final AtomicLong FETCH_SEQ = new AtomicLong();
+
+    /** 配置自证只打一次（探针用）：让日志能证明本次运行的有效开关。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean FLAGS_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** 最近一次 {@code APIResponse.dispose()} 的描述（{@code url@时刻}），供 fetch 失败时对照。 */
+    private static final AtomicReference<String> LAST_DISPOSE = new AtomicReference<>("<none>");
+
+    /** 读开关：系统属性优先，其次环境变量，最后默认值（与 {@code MonitorSink} 同款口径）。 */
+    private static boolean flag(String prop, String env, boolean defaultValue) {
+        String v = System.getProperty(prop);
+        if (v == null || v.isEmpty()) {
+            v = System.getenv(env);
+        }
+        if (v == null || v.isEmpty()) {
+            return defaultValue;
+        }
+        return !"false".equalsIgnoreCase(v.trim());
+    }
+
+    /**
+     * 由终结路径在 {@code APIResponse.dispose()} 之后调用（探针用）。
+     *
+     * @param url 被释放响应所属请求的 URL（可为 null）
+     */
+    public static void noteApiResponseDisposed(String url) {
+        if (FETCH_PROBE) {
+            LAST_DISPOSE.set(url + " @" + System.currentTimeMillis());
+        }
+    }
 
     private RouteAction() {
     }
@@ -218,8 +275,11 @@ public final class RouteAction {
     /**
      * IO 线程专用：真实响应拦截（MOCK intercept）的取响应实现。
      *
-     * <p>本方法必须经 {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps}
-     * 调用——它是同步 HTTP 且可能慢（实测数百 ms），事件线程严禁触碰。</p>
+     * <p><b>必须在本线程就地调用（O1）</b>：它是同步 HTTP，且会驱动（泵）所属连接。经
+     * {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps} 只是为"有界预算"
+     * （该实现是信号量 + <b>内联执行</b>，不换线程）；<b>不得派发到 IO 池</b> —— Playwright 的
+     * {@code Connection} 由等待者线程分发消息，其对象表/回调表<b>非线程安全</b>，多线程并发驱动
+     * 同一连接会命中竞态（假 {@code Object doesn't exist: xxx@} 与应答被丢弃 ⇒ 超时/毒化/RESET）。</p>
      *
      * <p><b>方案 A（结构化消除竞态）</b>：不使用 {@code route.fetch()}，统一用<b>事件线程拦截那一刻</b>
      * 取好的 {@link RequestSnapshot}（url/method/headers/body 值拷贝）+ {@code page.request()} 从零重发。
@@ -247,7 +307,44 @@ public final class RouteAction {
         if (body != null && !body.isEmpty()) {
             options.setData(body);
         }
-        return requestContext.fetch(snapshot.url(), options);
+        int inflight = FETCH_INFLIGHT.incrementAndGet();
+        long seq = FETCH_SEQ.incrementAndGet();
+        if (FLAGS_LOGGED.compareAndSet(false, true)) {
+            // 自证本次运行的有效配置（诊断期排错用）
+            LOGGER.info("[Route][FETCH-PROBE] flags: probe={} (via -Droute.fetch.probe / ROUTE_FETCH_PROBE)",
+                    FETCH_PROBE);
+        }
+        try {
+            return fetchOnce(requestContext, snapshot, options, seq, inflight);
+        } finally {
+            FETCH_INFLIGHT.decrementAndGet();
+        }
+    }
+
+    /** 单次 fetch + 失败探针。不持有任何锁；失败上抛（由 BoundedOps 统一 fail-open，语义不变）。 */
+    private static APIResponse fetchOnce(APIRequestContext requestContext, RequestSnapshot snapshot,
+                                         RequestOptions options, long seq, int inflight) {
+        try {
+            return requestContext.fetch(snapshot.url(), options);
+        } catch (RuntimeException e) {
+            if (FETCH_PROBE) {
+                // 判定依据：失败瞬间的全局在飞数（>1 ⇒ 并发假设），本次序号，失败 URL，
+                // 以及"最近一次被 dispose 的响应"（⇒ 上一次释放是否波及本次）。
+                LOGGER.warn("[Route][FETCH-PROBE] fetch FAILED seq={} inflight={} url='{}' lastDispose={} cause={}",
+                        seq, inflight, snapshot.url(), LAST_DISPOSE.get(), fullMessage(e));
+            }
+            throw e;
+        }
+    }
+
+    /** 异常全文（类名 + message + 顶层 cause），探针用。 */
+    private static String fullMessage(Throwable t) {
+        Throwable root = t;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return t.getClass().getName() + ": " + t.getMessage()
+                + (root == t ? "" : " | rootCause=" + root.getClass().getName() + ": " + root.getMessage());
     }
 
     /**
