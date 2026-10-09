@@ -78,6 +78,17 @@ public class BodyStoreTest {
     }
 
     @Test
+    public void spilledFilesLiveUnderTheBuildTargetDirectory() {
+        byte[] body = new byte[8192];
+        java.util.Arrays.fill(body, (byte) 'z');
+        BodyStore store = BodyStore.of(body, "application/octet-stream", 8, 16);   // 超 gzip 上限 ⇒ 落盘
+        assertTrue("落盘目录必须位于构建产物区（随 mvn clean 消失，不污染系统盘）",
+                java.nio.file.Files.isDirectory(java.nio.file.Path.of("target", "route-capture")));
+        assertArrayEquals("落盘档必须透明回读", body, store.readAll());
+        store.close();
+    }
+
+    @Test
     public void nullBodyIsEmptyAndSafe() {
         BodyStore store = BodyStore.of(null, JSON, 1024, 1024);
         assertEquals(0L, store.length());

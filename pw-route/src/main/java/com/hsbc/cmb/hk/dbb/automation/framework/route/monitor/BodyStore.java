@@ -214,9 +214,13 @@ final class BodyStore implements CapturedBody {
     }
 
     private static Path spillToFile(byte[] bytes) {
+        Path dir = spillDir();
+        if (dir == null) {
+            return null;   // 落盘不可用（目录建不出来）：由 of(...) fail-open 退回内存
+        }
         Path tmp = null;
         try {
-            tmp = Files.createTempFile(spillDir(), "capture-", ".bin");
+            tmp = Files.createTempFile(dir, "capture-", ".bin");
             Files.write(tmp, bytes);
             return tmp;   // 每个文件的清理责任在 close()（成功删）+ 目录级退出钩子（兜底）
         } catch (IOException e) {
@@ -228,25 +232,46 @@ final class BodyStore implements CapturedBody {
     }
 
     /**
-     * 采集落盘专用临时目录（懒创建；JVM 退出时整目录清理）。
+     * 采集落盘目录（懒创建；<b>永不抛</b>，不可用返回 null）。
      *
      * <p>刻意<b>不</b>使用 per-file {@code File.deleteOnExit()}：{@code DeleteOnExitHook} 的条目是
      * 只增集合，长跑套件下每个落盘体都会永久占用一条 → 堆缓慢增长。改为"一个目录 + 一个退出钩子"，
      * 条目数与落盘次数无关。
      */
-    private static Path spillDir() throws IOException {
+    private static Path spillDir() {
         Path dir = spillDir;
         if (dir != null) {
             return dir;
         }
         synchronized (BodyStore.class) {
             if (spillDir == null) {
-                Path created = Files.createTempDirectory("route-capture-");
+                Path created = createSpillDir();
+                if (created == null) {
+                    return null;
+                }
                 Runtime.getRuntime().addShutdownHook(
                         new Thread(() -> deleteRecursively(created), "route-capture-cleanup"));
                 spillDir = created;
             }
             return spillDir;
+        }
+    }
+
+    /**
+     * 建落盘目录：<b>优先构建产物区 {@code <工作目录>/target/route-capture}</b> —— 随
+     * {@code mvn clean} 一起消失，<b>不污染系统盘</b>；工作目录不可写（如从只读位置运行）时
+     * 回退系统临时目录；两处都不可用则返回 {@code null}（采集 fail-open 退回内存）。
+     */
+    private static Path createSpillDir() {
+        try {
+            return Files.createDirectories(Path.of("target", "route-capture"));
+        } catch (IOException e) {
+            try {
+                return Files.createTempDirectory("route-capture-");
+            } catch (IOException fallbackFailure) {
+                // 两处都不可建：以 null 表示落盘不可用，绝不影响采集主流程
+                return null;
+            }
         }
     }
 
