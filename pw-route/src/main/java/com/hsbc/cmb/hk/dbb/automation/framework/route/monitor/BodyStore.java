@@ -28,15 +28,13 @@ import java.util.zip.GZIPOutputStream;
  * <p><b>线程模型（调用方注意）</b>：gzip 与落盘都是 IO，{@link #of(byte[], String)} 会同步完成它们。
  * 采集路径必须把本调用交给既有有界 IO 池执行（事件/调度线程只做"趁句柄存活时快照字节"这一步）。
  *
- * <p><b>生命周期</b>：落盘文件必须由 {@link #close()} 删除；{@code CaptureSink.reset()} 与
- * context 收尾（{@code stopCaptureFor}）会遍历关闭，另有 JVM 退出兜底。
+ * <p><b>生命周期</b>：落盘文件由 {@link #close()} 删除；{@code CaptureSink} 在 {@code reset()} 与该记录
+ * 被 history 驱逐时关闭本实例，另保留 JVM 退出兜底。完整契约见 {@link CapturedBody}
+ * （<b>{@code reset()} 之后不得再读取</b>）。
  *
  * <p><b>解码</b>：{@link #text(Charset)} 按需解码并<b>只解一次</b>并缓存（大体避免重复解码开销）。
  */
-final class BodyStore {
-
-    /** 阈值统一走 RouteCaptureConfig（系统属性 > 环境变量 > classpath 配置文件 > 默认）；每次取用现读，单测可切换。 */
-    // 说明：不再用 static final 快照，改为调用处读配置，使"运行中调整阈值"在测试里也可验证。
+final class BodyStore implements CapturedBody {
 
     /** 留存形态。 */
     private enum Storage { MEMORY, GZIP, FILE }
@@ -90,22 +88,26 @@ final class BodyStore {
     }
 
     /** 原始响应体长度（字节）。 */
-    long length() {
+    @Override
+    public long length() {
         return length;
     }
 
     /** 响应 {@code content-type}（原样，可为 null）。 */
-    String contentType() {
+    @Override
+    public String contentType() {
         return contentType;
     }
 
     /** 是否文本型（供上层决定"要不要解码"；二进制型永不解码）。 */
-    boolean isTextual() {
+    @Override
+    public boolean isTextual() {
         return isTextual(contentType);
     }
 
     /** 整读原始字节（<b>副本</b>；文件/gzip 场景会解压/读盘）。 */
-    byte[] readAll() {
+    @Override
+    public byte[] readAll() {
         switch (storage) {
             case MEMORY:
                 return payload == null ? new byte[0] : payload.clone();
@@ -122,7 +124,8 @@ final class BodyStore {
     }
 
     /** 流式读取（大 body 首选；调用方负责关闭）。 */
-    InputStream open() {
+    @Override
+    public InputStream open() {
         switch (storage) {
             case MEMORY:
                 return new ByteArrayInputStream(payload == null ? new byte[0] : payload.clone());
@@ -139,7 +142,8 @@ final class BodyStore {
     }
 
     /** 按需解码为文本（只解一次并缓存）。非文本型调用方不应调用（返回 null 由上层决定）。 */
-    String text(Charset charset) {
+    @Override
+    public String text(Charset charset) {
         String cached = cachedText;
         if (cached != null) {
             return cached;
@@ -151,7 +155,8 @@ final class BodyStore {
     }
 
     /** 删除落盘文件（幂等；内存/gzip 场景无操作）。 */
-    void close() {
+    @Override
+    public void close() {
         if (file != null) {
             try {
                 Files.deleteIfExists(file);
