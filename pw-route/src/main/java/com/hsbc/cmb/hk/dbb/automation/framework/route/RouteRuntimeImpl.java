@@ -119,8 +119,10 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         // context 关闭 → 运行时自动关闭（幂等）
         context.onClose(ignored -> closeAfterContextClosed());
         // 刻意【不订阅】context.onResponse：该订阅是驱动侧 "Object doesn't exist: response@…" 竞态的
-        // 唯一触发源——Playwright 在 BrowserContextImpl.handleEvent 的 "response" 分支会为每个事件句柄
-        // 调用 Connection.getExistingObject(guid)，句柄一旦被服务端回收即抛异常；异常发生在业务 lambda
+        // **主要**触发源（2026-10-09 修正：早期注释写"唯一"，实测仍有该异常 ⇒ 另有订阅方或其它来源，
+        // 需在运行期锁定；本框架自身不注册该订阅这一点仍然成立）——Playwright 在 BrowserContextImpl
+        // .handleEvent 的 "response" 分支会为每个事件句柄调用 Connection.getExistingObject(guid)
+        // （**先于**任何监听器判定），句柄一旦被服务端回收即抛异常；异常发生在业务 lambda
         // 之前无法被拦截，且因 Connection 为共享单连接，会以「此刻在等结果的任意调用线程」为宿主抛出
         // （实测：会话校验导航被炸 → 误判会话失效 → 删缓存 → 每轮全量重登）。
         // 响应侧观测改走 route 通道：recordObservation 持有 Request，轮询 existingResponse()（本地字段）。

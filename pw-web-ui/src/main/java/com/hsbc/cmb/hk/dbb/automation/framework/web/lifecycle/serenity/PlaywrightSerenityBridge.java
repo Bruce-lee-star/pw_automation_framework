@@ -585,8 +585,10 @@ public class PlaywrightSerenityBridge {
      * 关闭 Context 之后的迟到事件：
      * 经删除「新建-关闭临时 Context」的做法——那属于<b>收尾期创建资源（操作）</b>，违反"只监控不操作"；
      * 且 live 监听器（{@code onPage / onLoad / onPageError / onConsoleMessage / onRequestFailed / onCrash}）
-     * 已在页面/上下文创建接缝处注册（响应侧<b>不</b>订阅 {@code onResponse}：该订阅是驱动侧句柄竞态源，
-     * 已被刻意移除，响应改由 route 通道 {@code Request#existingResponse()} 轮询取得），
+     * 已在页面/上下文创建接缝处注册（响应侧由 route 通道 {@code Request#existingResponse()} 轮询取得）。
+     * 注意：框架<b>不注册</b> {@code context.onResponse} 订阅，但该订阅一旦被<b>上层/第三方</b>注册，
+     * 驱动就会下发 {@code response} 事件，而 Playwright 在该分支里<b>先</b>做
+     * {@code Connection.getExistingObject(guid)}，句柄已回收即抛给"当时在等回包的任意调用线程"，
      * 迟到事件本就由它们监控。真正的"线程必释放"由 {@code CloseGuard} 有界关闭 + 超时强收本线程 Playwright 保证，
      * 无需在收尾期额外发起命令。关闭前的 {@code absorbPendingEventsBeforeClose}（只读 {@code cookies} 往返）已足够
      * 消化大多数在途事件，剩余的极小窗口丢失是可接受的监控代价。

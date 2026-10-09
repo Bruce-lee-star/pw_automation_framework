@@ -138,6 +138,68 @@ public class RouteMockModifyTest {
         assertEquals((long) 200L, (long) captor.getValue().status);
     }
 
+    /**
+     * 修复回归：真实响应头的键大小写不固定（{@code Content-Type} vs {@code content-type}），
+     * 原实现直接 {@code headers().get("content-type")} ⇒ 取不到 ⇒ 字段替换静默失效。
+     */
+    @Test
+    public void interceptWithMixedCaseContentTypeHeaderStillReplacesFields() throws Exception {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        APIResponse apiResponse = mock(APIResponse.class);
+        when(apiResponse.status()).thenReturn(200);
+        when(apiResponse.headers()).thenReturn(Map.of("Content-Type", "application/json"));
+        when(apiResponse.body()).thenReturn("{\"code\":0,\"name\":\"real\"}".getBytes(StandardCharsets.UTF_8));
+
+        RouteDsl.on(ctx).api("/api/case")
+                .mock().interceptResponse().mockReplaceField("$.code", 7)
+                .register();
+        Consumer<Route> handler = captureHandler();
+
+        Route route = mockRoute(mockRequestWithBody("https://host/api/case", "GET", null, null));
+        when(lastApiCtx.fetch(anyString(), any())).thenReturn(apiResponse);
+        handler.accept(route);
+        runtime.io().close();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
+        verify(route).fulfill(captor.capture());
+        assertEquals("大小写不同的 content-type 头也必须让字段替换生效",
+                (Object) "{\"code\":7,\"name\":\"real\"}", (Object) captor.getValue().body);
+    }
+
+    /**
+     * 修复回归（E2E 实测场景）：拦截到的真实响应<b>没有 content-type</b> 时，
+     * 必须按体嗅探 JSON 让替换生效 —— 原实现会判"非文本"并<b>静默保留原体</b>。
+     */
+    @Test
+    public void interceptWithoutContentTypeSniffsJsonAndStillReplacesFields() throws Exception {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        APIResponse apiResponse = mock(APIResponse.class);
+        when(apiResponse.status()).thenReturn(200);
+        when(apiResponse.headers()).thenReturn(Map.of());
+        when(apiResponse.body()).thenReturn("{\"enablePaymentPP\":\"Y\"}".getBytes(StandardCharsets.UTF_8));
+
+        RouteDsl.on(ctx).api("/api/leftmenu")
+                .mock().interceptResponse().mockReplaceField("$.enablePaymentPP", "X")
+                .register();
+        Consumer<Route> handler = captureHandler();
+
+        Route route = mockRoute(mockRequestWithBody("https://host/api/leftmenu", "GET", null, null));
+        when(lastApiCtx.fetch(anyString(), any())).thenReturn(apiResponse);
+        handler.accept(route);
+        runtime.io().close();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
+        verify(route).fulfill(captor.capture());
+        assertEquals("响应头无 content-type 时必须按体嗅探 JSON 让替换生效（不得静默保留原体）",
+                (Object) "{\"enablePaymentPP\":\"X\"}", (Object) captor.getValue().body);
+    }
+
     @Test
     public void modifyBodyResumesWithPostData() throws Exception {
         mockContext();

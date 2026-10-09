@@ -333,6 +333,56 @@ public final class RouteDispatcher {
         return m.length() == 0 ? "no modified fields" : m.toString();
     }
 
+    /**
+     * 拦截响应的内容类型解析（<b>三档</b>，修复"字段替换静默失效"）：
+     * <ol>
+     *   <li>响应头（<b>大小写不敏感</b>且非空白）—— 正常路径；</li>
+     *   <li>规则自身声明（{@code mockContentType}）—— 真实响应未带 content-type 时；</li>
+     *   <li>体嗅探：去前导空白后以 {@code {} / [} 开头视为 JSON —— 头与声明都缺失时仍让替换生效。</li>
+     * </ol>
+     *
+     * <p><b>为什么必须这样修</b>：原实现直接 {@code headers().get("content-type")}，一旦响应头缺失或键为
+     * {@code Content-Type}，就得到 {@code null} ⇒ {@code FieldReplacer} 判为"非文本"⇒ <b>字段替换静默不生效</b>
+     * （真实 E2E 实测：{@code replace field '$.enablePaymentPP' failed: content-type is <missing>}）。
+     * 嗅探只认 JSON 起始符，<b>不猜二进制</b>（二进制仍按原语义明确失败并保留原体）。
+     */
+    private static String resolveInterceptContentType(Map<String, String> headers, ApiSpec spec, byte[] body) {
+        if (headers != null) {
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                if (e.getKey() != null && "content-type".equalsIgnoreCase(e.getKey())
+                        && e.getValue() != null && !e.getValue().trim().isEmpty()) {
+                    return e.getValue();
+                }
+            }
+        }
+        String declared = spec.mockContentType();
+        if (declared != null && !declared.trim().isEmpty()) {
+            LOGGER.debug("[Route] intercept content-type absent in response headers for pattern='{}'; "
+                    + "falling back to the rule declaration '{}'", spec.pattern(), declared);
+            return declared;
+        }
+        String sniffed = sniffJsonContentType(body);
+        if (sniffed != null) {
+            LOGGER.debug("[Route] intercept content-type unresolved for pattern='{}'; body starts like JSON, "
+                    + "treating as {} so field replacements apply", spec.pattern(), sniffed);
+        }
+        return sniffed;
+    }
+
+    /** 体嗅探：忽略前导空白，以 {@code {} 或 {@code [} 开头即视为 JSON；否则 null（不猜二进制）。 */
+    private static String sniffJsonContentType(byte[] body) {
+        if (body == null) {
+            return null;
+        }
+        for (byte b : body) {
+            if (b == ' ' || b == '\t' || b == '\r' || b == '\n') {
+                continue;
+            }
+            return b == '{' || b == '[' ? "application/json" : null;
+        }
+        return null;
+    }
+
     /** MOCK：静态伪造直接 fulfill；intercept / 字段替换交 IO 线程。 */
     private void dispatchMock(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime, HitTrace trace) {
         // 事件线程取好请求句柄：IO 线程的 fulfill 分支也要用同一份"完整请求信息"上报结果
@@ -439,7 +489,7 @@ public final class RouteDispatcher {
                                         + " full body in the matching CAPTURE block)", trace);
                         return;
                     }
-                    String contentType = apiResponse.headers().get("content-type");
+                    String contentType = resolveInterceptContentType(apiResponse.headers(), spec, apiResponse.body());
                     MediaType mediaType = MediaType.parse(contentType);
                     String body = new String(apiResponse.body(), mediaType.charset());
                     FieldReplacer.ReplaceResult replaced = FieldReplacer.replace(mediaType, body, spec.mockReplacements(),
