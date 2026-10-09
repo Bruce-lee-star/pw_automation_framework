@@ -162,6 +162,11 @@ public class RouteLifecycleImpl implements RouteLifecycle {
 
     @Override
     public void stopCaptureFor(Object context) {
-        // no-op（V2 无 API 捕获）
+        // 【收尾清理】用例收尾（PlaywrightListener.testFinished / context 关闭）会调用本方法：
+        // 原为 no-op，导致"同一 Context 跨 scenario 复用"时上一条用例的采集数据残留给下一条。
+        // 现按 context 清空采集数据（幂等）；context 无关的入参一律忽略。
+        if (context instanceof com.microsoft.playwright.BrowserContext bc) {
+            com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine.resetCapturedApis(bc);
+        }
     }
 }

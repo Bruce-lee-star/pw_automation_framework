@@ -304,6 +304,61 @@ public final class RouteEngine {
         return runtime == null ? List.of() : runtime.peekCapturedApis();
     }
 
+    // ==================== 采集数据的索引查询与清理（非消费式；runtime 不存在时安全降级） ====================
+
+    /** 清空指定 context 的采集数据（用例收尾；runtime 不存在时无操作）。幂等。 */
+    public static void resetCapturedApis(BrowserContext context) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        if (runtime != null) {
+            runtime.resetCapturedApis();
+        }
+    }
+
+    /** 全部采集记录（非消费式）。 */
+    public static List<CapturedApiCall> allCapturedApis(BrowserContext context) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? List.of() : runtime.allCapturedApis();
+    }
+
+    /** 每个 pattern 的最近一次采集记录（非消费式）。 */
+    public static List<CapturedApiCall> lastCapturedPerPattern(BrowserContext context) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? List.of() : runtime.lastCapturedPerPattern();
+    }
+
+    /** 指定 endpoint 的最近一次采集记录（非消费式）。 */
+    public static CapturedApiCall lastCapturedApi(BrowserContext context, String endpoint) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? null : runtime.lastCapturedApi(endpoint);
+    }
+
+    /** 指定 URL 的全部采集记录（非消费式）。 */
+    public static List<CapturedApiCall> capturedApisByUrl(BrowserContext context, String url) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? List.of() : runtime.capturedApisByUrl(url);
+    }
+
+    /** 指定渠道的全部采集记录（非消费式；渠道名 MOCK/MODIFY/MONITOR/DELAY）。 */
+    public static List<CapturedApiCall> capturedApisByChannel(BrowserContext context, String channel) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? List.of() : runtime.capturedApisByChannel(channel);
+    }
+
+    /** 等待首个满足条件的采集记录（非消费式）。 */
+    public static CapturedApiCall waitForCapturedApi(BrowserContext context,
+                                                     java.util.function.Predicate<CapturedApiCall> predicate,
+                                                     long timeoutMs) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? null : runtime.waitForCapturedApi(predicate, timeoutMs);
+    }
+
     /** 聚合全部活跃 runtime 的已定案断言失败（消费式；幂等——第二次调用返回空列表）。
      *
      * <p>MONITOR 断言失败上报的统一出口，由 {@code RouteAssertionProbeImpl} 委托；
