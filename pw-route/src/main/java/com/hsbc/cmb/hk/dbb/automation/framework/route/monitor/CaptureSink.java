@@ -255,7 +255,7 @@ public final class CaptureSink {
                 body, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
-                contentType, bodyBytes);
+                contentType, bodyBytes, null);   // 载体（CapturedBody）由 ③ 接线时填入
     }
 
     /**

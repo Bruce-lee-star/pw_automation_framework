@@ -40,6 +40,9 @@ import java.util.Set;
  * @param durationMs             请求到响应耗时（毫秒；未响应为 -1）
  * @param timedOut               是否在超时窗口内未等到响应
  * @param recordedAtMillis       记录创建时刻（epoch millis）
+ * @param body                   响应体<b>载体</b>（{@link CapturedBody}）：非 null 时优先于
+ *                               {@code responseBody} / {@code responseBodyBytes}；采集器路径只在载体中
+ *                               留一份（不重复占用堆），派发链证据路径无载体（为 null，沿用文本组件）
  */
 public record CapturedApiCall(String pattern, String method, String url,
                               Map<String, String> requestHeaders, String requestBodyPreview,
@@ -47,7 +50,8 @@ public record CapturedApiCall(String pattern, String method, String url,
                               String responseBody, boolean responseBodyTruncated,
                               long durationMs, boolean timedOut, long recordedAtMillis,
                               Set<String> channels, String primaryChannel,
-                              String contentType, byte[] responseBodyBytes) {
+                              String contentType, byte[] responseBodyBytes,
+                              CapturedBody body) {
 
     /**
      * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null。
@@ -62,7 +66,7 @@ public record CapturedApiCall(String pattern, String method, String url,
                            long durationMs, boolean timedOut, long recordedAtMillis) {
         this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
                 responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
-                Set.of(), null, null, null);
+                Set.of(), null, null, null, null);
     }
 
     /** 敏感头键（小写比较）：值一律打码。 */
@@ -105,12 +109,32 @@ public record CapturedApiCall(String pattern, String method, String url,
     }
 
     /**
+     * 响应体文本：优先取自载体 {@link #body}（懒解码 + 缓存，避免大 body 一次性物化），
+     * 否则回落到 {@code responseBody} 组件（派发链证据只有 preview 文本、没有载体）。
+     *
+     * <p><b>null 语义</b>：载体与组件同为 null 时返回 {@code null} —— {@code captureBody} 关闭时
+     * 必须保持 null（既有消费者依赖此语义），故此处不得触发解码。
+     */
+    @Override
+    public String responseBody() {
+        if (body == null) {
+            return responseBody;
+        }
+        java.nio.charset.Charset charset = contentType == null ? null
+                : com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType.parse(contentType).charset();
+        return body.text(charset);
+    }
+
+    /**
      * 原始响应体字节的<b>副本</b>（数组是不可变类型的例外：不拷贝等于暴露内部表示，静态分析会拦构建）。
      *
      * <p>仅在开启 {@code captureBody} 时有值；文本型与二进制型都会有值，供"精确回放/自行解析"使用。
      */
     @Override
     public byte[] responseBodyBytes() {
+        if (body != null) {
+            return body.readAll();      // readAll() 本身返回副本
+        }
         return responseBodyBytes == null ? null : responseBodyBytes.clone();
     }
 
@@ -288,7 +312,7 @@ public record CapturedApiCall(String pattern, String method, String url,
             appendField(d, "response", responseStatus);
         }
         appendHeaders(d, "respHeaders", sanitize(responseHeaders));
-        appendBody(d, "respBody", responseBody, responseBodyTruncated);
+        appendBody(d, "respBody", responseBody(), responseBodyTruncated);
         d.append('}');
         return d.toString();
     }
