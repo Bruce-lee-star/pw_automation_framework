@@ -27,10 +27,12 @@ import static org.mockito.Mockito.when;
 /**
  * 第二批能力 dispatch 级验证（mock BrowserContext）：
  * <ul>
- *   <li>MOCK 静态体 + 字段替换（IO 线程替换后 fulfill 替换后 body）；</li>
+ *   <li>MOCK 静态体 + 字段替换（**就地**替换后 fulfill 替换后 body）；</li>
  *   <li>MOCK intercept + 字段替换（快照 + context.request() 取真实响应 → 替换 → fulfill）；</li>
- *   <li>MODIFY body 级修改（IO 线程改 postData → resume 携带新 body）；</li>
+ *   <li>MODIFY body 级修改（**就地**改 postData → resume 携带新 body）；</li>
  *   <li>mockBodyFromFile（classpath 资源读取）。</li>
+ *   <li><b>线程契约（O1/O1b）</b>：MODIFY 就地执行、且 MODIFY+MOCK 组合下取真实响应也在调用线程
+ *       —— 二者共同保证"我们这一侧不新增驱动线程"（见 {@code RouteDispatcher} 的 O1/O1b 说明）。</li>
  * </ul>
  */
 public class RouteMockModifyTest {
@@ -311,5 +313,86 @@ public class RouteMockModifyTest {
             threw = true;
         }
         assertTrue( "interceptResponse 与静态 body 必须互斥", threw);
+    }
+
+    /**
+     * <b>O1b 契约：MODIFY 阶段必须在调用线程就地执行</b>（不再派发 IO 池）。
+     *
+     * <p>判据手法：<b>不调用</b> {@code runtime.io().close()}，直接在 {@code handler.accept(route)}
+     * 之后断言 resume 已发生，并记录调用线程名必须等于测试线程名 —— 若仍派发 IO 池，两处都会失败。</p>
+     *
+     * <p>为什么必须就地：该阶段链尾可能落到 MOCK intercept 的取真实响应（同步驱动调用），而 Playwright
+     * 的连接由"等待者线程"分发消息、其对象/回调表非线程安全，多一个线程驱动同一连接就会重新引入竞态。</p>
+     */
+    @Test
+    public void modifyRunsOnTheCallingThreadWithoutWaitingForTheIoPool() throws Exception {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        RouteDsl.on(ctx)
+                .api("/api/thread")
+                .modifyRequest()
+                .modifyRequestBody("$.password", "changed")
+                .register();
+        Consumer<Route> handler = captureHandler();
+
+        String callingThread = Thread.currentThread().getName();
+        java.util.concurrent.atomic.AtomicReference<String> resumeThread =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        Route route = mockRoute(mockRequestWithBody("https://host/api/thread", "POST",
+                "{\"user\":\"u\",\"password\":\"old\"}", "application/json"));
+        org.mockito.Mockito.doAnswer(inv -> {
+            resumeThread.set(Thread.currentThread().getName());
+            return null;
+        }).when(route).resume(any());
+
+        handler.accept(route);   // 刻意不等待 IO 池：就地执行则此刻已 resume
+
+        assertEquals("MODIFY 必须在调用线程就地执行（O1b：不得派发 IO 池）",
+                callingThread, resumeThread.get());
+        runtime.io().close();    // 收尾（不影响上方断言：断言发生在等待之前）
+    }
+
+    /**
+     * <b>O1 契约：MOCK intercept 的取真实响应必须在调用线程就地发生</b>（不派发 IO 池）。
+     *
+     * <p>判据手法：<b>不调用</b> {@code runtime.io().close()}，直接在 {@code handler.accept(route)}
+     * 之后断言 fetch 已在<b>测试线程</b>上发生 —— 若仍派发 IO 池，fetch 线程名必然不等于调用线程名。</p>
+     *
+     * <p>与上一条 MODIFY 契约共同保证：我们这一侧的驱动调用（MODIFY 的本地读 + MOCK intercept 的 fetch）
+     * 都发生在"持有连接约束的那条线程"上 ⇒ 不新增驱动线程、不破坏 Playwright 连接的单线程使用契约。</p>
+     *
+     * <p>（MODIFY + MOCK 同 pattern 的组合在集成层由 E2E 的 {@code login-priority} 覆盖：MODIFY/MOCK/MONITOR
+     * 三条同 pattern 规则并存、执行序 MODIFY → MOCK。）</p>
+     */
+    @Test
+    public void interceptFetchHappensOnTheCallingThread() throws Exception {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        APIResponse apiResponse = mock(APIResponse.class);
+        when(apiResponse.status()).thenReturn(200);
+        when(apiResponse.headers()).thenReturn(Map.of("content-type", "application/json"));
+        when(apiResponse.body()).thenReturn("{\"code\":0}".getBytes(StandardCharsets.UTF_8));
+
+        RouteDsl.on(ctx).api("/api/inplace")
+                .mock().interceptResponse().mockReplaceField("$.code", 5)
+                .register();
+        Consumer<Route> handler = captureHandler();
+
+        String callingThread = Thread.currentThread().getName();
+        java.util.concurrent.atomic.AtomicReference<String> fetchThread =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(lastApiCtx.fetch(anyString(), any())).thenAnswer(inv -> {
+            fetchThread.set(Thread.currentThread().getName());
+            return apiResponse;
+        });
+
+        Route route = mockRoute(mockRequestWithBody("https://host/api/inplace", "GET", null, null));
+        handler.accept(route);   // 刻意不等待 IO 池：就地执行则此刻 fetch 已完成
+
+        assertEquals("intercept 取真实响应必须在调用线程就地发生（O1：不得派发 IO 池）",
+                callingThread, fetchThread.get());
+        runtime.io().close();
     }
 }

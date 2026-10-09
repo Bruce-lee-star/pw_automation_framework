@@ -33,6 +33,35 @@ import java.util.Objects;
  * 显式 {@code .capture(...)} 保持"横切观测、不随能力停止"的既有语义。
  * 采集结果可经 {@code peekCaptured}/{@code dumpCaptured}（pw-route 门面）或 SPI 只读视图查询。
  *
+ * <p><b>能力组合与优先级（业务视角）</b>——四种能力各管一段，终结者只有两个
+ * （{@code MOCK.fulfill} 或 {@code resume(真实网络)}，一个请求只有一个终结）：
+ * <pre>
+ * 阶段 0 观测声明  MONITOR  横切：先声明、最后生效；永不 own 终结（断言/采集"最终交付的响应"）
+ * 阶段 1 时序      DELAY    决定"何时结算"（handler 返回 pending，到点才终结）
+ * 阶段 2 请求变形  MODIFY   决定"后端看到什么"（headers/method/body；本地读 + 纯函数）
+ * 阶段 3 响应决策  MOCK     决定"交付什么内容"：static 短路 / intercept 取真实体后改写
+ *                  resume   放行真实网络
+ * 判定要点：MOCK 拥有"内容决策权"，DELAY 拥有"时序决策权" —— 故二者并存时，
+ * "取真实响应/改写"应在 DELAY 挂起之前、在持有连接约束的线程上完成（见 RouteDispatcher 的 O1/O1b）。
+ * </pre>
+ * <p>组合合法性（✓ 语义正确；⚠ 已知限制）：
+ * <pre>
+ *  MONITOR  MODIFY  DELAY  MOCK       业务场景                        状态
+ *    ✓                         观测/断言真实响应                    ✓
+ *    ✓        ✓                强制请求头后断言真实响应             ✓
+ *    ✓                  static   短路夹具并断言"夹具"（非真实体）    ✓ 注意断言对象
+ *    ✓                  intercept 真实响应改字段后断言              ✓
+ *             ✓          any      改请求 + 决定响应                  ✓
+ *                     ✓  static     慢交付夹具（测 loading/超时）     ✓
+ *                     ✓  intercept  慢交付"真实+改写"               ⚠ fetch 落在延迟调度线程（待修）
+ *             ✓        ✓           延迟释放改写后的请求             ✓
+ *    ✓        ✓        ✓  intercept 全组合                         ⚠ 同上一行
+ *                     ✓            纯限速                           ✓
+ * </pre>
+ * <p>两条最易误用点：① {@code MONITOR 的响应断言 + static MOCK} ⇒ 断言对象是<b>夹具</b>而非真实响应
+ * （合法，但极易误判为"没生效"）；② {@code interceptResponse()} 与静态 {@code status/body/headers}
+ * <b>互斥</b>（build 期 fail-fast）。以上矩阵与状态为 2026-10-09 版本。
+ *
  * <p><b>采集 → 回放</b>：{@code MockDsl.fromCaptured(...)} 把采集记录（或 SPI 只读视图）转为 Mock 规则，
  * 语义是<b>注册期即时快照</b> —— 不留存任何采集载体 / 临时文件引用，故采集器的 {@code reset()} 与驱逐
  * 不会影响已注册的回放规则（契约见 {@code CapturedBody}）。文本体走文本通道；<b>非文本体走字节保真
