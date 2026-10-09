@@ -932,8 +932,15 @@ public final class RouteDsl {
          */
         public MockDsl fromCaptured(CapturedApiCall captured) {
             Objects.requireNonNull(captured, "captured");
+            com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedBody carrier = captured.body();
+            if (carrier != null && !carrier.isTextual()) {
+                // 非文本体：走字节保真通道（文本通道会因 UTF-8 往返损坏二进制）
+                return capturedSnapshot(captured.responseStatus(), captured.responseHeaders(),
+                        captured.contentType(), null, carrier.readAll());
+            }
+            // 文本体 / 无载体（派发链证据）：沿用文本通道，避免额外解出整份字节
             return capturedSnapshot(captured.responseStatus(), captured.responseHeaders(),
-                    captured.contentType(), captured.responseBody());
+                    captured.contentType(), captured.responseBody(), null);
         }
 
         /**
@@ -946,12 +953,12 @@ public final class RouteDsl {
                 com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView captured) {
             Objects.requireNonNull(captured, "captured");
             return capturedSnapshot(captured.responseStatus(), captured.responseHeaders(),
-                    captured.contentType(), captured.responseBody());
+                    captured.contentType(), captured.responseBody(), null);
         }
 
         /** 把采集到的响应要素即时写入本 Mock 规格（局部变量即快照，不留存任何采集侧引用）。 */
         private MockDsl capturedSnapshot(Integer status, Map<String, String> headers,
-                                          String contentType, String body) {
+                                          String contentType, String body, byte[] bodyBytes) {
             if (status != null) {
                 b.mockStatus(status);
             }
@@ -965,7 +972,11 @@ public final class RouteDsl {
             if (contentType != null) {
                 b.mockContentType(contentType);
             }
-            if (body != null) {
+            if (bodyBytes != null) {
+                b.mockBody(null);
+                b.mockBodyBytes(bodyBytes);      // 字节保真：非文本/二进制体逐字节回放
+            } else if (body != null) {
+                b.mockBodyBytes(null);           // 两通道"后写生效"，避免触发 build 的互斥校验
                 b.mockBody(body);
             }
             return this;

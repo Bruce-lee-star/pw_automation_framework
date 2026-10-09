@@ -129,4 +129,34 @@ public class RouteDslFromCapturedTest {
                 binary, captor.getValue().bodyBytes);
         assertEquals("字节通道下不得再设字符串体", null, captor.getValue().body);
     }
+
+    @Test
+    public void fromCapturedReplaysBinaryBodiesByteExact() {
+        mockContext();
+        RouteEngine.runtimeOf(ctx);
+
+        // 非文本体（含 0x00 / 0xFF）：文本通道会损坏，必须走字节通道
+        byte[] binary = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x00, (byte) 0xFF, (byte) 0x90};
+        CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);
+        CapturedApiCall captured = new CapturedApiCall("/api/png", "GET", "https://host/api/png",
+                null, null, 200, Map.of(), null, false, 5L, false, 1L, null, "MONITOR", "image/png", null,
+                carrier);
+
+        RouteDsl.on(ctx).api("/api/png").mock().fromCaptured(captured).register();
+        carrier.close();   // 快照自足性：载体关闭后仍须逐字节回放
+
+        Consumer<Route> handler = captureHandler();
+        Request request = mockRequest("https://host/api/png");
+        Route route = mock(Route.class);
+        when(route.request()).thenReturn(request);
+        handler.accept(route);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Route.FulfillOptions> captor =
+                ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
+        verify(route).fulfill(captor.capture());
+        org.junit.Assert.assertArrayEquals("非文本体必须逐字节回放（不得经字符集往返）",
+                binary, captor.getValue().bodyBytes);
+        assertEquals("字节通道下不得再设字符串体", null, captor.getValue().body);
+    }
 }
