@@ -873,6 +873,7 @@ public final class RouteDsl {
 
         public MockDsl body(String body) {
             b.mockBody(body);
+            b.mockBodyBytes(null);   // 两通道"后写生效"：避免与字节体同时存在而触发 build 的互斥校验
             return this;
         }
 
@@ -882,16 +883,17 @@ public final class RouteDsl {
         }
 
         /**
-         * 二进制 Mock 响应体（对齐现有 RouteDsl.mockBody(byte[])；优先级高于 String body）。
+         * 二进制 Mock 响应体（对齐现有 RouteDsl.mockBody(byte[])）。
          *
-         * <p><b>当前限制（务必注意）</b>：本方法把字节按 <b>UTF-8 转成 String</b> 后交给
-         * {@code mockBody(String)} 通道，故对<b>非文本</b>体（图片 / protobuf / gzip / 任意二进制）
-         * 会<b>损坏</b>——UTF-8 解码不是无损往返。文本体（JSON / XML / 纯文本）不受影响。
-         * 字节保真通道（{@code byte[]} mock 组件 + byte[] fulfill）落地后，本方法将改走该通道。
+         * <p><b>字节保真</b>：直接走 {@code ApiSpec.mockBodyBytes} 通道，由 Playwright 的
+         * {@code FulfillOptions.setBodyBytes} 交付原始字节，<b>不再经受 UTF-8 字符串往返</b> ——
+         * 图片 / protobuf / gzip 等非文本体不再损坏（历史实现会损坏）。
+         * 与 {@link #mockBody(String)} 互为"后写生效"（本方法会清掉字符串体，反之亦然）。
          */
         public MockDsl mockBody(byte[] bodyBytes) {
             Objects.requireNonNull(bodyBytes, "bodyBytes");
-            b.mockBody(new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));
+            b.mockBody(null);
+            b.mockBodyBytes(bodyBytes);
             return this;
         }
 

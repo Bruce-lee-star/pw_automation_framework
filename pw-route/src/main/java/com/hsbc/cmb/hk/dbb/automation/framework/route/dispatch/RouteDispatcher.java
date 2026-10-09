@@ -336,15 +336,20 @@ public final class RouteDispatcher {
         // 事件线程取好请求句柄：IO 线程的 fulfill 分支也要用同一份"完整请求信息"上报结果
         Request request = route.request();
         boolean hasStaticBody = spec.mockStatus() != null || spec.mockBody() != null
+                || spec.mockBodyBytes() != null
                 || spec.mockContentType() != null || !spec.mockHeaders().isEmpty();
         if (hasStaticBody && spec.mockReplacements().isEmpty()
                 && spec.conditionalReplacements().isEmpty()) {
             RouteAction.fulfill(route, spec);
             runtime.claims().markTerminal(claim, true);
+            // 证据描述区分两个体通道：字节体报字节数（字符串体报字符数），避免"body=empty"的误导
+            byte[] staticBytes = spec.mockBodyBytes();
+            String bodyDesc = staticBytes != null
+                    ? staticBytes.length + " bytes"
+                    : (spec.mockBody() == null ? "empty" : spec.mockBody().length() + " chars");
             reportOutcome("MOCK RESULT", spec, request, spec.mockStatus(), spec.mockHeaders(), spec.mockBody(),
                     "static fulfill (status=" + (spec.mockStatus() == null ? "default 200" : spec.mockStatus())
-                            + ", body=" + (spec.mockBody() == null ? "empty"
-                                    : spec.mockBody().length() + " chars") + ")", trace);
+                            + ", body=" + bodyDesc + ")", trace);
             return;
         }
         // 需要 IO：intercept fetch（无静态体）或 字段替换（静态体 / 真实响应）

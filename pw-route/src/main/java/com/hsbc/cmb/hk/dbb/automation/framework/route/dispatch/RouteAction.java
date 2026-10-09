@@ -109,7 +109,10 @@ public final class RouteAction {
             if (spec.mockStatus() != null) {
                 options.setStatus(spec.mockStatus());
             }
-            if (spec.mockBody() != null) {
+            if (spec.mockBodyBytes() != null) {
+                // 字节保真通道：由 Playwright setBodyBytes 交付原始字节，不经任何字符集往返
+                options.setBodyBytes(spec.mockBodyBytes());
+            } else if (spec.mockBody() != null) {
                 options.setBody(spec.mockBody());
             }
             if (spec.mockContentType() != null) {

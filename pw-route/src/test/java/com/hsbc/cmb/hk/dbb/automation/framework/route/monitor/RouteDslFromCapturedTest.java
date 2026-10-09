@@ -26,6 +26,9 @@ import static org.mockito.Mockito.when;
  * {@code MockDsl.fromCaptured} 的契约：<b>注册期即时快照</b> —— 采集体被关闭（等价于
  * {@code CaptureSink.reset()} 删除临时文件）之后，已注册的 Mock 规则仍能原样回放。
  *
+ * <p>同时钉住 <b>字节保真</b>：{@code mockBody(byte[])} 必须经 {@code FulfillOptions.setBodyBytes}
+ * 逐字节交付（含非法 UTF-8 序列），不得再经受字符串往返而损坏。
+ *
  * <p>夹具口径沿用 {@code RouteMockModifyTest}：mock {@link BrowserContext} + 捕获
  * {@code ctx.route(...)} 的驱动 handler + {@link Route.FulfillOptions} 的公有字段断言。
  */
@@ -99,5 +102,31 @@ public class RouteDslFromCapturedTest {
         assertEquals("回放体必须是采集到的原文", "{\"code\":0,\"name\":\"captured\"}",
                 captor.getValue().body);
         assertEquals("状态码必须来自采集记录", 200L, (long) captor.getValue().status);
+    }
+
+    @Test
+    public void binaryMockBodyIsDeliveredByteExact() {
+        mockContext();
+        RouteEngine.runtimeOf(ctx);
+
+        // 含非法 UTF-8 序列（0xFF / 0x80）与 0x00：任何字符串往返都会损坏
+        byte[] binary = new byte[] {0x00, (byte) 0xFF, 0x1F, (byte) 0x8B, (byte) 0x80, 0x7F};
+        RouteDsl.on(ctx).api("/api/bin").mock()
+                .status(200).contentType("application/octet-stream").mockBody(binary)
+                .register();
+
+        Consumer<Route> handler = captureHandler();
+        Request request = mockRequest("https://host/api/bin");
+        Route route = mock(Route.class);
+        when(route.request()).thenReturn(request);
+        handler.accept(route);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Route.FulfillOptions> captor =
+                ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
+        verify(route).fulfill(captor.capture());
+        org.junit.Assert.assertArrayEquals("字节体必须逐字节保真（不得经字符串往返）",
+                binary, captor.getValue().bodyBytes);
+        assertEquals("字节通道下不得再设字符串体", null, captor.getValue().body);
     }
 }
