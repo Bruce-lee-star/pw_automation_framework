@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -129,7 +128,7 @@ public final class CaptureSink {
         if (spec.captureBodyEnabled()) {
             captureBodyNow(snapshot, spec, response);
         } else {
-            enqueue(snapshot, null, false);
+            enqueue(snapshot, null, null, null, false);
         }
     }
 
@@ -145,8 +144,8 @@ public final class CaptureSink {
      * <p>读取失败保持 fail-open：保留核心快照（body=null）并计数，绝不抛异常、绝不判场景失败。</p>
      */
     private void captureBodyNow(CapturedExchange snapshot, ApiSpec spec, Response response) {
-        String contentType;
-        byte[] bytes;
+        String contentType = null;
+        byte[] bytes = null;
         try {
             contentType = response.headers().get("content-type");
             bytes = response.body();
@@ -155,29 +154,30 @@ public final class CaptureSink {
             LOGGER.warn("[Route] capture body unavailable (driver handle reclaimed / page closed) "
                             + "pattern='{}' url='{}': {}",
                     spec.pattern(), snapshot.url(), t.toString());
-            enqueue(snapshot, null, false);
+            enqueue(snapshot, null, null, contentType, false);
             return;
         }
         try {
-            int limit = spec.captureBodyLimitBytes();
-            boolean truncated = bytes.length > limit;
-            String body = new String(truncated ? Arrays.copyOf(bytes, limit) : bytes,
-                    MediaType.parse(contentType).charset());
-            enqueue(snapshot, body, truncated);
+            // 【不截断】整响应保留 —— 供业务"取整响应 → 改指定节点 → 当 mock 回放"使用。
+            // captureBodyLimitBytes 字段保留（兼容旧写法）但不再参与截断；截断标志恒为 false。
+            // 原始字节同时透传：业务需要精确回放或自行解析时用 bytes，不必再经受字符串往返。
+            String body = new String(bytes, MediaType.parse(contentType).charset());
+            enqueue(snapshot, body, bytes, contentType, false);
         } catch (Throwable t) {
-            // 编码/截断失败（理论上不会）：同样 fail-open，保留核心快照
+            // 编码失败（理论上不会）：同样 fail-open，保留核心快照 + 原始字节
             bodyReadFailures.incrementAndGet();
-            enqueue(snapshot, null, false);
+            enqueue(snapshot, null, bytes, contentType, false);
         }
     }
 
     /** 定案入队（队列满则丢弃并计数）；定案即打一行日志（请求/响应头 + 体 + 耗时，头已脱敏、体已截断）。 */
-    private void enqueue(CapturedExchange snapshot, String body, boolean truncated) {
+    private void enqueue(CapturedExchange snapshot, String body, byte[] bodyBytes, String contentType,
+                         boolean truncated) {
         if (count.get() >= maxCaptured) {
             dropped.incrementAndGet();
             return;
         }
-        CapturedApiCall call = toDto(snapshot, body, truncated);
+        CapturedApiCall call = toDto(snapshot, body, bodyBytes, contentType, truncated);
         captured.add(call);
         // 非消费式历史（peek 用）：与消费式队列并行维护，保证"用例收尾复核真实流量"不会被
         // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
@@ -217,7 +217,8 @@ public final class CaptureSink {
     /** 非消费式历史快照（{@link #peek()} 的数据源）：只增（按 {@code maxCaptured} 限量），不受 dump 影响。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> history = new ConcurrentLinkedQueue<>();
 
-    private static CapturedApiCall toDto(CapturedExchange snapshot, String body, boolean truncated) {
+    private static CapturedApiCall toDto(CapturedExchange snapshot, String body, byte[] bodyBytes,
+                                         String contentType, boolean truncated) {
         // 分渠道透传：与 ofRequest 同源（channels=全部命中渠道，primaryChannel=优先级最高者）。
         return new CapturedApiCall(
                 snapshot.pattern(), snapshot.method(), snapshot.url(),
@@ -226,9 +227,7 @@ public final class CaptureSink {
                 body, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
-                // 【下一步接线】contentType 与原始字节：待 CapturedExchange 增加对应字段后由 toDto 透传，
-                // 现先传 null 占位，保证模型先行扩展、编译与行为均不受影响。
-                null, null);
+                contentType, bodyBytes);
     }
 
     /**
@@ -281,7 +280,7 @@ public final class CaptureSink {
                     snapshot.markTimedOut();
                     timedOutCount.incrementAndGet();
                     pending.remove(snapshot);
-                    enqueue(snapshot, null, false);
+                    enqueue(snapshot, null, null, null, false);
                 }
             }
         }

@@ -111,7 +111,7 @@ public class CaptureSinkTest {
     }
 
     @Test
-    public void responseBodyCapturedWithTruncation() throws Exception {
+    public void responseBodyCapturedInFullWithoutTruncation() throws Exception {
         io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/big", RouteCapability.MONITOR)
                 .capture(true)
@@ -130,9 +130,14 @@ public class CaptureSinkTest {
         List<CapturedApiCall> calls = sink.dump();
         assertEquals((long) 1, (long) calls.size());
         CapturedApiCall call = calls.get(0);
-        assertNotNull( "captureBody 开启后响应体必须非 null", call.responseBody());
-        assertEquals("响应体必须按 limit 截断", (long) 8, (long) call.responseBody().length());
-        assertTrue( "截断标志必须置位", call.responseBodyTruncated());
+        assertNotNull("captureBody 开启后响应体必须非 null", call.responseBody());
+        // 行为变更：不再截断（整响应保留，供业务"改指定节点后当 mock 回放"）。
+        assertTrue("响应体必须整份保留（不受 captureBodyLimitBytes 影响）",
+                call.responseBody().contains("very long payload"));
+        assertFalse("不再截断，标志必须为 false", call.responseBodyTruncated());
+        assertNotNull("原始字节必须同时保留", call.responseBodyBytes());
+        assertEquals("原始字节与文本长度一致", (long) call.responseBody().length(),
+                (long) call.responseBodyBytes().length);
     }
 
     @Test
