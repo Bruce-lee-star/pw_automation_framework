@@ -31,7 +31,12 @@ public interface CapturedBody {
     /** 原始响应体内容类型；未知时为 {@code null}。 */
     String contentType();
 
-    /** 是否文本型内容（决定是否允许走内存 gzip 档）。 */
+    /**
+     * 内容是否被 {@code content-type} 声明为文本型（决定留存是否允许走内存 gzip 档）。
+     *
+     * <p><b>不等价于"能否解码"</b>：内容类型缺失时实现返回 {@code false}（留存保守落盘），
+     * 而 {@link #text(Charset)} 仍可按调用方给定字符集解码（未给出时按 UTF-8 回落）。
+     */
     boolean isTextual();
 
     /** 原始响应体字节的完整副本。 */

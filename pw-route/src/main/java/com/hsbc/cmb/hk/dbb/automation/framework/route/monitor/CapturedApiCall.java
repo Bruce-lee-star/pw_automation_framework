@@ -120,9 +120,11 @@ public record CapturedApiCall(String pattern, String method, String url,
         if (body == null) {
             return responseBody;
         }
-        java.nio.charset.Charset charset = contentType == null ? null
-                : com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType.parse(contentType).charset();
-        return body.text(charset);
+        // 字符集口径与 CaptureSink.toView 完全一致：MediaType.parse(null) 内部回落 UTF-8，
+        // 故此处不再对 null 特判（原先 `contentType == null ? null : ...` 与载体的 UTF-8 回落
+        // 形成两份等价实现，是"口径分裂"的温床）。
+        return body.text(com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType
+                .parse(contentType).charset());
     }
 
     /**

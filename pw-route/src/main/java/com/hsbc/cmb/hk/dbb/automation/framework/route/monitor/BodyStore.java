@@ -105,7 +105,13 @@ final class BodyStore implements CapturedBody {
         return contentType;
     }
 
-    /** 是否文本型（供上层决定"要不要解码"；二进制型永不解码）。 */
+    /**
+     * 是否被 {@code content-type} 声明为文本型（供留存策略与上层判断使用）。
+     *
+     * <p><b>与解码口径的关系</b>：本方法描述"内容类型<b>声明</b>为文本"，而 {@link #text(Charset)}
+     * 对任何非 null 体都可解码（无内容类型时按 UTF-8 回落）。故 {@code isTextual() == false}
+     * 只表示"留存不走 gzip 档"，<b>不</b>表示文本不可读。
+     */
     @Override
     public boolean isTextual() {
         return isTextual(contentType);
@@ -179,6 +185,15 @@ final class BodyStore implements CapturedBody {
 
     // ---------------------------------------------------------------- 内部工具
 
+    /**
+     * 是否文本型（按 {@code content-type} 判定）。
+     *
+     * <p><b>{@code content-type} 缺失 ⇒ 返回 false（口径说明）</b>：这是<b>留存策略</b>的保守选择 ——
+     * 内容类型未知时宁可落盘，也不做 gzip（gzip 对任意字节都无损，但对已压缩的二进制只是白烧 CPU）。
+     *
+     * <p><b>与读取口径的区别</b>：无 {@code content-type} 时 {@link #text(Charset)} 仍会解码
+     * （调用方给不出字符集时按 UTF-8 回落），故 {@code isTextual()==false} <b>不等于</b>"读不到文本"。
+     */
     private static boolean isTextual(String contentType) {
         if (contentType == null) {
             return false;

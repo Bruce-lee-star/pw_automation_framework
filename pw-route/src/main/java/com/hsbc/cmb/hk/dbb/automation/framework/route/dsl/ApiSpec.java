@@ -687,7 +687,14 @@ public final class ApiSpec {
         return new Builder(pattern, capability);
     }
 
-    /** 流式构建器。所有参数方法均返回本构建器，规则构建完成后由 {@link #build()} 冻结。 */
+    /**
+     * 流式构建器。所有参数方法均返回本构建器，规则构建完成后由 {@link #build()} 冻结。
+     *
+     * <p><b>线程约束</b>：构建器<b>非线程安全</b>，且不可被多条 DSL 链共享 —— 每次
+     * {@code RouteDsl.on(...).api(...)} 都会新建独立实例（见 {@link #builder(String, RouteCapability)}）。
+     * 跨线程并发调用参数方法（尤其两个 Mock 体通道的"后写生效"两步）会得到不确定结果，
+     * 甚至让 {@link #build()} 看到互相矛盾的状态而抛 {@link IllegalArgumentException}。
+     */
     public static final class Builder {
         private final String pattern;
         private final RouteCapability capability;
