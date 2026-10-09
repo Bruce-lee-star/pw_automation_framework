@@ -222,13 +222,17 @@ public final class CaptureSink {
         // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
         // 事件驱动、生产者无锁：历史写入走并发队列，随后仅发一次无阻塞信号（AQS 单次 CAS，不 park、不阻塞）
         history.add(call);
-        while (history.size() > maxCaptured) {
+        historySize.incrementAndGet();
+        while (historySize.get() > maxCaptured) {
             CapturedApiCall evicted = history.poll();
+            if (evicted == null) {
+                break;   // 理论不可达：并发下计数与队列短暂不一致时不空转
+            }
+            historySize.decrementAndGet();
             // 驱逐即释放，但必须排除"仍被消费队列持有"的对象：同一对象同处两队列，
             // 关掉它会让随后的 dump() 把已失效载体交给业务（use-after-close）。
             // 残留（本处不关、且此后无人关）由 reset() 与 JVM 退出兜底覆盖。
-            if (evicted != null && evicted != call && !captured.contains(evicted)
-                    && evicted.body() != null) {
+            if (evicted != call && !captured.contains(evicted) && evicted.body() != null) {
                 evicted.body().close();
             }
         }
@@ -268,6 +272,11 @@ public final class CaptureSink {
 
     /** 非消费式历史快照（{@link #peek()} 的数据源）：只增（按 {@code maxCaptured} 限量），不受 dump 影响。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> history = new ConcurrentLinkedQueue<>();
+    /**
+     * {@code history} 的近似计数：{@link ConcurrentLinkedQueue#size()} 是 O(n)，而入队路径每条记录都要
+     * 判一次上限，故改用原子计数把长度判断降为 O(1)（近似约束口径与 {@code count} 一致）。
+     */
+    private final AtomicInteger historySize = new AtomicInteger();
     /**
      * 记录到达信号（无锁信号量）：入队点仅做一次无阻塞 {@code release()}，等待者
      * {@code tryAcquire(剩余时间)} —— 生产者不持任何锁、不被任何等待者阻塞
@@ -395,6 +404,7 @@ public final class CaptureSink {
         history.clear();
         pendingByPattern.clear();
         count.set(0);
+        historySize.set(0);
         dropped.set(0);
         timedOutCount.set(0);
         bodyReadFailures.set(0);

@@ -120,6 +120,17 @@ public class CaptureSinkQueryApiTest {
     }
 
     @Test
+    public void historyStaysBoundedAfterTheConsumerDrainsTheQueue() {
+        sink = new CaptureSink(null, 1, 30_000);   // 上限 1 条
+        capture("https://host/api/a");
+        assertEquals(1, sink.dump().size());       // 消费侧抽干：count 归零，但 history 仍存旧记录
+        capture("https://host/api/b");             // 此时入队必须触发 history 驱逐
+
+        assertEquals("history 上限靠 O(1) 计数维持（计数漂移会让它无界增长）", 1, sink.all().size());
+        assertEquals("驱逐的是最旧一条", "https://host/api/b", sink.all().get(0).pattern());
+    }
+
+    @Test
     public void everyWaiterIsWokenWhenARecordArrives() throws Exception {
         java.util.concurrent.CountDownLatch armed = new java.util.concurrent.CountDownLatch(2);
         java.util.concurrent.atomic.AtomicReference<CapturedApiCall> first =

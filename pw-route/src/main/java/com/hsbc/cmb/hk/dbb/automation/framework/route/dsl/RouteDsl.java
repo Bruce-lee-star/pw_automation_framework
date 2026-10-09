@@ -26,6 +26,11 @@ import java.util.Objects;
  *   <li>注册动作本身只做内存操作 + 原生 route() 绑定，注册/注销不触发全局状态清理。</li>
  * </ul>
  *
+ * <p><b>采集 → 回放</b>：{@code MockDsl.fromCaptured(...)} 把采集记录（或 SPI 只读视图）转为 Mock 规则，
+ * 语义是<b>注册期即时快照</b> —— 不留存任何采集载体 / 临时文件引用，故采集器的 {@code reset()} 与驱逐
+ * 不会影响已注册的回放规则（契约见 {@code CapturedBody}）。文本体走文本通道；<b>非文本体走字节保真
+ * 通道</b>逐字节回放（历史实现经 UTF-8 往返会损坏二进制）。
+ *
  * <p>示例：
  * <pre>{@code
  * // MONITOR（fail-open，绝不影响请求）

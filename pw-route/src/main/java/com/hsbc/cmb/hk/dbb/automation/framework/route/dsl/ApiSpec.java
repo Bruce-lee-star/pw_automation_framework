@@ -25,6 +25,12 @@ import java.util.Set;
  *   <li>{@code onlyMainFrame} 默认 {@code true}（跳过 iframe/worker 请求）；</li>
  *   <li>{@code onlyApiCall(true)}：跳过导航请求；未显式设置 resourceType 时仅匹配 xhr/fetch。</li>
  * </ul>
+ *
+ * <p><b>两个 Mock 响应体通道（互斥）</b>：{@code mockBody(String)} 是文本通道（字符集由
+ * {@code mockContentType} 决定）；{@code mockBodyBytes(byte[])} 是<b>字节保真</b>通道，交付给
+ * Playwright 的 {@code FulfillOptions.setBodyBytes}，供图片 / protobuf / gzip 等<b>非文本</b>体使用。
+ * 两者同时设置会在 {@code build()} 期 fail-fast（避免"到底回放哪个体"的歧义）；字节通道在<b>入参与
+ * 读取两端</b>都做防御性拷贝，故外部数组的后续改动不会影响已发布的不可变规则。
  */
 public final class ApiSpec {
 
