@@ -48,6 +48,35 @@ public final class ConfigSource {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConfigSource.class);
 
+    /**
+     * 配置来源层（解析顺序由<b>层序声明</b>决定，高 → 低）。
+     */
+    public enum Layer {
+        /** 环境变量（键名经 {@link #toEnvKey} 归一）。 */
+        ENVIRONMENT,
+        /** 系统属性（{@code -Dkey=value}；{@code FrameworkConfig.setValue} 的落地层）。 */
+        SYSTEM_PROPERTY,
+        /** 配置文件属性（SPI {@link ConfigResolver}；web 侧为 Serenity 合并源）。 */
+        CONFIG_FILE,
+        /** 代码内默认值（最低兜底，非"来源"而是兜底）。 */
+        DEFAULT
+    }
+
+    /** 框架默认层序：系统属性 → 环境变量 → 配置文件 → 默认值（保持既有 C-9 语义不变）。 */
+    public static final List<Layer> DEFAULT_PRECEDENCE =
+            List.of(Layer.SYSTEM_PROPERTY, Layer.ENVIRONMENT, Layer.CONFIG_FILE, Layer.DEFAULT);
+
+    /** 采集/环境优先层序：环境变量 → 系统属性 → 配置文件 → 默认值（route 采集三键声明使用）。 */
+    public static final List<Layer> ENV_FIRST_PRECEDENCE =
+            List.of(Layer.ENVIRONMENT, Layer.SYSTEM_PROPERTY, Layer.CONFIG_FILE, Layer.DEFAULT);
+
+    /** 已上报过「键@来源层」的组合（仅已登记键写入，容量有界 = 注册表规模，杜绝刷屏）。 */
+    private static final java.util.Set<String> REPORTED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 单次解析结果：生效值 + 来源层 + 键（供类型转换层与可观测使用）。 */
+    public record Resolved(String key, String value, Layer layer) {
+    }
+
     private ConfigSource() {
     }
 
@@ -78,37 +107,135 @@ public final class ConfigSource {
     /**
      * 按 key 解析配置值，并对 {@code ENC(<base64>)} / 裸 base64 密文透明解密。
      *
-     * <p>C-9：兜底 {@code defaultValue} 为<b>代码内受信字面量</b>，不作为"用户配置的密文"参与
-     * 裸密文启发式解密；仅当其显式以 {@code ENC(...)} 标记时才解密，避免误伤形似 base64 的默认值。
+     * <p>解析层序取该键的<b>声明式层序</b>（{@link #precedenceFor}）：已登记键用其
+     * {@link ConfigKeys#precedence()} 声明；未登记键用 {@link #DEFAULT_PRECEDENCE}。
+     * 语义与改造前完全一致（系统属性优先、仅 {@code null} 视为未命中、默认值按 C-9 解密）。
      *
      * @param key          配置键（如 {@code playwright.browser.type}）
      * @param defaultValue 键缺失时的兜底默认值
      * @return 解析并解密后的配置值
      */
     public static String resolve(String key, String defaultValue) {
-        // 1) 实时系统属性（最高优先级）：支持运行时动态覆盖 / 测试 toggle，
-        //    且保证 FrameworkConfig.setValue(key, v)（本质是 System.setProperty）即时生效。
-        String fromSys = System.getProperty(key);
-        if (fromSys != null) {
-            return SecretValue.decryptIfNeeded(fromSys);
-        }
-        // 2) 环境变量：与 Serenity 的 ENV 映射一致（点/连字符转下划线 + 大写），
-        //    补齐"仅直读 System.getProperty 会漏掉 ENV"的缺口，使所有 WebFrameworkConfig / ApiFrameworkConfig 均支持 ENV 覆盖。
-        String fromEnv = System.getenv(toEnvKey(key));
-        if (fromEnv != null) {
-            return SecretValue.decryptIfNeeded(fromEnv);
-        }
-        // 3) SPI 扩展配置源（web 提供 Serenity 合并源；缺实现时为空，降级到默认值）。
-        for (ConfigResolver r : resolvers()) {
-            String fromResolver = r.resolve(key);
-            if (fromResolver != null) {
-                return SecretValue.decryptIfNeeded(fromResolver);
+        return resolveWithLayer(key, defaultValue).value();
+    }
+
+    /**
+     * 键的声明式层序：已登记键取其在 {@link ConfigKeys} 的声明，未登记键取框架默认层序。
+     *
+     * @param key 配置键
+     * @return 该键的解析层序（高 → 低，含末位 {@link Layer#DEFAULT}）
+     */
+    public static List<Layer> precedenceFor(String key) {
+        ConfigKeys registered = ConfigKeys.of(key);
+        return registered == null ? DEFAULT_PRECEDENCE : registered.precedence();
+    }
+
+    /**
+     * 显式层序解析（未登记键 / 单测可指定层序；空白仍视为命中，与既有语义一致）。
+     *
+     * @param key          配置键
+     * @param defaultValue 兜底默认值
+     * @param precedence   显式层序（高 → 低）
+     * @return 解析并解密后的配置值
+     */
+    public static String resolve(String key, String defaultValue, List<Layer> precedence) {
+        return resolveWithLayer(key, defaultValue, precedence, false).value();
+    }
+
+    /**
+     * 显式层序 + 空白语义解析。
+     *
+     * @param key               配置键
+     * @param defaultValue      兜底默认值
+     * @param precedence        显式层序（高 → 低）
+     * @param blankFallsThrough 空白值是否视为「未命中」并继续下一层（false = 仅 null 未命中）
+     * @return 解析并解密后的配置值
+     */
+    public static String resolve(String key, String defaultValue,
+                                 List<Layer> precedence, boolean blankFallsThrough) {
+        return resolveWithLayer(key, defaultValue, precedence, blankFallsThrough).value();
+    }
+
+    /**
+     * 解析并返回生效值 + 来源层（层序按 {@link #precedenceFor} 声明）。
+     *
+     * @param key          配置键
+     * @param defaultValue 兜底默认值
+     * @return 生效值与其来源层
+     */
+    public static Resolved resolveWithLayer(String key, String defaultValue) {
+        return resolveWithLayer(key, defaultValue, precedenceFor(key), false);
+    }
+
+    /**
+     * 逐层回退解析：命中即解密返回，未命中继续下一层，全部未命中取兜底默认值。
+     *
+     * <p>C-9：兜底 {@code defaultValue} 为<b>代码内受信字面量</b>，不作为"用户配置的密文"参与
+     * 裸密文启发式解密；仅当其显式以 {@code ENC(...)} 标记时才解密。
+     *
+     * @param key               配置键
+     * @param defaultValue      兜底默认值
+     * @param precedence        层序（高 → 低）
+     * @param blankFallsThrough 空白值是否视为「未命中」并继续下一层
+     * @return 生效值与其来源层
+     */
+    public static Resolved resolveWithLayer(String key, String defaultValue,
+                                            List<Layer> precedence, boolean blankFallsThrough) {
+        for (Layer layer : precedence) {
+            String raw = rawFrom(layer, key);
+            if (raw == null || (blankFallsThrough && raw.trim().isEmpty())) {
+                continue;
             }
+            String value = SecretValue.decryptIfNeeded(raw);
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("[ConfigSource] resolved {} (layer={})", key, layer);
+            }
+            reportOnce(key, layer);
+            return new Resolved(key, value, layer);
         }
-        // 4) 默认值：代码内受信字面量，跳过裸密文启发式；仅显式 ENC(...) 标记才解密（C-9）。
+        return new Resolved(key, defaultDecrypted(defaultValue), Layer.DEFAULT);
+    }
+
+    /**
+     * 单层原始取值（不解密；{@code DEFAULT} 恒返回 null，由兜底分支处理）。
+     */
+    private static String rawFrom(Layer layer, String key) {
+        switch (layer) {
+            case ENVIRONMENT:
+                // 与 Serenity 的 ENV 映射一致（点/连字符转下划线 + 大写）
+                return System.getenv(toEnvKey(key));
+            case SYSTEM_PROPERTY:
+                // 实时系统属性：支持 FrameworkConfig.setValue(key, v) 运行期即时生效
+                return System.getProperty(key);
+            case CONFIG_FILE:
+                for (ConfigResolver r : resolvers()) {
+                    String raw = r.resolve(key);
+                    if (raw != null) {
+                        return raw;
+                    }
+                }
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    /** C-9：兜底默认值为代码内受信字面量，仅显式 {@code ENC(...)} 标记才解密。 */
+    private static String defaultDecrypted(String defaultValue) {
         return ConfigCipher.isEncrypted(defaultValue)
                 ? SecretValue.decryptIfNeeded(defaultValue)
                 : defaultValue;
+    }
+
+    /**
+     * 首次生效上报：仅对<b>已登记键</b>记录一次「键 + 来源层」（不含值，避免敏感值入日志），
+     * 容量有界（≤ 注册表规模 × 层数），热路径不刷屏。
+     */
+    private static void reportOnce(String key, Layer layer) {
+        if (ConfigKeys.of(key) == null || !REPORTED.add(key + '@' + layer)) {
+            return;
+        }
+        LOGGER.info("[ConfigSource] effective {} (layer={})", key, layer);
     }
 
     /**

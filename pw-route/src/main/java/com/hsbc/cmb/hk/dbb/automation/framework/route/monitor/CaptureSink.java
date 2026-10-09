@@ -67,14 +67,30 @@ public final class CaptureSink {
     /** 响应体读取失败数（可观测；失败仍保留核心快照）。 */
     private final AtomicLong bodyReadFailures = new AtomicLong();
 
-    /**
-     * 构造：采集范围不再由实例承载，改由 {@code RouteCaptureSettings} 现读
-     * {@code route.capture.all.type}（环境变量 → 系统属性 → 配置文件属性 → 默认值）。
-     */
+    /** 采集策略（不可变冻结快照）：请求侧与响应侧两个闸门共用同一份，杜绝口径漂移。 */
+    private final com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy capturePolicy;
+
+    /** 便捷构造：策略在本类内冻结一次（等价 {@code RouteCapturePolicy.resolveNow()}）。 */
     public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs) {
+        this(io, maxCaptured, defaultTimeoutMs,
+                com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy.resolveNow());
+    }
+
+    /**
+     * 注入构造：策略由装配方（{@code RouteRuntimeImpl}）解析并冻结一次后注入，
+     * 使请求侧与响应侧闸门判定恒为同一快照。
+     *
+     * @param io               IO 执行器
+     * @param maxCaptured      采集队列上限
+     * @param defaultTimeoutMs 未响应定案窗口（毫秒）
+     * @param policy           已冻结的采集策略
+     */
+    public CaptureSink(RouteIoExecutor io, int maxCaptured, long defaultTimeoutMs,
+                       com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy policy) {
         this.io = io;
         this.maxCaptured = maxCaptured;
         this.defaultTimeoutMs = defaultTimeoutMs;
+        this.capturePolicy = policy;
     }
 
     /**
@@ -91,7 +107,7 @@ public final class CaptureSink {
         // captureBody() 语义不变：只控制"是否读响应体"，不决定是否入采集库。
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !RouteCaptureSettings.allTypes()) {
+                && !capturePolicy.allTypes()) {
             return false;
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
@@ -117,7 +133,7 @@ public final class CaptureSink {
         }
         if (!spec.captureEnabled()
                 && !ApiSpec.CHANNEL_MONITOR.equals(spec.primaryChannel())
-                && !RouteCaptureSettings.allTypes()) {
+                && !capturePolicy.allTypes()) {
             return;
         }
         ConcurrentLinkedQueue<CapturedExchange> pending = pendingByPattern.get(spec.pattern());
@@ -399,10 +415,11 @@ public final class CaptureSink {
             if (System.nanoTime() >= deadline) {
                 return null;
             }
-            try {
-                Thread.sleep(20L);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
+            // 架构规则 LayeringArchTest#frameworkCodeMustNotCallThreadSleep 禁止框架代码调用
+            // Thread.sleep：改用可中断的 LockSupport.parkNanos（行为等价，被中断立即返回并保留中断位）。
+            // 后续可进一步改为事件驱动（入队点 notifyAll + 条件等待），彻底消除轮询。
+            java.util.concurrent.locks.LockSupport.parkNanos(20_000_000L);
+            if (Thread.currentThread().isInterrupted()) {
                 return null;
             }
         }

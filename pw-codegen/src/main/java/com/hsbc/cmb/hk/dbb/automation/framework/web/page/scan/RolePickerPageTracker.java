@@ -328,7 +328,7 @@ final class RolePickerPageTracker {
                         log.warn("[picker] inject attempt {}/3 into the followed page failed (url={}): {}",
                                 attempt, newPage.url(), ex.getMessage());
                         if (attempt < 3) {
-                            try { Thread.sleep(300L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                            try { newPage.waitForLoadState(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#waitForLoadState", ignore); }
                         }
                     }
                 }
@@ -347,7 +347,7 @@ final class RolePickerPageTracker {
                     log.warn("[picker] panel injection attempt {}/3 into the followed page failed (url={}): {}",
                             attempt, newPage.url(), ex.getMessage());
                     if (attempt < 3) {
-                        try { Thread.sleep(300L); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                        try { newPage.waitForLoadState(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#waitForLoadState", ignore); }
                     }
                 }
             }

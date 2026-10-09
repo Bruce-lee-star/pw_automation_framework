@@ -1026,17 +1026,24 @@ public enum ConfigKeys {
     API_CAPTURE_MAX_RESPONSE_SIZE_MB("api.capture.max.response.size.mb", "50", "API 捕获响应体最大体积（MB），超出即截断"),
 
     // ===================== Route 采集（对应 RouteConfig.DEFAULT_CAPTURE_*）=====================
-    //  优先级：环境变量 → 系统属性 → 配置文件属性 → 下列默认值（见 RouteCaptureSettings）。
-    //  默认值须与 RouteConfig.DEFAULT_CAPTURE_* 同值（由 RouteCaptureSettingsTest 防漂移）。
+    //  层序经 ConfigSource.ENV_FIRST_PRECEDENCE 声明：环境变量 → 系统属性 → 配置文件属性 → 下列默认值
+    //  （框架其余键仍为系统属性优先 ⇒ 语义零变化）。默认值须与 RouteConfig.DEFAULT_CAPTURE_* 同值
+    //  （由 RouteCapturePolicyTest 防漂移）。
 
     /** 采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK（显式 .capture() 始终强制采集）。 */
-    ROUTE_CAPTURE_ALL_TYPE("route.capture.all.type", "false", "路由采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK"),
+    ROUTE_CAPTURE_ALL_TYPE("route.capture.all.type", "false",
+            "路由采集范围：是否采集 MONITOR 之外的 DELAY / MODIFY / MOCK",
+            ConfigSource.ENV_FIRST_PRECEDENCE),
 
     /** 响应体内联阈值（字节）：不超过即原字节持内存。 */
-    ROUTE_CAPTURE_INLINE_MAX_BYTES("route.capture.inline.max.bytes", "262144", "路由采集响应体内联阈值（字节）"),
+    ROUTE_CAPTURE_INLINE_MAX_BYTES("route.capture.inline.max.bytes", "262144",
+            "路由采集响应体内联阈值（字节）",
+            ConfigSource.ENV_FIRST_PRECEDENCE),
 
     /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
-    ROUTE_CAPTURE_GZIP_MAX_BYTES("route.capture.gzip.max.bytes", "8388608", "路由采集响应体文本型 gzip 上限（字节）"),
+    ROUTE_CAPTURE_GZIP_MAX_BYTES("route.capture.gzip.max.bytes", "8388608",
+            "路由采集响应体文本型 gzip 上限（字节）",
+            ConfigSource.ENV_FIRST_PRECEDENCE),
 
     /** Monitor API 响应是否持久化到数据库。 */
     MONITOR_DB_STORE_ENABLED("monitor.db.store.enabled", "false", "Monitor API 响应数据库持久化"),
@@ -1134,11 +1141,48 @@ public enum ConfigKeys {
     private final String key;
     private final String defaultValue;
     private final String description;
+    /** 声明式解析层序（高 → 低，见 {@link ConfigSource}）。 */
+    private final List<ConfigSource.Layer> precedence;
 
+    /** 键名 → 条目 索引（类加载期构建；供 {@link ConfigSource#precedenceFor(String)} 查声明层序）。 */
+    private static final java.util.Map<String, ConfigKeys> BY_KEY = buildIndex();
+
+    /** 既有 3 参构造：层序取框架默认（系统属性 → 环境变量 → 配置文件 → 默认值）⇒ 既有键语义零变化。 */
     ConfigKeys(String key, String defaultValue, String description) {
+        this(key, defaultValue, description, ConfigSource.DEFAULT_PRECEDENCE);
+    }
+
+    /** 4 参构造：显式声明层序（如 route 采集三键用 {@link ConfigSource#ENV_FIRST_PRECEDENCE}）。 */
+    ConfigKeys(String key, String defaultValue, String description,
+               List<ConfigSource.Layer> precedence) {
         this.key = key;
         this.defaultValue = defaultValue;
         this.description = description;
+        // 不可变快照：不接受调用方后续修改（声明式层序应为常量）
+        this.precedence = List.copyOf(precedence);
+    }
+
+    /**
+     * 按键名查注册条目；未登记键返回 {@code null}（未登记键走框架默认层序）。
+     *
+     * @param key 配置键
+     * @return 对应条目或 {@code null}
+     */
+    public static ConfigKeys of(String key) {
+        return key == null ? null : BY_KEY.get(key);
+    }
+
+    /** 本键的声明式解析层序（高 → 低，含末位兜底层）。 */
+    public List<ConfigSource.Layer> precedence() {
+        return precedence;
+    }
+
+    private static java.util.Map<String, ConfigKeys> buildIndex() {
+        java.util.Map<String, ConfigKeys> index = new java.util.HashMap<>();
+        for (ConfigKeys c : values()) {
+            index.put(c.key, c);
+        }
+        return java.util.Map.copyOf(index);
     }
 
     public String key() {

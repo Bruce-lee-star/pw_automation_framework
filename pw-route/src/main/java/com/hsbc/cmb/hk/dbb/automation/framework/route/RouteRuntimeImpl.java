@@ -66,6 +66,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     private final RouteRetireExecutor retire;
     private final MonitorSink monitor;
     private final CaptureSink capture;
+    /** 采集策略：构造期解析并冻结一次，供两个采集闸门共用（杜绝口径漂移）。 */
+    private final RouteCapturePolicy capturePolicy;
     private final RouteDispatcher dispatcher = new RouteDispatcher();
     private final ConcurrentMap<String, PatternBinder> binders = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -101,7 +103,9 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         this.io = new RouteIoExecutor(tag, config.ioThreads(), config.ioQueueCapacity());
         this.retire = new RouteRetireExecutor(tag);
         this.monitor = new MonitorSink(io, this::retireByPurpose);
-        this.capture = new CaptureSink(io, config.maxCaptured(), config.captureTimeoutMs());
+        // 采集配置在本刻唯一解析并冻结（RouteCapturePolicy）：两个采集闸门共用同一快照
+        this.capturePolicy = RouteCapturePolicy.resolveNow();
+        this.capture = new CaptureSink(io, config.maxCaptured(), config.captureTimeoutMs(), this.capturePolicy);
         this.sweeper = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
             public Thread newThread(Runnable r) {
