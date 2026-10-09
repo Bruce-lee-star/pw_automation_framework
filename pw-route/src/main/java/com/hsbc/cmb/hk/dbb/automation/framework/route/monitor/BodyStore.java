@@ -160,13 +160,17 @@ final class BodyStore implements CapturedBody {
     /** 删除落盘文件（幂等；内存/gzip 场景无操作）。 */
     @Override
     public void close() {
-        if (file != null) {
-            try {
-                Files.deleteIfExists(file);
-            } catch (IOException e) {
-                // 收尾阶段删除失败只影响临时目录整洁，不影响任何业务语义
-                cachedText = null;
-            }
+        // 语义：close 之后不得再读。无论删除成败都失效解码缓存 —— 否则 FILE 档删除失败时
+        // text() 会静默返回 close 前的陈旧文本（内存/gzip 档字节仍在，重解码即可）。
+        cachedText = null;
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException e) {
+            // 立即删不掉（Windows 上文件被占用等）⇒ 交 JVM 退出兜底，绝不影响业务语义
+            file.toFile().deleteOnExit();
         }
     }
 

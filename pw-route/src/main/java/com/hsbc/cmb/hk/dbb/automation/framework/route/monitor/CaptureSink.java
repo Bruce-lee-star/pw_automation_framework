@@ -178,6 +178,7 @@ public final class CaptureSink {
             enqueue(snapshot, null, contentType, false);
             return;
         }
+        CapturedBody created = null;
         try {
             // 【不截断】整响应保留 —— 供业务"取整响应 → 改指定节点 → 当 mock 回放"使用。
             // captureBodyLimitBytes 字段保留（兼容旧写法）但不再参与截断；截断标志恒为 false。
@@ -185,14 +186,18 @@ public final class CaptureSink {
             // 文本型且 ≤gzipMax 内存 gzip；否则落盘临时文件（落盘失败 fail-open 退回内存）。
             // 本方法不再整体解码字符串：文本改由 CapturedBody.text(charset) 按需解码并缓存，
             // 编码口径仍由 contentType 决定（访问器内解析），故不再有"字符串往返"的堆峰值。
-            CapturedBody body = BodyStore.of(bytes, contentType,
+            created = BodyStore.of(bytes, contentType,
                     capturePolicy.inlineMaxBytes(), capturePolicy.gzipMaxBytes());
-            enqueue(snapshot, body, contentType, false);
+            enqueue(snapshot, created, contentType, false);
         } catch (Throwable t) {
             // of() 内部已 fail-open（gzip/落盘失败均退回内存）；此处兜住任何意外并退回内存原字节
             bodyReadFailures.incrementAndGet();
             LOGGER.debug("[Route] capture body retention failed, falling back to in-memory bytes: {}",
                     t.toString());
+            if (created != null) {
+                // 已建但未能交付（例如入队途中出错）⇒ 就地释放，避免"丢弃旧的 + 新建一个"双份泄漏
+                created.close();
+            }
             try {
                 enqueue(snapshot, BodyStore.of(bytes, contentType, Integer.MAX_VALUE, 0), contentType, false);
             } catch (Throwable fallbackFailure) {
@@ -219,9 +224,11 @@ public final class CaptureSink {
         history.add(call);
         while (history.size() > maxCaptured) {
             CapturedApiCall evicted = history.poll();
-            // 驱逐即释放；注意 evicted 可能仍被消费队列 captured 持有（同一对象），
-            // 故仅在"不是本次刚入队的这条"时关闭 —— 否则会关掉已交付/待交付对象的文件。
-            if (evicted != null && evicted != call && evicted.body() != null) {
+            // 驱逐即释放，但必须排除"仍被消费队列持有"的对象：同一对象同处两队列，
+            // 关掉它会让随后的 dump() 把已失效载体交给业务（use-after-close）。
+            // 残留（本处不关、且此后无人关）由 reset() 与 JVM 退出兜底覆盖。
+            if (evicted != null && evicted != call && !captured.contains(evicted)
+                    && evicted.body() != null) {
                 evicted.body().close();
             }
         }
@@ -373,6 +380,9 @@ public final class CaptureSink {
         dropped.set(0);
         timedOutCount.set(0);
         bodyReadFailures.set(0);
+        // 唤醒可能阻塞在 waitFor 的等待者：history 已清空，其 predicate 恒不满足，
+        // 若不通知只能等到超时（reset 通常在用例收尾，不该让等待线程白等）。
+        recordArrival.release();
     }
 
     /** 关闭一批记录持有的响应体载体（幂等；文件型由此删除临时文件）。 */
