@@ -41,7 +41,8 @@ public final class ApiSpec {
     private final Integer mockStatus;
     private final String mockBody;
     /**
-     * 二进制 Mock 响应体（字节<b>保真</b>通道）：非 null 时优先于 {@link #mockBody}。
+     * 二进制 Mock 响应体（字节<b>保真</b>通道）：与 {@link #mockBody} <b>互斥</b>（同时设置会在
+     * {@code build()} 时报错，避免"到底回放哪个体"的歧义）。
      *
      * <p>供图片 / protobuf / gzip 等<b>非文本</b>体使用 —— 走 {@code mockBody(String)} 通道会因
      * UTF-8 往返而损坏。不可变：构造期做防御性拷贝（数组非不可变类型）。
@@ -788,7 +789,7 @@ public final class ApiSpec {
         }
 
         /**
-         * 二进制 Mock 响应体（<b>字节保真</b>；非 null 时优先于 {@link #mockBody(String)}）。
+         * 二进制 Mock 响应体（<b>字节保真</b>；与 {@link #mockBody(String)} 互斥，见 {@code build()}）。
          *
          * @param bodyBytes 原始响应体字节（构造 ApiSpec 时会做防御性拷贝）
          */
@@ -1085,9 +1086,14 @@ public final class ApiSpec {
         }
 
         public ApiSpec build() {
-            if (mockIntercept && (mockBody != null || mockStatus != null || !mockHeaders.isEmpty())) {
+            if (mockIntercept && (mockBody != null || mockBodyBytes != null || mockStatus != null
+                    || !mockHeaders.isEmpty())) {
                 throw new IllegalArgumentException("interceptResponse() conflicts with static mock body/status/headers; "
                         + "use mockBodyFromFile() + replaceField() for static-body field replacement");
+            }
+            if (mockBody != null && mockBodyBytes != null) {
+                throw new IllegalArgumentException("mockBody(String) and mockBodyBytes(byte[]) are mutually "
+                        + "exclusive; declare exactly one mock response body");
             }
             return new ApiSpec(this);
         }
