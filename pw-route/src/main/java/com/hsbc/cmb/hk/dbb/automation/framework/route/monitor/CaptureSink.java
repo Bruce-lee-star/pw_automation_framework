@@ -201,9 +201,13 @@ public final class CaptureSink {
         captured.add(call);
         // 非消费式历史（peek 用）：与消费式队列并行维护，保证"用例收尾复核真实流量"不会被
         // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
-        history.add(call);
-        while (history.size() > maxCaptured) {
-            history.poll();
+        // 事件驱动：状态写入（history）与通知在同一监视器内完成 —— 既不丢唤醒，也不产生"裸通知"（NN_NAKED_NOTIFY）
+        synchronized (recordArrival) {
+            history.add(call);
+            while (history.size() > maxCaptured) {
+                history.poll();
+            }
+            recordArrival.notifyAll();
         }
         count.incrementAndGet();
         // 捕获结果 → Serenity 报告：报告要能回答"采到了什么、成功没"。**纯采集规则没有响应侧期望**，
@@ -236,6 +240,11 @@ public final class CaptureSink {
 
     /** 非消费式历史快照（{@link #peek()} 的数据源）：只增（按 {@code maxCaptured} 限量），不受 dump 影响。 */
     private final ConcurrentLinkedQueue<CapturedApiCall> history = new ConcurrentLinkedQueue<>();
+    /**
+     * 记录到达监视器：入队点在其上 {@code notifyAll}，{@link #waitFor} 在其上条件等待
+     * —— 事件驱动、无固定间隔轮询（框架内禁止 {@code Thread.sleep}）。
+     */
+    private final Object recordArrival = new Object();
 
     private static CapturedApiCall toDto(CapturedExchange snapshot, String body, byte[] bodyBytes,
                                          String contentType, boolean truncated) {
@@ -406,21 +415,25 @@ public final class CaptureSink {
             return null;
         }
         long deadline = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
-        while (true) {
-            for (CapturedApiCall c : history) {
-                if (c != null && predicate.test(c)) {
-                    return c;
+        synchronized (recordArrival) {
+            while (true) {
+                // 先扫描后等待，且扫描在监视器内 ⇒ 与入队点的 notifyAll 无丢唤醒窗口
+                for (CapturedApiCall c : history) {
+                    if (c != null && predicate.test(c)) {
+                        return c;
+                    }
                 }
-            }
-            if (System.nanoTime() >= deadline) {
-                return null;
-            }
-            // 架构规则 LayeringArchTest#frameworkCodeMustNotCallThreadSleep 禁止框架代码调用
-            // Thread.sleep：改用可中断的 LockSupport.parkNanos（行为等价，被中断立即返回并保留中断位）。
-            // 后续可进一步改为事件驱动（入队点 notifyAll + 条件等待），彻底消除轮询。
-            java.util.concurrent.locks.LockSupport.parkNanos(20_000_000L);
-            if (Thread.currentThread().isInterrupted()) {
-                return null;
+                long remainingNs = deadline - System.nanoTime();
+                if (remainingNs <= 0L) {
+                    return null;
+                }
+                // 事件驱动等待：由入队点 notifyAll 唤醒，无固定间隔轮询（框架内禁止 Thread.sleep）
+                try {
+                    recordArrival.wait(remainingNs / 1_000_000L, (int) (remainingNs % 1_000_000L));
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
             }
         }
     }
