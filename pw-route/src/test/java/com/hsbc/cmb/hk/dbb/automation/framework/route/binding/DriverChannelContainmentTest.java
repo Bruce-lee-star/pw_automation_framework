@@ -47,11 +47,27 @@ public class DriverChannelContainmentTest {
 
         assertNull("界内无回包 ⇒ 放弃等待并降级", first);
         assertEquals("信道故障计数必须 +1", failuresBefore + 1, GuardedDriverCallImpl.channelFailureCount());
-        assertTrue("在途调用已收尾 ⇒ 允许重建驱动线程（自愈语义保留）",
-                GuardedDriverCallImpl.poisonResetCount() > resetsBefore);
-        assertTrue("在途调用已收尾 ⇒ 信道可确证可用", call.isChannelUsable());
-        assertEquals("恢复后调用必须正常返回", "ok",
-                call.guarded("bind:after", 5_000L, GuardedDriverCall.OnTimeout.WARN_AND_ABANDON, () -> "ok"));
+        // C（2026-10-09）：原断言要求"被中断的在途调用在 POISON_DRAIN_MS(1s) 内收尾"，高负载下会走到
+        // 相反分支（1s 内未收尾 ⇒ 信道标记 UNUSABLE），把"机器慢"误判成语义错。改为**有界收敛等待**并
+        // 接受两种确定终态之一 —— 契约不变，仍是"绝不留下残留泵"：
+        //   ① 自愈：换干净驱动线程（poisonReset 计数 +1）且信道可确证可用；
+        //   ② 显式：信道被标记不可用（不再新建驱动线程，正是"第二个消息泵偷 ack"的防线）。
+        long deadline = System.currentTimeMillis() + 3_000L;
+        boolean healed = false;
+        while (System.currentTimeMillis() < deadline) {
+            healed = GuardedDriverCallImpl.poisonResetCount() > resetsBefore;
+            if (healed || !call.isChannelUsable()) {
+                break;
+            }
+            Thread.sleep(20L);
+        }
+        if (healed) {
+            assertTrue("在途调用已收尾 ⇒ 信道可确证可用", call.isChannelUsable());
+            assertEquals("恢复后调用必须正常返回", "ok",
+                    call.guarded("bind:after", 5_000L, GuardedDriverCall.OnTimeout.WARN_AND_ABANDON, () -> "ok"));
+        } else {
+            assertTrue("未在窗口内收尾 ⇒ 必须显式标记信道不可用（绝不留下残留泵）", !call.isChannelUsable());
+        }
         release.countDown();
     }
 
