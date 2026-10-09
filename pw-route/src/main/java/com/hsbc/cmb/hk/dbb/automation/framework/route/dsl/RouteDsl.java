@@ -743,8 +743,13 @@ public final class RouteDsl {
          * 用于让"非 MONITOR 主渠道"的规则也参与采集。
          *
          * <p>capture 是横切观测：不参与终结所有权、不改变请求流，与 mock/modify/delay/monitor
-         * 能力共存无竞态——同一请求同时被能力处理与被采集（响应侧挂载于 context.onResponse，
-         * 事件线程零阻塞，响应体读取在响应轮询线程就地快照）。
+         * 能力共存无竞态——同一请求同时被能力处理与被采集。
+         *
+         * <p><b>响应侧不订阅 {@code context.onResponse}</b>（该订阅是驱动侧
+         * {@code Object doesn't exist: response@…} 竞态的唯一触发源，已被刻意移除）：由
+         * {@code RouteRuntimeImpl} 在 route 分发入口持 {@code Request} 有界轮询
+         * {@code Request#existingResponse()} 配对后投递，响应体在轮询线程<b>就地</b>快照
+         * （{@code Response.body()} 是协议调用，必须趁句柄存活时读）。
          */
         public T capture() {
             b.capture(true);
