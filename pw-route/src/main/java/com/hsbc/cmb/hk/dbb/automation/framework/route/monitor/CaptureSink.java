@@ -518,16 +518,29 @@ public final class CaptureSink {
         }
     }
 
-    /** 转换为跨模块只读视图（业务侧读取；pw-core 的 View 内部已对集合做不可变拷贝）。 */
+    /**
+     * 转换为跨模块只读视图（业务侧读取；pw-core 的 View 内部已对集合做不可变拷贝）。
+     *
+     * <p><b>内存口径（改造点）</b>：原先分别调用 {@code responseBody()}（把解码结果<b>永久缓存进共享载体</b>
+     * 的 {@code cachedText}，被 history/captured 长期引用）与 {@code responseBodyBytes()}（再读一遍字节），
+     * 大体单次查询既多一次全量读取、又把字符串长期钉在共享载体上。
+     * 现在<b>只读一次字节</b>，文本由同一份字节一次性解码 —— 读取次数不增、载体不再被解码结果钉住，
+     * 对外契约（两个字段都有值、字符集口径一致）完全不变。
+     */
     public static com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView toView(
             CapturedApiCall c) {
         if (c == null) {
             return null;
         }
+        byte[] responseBytes = c.responseBodyBytes();   // 单次读取（副本）
+        String responseText = responseBytes == null ? null
+                : new String(responseBytes,
+                        com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType
+                                .parse(c.contentType()).charset());
         return new com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView(
                 c.pattern(), c.method(), c.url(),
                 c.requestHeaders(), c.requestBodyPreview(), c.responseStatus(), c.responseHeaders(),
-                c.responseBody(), c.responseBodyTruncated(), c.durationMs(), c.timedOut(),
-                c.recordedAtMillis(), c.channels(), c.contentType(), c.responseBodyBytes());
+                responseText, c.responseBodyTruncated(), c.durationMs(), c.timedOut(),
+                c.recordedAtMillis(), c.channels(), c.contentType(), responseBytes);
     }
 }
