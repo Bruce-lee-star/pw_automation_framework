@@ -353,17 +353,37 @@ public record CapturedApiCall(String pattern, String method, String url,
         }
     }
 
-    /** 体段落：整体缩进 4 空格（JSON 自动 pretty；空体整段省略）。 */
+    /**
+     * 证据文本中单个体最多渲染的字符数 —— 与 {@code RouteDispatcher} / {@code CapturedExchange}
+     * 既有的证据体上限（4096）同口径，避免同一份报告里两套截断阈值。
+     */
+    static final int EVIDENCE_BODY_MAX_CHARS = 4096;
+
+    /**
+     * 体段落：整体缩进 4 空格（JSON 自动 pretty；空体整段省略）。
+     *
+     * <p><b>证据有界化</b>：只渲染首 {@value #EVIDENCE_BODY_MAX_CHARS} 字符，并标注总长度 ——
+     * 超大响应不再把整份 pretty JSON 灌进日志/报告（这正是"体不撑爆堆"的另一半：
+     * 遗留存储形态之外，报告渲染也必须是有界的）。截断在 {@code prettyBody} <b>之前</b>完成，
+     * 故也不会为超大 JSON 付出整体格式化开销。原体（{@code responseBody()} /
+     * {@code responseBodyBytes()}）与 DTO 其他字段均<b>不受影响</b>。
+     */
     private static void appendBody(StringBuilder d, String label, String body, boolean truncated) {
         if (body == null || body.isEmpty()) {
             return;
         }
+        boolean bounded = body.length() > EVIDENCE_BODY_MAX_CHARS;
+        String rendered = bounded ? body.substring(0, EVIDENCE_BODY_MAX_CHARS) : body;
         d.append("  ").append(label).append(':');
         if (truncated) {
             d.append(" [truncated]");
         }
+        if (bounded) {
+            d.append(" [evidence limited to first ").append(EVIDENCE_BODY_MAX_CHARS)
+                    .append(" of ").append(body.length()).append(" chars]");
+        }
         d.append('\n');
-        for (String line : prettyBody(body).split("\n", -1)) {
+        for (String line : prettyBody(rendered).split("\n", -1)) {
             d.append("    ").append(line).append('\n');
         }
     }

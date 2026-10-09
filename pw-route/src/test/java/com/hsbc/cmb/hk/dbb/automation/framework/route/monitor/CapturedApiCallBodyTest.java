@@ -6,7 +6,9 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * 载体接入后 {@link CapturedApiCall} 派生访问器的契约（加法式迁移正确性）。
@@ -53,5 +55,19 @@ public class CapturedApiCallBodyTest {
                 "legacy-body", false, 1L, false, 2L);
         assertEquals("无载体时回落旧文本组件", "legacy-body", call.responseBody());
         assertNull("旧路径字节组件为 null，语义不得改变", call.responseBodyBytes());
+    }
+
+    @Test
+    public void evidenceBodyIsBoundedWhileTheStoredBodyIsNot() {
+        String big = "x".repeat(5000);
+        CapturedApiCall call = new CapturedApiCall("p", "GET", "https://host/big", null, null, 200, null,
+                big, false, 1L, false, 2L);
+        String detail = call.detailWith();
+        assertTrue("证据须标注有界化与总长度",
+                detail.contains("[evidence limited to first 4096 of 5000 chars]"));
+        assertFalse("证据不得把整份 5000 字符体灌进去", detail.contains(big));
+        // 有界化只作用于证据文本：原体与字节组件不受影响
+        assertEquals(5000, call.responseBody().length());
+        assertNull("证据路径无载体 ⇒ 字节组件保持 null（语义不变）", call.responseBodyBytes());
     }
 }
