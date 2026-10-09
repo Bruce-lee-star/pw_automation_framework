@@ -555,9 +555,7 @@ public final class CaptureSink {
         }
         byte[] responseBytes = c.responseBodyBytes();   // 单次读取（副本）
         String responseText = responseBytes == null ? null
-                : new String(responseBytes,
-                        com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType
-                                .parse(c.contentType()).charset());
+                : new String(responseBytes, MediaType.parse(c.contentType()).charset());
         return new com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView(
                 c.pattern(), c.method(), c.url(),
                 c.requestHeaders(), c.requestBodyPreview(), c.responseStatus(), c.responseHeaders(),
