@@ -375,6 +375,28 @@ public final class RouteDispatcher {
                         headers.put("content-type", spec.mockContentType());
                     }
                     String body = spec.mockBody();
+                    if (body == null && spec.mockBodyBytes() != null) {
+                        // 字节保真通道（非文本体），且规则声明了字段替换：替换对二进制"不适用"
+                        // （FieldReplacer 契约：明确失败、保留原体，不猜测）。必须按原字节交付 ——
+                        // 修复前本分支只取 spec.mockBody()（字节通道下为 null），会以"无体"fulfill
+                        // 静默丢掉整个响应体：fromCaptured 的非文本采集记录 + replaceField 即会踩到。
+                        byte[] bytes = spec.mockBodyBytes();
+                        String ct = spec.mockContentType() == null ? "<missing>" : spec.mockContentType();
+                        java.util.List<String> skipped = new java.util.ArrayList<>();
+                        for (String path : spec.mockReplacements().keySet()) {
+                            skipped.add("replace field '" + path + "' skipped: body is binary (" + ct
+                                    + "); original bytes kept");
+                        }
+                        spec.conditionalReplacements().forEach(c -> skipped.add(
+                                "conditional 'when " + c.whenPath() + "' skipped: body is not JSON (" + ct + ")"));
+                        logReplacementFailures(spec.pattern(), skipped);
+                        RouteAction.fulfillWithBody(route, spec.mockStatus(), headers, bytes);
+                        runtime.claims().markTerminal(claim, true);
+                        reportOutcome("MOCK RESULT", spec, request, spec.mockStatus(), headers, null,
+                                "static bytes + as-is (replacePaths=" + spec.mockReplacements().keySet()
+                                        + " not applicable to binary body, skipped=" + skipped.size() + ")", trace);
+                        return;
+                    }
                     FieldReplacer.ReplaceResult replaced = FieldReplacer.replace(
                             MediaType.parse(spec.mockContentType()), body, spec.mockReplacements(),
                             spec.conditionalReplacements());

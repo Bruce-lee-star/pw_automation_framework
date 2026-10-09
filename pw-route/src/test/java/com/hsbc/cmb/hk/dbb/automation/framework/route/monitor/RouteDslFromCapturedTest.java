@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteRuntime;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
 import com.microsoft.playwright.APIRequestContext;
 import com.microsoft.playwright.BrowserContext;
@@ -158,5 +159,79 @@ public class RouteDslFromCapturedTest {
         org.junit.Assert.assertArrayEquals("非文本体必须逐字节回放（不得经字符集往返）",
                 binary, captor.getValue().bodyBytes);
         assertEquals("字节通道下不得再设字符串体", null, captor.getValue().body);
+    }
+
+    /**
+     * 采集 + 改字段：回放层的"写入路径"由 {@code replaceField} 承担（两者写同一个 Mock 规格），
+     * 本条钉住该组合可用 —— 这也是判定"无需新增 NodeMutator 之类类型"的依据。
+     */
+    @Test
+    public void capturedJsonBodyCanBeAdjustedBeforeReplay() {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        byte[] raw = "{\"code\":0,\"name\":\"captured\"}".getBytes(StandardCharsets.UTF_8);
+        CapturedBody body = BodyStore.of(raw, "application/json", 1024, 1024);
+        CapturedApiCall captured = new CapturedApiCall("/api/cap", "GET", "https://host/api/cap",
+                null, null, 200, Map.of(), null, false, 12L, false, 1L, null, "MONITOR",
+                "application/json", null, body);
+
+        RouteDsl.on(ctx).api("/api/cap").mock().fromCaptured(captured)
+                .replaceField("$.name", "replayed")
+                .register();
+        body.close();   // 采集载体关闭后，仍须"快照 + 改写"可用
+
+        Consumer<Route> handler = captureHandler();
+        Request request = mockRequest("https://host/api/cap");
+        Route route = mock(Route.class);
+        when(route.request()).thenReturn(request);
+        handler.accept(route);
+        runtime.io().close();   // 字段替换在 IO 线程执行：关池等待落定
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Route.FulfillOptions> captor =
+                ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
+        verify(route).fulfill(captor.capture());
+        assertEquals("回放体必须是采集快照叠加字段替换", (Object) "{\"code\":0,\"name\":\"replayed\"}",
+                (Object) captor.getValue().body);
+        assertEquals("状态码必须来自采集记录", 200L, (long) captor.getValue().status);
+    }
+
+    /**
+     * 非文本采集体 + 字段替换：替换对二进制"不适用"（{@code FieldReplacer} 契约：明确失败、保留原体），
+     * 但<b>体本身必须按原字节交付</b>。修复前静态体分支只取字符串通道（字节通道下为 null）⇒
+     * 以"无体"fulfill，整个响应体被静默丢弃。
+     */
+    @Test
+    public void capturedBinaryBodyKeepsItsBytesWhenAFieldReplacementIsRequested() {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        byte[] binary = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x00, (byte) 0xFF, (byte) 0x90};
+        CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);
+        CapturedApiCall captured = new CapturedApiCall("/api/png", "GET", "https://host/api/png",
+                null, null, 200, Map.of(), null, false, 5L, false, 1L, null, "MONITOR", "image/png", null,
+                carrier);
+
+        RouteDsl.on(ctx).api("/api/png").mock().fromCaptured(captured)
+                .replaceField("$.name", "x")
+                .register();
+        carrier.close();
+
+        Consumer<Route> handler = captureHandler();
+        Request request = mockRequest("https://host/api/png");
+        Route route = mock(Route.class);
+        when(route.request()).thenReturn(request);
+        handler.accept(route);
+        runtime.io().close();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Route.FulfillOptions> captor =
+                ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
+        verify(route).fulfill(captor.capture());
+        org.junit.Assert.assertArrayEquals("二进制回放体必须逐字节保留（不得因替换声明而丢体）",
+                binary, captor.getValue().bodyBytes);
+        assertEquals("字节通道下不得设字符串体", null, captor.getValue().body);
+        assertEquals("状态码必须来自采集记录", 200L, (long) captor.getValue().status);
     }
 }

@@ -161,6 +161,33 @@ public final class RouteAction {
         }
     }
 
+    /**
+     * 以显式 status/headers/<b>字节体</b>终结（IO 线程内调用）。
+     *
+     * <p>供<b>字节保真通道</b>使用：非文本 Mock 体（或 {@code fromCaptured} 的非文本采集记录）
+     * 只存在于 {@code mockBodyBytes}，当规则同时声明了字段替换时必须按原字节交付 ——
+     * 替换对二进制"不适用"（{@code FieldReplacer} 契约：明确失败、保留原体）。
+     */
+    public static boolean fulfillWithBody(Route route, Integer status, Map<String, String> headers, byte[] body) {
+        try {
+            Route.FulfillOptions options = new Route.FulfillOptions();
+            if (status != null) {
+                options.setStatus(status);
+            }
+            if (headers != null && !headers.isEmpty()) {
+                options.setHeaders(headers);
+            }
+            if (body != null) {
+                options.setBodyBytes(body);
+            }
+            route.fulfill(options);
+            return true;
+        } catch (RuntimeException e) {
+            LOGGER.warn("[Route] fulfill(bodyBytes) failed for url='{}': {}", route.request().url(), e.toString());
+            return false;
+        }
+    }
+
     /** 终止请求（仅 MOCK 在途任务取消场景使用；其余场景一律 fallback）。 */
     public static boolean abort(Route route, String errorCode) {
         try {
