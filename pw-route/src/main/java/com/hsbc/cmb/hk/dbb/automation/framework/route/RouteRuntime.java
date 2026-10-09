@@ -199,6 +199,45 @@ public interface RouteRuntime extends AutoCloseable {
         return List.of();
     }
 
+    // ==================== 采集数据的索引查询与清理（业务读取 API 采集信息） ====================
+    // 全部提供 default 默认实现：替身/未实现该能力的 runtime 不会因为接口方法增加而编译失败。
+
+    /** 清空本 runtime 的采集数据（用例收尾清理；幂等）。默认无操作。 */
+    default void resetCapturedApis() {
+        // 默认无操作
+    }
+
+    /** 全部采集记录（非消费式）。默认空。 */
+    default List<CapturedApiCall> allCapturedApis() {
+        return List.of();
+    }
+
+    /** 每个 pattern 的最近一次采集记录（非消费式）。默认空。 */
+    default List<CapturedApiCall> lastCapturedPerPattern() {
+        return List.of();
+    }
+
+    /** 指定 endpoint 的最近一次采集记录（非消费式）。默认 null。 */
+    default CapturedApiCall lastCapturedApi(String endpoint) {
+        return null;
+    }
+
+    /** 指定 URL 的全部采集记录（非消费式）。默认空。 */
+    default List<CapturedApiCall> capturedApisByUrl(String url) {
+        return List.of();
+    }
+
+    /** 指定渠道的全部采集记录（非消费式；渠道名 MOCK/MODIFY/MONITOR/DELAY）。默认空。 */
+    default List<CapturedApiCall> capturedApisByChannel(String channel) {
+        return List.of();
+    }
+
+    /** 等待首个满足条件的采集记录（非消费式）。默认 null。 */
+    default CapturedApiCall waitForCapturedApi(java.util.function.Predicate<CapturedApiCall> predicate,
+                                               long timeoutMs) {
+        return null;
+    }
+
     /** 取走本 runtime 已定案的断言失败（消费式；幂等）。 */
     List<RouteAssertionFailure> drainSettledAssertionFailures();
 

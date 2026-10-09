@@ -294,6 +294,44 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         return capture.peek();
     }
 
+    // ---------- 采集数据索引查询与清理：一律委托 CaptureSink（非消费式读取 + 收尾清理） ----------
+
+    @Override
+    public void resetCapturedApis() {
+        capture.reset();
+    }
+
+    @Override
+    public List<CapturedApiCall> allCapturedApis() {
+        return capture.all();
+    }
+
+    @Override
+    public List<CapturedApiCall> lastCapturedPerPattern() {
+        return capture.allLastPerPattern();
+    }
+
+    @Override
+    public CapturedApiCall lastCapturedApi(String endpoint) {
+        return capture.lastOf(endpoint);
+    }
+
+    @Override
+    public List<CapturedApiCall> capturedApisByUrl(String url) {
+        return capture.byUrl(url);
+    }
+
+    @Override
+    public List<CapturedApiCall> capturedApisByChannel(String channel) {
+        return capture.byChannel(channel);
+    }
+
+    @Override
+    public CapturedApiCall waitForCapturedApi(java.util.function.Predicate<CapturedApiCall> predicate,
+                                              long timeoutMs) {
+        return capture.waitFor(predicate, timeoutMs);
+    }
+
     @Override
     public List<RouteAssertionFailure> drainSettledAssertionFailures() {
         List<RouteAssertionFailure> result = new ArrayList<>();
