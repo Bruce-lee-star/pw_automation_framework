@@ -495,6 +495,9 @@ public final class RouteDispatcher {
                     FieldReplacer.ReplaceResult replaced = FieldReplacer.replace(mediaType, body, spec.mockReplacements(),
                             spec.conditionalReplacements());
                     logReplacementFailures(spec.pattern(), replaced.failures());
+                    // 拦截路径只透传真实响应头：intercept 规则不可能声明 mockHeaders（build() 期即拒绝
+                    // interceptResponse 与 static body/status/headers 组合，见 ApiSpec.Builder#build），
+                    // 故此处无需、也不应合并 spec.mockHeaders()。
                     RouteAction.fulfillWithBody(route, apiResponse.status(), apiResponse.headers(), replaced.body());
                     runtime.claims().markTerminal(claim, true);
                     reportOutcome("MOCK RESULT", spec, request, apiResponse.status(), apiResponse.headers(),

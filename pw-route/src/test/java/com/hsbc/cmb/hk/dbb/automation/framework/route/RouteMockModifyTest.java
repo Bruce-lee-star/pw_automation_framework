@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -198,6 +199,29 @@ public class RouteMockModifyTest {
         verify(route).fulfill(captor.capture());
         assertEquals("响应头无 content-type 时必须按体嗅探 JSON 让替换生效（不得静默保留原体）",
                 (Object) "{\"enablePaymentPP\":\"X\"}", (Object) captor.getValue().body);
+    }
+
+    /**
+     * <b>设计约束</b>：{@code interceptResponse()} 与静态 {@code status/body/headers} 互斥 ——
+     * 拦截语义是"只改真实响应的字段"，不应同时接管状态/头/体（否则"到底发哪个"有歧义）。
+     * 该组合必须在 {@code build()} 期 fail-fast（E2E 里曾误用 {@code interceptResponse().header(...)}）。
+     */
+    @Test
+    public void interceptResponseRejectsStaticHeadersAtBuildTime() {
+        mockContext();
+        IllegalStateException expected = null;
+        try {
+            RouteDsl.on(ctx).api("/api/hdr")
+                    .mock().interceptResponse()
+                    .header("x-route-e2e", "pri")
+                    .mockReplaceField("$.code", 9)
+                    .register();
+        } catch (IllegalArgumentException e) {
+            expected = new IllegalStateException(e.getMessage());
+        }
+        assertNotNull("interceptResponse + static header 必须 fail-fast（不得静默接受）", expected);
+        assertTrue("错误信息必须点明冲突原因，实际: " + expected.getMessage(),
+                expected.getMessage().contains("interceptResponse"));
     }
 
     @Test
