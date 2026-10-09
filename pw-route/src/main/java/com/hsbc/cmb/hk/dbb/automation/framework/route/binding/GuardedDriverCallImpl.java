@@ -26,7 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@code Object doesn't exist} 是并发协议调用的直接产物。故所有同步驱动协议调用
  * （{@code context.route} / {@code unroute} 等）收敛到<b>单一专用驱动线程</b>
  * （守护线程、全局复用、不随 case 泄漏），消除共享连接上的并发竞态。
- * 实现形态参照 {@code AsyncPool.MONITOR_CALLBACK_EXECUTOR}：{@code volatile} 执行器 + 工厂构造、可复位重建。</p>
+ * 实现形态：{@code volatile} 执行器 + 工厂构造、可复位重建（同一模式此前用于 AsyncPool 的 V1
+ * Monitor 回调执行器，该执行器已随"不订阅 {@code context.onResponse}"的决策一并移除）。</p>
  *
  * <p><b>毒化重置（T6，2026-09-29）</b>：某次调用在界内无回包（超时）→ 主线程按策略 fail-fast / 降级返回，
  * 同时<b>仅重置驱动线程</b>：{@code compareAndSet} 把执行器换成新建实例、旧执行器 {@code shutdownNow()}
@@ -49,8 +50,8 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
     /**
      * 单一专用驱动线程执行器（T6）：所有 guarded 驱动协议调用收敛于此线程。
      *
-     * <p>镜像 {@code AsyncPool} 的 {@code MONITOR_CALLBACK_EXECUTOR}：{@code volatile} + 工厂构造，
-     * 毒化时 CAS 换新建实例、旧实例遗弃，支持复位重建。守护线程、全局复用、不随 case 泄漏。</p>
+     * <p>{@code volatile} + 工厂构造，毒化时 CAS 换新建实例、旧实例遗弃，支持复位重建。
+     * 守护线程、全局复用、不随 case 泄漏。</p>
      */
     /** 驱动线程代际（毒化重建后递增，便于日志区分新旧信道）。 */
     private static final AtomicInteger DRIVER_EPOCH = new AtomicInteger(0);
@@ -69,8 +70,8 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
     /**
      * 单一专用驱动线程执行器（T6）：所有 guarded 驱动协议调用收敛于此线程。
      *
-     * <p>镜像 {@code AsyncPool} 的 {@code MONITOR_CALLBACK_EXECUTOR}：{@code volatile} + 工厂构造，
-     * 毒化时 CAS 换新建实例、旧实例遗弃，支持复位重建。守护线程、全局复用、不随 case 泄漏。</p>
+     * <p>{@code volatile} + 工厂构造，毒化时 CAS 换新建实例、旧实例遗弃，支持复位重建。
+     * 守护线程、全局复用、不随 case 泄漏。</p>
      */
     private static final AtomicReference<ExecutorService> DRIVER =
             new AtomicReference<>(newDriverExecutor());

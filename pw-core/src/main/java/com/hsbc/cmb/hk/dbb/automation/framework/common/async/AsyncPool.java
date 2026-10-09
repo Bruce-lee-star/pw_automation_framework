@@ -56,8 +56,6 @@ public final class AsyncPool {
     private static final AtomicLong timeoutCount = new AtomicLong(0);
     private static final AtomicLong pendingTimeoutCount = new AtomicLong(0);
     private static final AtomicLong pendingScheduleCount = new AtomicLong(0);
-    /** Monitor 回调因队列满/已关闭被丢弃的累计数（ 修复 H17：让静默丢弃变为可观测） */
-    private static final AtomicLong monitorCallbackDroppedCount = new AtomicLong(0);
 
     /** 活跃的 per-Context 调度器（由 ContextRouteEngine 注册，关闭时移除） */
     private static final Map<String, ScheduledThreadPoolExecutor> CONTEXT_SCHEDULERS = new ConcurrentHashMap<>();
@@ -68,61 +66,18 @@ public final class AsyncPool {
     /** 调度器：同 {@link #POOL}，惰性构造。 */
     private static volatile ScheduledThreadPoolExecutor SCHEDULER;
 
-    /**
-     * 串行单线程执行器 — <b>遗留</b>：为 V1「Monitor 用户回调线程」而建，当前<b>无调用方</b>。
+    /*
+     * 【已移除】V1 的「Monitor 用户回调串行执行器」（MONITOR_CALLBACK_EXECUTOR / 队列容量常量 /
+     * runOnMonitorCallbackThread / monitorCallbackDroppedCount）已整体删除 —— 无任何调用方。
      *
-     * <p><b>现役语义（route V2）</b>：采集 / 监控的响应侧<b>不订阅</b> {@code context.onResponse}
-     * —— 该订阅是驱动侧 {@code Object doesn't exist: response@…} 竞态的唯一触发源，已被刻意移除；
-     * 响应改由 {@code RouteRuntimeImpl} 在 route 分发入口持 {@code Request} 轮询
-     * {@code Request#existingResponse()} 后按 spec 投递（见 {@code CaptureSink}/{@code MonitorSink}），
-     * 因此不存在"需要桥接到专用回调线程"的用户回调。
+     * 现役语义（route V2）：采集与监控的响应侧不再存在用户回调，因为<b>不订阅</b>
+     * {@code context.onResponse}（该订阅是驱动侧 {@code Object doesn't exist: response@…} 竞态的唯一
+     * 触发源，已被刻意移除）；响应改由 {@code RouteRuntimeImpl} 在 route 分发入口持 {@code Request}
+     * 轮询 {@code Request#existingResponse()} 后按 spec 投递（见 CaptureSink / MonitorSink）。
      *
-     * <p>保留的执行器语义（若将来重新需要回调串行化）：Playwright route 拦截在事件线程触发，
-     * 用户回调若直接在该线程执行，其修改的全局/共享状态（如 {@code NLSUtils.setLanguage}）对主线程
-     * 不可见（ThreadLocal 隔离）；桥接到本串行线程后，回调在<b>同一受管上下文线程</b>顺序执行，
-     * 配合已全局化的框架状态，用户业务代码无需理解线程模型。
-     *
-     * <p><b>待清理</b>：{@link #runOnMonitorCallbackThread(Runnable)} 与
-     * {@link #getMonitorCallbackDroppedCount()} 目前均无调用方；确认无外部使用者后可整体删除。
+     * 若将来重新需要「回调里修改的全局状态对主线程可见」，可参照 {@code GuardedDriverCallImpl} 的
+     * 「volatile 执行器 + 工厂构造、可复位重建」形态重建，而不要复用旧实现（其语义是单线程串行）。
      */
-    /**
-     *  Monitor 回调队列容量上限。
-     * <p>原实现用 {@code Executors.newSingleThreadExecutor()}，其队列是
-     * <b>无界</b> LinkedBlockingQueue：慢回调（如 DB 校验）持续积压会让队列无限增长直至 OOM；
-     * 且无拒绝策略，积压只能靠消费者追上来消化。
-     * <p>注意：<b>仍然保持单线程</b>。串行执行是本执行器的<b>语义契约</b>（见上：回调里修改的
-     * 共享状态需在【同一受管线程】顺序生效），改成多线程会引入竞态并破坏用户可见性保证。
-     * 因此这里只做「有界」，不做「并发」——慢回调的吞吐问题应通过把重活改投
-     * {@link #run(Runnable)} 解决，而不是拆散本串行队列。
-     */
-    private static final int MONITOR_CALLBACK_QUEUE_CAPACITY = 10_000;
-
-    /**
-     * CT2-17：由 {@code static final} 改为 {@code volatile} + 工厂构造 —— 关闭后可复位重建，
-     * 使同 JVM 内后续套件能重新初始化（见 {@link LazyInit#reset()} 与 {@link #shutdownGracefully()}）。
-     * 非 null 由 {@link #ensureInitialized()} 保证（所有使用入口均已先调用它）。
-     */
-    private static volatile ExecutorService MONITOR_CALLBACK_EXECUTOR;
-
-    private static ExecutorService newMonitorCallbackExecutor() {
-        return new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(MONITOR_CALLBACK_QUEUE_CAPACITY),
-                r -> {
-                    Thread t = new Thread(r, "monitor-callback");
-                    t.setDaemon(true);
-                    t.setPriority(Thread.NORM_PRIORITY - 1);
-                    return t;
-                },
-                // 队列满：丢弃 + 告警，绝不反压提交方。
-                // 若用 CallerRunsPolicy，回调会在 Playwright 事件线程上执行，
-                // 把「回调慢」放大成「路由拦截阻塞 → 整轮测试卡死」，违背永不卡死原则。
-                (task, executor) -> {
-                    long dropped = monitorCallbackDroppedCount.incrementAndGet();
-                    LOGGER.error("[AsyncPool] Monitor callback queue full (capacity={}), dropping task to avoid OOM. "
-                            + "Dropped total: {}. Consider moving heavy work out of onResponse into AsyncPool.run().",
-                            MONITOR_CALLBACK_QUEUE_CAPACITY, dropped);
-                });
-    }
 
     /**
      * P2-3：因提交被拒（池关闭 / 饱和）而<b>丢弃</b>的任务数 —— 统一「绝不阻塞提交方」策略后的可观测计数。
@@ -231,7 +186,6 @@ public final class AsyncPool {
         MAX_PENDING_TIMEOUTS = maxPendingTimeouts;
         POOL = executor;
         SCHEDULER = scheduler;
-        MONITOR_CALLBACK_EXECUTOR = newMonitorCallbackExecutor();
         // CT2-17：启动超时裁决器（取代「每任务一个哨兵」——调度队列恒为 O(1)，且无降级路径）
         startTimeoutReaper();
 
@@ -382,8 +336,8 @@ public final class AsyncPool {
                 registerPendingTimeout(future, timeoutMs);
             }
         } catch (RejectedExecutionException e) {
-            //  P2-3：统一「是否阻塞提交方」策略 = 【绝不阻塞提交方】（与 runOnMonitorCallbackThread 的 H17
-            //  决策一致）。原实现此处 task.run() 回退到调用方线程执行 —— 同一「拒绝」情境两套相反策略：
+            //  P2-3：统一「是否阻塞提交方」策略 = 【绝不阻塞提交方】（沿用既有的 H17 决策）。
+            //  原实现此处 task.run() 回退到调用方线程执行 —— 同一「拒绝」情境两套相反策略：
             //  本池的调用方含 Playwright 事件线程与路由处理线程，在其上跑任务会把"拒绝"放大成级联卡顿。
             //  现统一为：计数 + ERROR + 丢弃（可见、不静默）。AsyncPool 承载的都是 best-effort 异步任务
             //  （监控 / 日志 / 收尾），丢弃可观测且代价远低于阻塞事件线程。
@@ -562,10 +516,10 @@ public final class AsyncPool {
     // ─── 优雅关闭 ──────────────────────────────────────────────
 
     private static void shutdownGracefully() {
-        //  CT2-17：幂等 + 复位安全 —— 三资源在 doInit 中同批发布、在下方同批清空，
+        //  CT2-17：幂等 + 复位安全 —— 两资源在 doInit 中同批发布、在下方同批清空，
         //  故任一为 null 即表示「从未初始化」或「已复位」，此时无资源可关，直接返回。
         //  （也覆盖了「doInit 被执行两次 → ShutdownCoordinator 注册了两个钩子」的重复调用场景。）
-        if (POOL == null || SCHEDULER == null || MONITOR_CALLBACK_EXECUTOR == null) {
+        if (POOL == null || SCHEDULER == null) {
             return;
         }
         if (POOL.isShutdown())  {return;} 
@@ -594,16 +548,6 @@ public final class AsyncPool {
                 POOL.shutdownNow();
             }
             SCHEDULER.awaitTermination(5, TimeUnit.SECONDS);
-            //  关闭 Monitor 回调串行执行器
-            MONITOR_CALLBACK_EXECUTOR.shutdown();
-            try {
-                if (!MONITOR_CALLBACK_EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
-                    MONITOR_CALLBACK_EXECUTOR.shutdownNow();
-                }
-            } catch (InterruptedException ie) {
-                MONITOR_CALLBACK_EXECUTOR.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
             // per-context 池的终结等待放在 SCHEDULER 之后
             if (ctxSchedulers > 0) {
                 for (ScheduledExecutorService s : CONTEXT_SCHEDULERS.values()) {
@@ -618,7 +562,6 @@ public final class AsyncPool {
             LOGGER.warn("[AsyncPool] Interrupted during shutdown, forcing shutdownNow");
             POOL.shutdownNow();
             SCHEDULER.shutdownNow();
-            MONITOR_CALLBACK_EXECUTOR.shutdownNow();
             for (ScheduledExecutorService s : CONTEXT_SCHEDULERS.values()) {
                 s.shutdownNow();
             }
@@ -634,12 +577,12 @@ public final class AsyncPool {
         cancelTimeoutReaper();
         PENDING_TIMEOUTS.clear();
         pendingTimeoutCount.set(0);
-        //  CT2-17（回归防护）：**刻意不把 POOL / SCHEDULER / MONITOR_CALLBACK_EXECUTOR 置空**。
+        //  CT2-17（回归防护）：**刻意不把 POOL / SCHEDULER 置空**。
         //    置空虽能"释放引用"，但会在「shutdown 与 submit / 阈值诊断 / 裁决器日志并发」时引入
-        //    NPE 这一**全新的失败形态**（原实现三字段永不为 null，失败形态是干净的
+        //    NPE 这一**全新的失败形态**（原实现字段永不为 null，失败形态是干净的
         //    RejectedExecutionException → 既有「拒绝即丢弃（计数 + ERROR）」路径）。
         //    可恢复性并不依赖置空：INIT.reset() 后下一次 ensureInitialized() 会重跑 doInit，
-        //    由 doInit 用**新实例整体覆盖**这三个字段；在此之前它们指向已终止的池，
+        //    由 doInit 用**新实例整体覆盖**这两个字段；在此之前它们指向已终止的池，
         //    此时提交同样走既有的拒绝分支，语义与改动前一致且可观测。
         INIT.reset();
     }
@@ -671,7 +614,6 @@ public final class AsyncPool {
     public static long getTimeoutCount() { return timeoutCount.get(); }
     public static long getPendingTimeoutCount() { return pendingTimeoutCount.get(); }
     public static long getPendingScheduleCount() { return pendingScheduleCount.get(); }
-    public static long getMonitorCallbackDroppedCount() { return monitorCallbackDroppedCount.get(); }
 
     public static double getQueueUsage() { return (double) pool().getQueue().size() / QUEUE_CAPACITY; }
     public static double getThreadUsage() {
@@ -684,12 +626,12 @@ public final class AsyncPool {
         ThreadPoolExecutor p = pool();
         return String.format(
                 "[AsyncPool] active=%d, pool=%d/%d, queue=%d/%d (%.0f%%), threads=%.0f%%, "
-                        + "completed=%d, rejected=%d, timeouts=%d, pendingTimeouts=%d/%d, pendingSched=%d, ctxSched=%d, monitorDropped=%d",
+                        + "completed=%d, rejected=%d, timeouts=%d, pendingTimeouts=%d/%d, pendingSched=%d, ctxSched=%d",
                 p.getActiveCount(), p.getPoolSize(), p.getMaximumPoolSize(),
                 p.getQueue().size(), QUEUE_CAPACITY, getQueueUsage() * 100, getThreadUsage() * 100,
                 p.getCompletedTaskCount(), rejectedCount.get(),
                 timeoutCount.get(), pendingTimeoutCount.get(), MAX_PENDING_TIMEOUTS, pendingScheduleCount.get(),
-                CONTEXT_SCHEDULERS.size(), monitorCallbackDroppedCount.get());
+                CONTEXT_SCHEDULERS.size());
     }
 
     /**
@@ -704,56 +646,6 @@ public final class AsyncPool {
             return;
         }
         shutdownGracefully();
-    }
-
-    /**
-     * 在「Monitor 回调专用」串行线程上执行任务（顺序、与主流程共享上下文）。
-     *
-     * <p><b>当前无调用方</b>：route V2 的采集 / 监控不再有 {@code context.onResponse} 回调
-     * （响应改由 route 通道 {@code Request#existingResponse()} 轮询投递，见类注释），
-     * 故本方法是历史兼容入口。若将来重新需要"回调里修改的全局状态对主线程可见"，它是现成的桥。
-     * task 为 null 静默跳过。
-     */
-    public static void runOnMonitorCallbackThread(Runnable task) {
-        if (task == null)  {return;} 
-        ensureInitialized();   // P2-2
-        // C-5：捕获提交线程 MDC，monitor 串行线程执行时恢复，finally clear。
-        final Map<String, String> mdcContext = MDC.getCopyOfContextMap();
-        // F-13：捕获软断言收集器，使用户在 onResponse 回调里记录的软断言失败可被上报。
-        final SoftAssertions.Collector assertionCollector = SoftAssertions.captureCollector();
-        //  修复 H17：监控回调串行队列满/已关闭时，绝不能回退到【调用方线程】同步执行
-        // （调用方多为 Playwright 事件线程，同步执行用户回调会阻塞路由拦截 → 整轮测试卡死）。
-        // 统一策略：准入控制 + 计数丢弃（可观测），但绝不阻塞提交方。
-        if (MONITOR_CALLBACK_EXECUTOR.isShutdown()
-                || ((ThreadPoolExecutor) MONITOR_CALLBACK_EXECUTOR).getQueue().size() >= MONITOR_CALLBACK_QUEUE_CAPACITY) {
-            long dropped = monitorCallbackDroppedCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] Monitor callback DROPPED (queue full or shutdown). Dropped total: {}. "
-                    + "Consider moving heavy work out of onResponse into AsyncPool.run().", dropped);
-            return;
-        }
-        try {
-            MONITOR_CALLBACK_EXECUTOR.execute(() -> {
-                if (mdcContext != null) {
-                    MDC.setContextMap(mdcContext);
-                }
-                SoftAssertions.Collector previousCollector = SoftAssertions.bindCollector(assertionCollector);
-                try {
-                    task.run();
-                } catch (Throwable t) {
-                    LOGGER.error("[AsyncPool] Monitor callback task threw exception: {}", t.getMessage(), t);
-                } finally {
-                    completedTaskCount.incrementAndGet();
-                    SoftAssertions.unbindCollector(previousCollector);
-                    MDC.clear();
-                }
-            });
-        } catch (RejectedExecutionException e) {
-            long dropped = monitorCallbackDroppedCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] Monitor callback REJECTED (DROPPED). Dropped total: {}. {}", dropped, e.getMessage());
-        } catch (Exception e) {
-            long dropped = monitorCallbackDroppedCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] Monitor callback submit failed (DROPPED). Dropped total: {}. {}", dropped, e.getMessage());
-        }
     }
 
     // ─── 内部工具 ──────────────────────────────────────────────
