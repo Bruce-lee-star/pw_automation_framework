@@ -319,6 +319,27 @@ public class PlaywrightManager {
     }
 
     /**
+     * 获取当前上下文最近一次下载的<b>原始文件名</b> —— 响应 {@code Content-Disposition}，即
+     * {@code Download.suggestedFilename()}。
+     *
+     * <p><b>与 {@link #getLastDownloadFileName()} 的区别</b>：后者返回<b>落盘文件名</b>，会在同名冲突时
+     * 被 {@code resolveNonConflictingDownloadPath} 去重改写（并发下载 / 重复导出同一份报表即会变），
+     * 用它做断言不稳定；断言"下载到的文件叫什么"应以本方法为准。</p>
+     *
+     * <p><b>可见时机</b>：与 {@link #getLastDownloadPath()} 同批登记（异步保存完成后），故同样需要先
+     * {@link #awaitLastDownloadPath(long)} / {@link #awaitDownloadCount(int, long)}。若要在下载事件当下
+     * 立刻拿到原始名，用 {@code BasePage.waitForDownload(...)} 的返回值 {@code Download} 读
+     * {@code suggestedFilename()}（事件到达即已可用）。</p>
+     *
+     * @return 原始文件名；当前上下文无下载记录（或 Playwright 未提供）时返回 {@code null}
+     * @apiNote 稳定公开契约。
+     */
+    public static String getLastDownloadOriginalFileName() {
+        DownloadRegistry.DownloadRecord record = DownloadRegistry.instance().lastRecord(getContext());
+        return record == null ? null : record.suggestedFileName();
+    }
+
+    /**
      * 获取当前上下文全部下载文件的绝对路径（按时间升序）。
      *
      * @return 下载路径列表；当前上下文无下载记录时返回空列表（非 {@code null}）
@@ -609,9 +630,11 @@ public class PlaywrightManager {
     /**
      * 关闭<b>本线程</b>当前持有的 Browser（{@code <threadId>:<configId>} 键）并从状态根移除。
      *
-     * <p>默认行为：随 scenario 收尾触发（Browser 跟随 Context 边界），下一场景首次 {@code getBrowser()} 懒重建；
-     * 由 {@code PlaywrightSerenityBridge.cleanupForScenario} 经 {@link BrowserCleanup#closeBrowserForCurrentThread} 执行，
-     * 对外行为零回归。当前线程无存活 Browser 时为 no-op。</p>
+     * <p><b>方案 A（2026-10-10）</b>：正常与并发模式默认都不触发本方法 —— Browser 为
+     * worker 级重对象跨场景/跨任务复用（对齐 Playwright 官方模型），仅在<b>并发执行器模式且显式开启
+     * {@code playwright.browser.close.after.concurrent.task=true}</b> 或显式关闭路径调用；
+     * 浏览器进程最终由套件收尾（JVM shutdown hook → {@code cleanupAll()}）统一回收。
+     * 当前线程无存活 Browser 时为 no-op。</p>
      *
      * @return 实际关闭的 Browser 数
      */

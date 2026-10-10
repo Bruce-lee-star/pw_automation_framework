@@ -14,9 +14,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
- * 下载登记簿（framework-internal）：记录每个 {@link BrowserContext} 最近保存的下载文件，
- * 供业务层经 {@link PlaywrightManager#getLastDownloadPath()} /
- * {@link PlaywrightManager#getLastDownloadFileName()} / {@link PlaywrightManager#getDownloadPaths()} 查询。
+ * 下载登记簿（framework-internal）：记录每个 {@link BrowserContext} 最近保存的下载文件
+ * （含<b>原始文件名</b>与<b>落盘路径</b>），供业务层经 {@link PlaywrightManager#getLastDownloadPath()} /
+ * {@link PlaywrightManager#getLastDownloadFileName()} /
+ * {@link PlaywrightManager#getLastDownloadOriginalFileName()} /
+ * {@link PlaywrightManager#getDownloadPaths()} 查询。
  *
  * <p><b>线程安全：</b>以 {@code BrowserContext} 为键，各上下文独立维护一个 FIFO 队列（最近下载追加至队尾）。
  * 跨线程可见性由 {@link ConcurrentHashMap} / {@link ConcurrentLinkedDeque} 的 happens-before 语义保证——
@@ -42,7 +44,21 @@ public final class DownloadRegistry {
         private static final DownloadRegistry INSTANCE = new DownloadRegistry();
     }
 
-    private final Map<BrowserContext, Deque<Path>> byContext = new ConcurrentHashMap<>();
+    private final Map<BrowserContext, Deque<DownloadRecord>> byContext = new ConcurrentHashMap<>();
+
+    /**
+     * 一次已落盘下载的登记项：<b>原始文件名</b>（响应 {@code Content-Disposition}，即
+     * {@code Download.suggestedFilename()}）与<b>落盘路径</b>。
+     *
+     * <p><b>为什么要分开存</b>：落盘路径经 {@code resolveNonConflictingDownloadPath} 做过同名去重 ——
+     * 同名文件已存在（并发下载 / 重复导出同一份报表）时文件名会被改写，落盘名 != 原始名。
+     * 断言"下载到的文件叫什么"应以原始名为准；要读文件内容则用落盘路径。</p>
+     *
+     * @param suggestedFileName 原始文件名（可为 null：极端情况下 Playwright 未提供）
+     * @param savedPath         实际落盘的绝对路径
+     */
+    public record DownloadRecord(String suggestedFileName, Path savedPath) {
+    }
 
     private DownloadRegistry() {
     }
@@ -58,37 +74,53 @@ public final class DownloadRegistry {
      * 登记一次已落盘的下载（由 {@code PlaywrightContextManager.registerDownloadHandler}
      * 在 {@code download.saveAs} 成功后调用）。
      *
-     * @param context   触发下载的浏览器上下文（null 安全：忽略）
-     * @param savedPath 已保存文件的绝对路径（null 安全：忽略）
+     * @param context           触发下载的浏览器上下文（null 安全：忽略）
+     * @param suggestedFileName 原始文件名（{@code Download.suggestedFilename()}；null 安全）
+     * @param savedPath         已保存文件的绝对路径（null 安全：忽略）
      */
-    public void record(BrowserContext context, Path savedPath) {
+    public void record(BrowserContext context, String suggestedFileName, Path savedPath) {
         if (context == null || savedPath == null) {
             return;
         }
-        byContext.computeIfAbsent(context, k -> new ConcurrentLinkedDeque<>()).addLast(savedPath);
+        byContext.computeIfAbsent(context, k -> new ConcurrentLinkedDeque<>())
+                .addLast(new DownloadRecord(suggestedFileName, savedPath));
         if (logger.isDebugEnabled()) {
-            logger.debug("[Download] Recorded saved file for context {}: {}",
-                    System.identityHashCode(context), savedPath);
+            logger.debug("[Download] Recorded saved file for context {}: {} -> {}",
+                    System.identityHashCode(context), suggestedFileName, savedPath);
         }
     }
 
     /**
-     * 取指定上下文最近一次下载的路径；无记录返回 {@code null}。
+     * 取指定上下文最近一次下载的<b>落盘路径</b>；无记录返回 {@code null}。
      */
     public Path last(BrowserContext context) {
-        Deque<Path> deque = context == null ? null : byContext.get(context);
+        DownloadRecord record = lastRecord(context);
+        return record == null ? null : record.savedPath();
+    }
+
+    /**
+     * 取指定上下文最近一次下载的完整登记项（原始文件名 + 落盘路径）；无记录返回 {@code null}。
+     */
+    public DownloadRecord lastRecord(BrowserContext context) {
+        Deque<DownloadRecord> deque = context == null ? null : byContext.get(context);
         return (deque == null || deque.isEmpty()) ? null : deque.peekLast();
     }
 
     /**
-     * 取指定上下文全部下载路径（按时间升序）；无记录返回空列表（非 {@code null}）。
+     * 取指定上下文全部下载的<b>落盘路径</b>（按时间升序）；无记录返回空列表（非 {@code null}）。
      */
     public List<Path> all(BrowserContext context) {
-        Deque<Path> deque = context == null ? null : byContext.get(context);
+        Deque<DownloadRecord> deque = context == null ? null : byContext.get(context);
         if (deque == null || deque.isEmpty()) {
             return Collections.emptyList();
         }
-        return Collections.unmodifiableList(new ArrayList<>(deque));
+        List<Path> paths = new ArrayList<>(deque.size());
+        for (DownloadRecord record : deque) {
+            if (record != null && record.savedPath() != null) {
+                paths.add(record.savedPath());
+            }
+        }
+        return Collections.unmodifiableList(paths);
     }
 
     /**

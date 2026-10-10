@@ -6,6 +6,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElementList
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.RoleOptions;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.Download;
 import com.microsoft.playwright.options.AriaRole;
 import com.microsoft.playwright.options.BoundingBox;
 import com.microsoft.playwright.Frame;
@@ -289,13 +290,13 @@ public class SerenityBasePageImpl implements SerenityBasePage {
     }
 
     @Override
-    public void waitForDownload(Runnable trigger, int timeoutSecs) {
-        bp.waitForDownload(trigger, timeoutSecs);
+    public Download waitForDownload(Runnable trigger, int timeoutSecs) {
+        return bp.waitForDownload(trigger, timeoutSecs);
     }
 
     @Override
-    public void waitForDownload(Runnable trigger) {
-        bp.waitForDownload(trigger);
+    public Download waitForDownload(Runnable trigger) {
+        return bp.waitForDownload(trigger);
     }
 
     @Override

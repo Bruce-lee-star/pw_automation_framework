@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.base;
 
 import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.Download;
 import com.microsoft.playwright.options.BoundingBox;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Page;
@@ -226,10 +227,15 @@ public interface SerenityBasePage {
     /** 触发操作并等待新页面打开，超时沿用框架默认（上下文级配置）；拾取生成物默认走本重载。 */
     Page waitForNewPage(Runnable trigger);
 
-    void waitForDownload(Runnable trigger, int timeoutSecs);
+    Download waitForDownload(Runnable trigger, int timeoutSecs);
 
-    /** 触发下载并等待完成，超时沿用框架默认（上下文级配置）；拾取生成物默认走本重载。 */
-    void waitForDownload(Runnable trigger);
+    /**
+     * 触发下载并等待完成，超时沿用框架默认（上下文级配置）；拾取生成物默认走本重载。
+     *
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} 原始文件名 / {@code url()}）；
+     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)}（框架异步保存）。
+     */
+    Download waitForDownload(Runnable trigger);
 
     void closeCurrentPage();
 

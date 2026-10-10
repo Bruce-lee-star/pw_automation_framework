@@ -582,19 +582,23 @@ public abstract class BasePage {
      * 框架已开启下载能力，文件自动保存到配置目录；可与弹窗/新页面嵌套。
      * @param trigger     触发下载的操作（如点击下载链接）
      * @param timeoutSecs 等待超时秒数
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}）；
+     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)}（保存是异步的）。
      * @see PageLifecycleCoordinator#waitForDownload(BasePage, Runnable, int)
      */
-    public void waitForDownload(Runnable trigger, int timeoutSecs) {
-        PageLifecycleCoordinator.waitForDownload(this, trigger, timeoutSecs);
+    public Download waitForDownload(Runnable trigger, int timeoutSecs) {
+        return PageLifecycleCoordinator.waitForDownload(this, trigger, timeoutSecs);
     }
 
     /**
      * 等待下载（<b>不指定超时</b>）：沿用 Playwright 上下文默认超时（框架配置驱动）。
      * @param trigger 触发下载的操作（如点击下载链接）
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}）；
+     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)}（保存是异步的）。
      * @see PageLifecycleCoordinator#waitForDownload(BasePage, Runnable)
      */
-    public void waitForDownload(Runnable trigger) {
-        PageLifecycleCoordinator.waitForDownload(this, trigger);
+    public Download waitForDownload(Runnable trigger) {
+        return PageLifecycleCoordinator.waitForDownload(this, trigger);
     }
 
     /**

@@ -289,8 +289,10 @@ public class PlaywrightContextManager {
                 saved = true;
                 VerboseLogging.logInfoIfVerbose(logger,
                         "Download completed: {} -> {}", suggestedFilename, reserved.toAbsolutePath());
-                // 登记已落盘文件，供业务层经 PlaywrightManager.getLastDownloadPath() 等查询（报告 §3.2 收尾）
-                DownloadRegistry.instance().record(context, reserved);
+                // 登记已落盘文件 + 原始文件名，供业务层经 PlaywrightManager.getLastDownloadPath() /
+                // getLastDownloadOriginalFileName() 等查询（报告 §3.2 收尾）。
+                // 同时带上 suggestedFilename：落盘路径会被同名去重改写，原始名才是"下载到的文件叫什么"。
+                DownloadRegistry.instance().record(context, suggestedFilename, reserved);
             } catch (Exception e) {
                 //  占位文件回滚：仅当尚未写成功（保存失败/上下文关闭）时删除，避免残留 0 字节文件
                 rollbackReservation(reserved, saved);
@@ -385,6 +387,11 @@ public class PlaywrightContextManager {
      */
     public static void closeContext(BrowserContext context) {
         if (context != null) {
+            //  耗时探针（2026-10-10）：TRACE 级，默认不输出；按需开
+            //    logger=com.hsbc...bootstrap.PlaywrightContextManager level=TRACE 观察
+            //    SIT 真实收尾分布，为 CloseGuard.CONTEXT_CLOSE_LIMIT_MS 定标提供数据（正常毫秒级，
+            //    挂死时此处不返回、由 CloseGuard 超时放弃 + dirty 隔离兜底，与阈值大小无关）。
+            long t0 = System.nanoTime();
             //  CT2-15：在任何清理动作之前登记「本 context 已进入关闭流程」——【避免】而非【事后归因】：
             //    此后到达的下载事件与在途保存任务不再发起 saveAs（该保存必被 close() 取消），
             //    绝大多数情况下根本不产生「需要分类的失败」；对已越过该判定的极小残留窗口，
@@ -418,6 +425,7 @@ public class PlaywrightContextManager {
                 //  收尾期不挂 onDialog 守卫：context.close() 默认不跑 beforeunload（强制关闭），且 Playwright
                 //    未注册 handler 时对所有对话框 auto-dismiss，close 不会因此挂死；改挂 accept 反而会覆盖
                 //    框架默认语义。真正的"无限挂死"兜底由 CloseGuard 有界关闭 + 超时强收本线程 Playwright 提供。
+                long tClose = System.nanoTime();
                 try {
                     context.close(new BrowserContext.CloseOptions().setReason("teardown"));
                     VerboseLogging.logInfoIfVerbose(logger, "BrowserContext closed");
@@ -425,9 +433,17 @@ public class PlaywrightContextManager {
                     VerboseLogging.logDebugIfVerbose(logger,
                             "BrowserContext close skipped (already closed or browser gone): {}", closeEx.getMessage());
                 }
+                if (logger.isTraceEnabled()) {
+                    logger.trace("[CT] context.close() segment took {} ms (reason=teardown)",
+                            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - tClose));
+                }
             } catch (Exception e) {
                 logger.error("Failed to close BrowserContext: {}", e.getMessage(), e);
                 throw new BrowserException("Failed to close BrowserContext", e);
+            }
+            if (logger.isTraceEnabled()) {
+                logger.trace("[CT] closeContext total took {} ms (routeClear+downloadClear+trace+close)",
+                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0));
             }
         }
     }

@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.TimeoutException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.codegen.spi.RoleCodegenBridgeRegistry;
+import com.microsoft.playwright.Download;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.PlaywrightException;
 import org.slf4j.Logger;
@@ -172,12 +173,16 @@ public final class PageLifecycleCoordinator {
      * @param bp          BasePage 实例
      * @param trigger     触发下载的操作（如点击下载链接）
      * @param timeoutSecs 等待超时秒数
+     * @return 本次下载的 {@link Download}（可直接读 {@code suggestedFilename()} / {@code url()}）。
+     *         <b>文件已由框架自动保存</b>；要取落盘路径请用
+     *         {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)} —— 本方法只等「下载事件」，
+     *         返回时异步保存可能尚未完成（此时读落盘路径会得到 null 或上一次的旧值）。
      */
-    public static void waitForDownload(BasePage bp, Runnable trigger, int timeoutSecs) {
+    public static Download waitForDownload(BasePage bp, Runnable trigger, int timeoutSecs) {
         requireNonNullPage(bp);
         Page page = bp.getPage();
         try {
-            page.waitForDownload(new Page.WaitForDownloadOptions().setTimeout((long) timeoutSecs * 1000),
+            return page.waitForDownload(new Page.WaitForDownloadOptions().setTimeout((long) timeoutSecs * 1000),
                     () -> trigger.run());
         } catch (PlaywrightException e) {
             throw new TimeoutException("Waiting for download timed out after " + timeoutSecs + " seconds", e);
@@ -193,12 +198,14 @@ public final class PageLifecycleCoordinator {
      *
      * @param bp      BasePage 实例
      * @param trigger 触发下载的操作（如点击下载链接）
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}）；
+     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)} 获取（异步保存原因见上）。
      */
-    public static void waitForDownload(BasePage bp, Runnable trigger) {
+    public static Download waitForDownload(BasePage bp, Runnable trigger) {
         requireNonNullPage(bp);
         Page page = bp.getPage();
         try {
-            page.waitForDownload(new Page.WaitForDownloadOptions(), () -> trigger.run());
+            return page.waitForDownload(new Page.WaitForDownloadOptions(), () -> trigger.run());
         } catch (PlaywrightException e) {
             throw new TimeoutException("Waiting for download timed out (context default timeout)", e);
         }
