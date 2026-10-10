@@ -386,6 +386,19 @@ final class RolePickerPageTracker {
             // 缺失则跳过：pick 内容已由下方 Java 权威态 push 覆盖，绝不丢元素。
             try {
                 String openerState = (opener == null) ? null : snapshots.get(opener);
+                // 【修复"新页面里之前选中的元素没被勾选 / 少一个元素"】snapshots 是"停止时 / 每次空闲轮询 / 关页时"
+                // 才更新的缓存，弹窗弹出瞬间可能已陈旧（现场：缓存 picks=19、currentStep=1，而打开页此刻实为
+                // 20 个 pick 且当轮选择集远不止 1 个）。applyPickState 决定新文档的 __rolePicks 与 __currentStep，
+                // 而"勾选框是否勾上"正是由 __currentStep 派生的 ⇒ 必须优先【活读】打开页当前态（2s 软超时，
+                // 与本方法其它注入同口径：失败无害，Java 权威态随后仍会整体回灌 picks）。
+                if (opener != null && !opener.isClosed()) {
+                    try {
+                        String live = RoleElementPicker.readPickStateJsonSoft(opener);
+                        if (live != null && !live.isEmpty() && RoleElementPicker.hasPicks(live)) {
+                            openerState = live;
+                        }
+                    } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#liveOpenerState", ignore); }
+                }
                 if (openerState != null && !openerState.isEmpty()) {
                     RoleElementPicker.applyPickState(newPage, openerState, nlsReverseJson, nlsFiles);
                 }

@@ -173,15 +173,39 @@
                 try { window.prompt  = hook(window.prompt,  'prompt'); }  catch (e) {}
               })();
               document.addEventListener('mousemove', window.__rolePickMove, true);
+              /**
+               * 【会话开关兜底：修复"到新页面必须手点一次 ▶ 开始拾取 才能拾取"】
+               *
+               * 闸门依据的 {@code window.__roleMode} 只在「面板构建那一刻」由 panel-core-a.js 从会话开关
+               * 推导【一次】；而新文档（尤其跨源新页）上「面板构建」常常早于 head 脚本置位会话开关，且跨源
+               * localStorage 被 origin 隔离、读不到旧 origin 的标记 ⇒ 模式停在 idle ⇒ 点击被闸门整体挡掉，
+               * 用户只能手点 ▶ 才恢复拾取（这就是现场表现）。
+               *
+               * 现改为以【会话开关】实时兜底判定：head 脚本 / 激活保活脚本 / start 都会置位它，stop-* 脚本
+               * 会清掉它 ⇒ 会话在即视为 manual，并顺手同步模式与按钮态，使「新页打开即可拾取」。
+               * 另需排除「用户刚点过停止」的窗口：停止会把 __rolePickWanted 置 false，此时不得再判为 manual，
+               * 否则会出现「点了停止又跳回停止态 / 停止后仍误拾取」。
+               *
+               * @returns {boolean} true = 当前应视为手动拾取（闸门放行）
+               */
+              window.__rolePickEnsureManual = function() {
+                if ((window.__roleMode || 'idle') !== 'idle') return true;
+                if (window.__rolePickWanted === false) return false;
+                var _sess = false;
+                try { _sess = !!window.__rolePickSessionOn; } catch (e) {}
+                if (!_sess) { try { _sess = localStorage.getItem('__rolePickSessionOn') === '1'; } catch (e) {} }
+                if (!_sess) return false;
+                try { window.__roleMode = 'manual'; } catch (e) {}
+                try { if (window.__roleRefreshToggle) window.__roleRefreshToggle(); } catch (e) {}
+                return true;
+              };
               window.__rolePickClick = function(event) {
                 // 诊断：记录最近一次点击到达 handler 的时间与当时激活态（供 Java 侧回读，确认点击是否被监听捕获）。
                 window.__lastClickTs = Date.now();
                 window.__lastClickActive = !!window.__rolePickActive;
-                // 【模式闸门】IDLE（待命）态下点击页面不拾取任何元素——必须等用户点"▶ 开始拾取"进入 MANUAL，
-                //避免 stop 后再次进入 IDLE 时
-                // 误拾取（日志里"点了 4 个却出 6 个"的诱因之一：拾取库仍注入、active 未随模式复位）。
-                var _mode = window.__roleMode || 'idle';
-                if (_mode === 'idle') return;
+                // 【模式闸门】IDLE（待命）态下点击页面不拾取任何元素（避免 stop 后仍注入的库误拾取）；
+                // 会话仍在（新页 / 跨源页这类"模式推导早于会话开关"的场景）由 __rolePickEnsureManual 兜底放行。
+                if (!window.__rolePickEnsureManual()) return;
                 // 对齐 page.pause()：用 composedPath()[0] 取代 event.target，穿透 open shadow DOM，
                 // 点击 Web Component 内部按钮也能拿到真实目标元素（event.target 在 shadow 边界会停在宿主上）。
                 var t = (typeof event.composedPath === 'function' && event.composedPath().length)
@@ -355,8 +379,9 @@
               // 因 __recordPick 内部已"首次即时回传"一份不含 rightClick 的 pick 到 Java 内存态，
               // 故设标记后须再次经 __roleOnPick 回传（按 _sigKey 覆盖），确保 stop 生成能拿到该标记。
               window.__rolePickContextMenu = function(event) {
-                // 模式闸门：IDLE（待命）态下不拾取（与 click 一致），避免 stop 后再次进入 IDLE 时误拾取。
-                if ((window.__roleMode || 'idle') === 'idle') return;
+                // 模式闸门：IDLE（待命）态下不拾取（与 click 一致），避免 stop 后再次进入 IDLE 时误拾取；
+                // 同样走 __rolePickEnsureManual 的会话兜底（新页 / 跨源页开箱即可右键拾取，无需手点 ▶）。
+                if (!window.__rolePickEnsureManual()) return;
                 var t = (typeof event.composedPath === 'function' && event.composedPath().length)
                   ? event.composedPath()[0] : event.target;
                 if (t && t.closest && t.closest('#__rolePanel, #__roleCodeOverlay')) return;

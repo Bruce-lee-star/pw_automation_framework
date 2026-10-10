@@ -929,7 +929,12 @@ public final class RolePickerPanelController {
                             // 兜底安全网：仅当 evaluate 调用本身撞上"执行上下文正在销毁"的极端竞态时才触发；
                             // 等待 DOM/load 就绪后重试一次轻量激活保活（仍不重注入整套库）。
                             log.warn("[picker][nav] activation keep-alive first attempt failed (race during context teardown); retrying after page is ready @ {} : {}", page.url(), ex.getMessage());
-                            try { page.waitForLoadState(); } catch (Exception ignore2) { RolePickerQuiet.ignore("RolePickerPanelController#waitForLoadState", ignore2); }
+                            // 【必须有界】无参 waitForLoadState 默认最长等 30s，而本方法跑在事件派发线程上 ——
+                            // 慢页会把其后的事件派发与面板回灌一并排队；限 2s 后直接重试（幂等、失败可重做）。
+                            try {
+                                page.waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
+                                        new Page.WaitForLoadStateOptions().setTimeout(2_000));
+                            } catch (Exception ignore2) { RolePickerQuiet.ignore("RolePickerPanelController#waitForLoadState", ignore2); }
                             try { pickerEval(page, RolePickerScripts.SET_PICK_ACTIVE_AND_RENDER_JS); }
                             catch (Exception ex2) { log.warn("[picker][nav] activation keep-alive retry still failed @ {} : {}", page.url(), ex2.getMessage()); }
                         }
@@ -954,7 +959,13 @@ public final class RolePickerPanelController {
                                 // 导航瞬间新文档执行上下文可能尚未就绪，page.evaluate 会抛"上下文已销毁"类异常；
                                 // 等待 DOM/load 就绪后重试一次真正重注入，避免跨域页因首轮竞态失败而仍无蓝框。
                                 log.warn("[picker][nav] cross-origin re-injection first attempt failed; retrying after page is ready @ {} : {}", page.url(), startEx.getMessage());
-                                try { page.waitForLoadState(); } catch (Exception ignore2) { RolePickerQuiet.ignore("RolePickerPanelController#waitForLoadState", ignore2); }
+                                // 【必须有界】默认 waitForLoadState 最长等 30s，而本方法跑在事件派发线程上 ——
+                                // 慢页会把其后所有事件与 CDP 命令一起排队（"已拾元素回灌慢"的另一来源）。
+                                // 限 2s 后即重试注入；失败也只是本轮跳过，主循环自愈与门控 addInitScript 会兜底。
+                                try {
+                                    page.waitForLoadState(com.microsoft.playwright.options.LoadState.DOMCONTENTLOADED,
+                                            new Page.WaitForLoadStateOptions().setTimeout(2_000));
+                                } catch (Exception ignore2) { RolePickerQuiet.ignore("RolePickerPanelController#waitForLoadState", ignore2); }
                                 try {
                                     start(page, nlsReverseJson);
                                 } catch (Exception startEx2) {
@@ -964,8 +975,11 @@ public final class RolePickerPanelController {
                             // 跨域同页跳转：面板脚本(panel-core)经 context 级 addInitScript 已无条件注入，但其显示门禁
                             // localStorage.__rolePanelEnabled 因 origin 隔离读不到、window.__rolePanelForce 随旧文档销毁丢失
                             // → 面板不显示（有蓝框能拾取却看不到已拾列表）。此处显式置位兜底开关确保面板显示。
+                            // 【必须 soft】本方法跑在 Playwright 事件派发线程上，且 pickerEval 是"持页锁等待"：
+                            // 用 10s 默认超时会让新文档/慢页把事件派发与面板回灌一起排队（现场：跨域新页连出两个
+                            // 10s 空档，用户表现为"已拾元素回灌很慢"）。幂等且失败可重做，故一律走 2s 软超时。
                             try {
-                                pickerEval(page, RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
+                                pickerEvalSoft(page, RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
                             } catch (Exception ignorePanel) { RolePickerQuiet.ignore("RolePickerPanelController#removePanel", ignorePanel); }
                         }
                     }
@@ -980,7 +994,9 @@ public final class RolePickerPanelController {
                 //   hasClick/hasMove/hasRecord —— 三大监听/入口函数是否真的被定义（判断 START_SCRIPT 是否注入成功）
                 //   gateInit   —— 门控注入脚本本次执行结果（是否读到开关、是否注入），直接显示是"门控没生效"还是"激活被覆盖"
                 try {
-                    String navDiag = pickerEval(page, RolePickerScripts.NAV_DIAG_JS).toString();
+                    // 【必须 soft】同上：本方法在事件派发线程上执行，诊断 evaluate 不能占用 10s 默认超时
+                    // （诊断丢了只影响日志，不影响功能；诊断超时同样只打一行 warn）。
+                    String navDiag = String.valueOf(pickerEvalSoft(page, RolePickerScripts.NAV_DIAG_JS));
                     log.info("[picker][nav] post navigation-restore/activation runtime diagnostics @ {} : {}", page.url(), navDiag);
                 } catch (Exception diagEx) {
                     log.warn("[picker][nav] failed to read diagnostics (page may be closed): {}", diagEx.getMessage());

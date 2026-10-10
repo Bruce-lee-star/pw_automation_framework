@@ -402,6 +402,17 @@
               // 仅在状态变化时重写 DOM，避免定时器无谓重绘（企业级：减少无变化重排）。
               var __lastMode = null;
               function refreshToggle() {
+                // 【按钮态自愈：新页面开箱即显示"⏹ 停止拾取"】__roleMode 在 build() 里只推导一次，而新文档
+                // （尤其跨源新页）上"面板构建"常早于 head 脚本置位会话开关 ⇒ 模式停在 'idle'、按钮显示
+                // "▶ 开始拾取"，与"其实正处于拾取会话"的真实态不符（用户被迫手点一次 ▶ 才能拾取）。
+                // 这里每轮（80ms）都按会话真相兜底升级一次：判定与拾取库的 __rolePickEnsureManual 同源，
+                // 含"用户刚点过停止则不得回弹"的保护；停止时 stop-* 脚本会清掉会话开关，故不会把已停止误升。
+                try {
+                  if ((window.__roleMode || 'idle') === 'idle'
+                      && typeof window.__rolePickEnsureManual === 'function') {
+                    window.__rolePickEnsureManual();
+                  }
+                } catch (e) {}
                 var mode = window.__roleMode || 'idle';
                 var modeChanged = (mode !== __lastMode);
                 __lastMode = mode;
