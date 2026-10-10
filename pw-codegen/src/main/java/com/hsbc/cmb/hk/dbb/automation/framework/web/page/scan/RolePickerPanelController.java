@@ -20,6 +20,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickerAction
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickMode;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.PickerAbortedException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickSnapshot;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.StepRec;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerScripts;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerSessionState;
@@ -38,11 +39,11 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElement
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.runPickerCommand;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.mergeFramePicksToMain;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.syncPanelToBrowser;
-import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.ensurePickingActive;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.pickerEvalSoft;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.reconcileTrackedPages;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.reconcileMissedPages;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.refreshPageClass;
+import java.util.concurrent.ScheduledFuture;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.followPage;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.closePanel;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.hasPicks;
@@ -62,6 +63,25 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElement
 public final class RolePickerPanelController {
 
     private static final Logger log = LoggerFactory.getLogger(RolePickerPanelController.class);
+
+    /**
+     * 自愈兜底节拍：事件驱动为主，残留轮询仅作"三重失效"极端兜底。
+     *
+     * <p>绝大多数自愈已在<b>事件发生时即时</b>处理，稳态主循环零周期 evaluate：
+     * <ul>
+     *   <li>拾取库注入：{@code registerContextInitScripts} 经 addInitScript 原生保证所有当前/未来页面存活；</li>
+     *   <li>面板回灌 + 跨源 iframe 聚合：{@code __roleOnPick} 绑定回调 / console 兜底桥在合并进权威态后，
+     *       经 {@code PICK_SYNC_POOL} 即时回灌面板并协议级读回该页所有 frame 的 {@code window.__rolePicks}
+     *       （跨源可读，不受 file:// 跨源限制）；</li>
+     *   <li>iframe 导航聚合：{@code onFrameNavigated} 子帧分支经 {@code scheduleSelfHeal} debounce 触发；</li>
+     *   <li>页类刷新：{@code onFrameNavigated} 主帧 + 回调 retag 已覆盖（含 pushState 无 pick 时不产生脏数据）。</li>
+     * </ul>
+     * 故残留轮询只保留两件<b>真正无事件信号</b>的事：① 周期缓存快照（onClose 已优先活读，这里仅兜底）；
+     * ② 跨源 iframe 聚合兜底（binding 与 console 均回传失败、且之后零导航的极端情形）。
+     * 间隔从 5s 放宽到 {@code SELF_HEAL_EVERY_IDLE_ROUNDS} 轮（~15s），因为常规路径已不再依赖它。
+     */
+    private static final int SELF_HEAL_EVERY_IDLE_ROUNDS = 15;
+    private static int idleRound = 0;
 
     /**
      * 判定「导航后是否需要强制 {@code start()} 重注入整套库」的<b>唯一判据</b>（单点事实来源）。
@@ -184,6 +204,10 @@ public final class RolePickerPanelController {
         final java.util.Set<Page> navigatedPages = java.util.concurrent.ConcurrentHashMap.newKeySet();
         // 收敛本次拾取会话的可变工作集到 RolePickerContext，消除下游方法的 16 参数长签名（行为零变更）。
         final RolePickerContext pc = new RolePickerContext(current, rootClosed, active, nlsReverseJson, nlsFiles, packageName, pageClassName, stepClassName, pageNames, snapshots, urlToClass, openedPages, cmdQueue, navigatedPages, closeSignal, javaPickBySig);
+        // 登记「BrowserContext → 会话上下文」：供 context 级 console 桥在收到浏览器侧 URL 变化信号
+        // （__roleOnUrlChanged::，gate-init.js 的 pushState/popstate 自愈钩子）时反查本会话并即时刷新页类，
+        // 补齐 History API 导航不触发 onFrameNavigated 的空档。
+        RolePickerPageTracker.bindContext(ctx, pc);
         // 把根页类名暴露给面板标题展示（新页面在 followPage 里设置），并持久化以便整页重建后恢复。
         pickerEval(page, RolePickerScripts.SET_PAGE_NAME_AND_RESET_INSTANCE_JS,
                 RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, pageClassName));
@@ -334,6 +358,8 @@ public final class RolePickerPanelController {
             for (Page p : openedPages) {
                 try { if (p != null && !p.isClosed()) p.close(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
             }
+            // 关闭 per-session 自愈调度器（取消所有在途自愈任务，释放 daemon 线程），避免线程泄漏。
+            try { pc.selfHealScheduler.shutdownNow(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
         }
     }
 
@@ -395,74 +421,38 @@ public final class RolePickerPanelController {
                 if (!pg.isClosed()) drainPanelCmds(pg, cmdQueue);
             }
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
-        // 空闲（1s 内无命令）：周期性缓存"所有被跟踪页面"的拾取快照，供导航重建/关闭后恢复。
-        // 关键优化：快照刷新不再放在【每个命令迭代】里——否则每次点按钮都要先对"每个被跟踪页面"
-        // 各做一次 page.evaluate 读快照（N 页 = N 次往返），造成"点按钮要好久才有反应"。
-        // 仅空闲时刷新一次即可：onClose 关闭瞬间会自读最新快照；整页跳转前的最后点击另有
-        // localStorage 落盘合并兜底（见 onFrameNavigated），正确性不受影响，点击延迟大幅下降。
-        try {
-            for (Page pg : pageNames.keySet()) {
-                if (pg.isClosed()) continue;
-                String snap = readPickStateJson(pg);
-                String prev = snapshots.get(pg);
-                boolean prevEmpty = (prev == null || prev.isEmpty() || isEmptyState(prev));
-                boolean curEmpty = isEmptyState(snap);
-                if (prevEmpty || !curEmpty) snapshots.put(pg, snap);
-            }
-        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
-        // 以 Java 权威内存态兜底刷新实时面板：浏览器侧 window.__rolePicks 因跨 iframe/导航时序
-        // 可能未可靠填充，导致"内存态增长、面板空白"。每轮空闲用 javaPickBySig 同步【所有】被跟踪页面
-        // 的面板并渲染（按各页 pageClass 过滤只显示该页拾取），保证用户在任一页面点击时面板都实时反映
-        // 已拾元素（生成链路仍走 javaPickBySig，不受影响）。
-        try {
-            for (Page pg : pageNames.keySet()) {
-                if (pg.isClosed()) continue;
-                try { mergeFramePicksToMain(pg, javaPickBySig); } catch (Exception me) { /* ignore */ }
-                syncPanelToBrowser(pg, null, javaPickBySig, false);
-            }
-        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
-        // 【修复"URL change 后没有生成新的页面"】每轮按各页【当前 URL】幂等刷新页类名并写回浏览器侧
-        // window.__rolePageName。整页导航新建的文档会把该值从 localStorage 恢复成【上一个文档的旧类名】，
-        // 与 onFrameNavigated 的一次性写入存在先后竞态（先写入的被随后恢复的旧值覆盖）⇒ 新页拾取的元素
-        // 被打上旧页类名、生成时归入旧页类 ⇒ 用户表现"URL 变了却没生成新页面"（且面板按激活页过滤后
-        // 看不到之前的元素）。每轮幂等重写（值不同才写）可在 ≤1 轮内自愈；与下方 ensurePickingActive
-        // 同处一轮，保证"监听已重挂"与"页类名已刷新"同步落地。
-        for (Page pg : pageNames.keySet()) {
-            if (!pg.isClosed()) refreshPageClass(pc, pg);
-        }
-        // 【F1 每轮自愈：面板 / 拾取库的"存在性"检查】上一段只保证页类正确；本段保证每个被跟踪页上确实
-        // 【有面板、有拾取库】。这是此前唯一完全没有兜底的环节：跨源 popup 拿不到 localStorage 的会话标志
-        // （gate-init 不注入拾取库），而 followPage 的一次性 evaluate 若在加载期失败，该页会既无库也无面板，
-        // 且【永不恢复】（表现为"新页面没有重建 panel"）。
-        // 探针返回值：'' 正常 / 'panel' 面板 DOM 丢失（已在浏览器侧就地重建）/ 'none' 拾取库也丢了
-        // （本段先把面板拉回来，库由紧随其后的 ensurePickingActive 重挂 START_SCRIPT 负责）。
-        // 用 pickerEvalSoft（2s 超时）：本段是"每轮重做、丢掉无害"的调用，超时不允许拖慢主循环。
-        if (active.get()) {
-            for (Page pg : pageNames.keySet()) {
-                if (pg.isClosed()) continue;
-                try {
-                    Object healRes = RoleElementPicker.pickerEvalSoft(pg, RolePickerScripts.HEAL_PANEL_AND_LIB_JS);
-                    String heal = healRes == null ? "" : String.valueOf(healRes);
-                    if ("panel".equals(heal)) {
-                        log.info("[picker][heal] panel was missing on a tracked page and has been rebuilt (url={})", pg.url());
-                    } else if ("none".equals(heal)) {
-                        log.warn("[picker][heal] picker library missing on a tracked page: restoring the panel now,"
-                                + " the library itself is re-attached by ensurePickingActive (url={})", pg.url());
-                        RoleElementPicker.pickerEvalSoft(pg, RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
-                        RoleElementPicker.pickerEvalSoft(pg, RolePickerScripts.PANEL_SCRIPT);
-                    }
-                } catch (Exception healEx) {
-                    // 导航瞬间文档不稳定导致的探针失败属预期：下一轮重来（幂等），故只记 debug。
-                    log.debug("[picker][heal] probe skipped this round (page may be navigating): {}", healEx.getMessage());
+        // 事件驱动为主：拾取库注入(addInitScript)、面板回灌(__roleOnPick 回调逐拾回灌 + onFrameNavigated 导航回灌)、
+        // 页类刷新(onFrameNavigated + 回调 retag)、iframe 聚合(回调已直达 javaPickBySig) 都已在发生时即时处理，
+        // 不再每轮(1s)对所有 page×frame 做一遍重活。下面仅保留一个低频次的自愈兜底，把每轮 O(pages·frames)
+        // 的 evaluate 降到 O(1)，空闲时主循环零浏览器往返。
+        // 自愈仅每 SELF_HEAL_EVERY_IDLE_ROUNDS 轮（~5s）执行一次，覆盖"事件/回调未捕获"的极端边界
+        // （如跨源 iframe 聚合时序、导航竞态导致面板/库短暂丢失），平时完全跳过这些 evaluate。
+        idleRound++;
+        if (idleRound % SELF_HEAL_EVERY_IDLE_ROUNDS == 0) {
+            // ① 周期缓存快照（事件侧 onClose 已优先活读，这里仅兜底；与 handleIdle 顶部每轮轻量对齐解耦）。
+            try {
+                for (Page pg : pageNames.keySet()) {
+                    if (pg.isClosed()) continue;
+                    String snap = readPickStateJson(pg);
+                    String prev = snapshots.get(pg);
+                    boolean prevEmpty = (prev == null || prev.isEmpty() || isEmptyState(prev));
+                    boolean curEmpty = isEmptyState(snap);
+                    if (prevEmpty || !curEmpty) snapshots.put(pg, snap);
                 }
-            }
-        }
-        // 自愈式保活：会话处于拾取中时，校验每个被跟踪页的点击捕获监听是否仍存活，
-        // 丢失则立即重挂 START_SCRIPT（含 nls）——覆盖"页面变化（跳转/URL change/SPA 整文档替换/
-        // frame 内部跳转）后监听被静默丢弃"的所有边界，保证任何时刻都能继续拾取。
-        if (active.get()) {
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+            // ② 跨源 iframe 聚合兜底（事件/回调未捕获的"三重失效"极端情形）：binding 与 console 均回传失败、
+            // 且该 iframe 之后零导航时，协议级读回其 window.__rolePicks（跨源可读）补回拾取。
+            // 面板回灌与常规 iframe 聚合已由 __roleOnPick 回调 / console 桥 / onFrameNavigated 子帧分支事件驱动即时完成。
+            try {
+                for (Page pg : pageNames.keySet()) {
+                    if (pg.isClosed()) continue;
+                    try { mergeFramePicksToMain(pg, javaPickBySig); } catch (Exception me) { /* ignore */ }
+                }
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+            // ③ 页类刷新兜底（事件驱动为主：__roleOnUrlChanged:: / onFrameNavigated 主帧已即时刷新；
+            //    这里仅兜底"URL 变化信号未到达"的极端情形，幂等、页类不变时零写入）。
             for (Page pg : pageNames.keySet()) {
-                if (!pg.isClosed()) ensurePickingActive(pg, nlsReverseJson, nlsFiles);
+                if (!pg.isClosed()) refreshPageClass(pc, pg);
             }
         }
         // auto-generate step while picking (no need to click stop): each change in javaPickBySig
@@ -475,18 +465,44 @@ public final class RolePickerPanelController {
         List<RoleEntry> pickSnap;
         synchronized (javaPickBySig) { pickSnap = new ArrayList<>(javaPickBySig.values()); }
         if (!pickSnap.isEmpty()) {
+            // 当轮进行中拾取快照：与 pickSnap 同期取，保证"签名"与"正文"基于同一视图。
+            List<RoleEntry> roundSnap;
+            synchronized (pc.roundPicks) { roundSnap = new ArrayList<>(pc.roundPicks.values()); }
             StringBuilder sigBuilder = new StringBuilder();
             sigBuilder.append(pickSnap.size()).append('#');
             for (RoleEntry e : pickSnap) {
                 sigBuilder.append(e.getSigKey()).append('|');
             }
+            // 当轮（roundPicks）一并纳入签名：同一元素在新一轮被重拾时 javaPickBySig 签名不变（sigKey 相同），
+            // 但 step 边界已变（新一轮从 1 开始编号），预览必须重算，否则当轮 step 不会出现在实时预览里。
+            sigBuilder.append('/').append(roundSnap.size()).append('#');
+            for (RoleEntry e : roundSnap) {
+                sigBuilder.append(e.getSigKey()).append(':').append(e.getPickNos()).append('|');
+            }
             String newSig = sigBuilder.toString();
             if (!newSig.equals(lastAutoGenSig[0])) {
                 lastAutoGenSig[0] = newSig;
                 try {
+                    // 【实时预览与"停止"生成完全一致】steps = 已封存 steps（上次停止时缓存，见 cmdStop）
+                    // + 当轮进行中 step（ctx.roundPicks，__roleOnPick 逐拾累加），而不再传空 steps 交给
+                    // snapWithAutoStep 把全部元素兜底成 1 步 —— 后者正是"边拾边预览只有 1 个 step、
+                    // 断言 Tab 也只有一个 assertStep"的来源。当轮取 roundPicks 与浏览器 __currentStep 同口径，
+                    // 故预览的 stepN / assertStepN 与随后"停止"生成的第 N 个完全对应。
+                    List<StepRec> previewSteps = new ArrayList<>(pc.sealedSteps);
+                    List<RoleEntry> curRound = roundSnap;
+                    if (!curRound.isEmpty()) {
+                        String rootPc = "";
+                        for (RoleEntry ce : curRound) {
+                            String cp = ce.getPageClass();
+                            if (cp != null && !cp.isEmpty()) { rootPc = cp; break; }
+                        }
+                        if (rootPc.isEmpty()) rootPc = pageClassName;
+                        previewSteps.add(new StepRec(rootPc, curRound));
+                    }
+                    // 仅当两处都为空（尚无任何回传）时才由 snapWithAutoStep 兜底为 1 步，保持旧有安全网。
                     PickSnapshot autoSnap = RolePickerCodeAssembler.snapWithAutoStep(
                             new PickSnapshot(pageClassName, new ArrayList<>(pickSnap),
-                                    new ArrayList<>(), new ArrayList<>()));
+                                    previewSteps, new ArrayList<>()));
                     LinkedHashMap<String, String> autoPage = RolePickerCodeAssembler.buildPageClassCode(autoSnap.entries, packageName, pageClassName, nlsFiles);
                     LinkedHashMap<String, String> autoStep = RolePickerCodeAssembler.buildStepCode(autoSnap, packageName, stepClassName);
                     LinkedHashMap<String, String> autoAssert = RolePickerCodeAssembler.buildAssertCode(autoSnap, packageName);
@@ -509,6 +525,50 @@ public final class RolePickerPanelController {
         }
     }
 
+    /**
+     * 按 page 去抖（debounce）调度一次自愈：同一 page 在 250ms 内的多次触发只真正执行一次，
+     * 把 iframe 导航 / URL 变化 / 拾取回调的突发合并为单次 {@link #selfHealPage}，避免对单页反复做 frame 读回。
+     * 页面关闭时由 {@code onClose} 移除条目；会话结束由 openPanel 的 finally 关闭调度器取消所有在途任务。
+     */
+    static void scheduleSelfHeal(RolePickerContext pc, Page page) {
+        if (page == null || page.isClosed()) return;
+        ScheduledFuture<?> existing = pc.selfHealTasks.get(page);
+        if (existing != null && !existing.isDone()) return;   // 已排程：跳过，等其执行
+        try {
+            ScheduledFuture<?> f = pc.selfHealScheduler.schedule(() -> {
+                pc.selfHealTasks.remove(page);
+                selfHealPage(pc, page);
+            }, 250, TimeUnit.MILLISECONDS);
+            pc.selfHealTasks.put(page, f);
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+    }
+
+    /**
+     * 单页自愈（事件驱动，替代原先每 1s/5s 的整页轮询）：
+     * <ol>
+     *   <li>{@link RolePickerPageTracker#refreshPageClass}：按当前 URL 幂等刷新页类名——补齐 History API
+     *       （pushState/hashchange）导航不触发 {@code onFrameNavigated} 导致的页类陈旧（现场"url change
+     *       没有创建新页面、所有元素都在 LogonPage"的根因）；页类未变时零写入，幂等；</li>
+     *   <li>{@link RolePickerPanelSync#mergeFramePicksToMain}：跨源 iframe 聚合（协议级读回所有 frame 的
+     *       {@code window.__rolePicks}，不受 file:// 跨源限制）；</li>
+     *   <li>{@link RolePickerPanelSync#syncPanelToBrowser}：面板回灌。</li>
+     * </ol>
+     * 由 {@code onFrameNavigated} 子帧分支 / 拾取回调 / console 桥的 URL 变化信号（{@code __roleOnUrlChanged::}）
+     * 经 {@link #scheduleSelfHeal} 去抖触发。
+     */
+    private static void selfHealPage(RolePickerContext pc, Page page) {
+        if (page == null || page.isClosed()) return;
+        try {
+            refreshPageClass(pc, page);
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+        try {
+            mergeFramePicksToMain(page, pc.javaPickBySig);
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+        try {
+            syncPanelToBrowser(page, null, pc.javaPickBySig);
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+    }
+
     static void registerPopupFollow(RolePickerContext ctx, Page page, Page parent) {
         AtomicReference<Page> current = ctx.current;
         AtomicBoolean rootClosed = ctx.rootClosed;
@@ -528,16 +588,21 @@ public final class RolePickerPanelController {
         LinkedHashMap<String, RoleEntry> javaPickBySig = ctx.javaPickBySig;
         // 弹窗（window.open / target=_blank 等）跟随：复用 followPage 把 inspector 跟随到新页面。
         page.onPopup(popup -> {
-            // 新页面弹出时，把"最近一次拾取的元素"标记为 popup（其触发动作会打开新页），
+            // 【关键路径优先】先 followPage：重建新页面板 + 注入拾取库。弹窗弹出瞬间打开器页可能短暂繁忙，
+            // 旧实现把"读 last pick sig"的 evaluate 排在它之前，实测该 evaluate 可阻塞至 pickerEval 默认超时
+            // （10s），把紧随其后的新页面板重建一并拖延 → 表现为"打开的新页面长时间没有面板、拾取不了"。
+            followPage(ctx, page, popup);
+            // 装饰性动作（非关键路径）：把"最近一次拾取的元素"标记为 popup（其触发动作会打开新页），
             // 生成 step 时包装为 waitForNewPage(() -> element.click())（对齐 page.pause() 的 codegen 输出）。
+            // 改用短超时：失败/超时仅丢失该标记，绝不再拖住新页的关键初始化。
             try {
-                String sig = pickerEval(page, RolePickerScripts.READ_LAST_PICK_SIG_JS).toString();
+                Object sigRaw = pickerEvalSoft(page, RolePickerScripts.READ_LAST_PICK_SIG_JS);
+                String sig = sigRaw == null ? "" : sigRaw.toString();
                 if (sig != null && !sig.isEmpty()) {
                     RoleEntry e = javaPickBySig.get(sig);
                     if (e != null) { e.setPopup(true); log.info("[picker] onPopup captured a new page; writing back popup flag to the last picked element: {}", sig); }
                 }
             } catch (Exception ex) { log.warn("[picker] failed to set onPopup flag (ignored): {}", ex.getMessage()); }
-            followPage(ctx, page, popup);
         });
         // 原生对话框（alert/confirm/prompt）捕获：Playwright 官方机制，不依赖浏览器侧 JS hook 的脆弱时序。
         // dialog 出现时，把"最近一次拾取的元素"（浏览器侧 window.__lastPickSig）标记为 dialog 并回写 Java 权威内存态，
@@ -590,6 +655,8 @@ public final class RolePickerPanelController {
         // 多页面模型下每个页面保留各自独立的拾取（不合并），故此处仅重建父页面板、不回写子页数据。
         page.onClose(closed -> {
             try {
+                // 清理该页的去抖自愈任务（若有在途），避免对已关闭页执行自愈 / 持有过期引用。
+                ctx.selfHealTasks.remove(closed);
                 // 区分"框架主动关闭（closeCurrentPage 主动 page.close()）"与"外部/手动关闭"。
                 // 前者已在代码里显式调用 closeCurrentPage()，若在 onClose 再登记 _closeOp 会重复生成；
                 // 后者才需要补登记 closeCurrentPage 步骤。RolePickerSessionState.consumeFrameworkClose 读取即清除标记（页面关后失效）。
@@ -730,6 +797,9 @@ public final class RolePickerPanelController {
                 if (frame != page.mainFrame()) {
                     // 子框架（iframe）整页导航的重新注入已统一由 registerFrameInjection 的 onFrameNavigated
                     // 处理（持有正确的 nls 反向表），此处不再重复，避免两处逻辑分散与 nls 不一致。
+                    // 但 iframe 导航后其上可能已承载待聚合的拾取：调度一次 debounced 自愈（跨源 iframe 聚合 +
+                    // 面板回灌），由事件精准触发，替代原先每 5s 轮询对所有 page×frame 做一遍重活。
+                    scheduleSelfHeal(ctx, page);
                     return;
                 }
                 log.info("[picker][nav] onFrameNavigated triggered: page={} active.get()={}", page.url(), active.get());
@@ -779,10 +849,13 @@ public final class RolePickerPanelController {
                     // 立即重灌：瞬态文档未就绪时 evaluate 可能失败，catch 后由 idle 主循环兜底补灌，幂等无副作用。
                     // 重灌后再次作废 ETag，确保文档真正就绪后 idle 主循环仍会确定性重写一次，
                     // 避免"提前写旧文档、新文档收不到"的竞态（修复回灌慢/偶发丢元素）。
-                    RolePickerPanelSync.syncPanelToBrowser(page, null, javaPickBySig, false);
+                    RolePickerPanelSync.syncPanelToBrowser(page, null, javaPickBySig);
                     RolePickerPanelSync.invalidateSync(page);
                     // 导航后重渲染面板列表并滚动到底部，确保已恢复元素可见（修复"URL 变化后元素看不见"）。
-                    pickerEval(page, RolePickerScripts.POST_NAV_COMPACT_AND_RENDER_JS);
+                    // 【必须用短超时】这是"每轮/每次导航都会重做、丢掉无害"的显示层动作；弹窗/跨域页在导航后常
+                    // 短暂繁忙，用全超时(10s)会把紧随其后的"激活保活"一起拖住——实测 panel re-push 超时 10s，
+                    // 导致新页面板在 ~10s 内处于非 active（用户须重新点开始拾取）。软超时失败由 idle 主循环补灌。
+                    pickerEvalSoft(page, RolePickerScripts.POST_NAV_COMPACT_AND_RENDER_JS);
                     // 依据新 URL 解析本页类名：优先复用会话级 urlToClass 稳定映射（同一 URL 复用同一类名，
                     // 避免"回到默认页 URL 又派生出 LogonPage 之类重复页类"）——仅当该 URL 从未见过时才派生新类名。
                     String curCls = pageNames.get(page);

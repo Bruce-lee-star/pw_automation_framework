@@ -72,17 +72,17 @@ public class RolePickerPanelResyncTest {
         RoleEntry e = new RoleEntry("text", "Special announcement");
         state.put("HomePage|text:Special announcement", e);
 
-        RolePickerPanelSync.syncPanelToBrowser(page, null, state, false);
+        RolePickerPanelSync.syncPanelToBrowser(page, null, state);
         int afterFirst = EVAL_CALLS.get();
         assertTrue("首次同步应当写回面板（否则用例前提不成立）", afterFirst > 0);
 
-        RolePickerPanelSync.syncPanelToBrowser(page, null, state, false);
+        RolePickerPanelSync.syncPanelToBrowser(page, null, state);
         assertEquals("状态未变时不得再次写回（否则空闲期每轮都空转一次 driver 往返并刷屏）",
                 afterFirst, EVAL_CALLS.get());
 
         // 状态确实变化时（新增元素）必须恢复写回
         state.put("HomePage|text:Activate security device.", new RoleEntry("text", "Activate security device."));
-        RolePickerPanelSync.syncPanelToBrowser(page, null, state, false);
+        RolePickerPanelSync.syncPanelToBrowser(page, null, state);
         assertTrue("状态变化后必须重新写回", EVAL_CALLS.get() > afterFirst);
     }
 
@@ -95,12 +95,12 @@ public class RolePickerPanelResyncTest {
         RoleEntry e = new RoleEntry("text", "Special announcement");
         state.put("HomePage|text:Special announcement", e);
 
-        RolePickerPanelSync.syncPanelToBrowser(page, null, state, false);
+        RolePickerPanelSync.syncPanelToBrowser(page, null, state);
         int afterFirst = EVAL_CALLS.get();
         assertTrue("首次同步应当写回面板", afterFirst > 0);
 
         // 空闲期状态没变 → 不写回（既有契约）
-        RolePickerPanelSync.syncPanelToBrowser(page, null, state, false);
+        RolePickerPanelSync.syncPanelToBrowser(page, null, state);
         assertEquals("状态未变时不得再次写回", afterFirst, EVAL_CALLS.get());
 
         // 模拟「同 URL 切换表单」：整文档被重建（window.__rolePicks 清空），
@@ -109,7 +109,7 @@ public class RolePickerPanelResyncTest {
 
         // 下一轮 idle 必须整体重灌，即便状态一行未变（对齐 page.pause 导航后重渲染列表）。
         // 若不重灌，新文档面板收不到已拾元素 → 切表单后「之前的元素又没了」。
-        RolePickerPanelSync.syncPanelToBrowser(page, null, state, false);
+        RolePickerPanelSync.syncPanelToBrowser(page, null, state);
         assertTrue("导航后即便 Java 态未变也必须重灌面板（否则同 URL 切表单丢元素）",
                 EVAL_CALLS.get() > afterFirst);
     }

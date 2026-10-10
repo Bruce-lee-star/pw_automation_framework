@@ -120,6 +120,27 @@ final class RolePickerPageTracker {
     private static final ConcurrentHashMap<com.microsoft.playwright.BrowserContext, LinkedHashMap<String, String>> CTX_URL_TO_CLASS =
             new ConcurrentHashMap<>();
 
+    /**
+     * 会话级「BrowserContext → RolePickerContext」注册表：供 context 级 console 兜底桥在收到浏览器侧
+     * URL 变化信号（{@code __roleOnUrlChanged::}，见 gate-init.js 的 pushState/popstate 自愈钩子）时，
+     * 拿到本会话的 pageNames/urlToClass/javaPickBySig，即时 {@link #refreshPageClass}。
+     * 由 openPanel 在构造 pc 后经 {@link #bindContext} 登记（同一 context 二次 openPanel 覆盖为最新 pc）。
+     */
+    private static final ConcurrentHashMap<com.microsoft.playwright.BrowserContext, RolePickerContext> CTX_CONTEXT =
+            new ConcurrentHashMap<>();
+
+    /** 登记/更新某 BrowserContext 对应的会话上下文（供事件驱动自愈按 ctx 反查 pc）；同时暴露 urlToClass 给回传桥。 */
+    static void bindContext(com.microsoft.playwright.BrowserContext ctx, RolePickerContext pc) {
+        if (ctx == null || pc == null) return;
+        CTX_CONTEXT.put(ctx, pc);
+        try { CTX_URL_TO_CLASS.put(ctx, pc.urlToClass); } catch (Exception ignore) { /* 页面/上下文竞态：忽略 */ }
+    }
+
+    /** 按 BrowserContext 反查当前会话上下文；未登记返回 null（调用方需判空）。 */
+    static RolePickerContext contextFor(com.microsoft.playwright.BrowserContext ctx) {
+        return ctx == null ? null : CTX_CONTEXT.get(ctx);
+    }
+
     static String retagStalePickClass(Page srcPage, String pickClass) {
         if (srcPage == null || pickClass == null || pickClass.isEmpty()) return null;
         String prev = PREV_CLASS.get(srcPage);
@@ -133,6 +154,21 @@ final class RolePickerPageTracker {
         //    且 pick 的类名正是本页"最后已知类名"，即认定是导航前打的旧标签并改标。
         //    限定"pickClass == 本页已知类名"是为了不误伤跨页搬运来的 pick（它们带的是别的页的类名）。
         boolean staleByUrl = (lastKnown != null && lastKnown.equals(pickClass));
+        // ③ 权威兜底（不依赖 refreshPageClass 是否刚跑过）：pushState/hashchange 等 History API 导航不触发
+        //    onFrameNavigated，若 refreshPageClass 未及时跑过，PREV/CUR 仍是旧值 ⇒ 仅靠①②会漏判，
+        //    新页拾取的元素被打上旧页类（现场："url change 没有创建新页面"，所有元素都在 LogonPage）。
+        //    此处直接读本会话 pageNames[srcPage]：只要 pick 的类名正是【本页 Java 侧当前登记的类名】、
+        //    而按当前 URL 解析出的类名不同，即认定本页已导航、当场改标。
+        //    限定"pickClass == pageNames[srcPage]"同样是为了不误伤跨页搬运来的 pick。
+        if (!staleByRecord && !staleByUrl) {
+            try {
+                RolePickerContext pc = CTX_CONTEXT.get(srcPage.context());
+                if (pc != null) {
+                    String javaCls = pc.pageNames.get(srcPage);
+                    if (javaCls != null && javaCls.equals(pickClass)) staleByUrl = true;
+                }
+            } catch (Exception ignore) { /* 页面/上下文竞态：忽略 */ }
+        }
         if (!staleByRecord && !staleByUrl) return null;
         String cur = lastKnown;
         try {
@@ -325,84 +361,107 @@ final class RolePickerPageTracker {
             // 发生在重定向之后，本页自己的 onFrameNavigated 会【错过】这次导航 ⇒ 该页再也不会被跨域强制
             // 重注入 / 重建面板，表现为"新页面没有重建 panel"。故把注册提前到状态搬运之前（幂等，末尾不再重复）。
             RoleElementPicker.registerPopupFollow(ctx, newPage, opener);
+            // 【关键路径·纯推】即时注入"面板 + 拾取库"，全部软超时：面板内容由 Java 权威态 javaPickBySig
+            // 直接 push（与 page.pause() 的"模型→视图 push"一致），不再"读打开器状态"——那正是 10s 阻塞的根源。
+            // 新页此刻可能仍是 about:blank：失败【不再】循环 evaluate 干等，而是注册一次性 load 事件，在真实文档
+            // 就绪时重跑同一套幂等注入（事件驱动）；本页 onFrameNavigated 与门控 addInitScript 亦为兜底。
+            boolean panelReady = injectPanelAndLib(newPage, cls, sessionActive, nlsReverseJson);
+            if (!panelReady) {
+                final AtomicBoolean loadRetried = new AtomicBoolean(false);
+                try {
+                    newPage.onLoad(loaded -> {
+                        if (!loadRetried.compareAndSet(false, true)) return;
+                        injectPanelAndLib(newPage, cls, active.get(), nlsReverseJson);
+                    });
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#onLoad", ignore); }
+            }
             // 关键修复：打开新页面【不再】把默认页当前步收尾成一个 step。step 的唯一边界是"开始→停止"，
             // 弹窗打开/关闭都只是同一 step 内的交互，绝不该切分出额外 step（用户明确要求"只有一个条件：开始-停止"）。
             // 因此此处只把 opener 的"进行中 step"（__currentStep，已带各元素原 _pageClass）整体搬运到新页继续累积，
             // 并把 opener 的 __currentStep 清空（转移而非复制），避免关闭弹窗合并回来时出现重复元素。
             // 旧页 pick 已带原 _pageClass，新页面板会显示之前抓的元素；新页拾取的元素再打上 cls。
             // 当前页始终持有全部页面的 pick 并集，故代码生成可在单一窗口按各元素自身 _pageClass 归类。
-            RoleElementPicker.applyPickState(newPage, RoleElementPicker.readPickStateJson(opener), nlsReverseJson, nlsFiles);
-            if (opener != null && !opener.isClosed()) {
-                pickerEval(opener, RolePickerScripts.CLEAR_CURRENT_STEP_JS);
+            // 【状态搬运·纯缓存】来源为内存缓存快照 snapshots.get(opener)（由主循环 / onClose 维护），
+            // 零浏览器往返——不再用 evaluate 去"拉"打开器状态（那正是弹窗路径 10s 阻塞的根源）。
+            // 缺失则跳过：pick 内容已由下方 Java 权威态 push 覆盖，绝不丢元素。
+            try {
+                String openerState = (opener == null) ? null : snapshots.get(opener);
+                if (openerState != null && !openerState.isEmpty()) {
+                    RoleElementPicker.applyPickState(newPage, openerState, nlsReverseJson, nlsFiles);
+                }
+            } catch (Exception applyEx) {
+                log.warn("[picker] applyPickState into the followed page failed (continuing with library/panel injection): {}", applyEx.getMessage());
             }
-            pickerEval(newPage, RolePickerScripts.SET_PAGE_NAME_AND_RESET_INSTANCE_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
-            // 跨源/新页面：localStorage 往往为空或不可写，若直接跑 PANEL_SCRIPT 会因
-            // __rolePanelEnabled!=='1' 提前 return，导致新页面没有面板。故显式置位开关，
-            // 并用 window.__rolePanelForce 兜底（即使 localStorage 不可用也能重建面板）。
-            // 面板重建 addInitScript 已在 context 级注册（registerContextInitScripts），
-            // 新页面后续导航（弹窗常伴随重定向）会自动重建面板，无需逐页注册。
-            pickerEval(newPage, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
-            // 若会话仍处于拾取中，则在新页面重启点击捕获监听（applyPickState 已把新页 active 置 false）：
-            // 经 start() 同时置位会话开关 + 注入 nls，使该页后续导航由 context 门控注入脚本原生保活。
-            // 【算法：零等待窗口的双保险注入，杜绝"卡住"】
-            // onPopup 回调触发时新页文档可能还是 about:blank（尚未导航到真实 URL）。早期版本把 start() 延迟到
-            // onLoadState 触发——但这引入"卡住窗口"：SPA 重定向/不触发 DOMContentLoaded 的页面会让监听永不挂载，
-            // 表现为"新页无蓝框、换了个操作才突然好"（实则是别的导航触发 onFrameNavigated 补注入）。
-            // 现改为【同步立即 start()】注入当前文档作为兜底，且 start() 已修复：about:blank 不再污染全局
-            // RolePickerSessionState.LAST_PICK_ORIGIN。随后真实页导航由两条路径无缝接管，无任何等待间隙：
-            //   ① context 级门控 addInitScript 在每个新文档早期自动跑，同源导航读得到 localStorage 开关即注入；
-            //   ② onFrameNavigated 对跨域导航强制 start() 重注入（RolePickerSessionState.LAST_PICK_ORIGIN 未污染故能正确判跨域）。
-            // 故弹出瞬间即具备基础监听，导航完成后即被真实库接管，用户体感"立即能拾取、不卡"。
-            // 【F3：等加载 + 有界重试，失败不再静默】
-            // onPopup 触发时新页文档常仍是 about:blank 或正在加载，一次性 evaluate 必然失败；原实现只 warn
-            // 吞掉 ⇒ 该页可能永久没有监听、没有面板（用户观感"新页面没有重建 panel"）。现对两处注入各重试
-            // 最多 3 次（退避 300ms）；仍失败则打印可判定告警，并交由两条兜底接管：① 每轮"面板/库存在性自愈"；
-            // ② 已提前注册（F2）的本页 onFrameNavigated，跨域导航时会强制重注入并重建面板。
+            // 【纯推】用新鲜 Java 权威态回灌新页面板 pick 内容：applyPickState 用的是可能过期的缓存快照，
+            // 而 javaPickBySig 是各页 pick 的【并集】（每次拾取都经 __roleOnPick 即时入库），故此处整体覆盖既
+            // 不丢元素、又保证新页面板"即时显示全部已拾元素"（steps/currentStep 由上一步 applyPickState 保留）。
+            try {
+                RolePickerPanelSync.syncPanelToBrowser(newPage, null, javaPickBySig);
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#pushPanel", ignore); }
+            // 【健壮性】以下为"非致命初始化"：onPopup 触发时新页文档常仍是 about:blank / 正在跨域重定向，
+            // 任一 evaluate 都可能瞬态失败。旧实现把它们放在同一个大 try 里，任一失败都会中断后续
+            // 【库注入 / 面板重建 / current 切换】，导致新页在被下一次导航触发前一直拾取不了
+            //（现场：`page following failed: pickerEval failed` 后弹窗既无面板也点不动）。
+            // 故逐个包 try/catch 做 fail-soft，并一律用【短超时】避免拖住关键路径：单点失败不阻断关键步骤，
+            // 随后由本页 onFrameNavigated 与门控 addInitScript 兜底重建。
+            try {
+                if (opener != null && !opener.isClosed()) {
+                    pickerEvalSoft(opener, RolePickerScripts.CLEAR_CURRENT_STEP_JS);
+                }
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#clearCurrentStep", ignore); }
+            try {
+                pickerEvalSoft(newPage, RolePickerScripts.SET_PAGE_NAME_AND_RESET_INSTANCE_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#setPageName", ignore); }
+            // 【修复"新页面面板不是 active、须重新点开始拾取"】上面的状态搬运（applyPickState）按设计会把
+            // __rolePickActive 置回 false（原实现期望随后由 onFrameNavigated 重激活）。但 onFrameNavigated 的
+            // 恢复块可能被弹窗/跨域页的慢 evaluate 拖住（实测 >10s），期间新页虽已重建面板却【非激活】——
+            // 用户点击无效、必须重新点"开始拾取"。故在此（状态搬运之后）显式恢复激活位：库已由
+            // injectPanelAndLib 注入，仅需轻量置位 activation 并渲染（幂等、无副作用），使新页"打开即可拾取"。
             if (sessionActive) {
-                boolean injected = false;
-                for (int attempt = 1; attempt <= 3 && !injected; attempt++) {
-                    try {
-                        RoleElementPicker.start(newPage, nlsReverseJson);
-                        injected = true;
-                    } catch (Exception ex) {
-                        log.warn("[picker] inject attempt {}/3 into the followed page failed (url={}): {}",
-                                attempt, newPage.url(), ex.getMessage());
-                        if (attempt < 3) {
-                            try { newPage.waitForLoadState(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#waitForLoadState", ignore); }
-                        }
-                    }
-                }
-                if (!injected) {
-                    log.warn("[picker] picker library could not be injected into the followed page after 3 attempts;"
-                            + " the per-round heal and the page's own onFrameNavigated will retry (url={})", newPage.url());
-                }
+                try { pickerEvalSoft(newPage, RolePickerScripts.SET_PICK_ACTIVE_AND_RENDER_JS); }
+                catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#reactivate", ignore); }
             }
-            // 面板脚本：初始文档也先注入一次（同样等加载 + 有界重试）；若后续导航重建，PANEL addInitScript 会兜底。
-            boolean panelInjected = false;
-            for (int attempt = 1; attempt <= 3 && !panelInjected; attempt++) {
-                try {
-                    pickerEval(newPage, RolePickerScripts.PANEL_SCRIPT);
-                    panelInjected = true;
-                } catch (Exception ex) {
-                    log.warn("[picker] panel injection attempt {}/3 into the followed page failed (url={}): {}",
-                            attempt, newPage.url(), ex.getMessage());
-                    if (attempt < 3) {
-                        try { newPage.waitForLoadState(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#waitForLoadState", ignore); }
-                    }
-                }
-            }
-            if (!panelInjected) {
-                log.warn("[picker] panel could not be rebuilt in the followed page after 3 attempts;"
-                        + " the per-round heal will retry (url={})", newPage.url());
-            }
+            // 注：面板使能 + PANEL_SCRIPT + 拾取库注入（含"跨源 localStorage 隔离"的开关/__rolePanelForce 兜底）
+            // 已上移并收敛到 injectPanelAndLib（幂等软超时 + 一次性 load 兜底），此处不再重复，避免双份逻辑与
+            // 带 waitForLoadState（默认 30s）的重试循环再次拖住关键路径。
             current.set(newPage);
             // 记录新页初始快照（含搬运来的并集），供导航重建（onFrameNavigated）与关闭回退（onClose）使用。
-            snapshots.put(newPage, RoleElementPicker.readPickStateJson(newPage));
+            // fail-soft：新页仍在导航时 readPickStateJson 的 evaluate 可能瞬态失败，绝不能让它中断
+            // "current 已切换 + 库/面板已注入"的成果（后续 onFrameNavigated / 主循环会补快照）。
+            try {
+                snapshots.put(newPage, RoleElementPicker.readPickStateJsonSoft(newPage));
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#snapshotNewPage", ignore); }
             // 新页面若再弹窗/再开页，继续跟随：该注册已提前到本方法开头（见 F2 说明），此处不再重复注册，
             // 否则会把 onPopup/onDialog/onClose/onFrameNavigated 挂两遍（同一事件被处理两次）。
             log.info("[picker] injected an independent panel into the new page ({}); the default panel is retained.", cls);
         } catch (Exception e) {
             log.warn("[picker] page following failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 新页「面板 + 拾取库」的幂等软超时注入（纯推，不读任何其它页状态）：
+     * 置页类名 → 使能并强制重建面板 → 会话中则重挂拾取库。
+     *
+     * <p>供 {@link #followPage} 的关键路径与"一次性 load 事件兜底"复用。全部走 {@code pickerEvalSoft}（2s 上限），
+     * 绝不因新页正在导航而干等满默认 10s；跨源页 localStorage 往往为空/不可写，故显式置位面板开关 +
+     * {@code __rolePanelForce} 兜底。返回 {@code true} 表示面板脚本已成功执行（新页已可见面板）；失败交由本页
+     * {@code onFrameNavigated}、门控 {@code addInitScript} 与主循环自愈兜底。
+     */
+    private static boolean injectPanelAndLib(Page p, String cls, boolean sessionActive, String nlsReverseJson) {
+        if (p == null || p.isClosed()) return false;
+        boolean ok = false;
+        try {
+            pickerEvalSoft(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
+            pickerEvalSoft(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
+            pickerEvalSoft(p, RolePickerScripts.PANEL_SCRIPT);
+            ok = true;
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#injectPanel", ignore); }
+        if (sessionActive) {
+            // 重挂拾取库（幂等）：使该页后续导航由 context 门控注入脚本原生保活；失败不影响面板可见性与后续兜底。
+            try { RoleElementPicker.start(p, nlsReverseJson); }
+            catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#injectLib", ignore); }
+        }
+        return ok;
     }
 }

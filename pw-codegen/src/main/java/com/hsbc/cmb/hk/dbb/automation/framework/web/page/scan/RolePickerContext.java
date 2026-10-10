@@ -1,12 +1,18 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan;
 
 import com.microsoft.playwright.Page;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.StepRec;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -50,6 +56,28 @@ final class RolePickerContext {
     final Set<Page> navigatedPages;
     final Object closeSignal;
     final LinkedHashMap<String, RoleEntry> javaPickBySig;
+    /**
+     * per-session 自愈调度器（daemon 单线程）：承载"按 page 去抖的事件驱动自愈"，
+     * 把 iframe 导航 / 拾取回调的突发合并为每页至多一次 {@code selfHealPage}，替代原先每 1s/5s 的整页轮询。
+     * 会话结束由 openPanel 的 finally 调 {@code shutdownNow()} 关闭，避免线程泄漏。
+     */
+    final ScheduledExecutorService selfHealScheduler;
+    /** 每页当前在途的自愈任务（去抖用）；页面关闭时移除、任务执行完自移除。 */
+    final ConcurrentHashMap<Page, ScheduledFuture<?>> selfHealTasks;
+    /**
+     * 已封存的 step（权威来源＝浏览器 {@code __steps}，每次「停止」时缓存一份）。
+     * 供「边拾边生成」实时预览构造 {@code steps = 已封存 + 当轮进行中}，使预览与「停止」生成在两个 Tab
+     * （步骤代码 / 断言）上完全一致：每轮「开始→停止」一个 step / 一个 assertStep，跨轮累积。
+     * 写入为整体替换（volatile 引用），读端直接取引用即得一致快照。
+     */
+    volatile List<StepRec> sealedSteps = new ArrayList<>();
+    /**
+     * 当轮（上一次「停止」之后）进行中的拾取：key → RoleEntry（与 javaPickBySig 同键、同对象引用）。
+     * 由 {@code __roleOnPick}（binding / console 两通道）在合并进权威态后累加，「停止」时清空；
+     * 实时预览据此把当轮呈现为"进行中的第 N+1 个 step"，与浏览器 {@code __currentStep} 同口径。
+     * 由 {@code synchronized (roundPicks)} 守卫（写端＝Playwright 回调线程，读端＝面板主循环线程）。
+     */
+    final LinkedHashMap<String, RoleEntry> roundPicks = new LinkedHashMap<>();
 
     RolePickerContext(AtomicReference<Page> current, AtomicBoolean rootClosed, AtomicBoolean active,
                       String nlsReverseJson, String[] nlsFiles,
@@ -77,5 +105,11 @@ final class RolePickerContext {
         this.navigatedPages = navigatedPages;
         this.closeSignal = closeSignal;
         this.javaPickBySig = javaPickBySig;
+        this.selfHealScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "picker-self-heal");
+            t.setDaemon(true);
+            return t;
+        });
+        this.selfHealTasks = new ConcurrentHashMap<>();
     }
 }

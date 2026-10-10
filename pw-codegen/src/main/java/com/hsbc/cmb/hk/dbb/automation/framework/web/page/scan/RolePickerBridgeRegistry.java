@@ -139,7 +139,7 @@ final class RolePickerBridgeRegistry {
                     } else {
                         // Playwright 会把 JS 对象反序列化为 Java Map/List/Number/Boolean，
                         // 其 toString() 不是合法 JSON（单等号、无引号），直接 Gson 解析会抛 MalformedJsonException。
-                        // 故统一用 GSON 规范序列化为 JSON 字符串再入队（repickNos 等对象命令依赖此路径）。
+                        // 故统一用 GSON 规范序列化为 JSON 字符串再入队（markList 等对象命令依赖此路径）。
                         c = GSON.toJson(v);
                     }
                 }
@@ -230,6 +230,13 @@ final class RolePickerBridgeRegistry {
                             || (existing.isDialog() != e.isDialog())
                             || (existing.isPopup() != e.isPopup());
                     RoleEntry merged = RolePickerPickParser.mergePickIntoMap(map, key, e);
+                    // 【当轮进行中记录】供"边拾边生成"预览构造 steps = 已封存 + 当轮，使预览与"停止"生成
+                    // 在两个 Tab（步骤代码 / 断言）上完全一致（每轮一个 step / 一个 assertStep、跨轮累积）。
+                    // 与 javaPickBySig 同键、同对象引用（合并后即最新态）；停止时由 cmdStop 清空。
+                    RolePickerContext roundCtx = RolePickerPageTracker.contextFor(ctx);
+                    if (roundCtx != null) {
+                        synchronized (roundCtx.roundPicks) { roundCtx.roundPicks.put(key, merged); }
+                    }
                     log.debug("[picker][diag-onpick][BIND] key={} pickNos(after-merge)={} changed={} rawNos={} strategy={} keys={}", key, merged.getPickNos(), changed, m.get("_pickNos"), (e != null ? e.getStrategy() : null), (m != null ? m.keySet() : null));
                     if (changed) {
                         List<String> fpLog = merged.getFramePath();
@@ -241,8 +248,15 @@ final class RolePickerBridgeRegistry {
                         final com.microsoft.playwright.Page srcPage = source.page();
                         if (srcPage != null && !srcPage.isClosed()) {
                             try {
-                                PICK_SYNC_POOL.execute(() ->
-                                        RolePickerPanelSync.syncPanelToBrowser(srcPage, null, map, false));
+                                // ① 即时回灌面板（消除"靠主循环 1s 轮询 + busy 页硬超时卡整轮"导致的列表延迟 1~12s）；
+                                // ② 跨源 iframe 聚合：本回调已将本页 iframe 内拾取并入权威态，但同页其它 frame
+                                //    可能仍有未回传的 straggler；协议级读回所有 frame 的 window.__rolePicks
+                                //    （跨源亦可读，不受 file:// 跨源限制），确保聚合即时，无需等残留轮询。
+                                final LinkedHashMap<String, RoleEntry> snap = map;
+                                PICK_SYNC_POOL.execute(() -> {
+                                    RolePickerPanelSync.syncPanelToBrowser(srcPage, null, snap);
+                                    RoleElementPicker.mergeFramePicksToMain(srcPage, snap);
+                                });
                             } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
                         }
                     }
@@ -460,10 +474,26 @@ final class RolePickerBridgeRegistry {
                                 || (existing.isDialog() != e.isDialog())
                                 || (existing.isPopup() != e.isPopup());
                         RoleEntry merged = RolePickerPickParser.mergePickIntoMap(map, key, e);
+                        // 【当轮进行中记录】（与 binding 通道对称）：console 兜底通道经跨源冒泡到达，
+                        // 同样把该元素记入"当轮"，保证跨源 iframe 拾取在实时预览里也归入正确 step。
+                        RolePickerContext roundCtx = RolePickerPageTracker.contextFor(ctx);
+                        if (roundCtx != null) {
+                            synchronized (roundCtx.roundPicks) { roundCtx.roundPicks.put(key, merged); }
+                        }
                         log.debug("[picker][diag-onpick][CONSOLE] key={} pickNos(after-merge)={} changed={} rawNos={} strategy={} keys={}", key, merged.getPickNos(), changed, m.get("_pickNos"), (e != null ? e.getStrategy() : null), (m != null ? m.keySet() : null));
                         if (changed) {
                             List<String> fplog = merged.getFramePath();
                             log.info("[picker] __roleOnPick(console) callback written to in-memory state: key={} pageClass={} framePath={} (current in-memory size={})", key, (merged.getPageClass() == null ? "" : merged.getPageClass()), (fplog == null || fplog.isEmpty() ? "" : fplog.toString()), map.size());
+                            // 事件驱动即时回灌 + 跨源 iframe 聚合（与 binding 通道对称）：console 通道经跨源冒泡到达，
+                            // 此处对来源页调度一次回灌 + 聚合，覆盖"binding 回传失败但拾取已落 frame"的跨源 iframe 场景。
+                            final Page cp = msg.page();
+                            if (cp != null && !cp.isClosed()) {
+                                final LinkedHashMap<String, RoleEntry> snap = map;
+                                PICK_SYNC_POOL.execute(() -> {
+                                    RolePickerPanelSync.syncPanelToBrowser(cp, null, snap);
+                                    RoleElementPicker.mergeFramePicksToMain(cp, snap);
+                                });
+                            }
                         }
                     }
                 } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
@@ -514,6 +544,19 @@ final class RolePickerBridgeRegistry {
                         //（N-18 已删除的写法：RolePickerSessionState.STATE_DELETED.computeIfAbsent(map, k -> ConcurrentHashMap.newKeySet()).addAll(dead);）
                     }
                 } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+            } else if (t.startsWith("__roleOnUrlChanged::")) {
+                // 浏览器侧 URL 变化信号（gate-init.js 在 pushState/replaceState/popstate/hashchange 时发出）：
+                // History API 导航不触发 onFrameNavigated，页类名不会自动刷新 ⇒ 新页拾取的元素会被打上旧页类
+                // （现场："url change 没有创建新页面、所有元素都在 LogonPage"）。此处反查本会话上下文，对来源页
+                // 调度一次 debounced 自愈（refreshPageClass 即时刷新页类 + iframe 聚合 + 面板回灌），
+                // 事件驱动补齐该空档，无需恢复轮询。
+                RolePickerContext pc = RolePickerPageTracker.contextFor(ctx);
+                if (pc != null) {
+                    Page urlChangedPage = msg.page();
+                    if (urlChangedPage != null && !urlChangedPage.isClosed()) {
+                        RolePickerPanelController.scheduleSelfHeal(pc, urlChangedPage);
+                    }
+                }
             } else if ("error".equals(msg.type())
                     && (t.contains("rolePick") || t.contains("__record") || t.contains("__role"))) {
                 log.info("[browser][error] {}", t);

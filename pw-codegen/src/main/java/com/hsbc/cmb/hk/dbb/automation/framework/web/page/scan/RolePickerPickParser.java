@@ -209,7 +209,7 @@ final class RolePickerPickParser {
             // 再以这个被污染的 Java 态为准重建浏览器面板 → 面板序号退回 [1,2,3]。
             // 修复：普通拾取回传【不拥有重置/覆盖全局序号的权限】——只在 incoming 携带的 _pickNos
             // 比 existing 更"完整/更新"（去重集合更大，或含更大的号）时才用 incoming 替换；
-            // 否则保留 existing 的累积序号。唯一能整体覆盖序号的是 repickNos（overwriteNos=true 路径）。
+            // 否则保留 existing 的累积序号（面板序号编辑已移除，当前已无"整体覆盖序号"的入口）。
             // 这样既保留"首次无序号候选"的正确初始化，又杜绝短值覆盖长值。
             java.util.List<Integer> chosen = pickMoreComplete(exNos, inNos);
             log.debug("[picker][diag-merge] key={} incomingNos={} existingNos={} -> chosenNos={}", key, inNos, exNos, (chosen == null ? "null" : chosen));
@@ -372,6 +372,8 @@ final class RolePickerPickParser {
             roleEntry.setPageInstanceId(parseInstanceId(m.get("_pageInstanceId")));
             roleEntry.setUrl(asString(m.get("_url")));
             roleEntry.setPickNos(parsePickNos(m.get("_pickNos")));
+            // 列表标记：面板「列表」开关经命令置位后会随回灌写回浏览器；此处透传，保证 Java 权威态持有该标记。
+            roleEntry.setList(Boolean.parseBoolean(asString(m.get("_list"))));
             return roleEntry;
         }
         String selector = buildSelector(strategy, m);
@@ -401,6 +403,8 @@ final class RolePickerPickParser {
         }
         entry.setPageInstanceId(parseInstanceId(m.get("_pageInstanceId")));
         entry.setPickNos(parsePickNos(m.get("_pickNos")));
+        // 列表标记：同角色分支，透传面板「列表」开关置位的标记。
+        entry.setList(Boolean.parseBoolean(asString(m.get("_list"))));
         return entry;
     }
 

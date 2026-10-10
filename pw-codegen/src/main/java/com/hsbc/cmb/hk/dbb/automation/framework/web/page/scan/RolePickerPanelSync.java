@@ -152,17 +152,14 @@ final class RolePickerPanelSync {
      * 仅用于面板展示；代码生成仍走 javaPickBySig（见 runPickerCommand），不受影响。
      * 注意：不再清空 window.__rolePickSigs，避免干扰浏览器端真实点击的去重计数。
      */
-    static void syncPanelToBrowser(Page page, LinkedHashSet<String> pageClasses, LinkedHashMap<String, RoleEntry> state) {
-        syncPanelToBrowser(page, pageClasses, state, false);
-    }
-
     /**
      * 把 Java 权威内存态回灌浏览器侧 __rolePicks。
-     * @param overwriteNos true=用户经面板显式编辑序号（repickNos）后调用，整体覆盖浏览器侧旧 _pickNos，
-     *                     不与其并集（避免"旧序号被并回"导致编辑序号不生效）。
-     *                     false=常规拾取回传同步，保留浏览器侧更长 _pickNos 以修复 i18n 并发回传丢号竞态。
+     *
+     * <p>序号合并策略恒为「保留更长」：浏览器侧已有的 _pickNos 与 Java 下发的取并（不整体覆盖），
+     * 以修复 i18n 并发回传导致的丢号竞态。面板序号编辑（原 {@code repickNos} 对象命令及其
+     * {@code overwriteNos=true} 覆盖路径）已整体移除，故不再需要该开关。
      */
-    static void syncPanelToBrowser(Page page, LinkedHashSet<String> pageClasses, LinkedHashMap<String, RoleEntry> state, boolean overwriteNos) {
+    static void syncPanelToBrowser(Page page, LinkedHashSet<String> pageClasses, LinkedHashMap<String, RoleEntry> state) {
         if (page == null || page.isClosed() || state == null) return;
         //  N-20（doc 21 MEDIUM）：快照必须【在锁内完成对可变 RoleEntry 的全部读取】。
         //  原实现只在锁内拷了 values() 的【引用】（浅快照），随后在锁外读 getPageClass / getSigKey /
@@ -229,7 +226,7 @@ final class RolePickerPanelSync {
             // 【必须用短超时】面板回灌是"每轮都会重做、丢掉无害"的幂等动作；若沿用 30s 默认超时，页面在
             // 导航瞬间抖动会把同一轮的关键动作（页类刷新、计数器垫高、监听重挂）一起卡住（实测 30s 停摆）。
             RoleElementPicker.pickerEvalSoft(page, RolePickerScripts.SYNC_PANEL_TO_BROWSER_JS,
-                    java.util.Arrays.asList(syncJsonB64, syncDelB64, overwriteNos));
+                    java.util.Arrays.asList(syncJsonB64, syncDelB64));
             // 【修复 ETag 毒化】必须在浏览器侧写回成功后才记签名：否则写回失败时签名已被标为"已同步"，
             // 后续相同状态永不重投，面板便再也不更新（表现为"点了元素、面板列表不刷新"）。
             LAST_SYNC_SIG.put(page, newSig);

@@ -229,6 +229,22 @@ public final class RoleEntry {
     private int count = 1;
 
     /**
+     * 该拾取是否被用户标记为「一组元素（列表）」：为 true 时页面类生成 {@code public PageElementList xxx;}
+     * （一个共享定位器表达"一组"），step 用 {@code xxx.get(index)} 取第几个，语义等价 Playwright
+     * {@code locator.nth(index)}；为 false（默认）仍生成单个 {@code PageElement} + 必要时 {@code .nth(index)}。
+     *
+     * <p>与 {@link #count}/{@link #index} 的关系：{@code count} 是"该定位器在页面上匹配的元素总数"、
+     * {@code index} 是本次点击的序号；标记为列表后，字段以一个定位器表达整组，index 仅用于 step 里取第几个。
+     * 可变字段（面板可随时切换，不参与去重签名、不参与构造器）。
+     */
+    private boolean list;
+
+    public boolean isList() { return list; }
+
+    /** 见 {@link #list} 字段说明：面板「列表」开关经命令回写，只改本标记、不影响其它字段。 */
+    public void setList(boolean list) { this.list = list; }
+
+    /**
      * 该元素所在的 iframe 嵌套路径（自顶向下，0 层表示主框架本身）。
      *
      * <p>对齐 page.pause() 的 {@code frameLocator} 录制：元素落在 iframe 内时，
@@ -274,7 +290,7 @@ public final class RoleEntry {
 
     public java.util.List<Integer> getPickNos() { return pickNos; }
     /** 设置 pickNos，并防御性做【去重 + 升序排序】。
-     *  本 setter 是 Java 权威内存态所有 pickNos 写入的统一入口（parsePick/mergePick/repickNos/clearStop 等），
+     *  本 setter 是 Java 权威内存态所有 pickNos 写入的统一入口（parsePick/mergePick/clearStop 等），
      *  即使上游传入时顺序混乱或含重复，进入权威态的 pickNos 始终是"去重、升序"的规范数组，
      *  从根消除 [12,13,14,15,3] 这类乱序输出。
      *  【关键修复】空列表统一保留为"空数组 []"而非 null：消除 Java 端 null 与 [] 的语义双轨制

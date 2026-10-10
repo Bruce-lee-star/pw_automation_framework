@@ -74,7 +74,7 @@ public final class RolePickerCommandEngine {
         try {
             if (page != null && !page.isClosed()) {
                 RolePickerPanelSync.invalidateSync(page);
-                syncPanelToBrowser(page, null, javaPickBySig, false);
+                syncPanelToBrowser(page, null, javaPickBySig);
             }
         } catch (Exception ignoreResync) { RolePickerQuiet.ignore("RolePickerCommandEngine#cmdStartResync", ignoreResync); }
         // 进入手动拾取模式（当前唯一模式：点击页面只拾取被点元素）。
@@ -105,9 +105,8 @@ public final class RolePickerCommandEngine {
     }
 
     private static PickerResult cmdUnknown(RolePickerContext ctx, Page page) {
-        // 【关键修复】未知/未识别命令（含 JSON 命令解析异常后落空、repickNos 等对象命令
-        // 在极少数竞态下未命中 type）绝不能再 stop + 返回 DONE，否则会误关面板
-        // （表现为"点拾取序号/加号面板直接关闭"）。未知命令一律忽略、继续会话。
+        // 【关键修复】未知/未识别命令（含 JSON 命令解析异常后落空、未命中 type 的对象命令）
+        // 绝不能再 stop + 返回 DONE，否则会误关面板。未知命令一律忽略、继续会话。
         return new PickerResult(PickerAction.CONTINUE, null, null, null);
     }
 
@@ -263,6 +262,15 @@ public final class RolePickerCommandEngine {
             mergedOps.addAll(closedOps);
             snap = new PickSnapshot(snap.pageClass, snap.entries, mergedSteps, mergedOps);
         }
+        // 【实时预览与"停止"生成完全一致】把本次停止后的权威 steps（浏览器 __steps，已含刚封存的当轮）
+        // 缓存进会话上下文，并清空"当轮进行中"的拾取。这样「边拾边生成」（handleIdle）可用
+        // 「已封存 steps + 当轮进行中 step」构造 steps，使【步骤代码】与【断言】两个 Tab 在"边拾边预览"
+        // 阶段就与停止生成一致（每轮一个 step / 一个 assertStep、跨轮累积），不再由 snapWithAutoStep
+        // 把全部元素兜底成 1 步（那正是"预览只有 1 个 step / 1 个 assertStep"的来源）。
+        try {
+            ctx.sealedSteps = new ArrayList<>(snap.steps);
+            synchronized (ctx.roundPicks) { ctx.roundPicks.clear(); }
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
         // 关键修复（修复"开始→停止→再开始→停止，第一次的步骤代码丢失"）：
         // 整页跳转时 onFrameNavigated→applyPickState 会用 snapshots 里的 Java 恢复态【整体覆盖】
         // window.__steps（见 applyPickState：window.__steps = s.steps || []）。而快照此前只在"空闲刷新"时更新，
@@ -336,8 +344,8 @@ public final class RolePickerCommandEngine {
             // start 时设计上"保留既有 picks、从既有重建去重表"，于是第二轮点同一元素会【复用旧 pick 对象】
             // （其旧 _pickSeq/_pickNos 仍在），导致序号回退/重复。
             // 修复：stop 时彻底清空浏览器侧全部拾取注册状态（与"下一轮从 1 重新连续"语义一致），
-            // 停止拾取：保留元素列表（__rolePicks），但清除所有序号（重置为 [-,+]）
-            // 这样第二轮拾取时，元素仍在列表中，显示为 [-,+]，用户可重新勾选分配序号
+            // 停止拾取：保留元素列表（__rolePicks），但清空本轮动作序号与选择集，
+            // 使下一轮「开始拾取」的序号从 1 重新连续（面板序号体系已移除，此处只剩序号基线语义）。
             pickerEval(page, RolePickerScripts.CLEAR_PICKS_JS);
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
         int matched = 0;
@@ -356,15 +364,19 @@ public final class RolePickerCommandEngine {
     }
 
     static PickerResult runPickerCommand(RolePickerContext ctx, Page page, String cmd) {
-        // 【删除单个拾取序号 + 全局重编号】浏览器侧面板点击某序号超链接时，经 __rolePickerCmd 投递
-        // JSON 命令 {type:'repickNos', mergeKey, nos:[...]}：把该元素在 Java 权威内存态中的 pickNos
-        // 更新为浏览器侧重排后的新序号数组（步骤生成依赖 pickNos 按号展开，故 Java 必须同步）。
-        // 纯字符串命令（start/package/stop...）走下方 switch；JSON 命令在此先拦截处理。
+        // 纯字符串命令（start/stop/done...）走下方 switch；面板「列表」开关等 JSON 对象命令在此先拦截处理。
+        // 注：面板序号体系（含 {type:'repickNos'} 对象命令）已整体移除，Java 侧不再有任何序号编辑入口。
         // 【已移除「扫描整页」与「区域扫描」】scan / scanRegion / regionScanned / regionDone 四类命令
         // 不再有分支处理：它们会把整页/整区的候选元素批量走「拾取记录」链路（每次记录分配一个全局
         // 递增拾取号），使仅有 8 个元素的会话累积出上百个序号、并因 Java 侧"只增不减"的并集合并不断
         // 放大，最终生成结果错乱（详见 panel-core-a.js 工具栏注释）。这四类命令现落入 default
         // （cmdUnknown）被安全忽略，会话不中断。
+        // 【JSON 对象命令】面板「列表」开关等对象命令（{...}）经 __rolePickerCmd 投递、桥侧 GSON 规范化为
+        // JSON 字符串，先于纯字符串 switch 拦截；未识别的 type 返回 null，交回既有 switch/default，行为不变。
+        if (cmd != null && cmd.startsWith("{")) {
+            PickerResult jsonResult = tryHandleJsonCommand(ctx, page, cmd);
+            if (jsonResult != null) return jsonResult;
+        }
         switch (cmd) {
             case RolePickerConstants.CMD_START: return cmdStart(ctx, page);
             case RolePickerConstants.CMD_REFRESH_CODE: return cmdRefreshCode(ctx, page);
@@ -372,5 +384,72 @@ public final class RolePickerCommandEngine {
             case RolePickerConstants.CMD_ABORT: return cmdAbort(ctx, page);
             case RolePickerConstants.CMD_DONE: return cmdDone(ctx, page);
             default: return cmdUnknown(ctx, page);
+        }
+    }
+
+    /**
+     * JSON 对象命令拦截（对象命令经 {@code __rolePickerCmd} 投递、桥侧 {@code GSON.toJson} 规范化）。
+     * 目前仅处理面板「列表」开关（{@link RolePickerConstants#CMD_TYPE_MARK_LIST}）；其余 type 返回 null，
+     * 交回既有 switch/default 处理，保持零行为变更。
+     */
+    private static PickerResult tryHandleJsonCommand(RolePickerContext ctx, Page page, String cmd) {
+        try {
+            Map<String, Object> m = GSON.fromJson(cmd, MAP_STRING_OBJECT_TYPE);
+            if (m == null) return null;
+            if (RolePickerConstants.CMD_TYPE_MARK_LIST.equals(String.valueOf(m.get("type")))) {
+                return cmdMarkList(ctx, page, m);
+            }
+            return null;
+        } catch (Exception ex) {
+            log.warn("[picker] failed to parse JSON panel command (ignored): {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 面板「列表」开关：把某条拾取在 Java 权威内存态中标记/取消标记为「一组元素（列表）」。
+     *
+     * <p>命令形如 {@code {type:'markList', list:<bool>, pick:{...精简 pick...}}}（pick 字段与删除回传同源：
+     * {@code strategy/_sig/_sigKey/_pageClass/role/key/name/index/selector/css/...}）。用与入库完全一致的
+     * {@link RolePickerPickParser#pickDedupKey} 精确定位内存态条目（与删除链路同口径），缺省再按固化
+     * {@code sigKey} 兜底命中；置位后回灌面板，使「列表」开关的视觉状态与 Java 权威态一致。
+     * 标记只影响<b>代码生成形态</b>（{@code PageElementList} + {@code x.get(index)}），不改动去重键/序号等既有语义。
+     */
+    private static PickerResult cmdMarkList(RolePickerContext ctx, Page page, Map<String, Object> m) {
+        try {
+            LinkedHashMap<String, RoleEntry> map = ctx.javaPickBySig;
+            boolean list = Boolean.parseBoolean(String.valueOf(m.get("list")));
+            boolean found = false;
+            Object pickRaw = m.get("pick");
+            if (pickRaw instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<Object, Object> pm = (Map<Object, Object>) pickRaw;
+                RoleEntry e = RolePickerPickParser.parsePick(pm);
+                if (e != null) {
+                    String key = RolePickerPickParser.pickDedupKey(pm, e);
+                    synchronized (map) {
+                        RoleEntry existing = (key == null || key.isEmpty()) ? null : map.get(key);
+                        if (existing == null && e.getSigKey() != null && !e.getSigKey().isEmpty()) {
+                            // 兜底：按固化 sigKey 精确命中（历史数据键形式不一致时）
+                            for (RoleEntry v : map.values()) {
+                                if (e.getSigKey().equals(v.getSigKey())) { existing = v; break; }
+                            }
+                        }
+                        if (existing != null) {
+                            existing.setList(list);
+                            found = true;
+                            log.info("[picker] markList applied: sigKey={} list={}", existing.getSigKey(), list);
+                        }
+                    }
+                }
+            }
+            if (!found) log.warn("[picker] markList target not found (list={})", list);
+            // 回灌面板：作废 ETag 后按 Java 权威态重写，使「列表」开关状态即时反映。
+            try { RolePickerPanelSync.invalidateSync(page); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
+            try { syncPanelToBrowser(page, null, ctx.javaPickBySig); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
+            return new PickerResult(PickerAction.CONTINUE, null, null, null, found ? "已切换列表标记（list=" + list + "）" : "未找到要标记的元素");
+        } catch (Exception ex) {
+            log.warn("[picker] markList failed: {}", ex.getMessage());
+            return new PickerResult(PickerAction.CONTINUE, null, null, null, "列表标记失败：" + ex.getMessage());
         }
     }}

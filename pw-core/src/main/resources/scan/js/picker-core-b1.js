@@ -2845,10 +2845,9 @@
                   } else if (typeof p._pickSeq !== 'number' || __thisIndex < p._pickSeq) {
                     p._pickSeq = __thisIndex;
                   }
-                  // 本轮已为该元素分配序号（新拾取或重拾已存在元素）：清除 _seqStale，使其从 [-] 变为显示本轮编号。
-                  try { p._seqStale = false; } catch (e) {}
-                  // 标记为手动拾取元素，取消勾选后 checkbox 仍保持禁用
-                  try { p._manualPick = true; } catch (e) {}
+                  // 本轮已为该元素分配动作序号。注：_seqStale / _manualPick 两个逐元素标志（面板序号与
+                  // checkbox 禁用时代的产物）已无任何读取点，随面板序号体系一并删除。
+
                 }
 
                 if (!dup) {

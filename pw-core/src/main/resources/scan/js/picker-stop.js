@@ -15,28 +15,33 @@
               try { if (window.__roleRefreshToggle) window.__roleRefreshToggle(); } catch (e) {}
               // 手动模式收尾（▶开始→点元素→⏹停止）：所有拾取元素封装为【一个步骤】(由 Java 端 snapWithAutoStep 兜底)，
               // 此处只做面板状态收尾：清空当前选择集与序号计数器，并把「页面元素 List」每行序号前缀重置为 [-]。
+              // 【每次「开始→停止」自动封存 1 个 step（跨轮累积、内容不跨轮）】
+              // 把本轮 __currentStep 追加进 __steps 后再清空 __currentStep：每轮 = 一个独立 step，
+              // 且 __steps 不再清空 ⇒ 跨轮累积为 step1/step2/…；step 内容只含本轮拾取（__currentStep 只装本轮）。
+              // 旧实现每轮清空 __steps，靠 Java 端 snapWithAutoStep 把「全部 entries」兜底成 1 步 ——
+              // 那正是"整个过程只有 1 个 step 且内容跨轮累积"的来源。
+              try {
+                var __cs = window.__currentStep;
+                if (Array.isArray(__cs) && __cs.length) {
+                  window.__steps = window.__steps || [];
+                  var __pc = '';
+                  try { __pc = window.__roleActivePageClass || (__cs[0] && (__cs[0]._pageClass || __cs[0].pageClass)) || ''; } catch (e2) {}
+                  window.__steps.push({ pageClass: __pc, picks: __cs.slice() });
+                }
+              } catch (e) {}
               window.__currentStep = null;
-              // 停止即关闭本轮 step 边界：清空 __steps，使下一轮 ▶ 从干净状态开始，
-              // step 编号重新从 1 起（否则 __steps 续接旧 step，下一轮 push 后 Java 渲染出 step2/显示"第 2 个 step"）。
-              // 注意：跨页切换重启走 picker-core-a.js 的「续接」分支（不调用 stop），__currentStep 被搬运、__steps 保留，不丢步骤。
-              // 同时重置全局动作序号计数器，下一轮拾取的 index 也重新从 1 连续编号。
-              try { window.__steps = []; } catch (e) {}
+              // 仅重置本轮动作序号计数器（下一轮 index 从 1 连续编号）；__steps 保留，不丢已封存步骤。
               try { window.__rolePickSeq = 0; } catch (e) {}
               // 【修复"新一轮首号不归 1"】停止收尾时一并清空"只增不回退"的最大动作号计数器，
               // 使下一轮 ▶ 拾取的 index 重新从 1 连续（与下方"下一轮 index 重新从 1 连续编号"语义一致）。
               try { window.__roleMaxNo = 0; } catch (e) {}
-              // 停止收尾后重置「页面元素 List」每行序号前缀为 [-]：
-              // 给每个已拾元素置逐元素标志 _seqStale=true（panel-core-b.js 兜底据其跳过位次推导直接显示 [-]），
-              // 并清空其 _pickNos/_pickSeq，使 stopped 后所有元素显示 [-]、序号归零。单纯清 _pickNos 无效——
-              // 兜底会按 __rolePicks 数组下标推导 [1]/[2]…，必须用 _seqStale 显式关掉。
-              // 下一轮「开始拾取」时会对旧元素维持 _seqStale（仍显示 [-]），并在本轮拾取/重拾时清除它。
+              // 停止收尾：清空本轮动作序号（令下一轮「开始拾取」的序号从 1 重新连续）。
+              // 注：面板序号体系已整体移除，_seqStale / _manualPick 两个逐元素标志已无任何读取点，一并删除。
               try {
                 var _ps = window.__rolePicks || [];
                 for (var _pi = 0; _pi < _ps.length; _pi++) {
-                  try { _ps[_pi]._seqStale = true; } catch (e) {}
                   try { delete _ps[_pi]._pickNos; } catch (e) {}
                   try { _ps[_pi]._pickSeq = 0; } catch (e) {}
-                  try { _ps[_pi]._manualPick = false; } catch (e) {}  // 【修复"停止后 checkbox 仍禁用"】清除手动拾取标记，使 checkbox 恢复可用
                 }
                 if (typeof window.__renderPicks === 'function') window.__renderPicks();
                 if (typeof window.refreshSelInfo === 'function') window.refreshSelInfo();

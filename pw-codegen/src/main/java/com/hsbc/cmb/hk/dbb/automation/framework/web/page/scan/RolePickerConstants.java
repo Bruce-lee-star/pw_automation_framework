@@ -28,6 +28,11 @@ final class RolePickerConstants {
     static final String CMD_STOP = "stop";
     static final String CMD_ABORT = "abort";
     static final String CMD_DONE = "done";
+    /**
+     * 面板「列表」开关的 JSON 对象命令 type（经 {@code __rolePickerCmd} 投递的对象命令，
+     * 形如 {@code {type:'markList', list:<bool>, pick:{...}}}）。对象命令在 runPickerCommand 顶部拦截。
+     */
+    static final String CMD_TYPE_MARK_LIST = "markList";
 
     // ───────────────────────── MODE_* : PickMode → 浏览器侧字符串 ─────────────────────────
     //  取值必须与面板 JS 的比对字面量严格一致（同一 Java↔JS 契约）。

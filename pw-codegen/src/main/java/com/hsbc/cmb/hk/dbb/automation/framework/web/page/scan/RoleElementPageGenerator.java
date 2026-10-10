@@ -398,6 +398,7 @@ public final class RoleElementPageGenerator {
         boolean hasRole = false;          // 任意 @RoleElement 字段（角色或语义）
         boolean hasAriaRole = false;      // 角色策略字段（需 import AriaRole 常量）
         boolean hasElement = false;
+        boolean hasList = false;          // 任意 PageElementList 列表字段（需 import PageElementList）
         for (GeneratedField s : specs) {
             RoleEntry e = s.entry;
             if (e.isRoleStrategy()) {
@@ -432,7 +433,14 @@ public final class RoleElementPageGenerator {
                         .collect(Collectors.joining(" → "));
                 fields.append("    // 控件: iframe [").append(frameReadable).append("]\n");
             }
-            fields.append(s.annotation).append("\n    public PageElement ").append(s.fieldName).append(";\n\n");
+            // 【列表字段】被标记为「一组元素」的拾取生成 {@code PageElementList} 字段（一个定位器表达整组，
+            // 业务 {@code x.get(i)} 取单项，语义等价 page.pause 的 locator.nth(i)）；否则仍是单个 {@code PageElement}。
+            if (e.isList()) {
+                hasList = true;
+                fields.append(s.annotation).append("\n    public PageElementList ").append(s.fieldName).append(";\n\n");
+            } else {
+                fields.append(s.annotation).append("\n    public PageElement ").append(s.fieldName).append(";\n\n");
+            }
         }
 
         // 按需构建 import：只有存在对应字段类型时才引入，避免未使用的 import。
@@ -441,6 +449,9 @@ public final class RoleElementPageGenerator {
             imports.append("import com.microsoft.playwright.options.AriaRole;\n\n");
         }
         imports.append("import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement;\n");
+        if (hasList) {
+            imports.append("import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElementList;\n");
+        }
         if (hasElement) {
             imports.append("import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.Element;\n");
         }

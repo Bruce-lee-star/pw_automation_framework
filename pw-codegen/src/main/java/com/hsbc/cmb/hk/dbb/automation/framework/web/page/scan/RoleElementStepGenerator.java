@@ -270,10 +270,12 @@ public final class RoleElementStepGenerator {
                                         .append(host).append("\n");
                             }
                         }
-                        // 目标表达式：页字段（+ 一组元素时的 .nth(index) 消歧）
+                        // 目标表达式：页字段（+ 一组元素时的索引消歧）。
+                        // 【列表字段】被标记为「一组元素」时字段是 PageElementList，用 {@code x.get(index)} 取单项
+                        // （语义等价 page.pause 的 locator.nth(index)）；普通字段仍用 {@code x.nth(index)}。
                         String target = pageVar + "." + field;
                         if (e.getIndex() >= 0) {
-                            target += ".nth(" + e.getIndex() + ")";
+                            target += e.isList() ? ".get(" + e.getIndex() + ")" : ".nth(" + e.getIndex() + ")";
                         }
                         // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
                         // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
@@ -626,7 +628,8 @@ public final class RoleElementStepGenerator {
                             }
                         }
                         String target = var + "." + field;
-                        if (e.getCount() > 1 && e.getIndex() >= 0) target += ".nth(" + e.getIndex() + ")";
+                        if (e.isList()) { if (e.getIndex() >= 0) target += ".get(" + e.getIndex() + ")"; }
+                        else if (e.getCount() > 1 && e.getIndex() >= 0) target += ".nth(" + e.getIndex() + ")";
                         // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
                         // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
                         // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的
@@ -1147,7 +1150,8 @@ public final class RoleElementStepGenerator {
                                 lastFp = (fp == null) ? null : new ArrayList<>(fp);
                             }
                             String target = var + "." + field;
-                            if (e.getCount() > 1 && e.getIndex() >= 0) target += ".nth(" + e.getIndex() + ")";
+                            if (e.isList()) { if (e.getIndex() >= 0) target += ".get(" + e.getIndex() + ")"; }
+                            else if (e.getCount() > 1 && e.getIndex() >= 0) target += ".nth(" + e.getIndex() + ")";
                             // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
                             // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
                             // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的

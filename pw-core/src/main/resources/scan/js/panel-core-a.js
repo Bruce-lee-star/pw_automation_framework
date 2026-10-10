@@ -228,22 +228,19 @@
                 // 表现即"停止按钮有时点不动、停止后再点开始却拾取不了"。
                 var willStart = !(window.__rolePickActive || window.__rolePickWanted);
                 window.__rolePickWanted = willStart;
-                // 【修复"手动拾取中封装按钮未禁用"】同步更新 __roleMode，
-                // 使 refreshToggle 能正确读取模式状态来禁用"封装为步骤"按钮。
+                // 同步更新 __roleMode（按钮态的唯一权威依据）。
                 window.__roleMode = willStart ? 'manual' : 'idle';
                 if (willStart) {
-                  // 新一轮「开始拾取」：上一轮已拾取的元素本轮尚未重新点，应显示 [-]（_seqStale 保持），
-                  // 并清空其 _pickNos / 重置序号计数器，使本轮编号从 1 重新连续；本次新拾取或重拾的元素
-                  // 会在 recordPick 中清除 _seqStale 并按本轮序号显示 [1]/[2]…。
+                  // 新一轮「开始拾取」：清空旧元素的动作序号并复位计数器，使本轮编号从 1 重新连续
+                  //（本次新拾取或重拾的元素会在 recordPick 中重新铸号）。
                   try { window.__rolePickSeq = 0; } catch (e) {}
                   // 【修复"新一轮首号不归 1"】__roleMaxNo 是 recordPick 内"只增不回退"的最大动作号计数器，
-                  // 若不在新一轮开始处归零，下一轮首元素会续接上一轮末号（与下方"从 1 重新连续"语义矛盾）。
+                  // 若不在新一轮开始处归零，下一轮首元素会续接上一轮末号（与"从 1 重新连续"语义矛盾）。
                   // 仅用户手动开启新一轮（willStart）时清零；跨域导航的 Java 注入 start 不走此分支，保留续接。
                   try { window.__roleMaxNo = 0; } catch (e) {}
                   try {
                     var _ps = window.__rolePicks || [];
                     for (var _pi = 0; _pi < _ps.length; _pi++) {
-                      try { _ps[_pi]._seqStale = true; } catch (e) {}
                       try { delete _ps[_pi]._pickNos; } catch (e) {}
                       try { _ps[_pi]._pickSeq = 0; } catch (e) {}
                     }
@@ -251,14 +248,6 @@
                   } catch (e) {}
                 }
                 pushCmd(willStart ? 'start' : 'stop');
-                // 【修复"手动拾取中可封装步骤"】立即禁用/启用"封装为步骤"按钮，
-                // 无需等待 setInterval 的 refreshToggle 异步刷新。开始拾取时禁用，停止时启用。
-                if (pkgBtn) {
-                  pkgBtn.disabled = willStart;
-                  pkgBtn.style.opacity = willStart ? '0.4' : '1';
-                  pkgBtn.style.pointerEvents = willStart ? 'none' : 'auto';
-                  pkgBtn.style.cursor = willStart ? 'not-allowed' : 'pointer';
-                }
               });
               // ---- 顶部 Tab：页面元素 / 页面类 / 步骤代码 ----
               var tabBar = document.createElement('div');
@@ -444,22 +433,12 @@
                   }
                   window.__rolePickWanted = null;
                 }
-                // 【修复"手动拾取中可封装步骤"】每次 refreshToggle 都同步"封装为步骤"按钮状态，
-                // 手动拾取模式（mode=manual）禁用，防止用户在拾取过程中误操作封装。
-                var pkgBtnEl = document.getElementById('__rolePkgBtn');
-                if (pkgBtnEl) {
-                  var pkgDisabled = (mode === 'manual');
-                  pkgBtnEl.disabled = pkgDisabled;
-                  pkgBtnEl.style.opacity = pkgDisabled ? '0.4' : '1';
-                  pkgBtnEl.style.pointerEvents = pkgDisabled ? 'none' : 'auto';
-                  pkgBtnEl.style.cursor = pkgDisabled ? 'not-allowed' : 'pointer';
-                }
                 // 每次都刷新状态栏（实时提示 step 语义与计数，不依赖模式切换）
                 var hint;
                 if (mode === 'manual') {
                   hint = '手动拾取中：点哪个拾哪个；停止时整段拾取作为一个步骤（自动包含 iframe/弹窗/新页面边界）' + stepSuffix;
                 } else {
-                  hint = '就绪：▶ 开始拾取 = 手动模式（开始到停止为一个步骤）；或先在「页面元素」勾选元素后点【封装为步骤】按选择顺序生成步骤' + stepSuffix;
+                  hint = '就绪：▶ 开始拾取 = 手动模式（开始到停止为一个步骤）' + stepSuffix;
                 }
                 if (status.textContent !== hint) status.textContent = hint;
                 // 步骤 Tab 标题实时计数
@@ -486,16 +465,7 @@
               listEl.id = '__rolePickList';
               listEl.style.cssText = 'flex:1;overflow:auto;padding:6px 8px;background:#161616;color:#bdbdbd;' +
                 'font:12px/1.5 Consolas,Monaco,monospace;min-height:0;';
-              // 注：「封装为步骤」按钮(pkgBtn) 不再独占一行(pkgRow)，而是合并进下方 selBar，
-              // 与「全选」复选框显示在同一行（见 PANEL_SCRIPT_B 中 selBar 构建处）。
-              var pkgBtn = document.createElement('button');
-              pkgBtn.id = '__rolePkgBtn';   // 稳定 id：selBar 复用持久存在时，每次重渲染先移除旧按钮再追加，避免堆积
-              pkgBtn.type = 'button';
-              pkgBtn.textContent = '封装为步骤';
-              pkgBtn.title = '把当前勾选的候选项【按选择顺序】封装为「一个步骤」，自动处理 iframe/弹窗/新页面等边界；未勾选的可继续勾选后再封装';
-              pkgBtn.style.cssText = 'padding:6px 14px;border:0;border-radius:6px;cursor:pointer;background:#43a047;color:#fff;font:12px/1.4 sans-serif;';
-              // 封装为步骤按钮逻辑已移除：拾取→停止即生成一个步骤（对齐 page.pause 录制语义，按交互顺序记录）。
-              pkgBtn.onclick = function() { /* no-op */ };
-              pkgBtn.style.display = 'none';
+              // 注：「封装为步骤」按钮已整体移除（step 的唯一边界是「开始→停止」，由 Java 侧
+              // RoleElementStepGenerator / snapWithAutoStep 生成），故这里不再创建任何 pkgBtn 占位元素。
               pageContent.appendChild(subTabBar);
               pageContent.appendChild(listEl);

@@ -202,12 +202,6 @@ public final class RolePickerScripts {
 
     public static final String PICK_STATE_READER_JS = loadScript("pick-state-reader-js.js");
 
-    /** repickNos 同步删除：读取浏览器侧 __rolePicks 的 sigKey 集合。 */
-    public static final String READ_PICK_SIGS_JS = loadScript("read-pick-sigs-js.js");
-
-    /** repickNos 回灌诊断：读取浏览器侧 __rolePicks 的 {k, n} 列表。 */
-    public static final String READ_PICK_KEYS_JS = loadScript("read-pick-keys-js.js");
-
     /** 读取浏览器侧已拾取元素数量（诊断用）。 */
     public static final String READ_PICK_COUNT_JS = loadScript("read-pick-count-js.js");
 
@@ -281,7 +275,7 @@ public final class RolePickerScripts {
 
     /**
      * 把 Java 权威拾取内存态回灌浏览器侧 window.__rolePicks（参数化注入，杜绝字符串拼接破坏语法）。
-     * 实参 a: [0]=Base64URL(过滤后 picks JSON)，[1]=Base64URL(删除键 JSON，恒 "[]")，[2]=overwriteNos(boolean)。
+     * 实参 a: [0]=Base64URL(过滤后 picks JSON)，[1]=Base64URL(删除键 JSON，恒 "[]")。
      * 由 RolePickerPanelSync.syncPanelToBrowser 外置而来，行为零变更。
      */
     public static final String SYNC_PANEL_TO_BROWSER_JS = loadScript("sync-panel-to-browser-js.js");

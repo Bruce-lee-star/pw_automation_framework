@@ -201,8 +201,12 @@ test('面板 bootstrap：关闭墓碑不得压过进行中的拾取会话（否�
   const boot = readRes('panel-bootstrap-script.js');
   assert.ok(!/getItem\('__rolePanelEnabled'\)\s*===\s*'0'\s*\)\s*return;/.test(boot),
     'panel-bootstrap-script.js 又出现"读到墓碑就无条件 return"——新页面将永远没有面板');
-  assert.ok(/if \(__panelFlag === '0' && __sessionOn !== '1'\) return;/.test(boot),
-    '未找到"墓碑 + 会话开关"的取舍判断（__rolePanelEnabled=0 且 __rolePickSessionOn!=1 才 return）');
+  assert.ok(/__sessionOn === '1' \|\| __winSession/.test(boot),
+    'bootstrap 必须在"墓碑存在但会话已激活"时强制重建面板（覆盖粘性墓碑，否则新页面永不重建）');
+  assert.ok(/addEventListener\('DOMContentLoaded', __rolePanelRetryOnReady/.test(boot),
+    '墓碑存在且会话信号暂不可见时必须延迟到 DOMContentLoaded 再判定，避免新页面漏建面板');
+  assert.ok(/__win2 \|\| __ls2 === '1'/.test(boot),
+    'DOMContentLoaded 重判必须依据会话开关（window 或 localStorage）再决定是否重建，无会话则尊重墓碑');
   assert.ok(/__rolePickSessionOn/.test(boot), 'bootstrap 必须读取 __rolePickSessionOn 作为会话开关');
   assert.ok(/setItem\('__rolePanelEnabled','1'\)/.test(boot), '放行路径必须把墓碑改回 1（否则下次导航又被挡）');
   assert.ok(/__rolePanelForce\s*=\s*true/.test(boot), '放行路径必须置位 __rolePanelForce（跨源新页面的唯一兜底）');
@@ -273,7 +277,7 @@ test('回灌写回：序号并集必须限定为“大于 Java 最大号的新�
 //   且新页元素带着"它出现之前就已铸出"的号。
 //   代码证据：sync-panel-to-browser-js.js 末尾把两侧所有号排序后重排成 1..N 写回每个 pick（全局重编号），
 //   而 RolePickerPickParser#pickMoreComplete 的注释明写"始终返回并集" ⇒ 每轮改名的号都被当作新号并集进来。
-//   回灌必须原样保留 Java 的权威号；紧凑化只在用户显式删除（repickNos / overwriteNos）时做。
+//   回灌必须原样保留 Java 的权威号；面板序号编辑（repickNos / overwriteNos）已整体移除。
 // ---------------------------------------------------------------------------
 test('回灌不得重命名序号（根因：全局重编号 + Java 并集 = 跨轮无限膨胀）', function () {
   const sync = readRes('sync-panel-to-browser-js.js');
@@ -294,7 +298,7 @@ test('开始拾取后必须作废 ETag 并立即回灌（否则面板元素全�
     'pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/scan/RolePickerCommandEngine.java'), 'utf8');
   assert.ok(/setPickNos\(new java\.util\.ArrayList<>\(\)\)[\s\S]{0,1400}?invalidateSync\(page\)/.test(java),
     'cmdStart 清序号后未作废该页 ETag —— 元素会从面板消失');
-  assert.ok(/invalidateSync\(page\)[\s\S]{0,300}?syncPanelToBrowser\(page, null, javaPickBySig, false\)/.test(java),
+  assert.ok(/invalidateSync\(page\)[\s\S]{0,300}?syncPanelToBrowser\(page, null, javaPickBySig\)/.test(java),
     'cmdStart 未在作废 ETag 后立即全量回灌 —— 面板仍可能空白');
 });
 

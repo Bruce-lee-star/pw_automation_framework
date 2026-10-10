@@ -24,6 +24,15 @@ final class RolePickerScriptInjector {
      * {@code __NLS_JSON__}=NLS 反查表 JSON 字符串字面量。模板本身经构建期 JS 语法校验。
      */
     private static final String GATE_INIT_TEMPLATE = RolePickerScripts.loadScript("gate-init.js");
+
+    /**
+     * 已为哪些 page 挂过 frame 注入监听器。Key 用弱引用：page 关闭后即可被 GC，不泄漏。
+     * 见 {@link #registerFrameInjection} 的节流说明——原实现每轮空闲（~1s）都重新遍历全 frame 重灌，
+     * 并再挂一组 onFrameAttached/onFrameNavigated 监听器；长跑会话下监听器线性累积、每次 frame 事件触发
+     * 全部，工作量随会话时长 O(ticks²) 膨胀，表现为拾取越久越卡。
+     */
+    private static final java.util.Set<Page> FRAME_INJECT_HOOKED =
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Page, Boolean>());
     /**
      * 为指定页面注入拾取脚本到其所有 frame（含主框架与同源 iframe），并注册 frame 监听器，
      * 使「start 之后动态附加的 iframe」一出现即自动注入。门控脚本仅在拾取会话开启时挂载 RolePickerScripts.START_SCRIPT，
@@ -38,37 +47,23 @@ final class RolePickerScriptInjector {
      * 补入已存在的更深层 frame。
      */
     static void registerFrameInjection(Page page, String nlsReverseJson) {
+        if (page == null || page.isClosed()) return;
+        // 【节流】onFrameAttached/onFrameNavigated 监听器一旦挂上即存活到 page 关闭，足以覆盖
+        // "动态附加的 iframe""子 frame 导航"等场景；frame 的导航/新建早已不需每轮重灌。故每 page 仅
+        // 首次登记时做"全 frame 补注 + 挂监听"，之后幂等返回——消灭监听器泄漏与每轮 N 次 evaluate 重灌
+        // （原每轮重挂一组监听器，长跑会话下工作量随会话时长 O(ticks²) 膨胀，拾取越久越卡）。
+        boolean firstTime;
+        synchronized (FRAME_INJECT_HOOKED) {
+            firstTime = FRAME_INJECT_HOOKED.add(page);
+        }
+        if (!firstTime) return;
         try {
-            // ① 对当前已存在的全部 frame（含主框架与任意层嵌套 iframe，page.frames() 递归返回）立即补挂。
-            for (Frame f : page.frames()) {
-                try { frameInjectOnce(f, nlsReverseJson); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerScriptInjector", ignore); }
-            }
-            // ② 动态附加的 iframe（含运行时创建）：立即注入，并遍历其当前已存在的子 frame 递归补注入。
-            page.onFrameAttached(frame -> {
-                try {
-                    // 页面/连接已关闭时不再注入，避免 connection closed 刷屏
-                    if (page.isClosed()) return;
-                    frameInjectOnce(frame, nlsReverseJson);
-                    for (Frame child : frame.childFrames()) {
-                        try { frameInjectOnce(child, nlsReverseJson); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerScriptInjector", ignore); }
-                    }
-                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerScriptInjector", ignore); }
-            });
-            // ③ 任意 frame（含嵌套深层）导航到真实文档 → 立即注入该 frame，并对全树 page.frames() 兜底补注入。
-            //    onFrameAttached 多在 about:blank 阶段触发，其 window 随真正子文档加载而销毁，故需在此以
-            //    force=true 再注入一次，确保子文档内 __renumberStep 等依赖完整，可被拾取并聚合。
-            //    主框架导航由 registerPopupFollow 单独处理（涉及快照/页类派生），此处仅处理子 frame。
-            page.onFrameNavigated(frame -> {
-                try {
-                    // 页面/连接已关闭时不再注入，避免 connection closed 刷屏
-                    if (page.isClosed()) return;
-                    if (frame == page.mainFrame()) return;
-                    frameInjectOnce(frame, nlsReverseJson);
-                    for (Frame f : page.frames()) {        // 全量兜底：覆盖本次导航链上更深层的兄弟/子 frame
-                        try { frameInjectOnce(f, nlsReverseJson); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerScriptInjector", ignore); }
-                    }
-                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerScriptInjector", ignore); }
-            });
+            // page 级 addInitScript：Playwright 会在该 page 的【主框架与所有（含嵌套/跨源）子 frame、每次导航】
+            // 的文档起始自动执行 gatedPickerInitScript(force=true)，原生覆盖"动态 iframe / 子 frame 导航 /
+            // 跨源弹窗 iframe"等场景（跨源子 frame 有独立 localStorage、读不到 context 级门控脚本的会话标记，
+            // 故必须用 force=true 兜底）。复杂度从 O(ticks·pages·frames) 降到 O(1)（仅注册一次），无监听器泄漏。
+            // 持久性：addInitScript 跟随 page 生命周期；force 注入的库在 __rolePickActive 未置位时本就惰性不拾取，无害。
+            page.addInitScript(gatedPickerInitScript(nlsReverseJson, true));
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerScriptInjector", ignore); }
     }
 

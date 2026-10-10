@@ -570,10 +570,6 @@ public final class RoleElementPicker {
         RolePickerPanelSync.syncPanelToBrowser(page, pageClasses, state);
     }
 
-    static void syncPanelToBrowser(Page page, LinkedHashSet<String> pageClasses, LinkedHashMap<String, RoleEntry> state, boolean overwriteNos) {
-        RolePickerPanelSync.syncPanelToBrowser(page, pageClasses, state, overwriteNos);
-    }
-
     /**
      * 自愈式保活：会话处于拾取中时，确保某页的点击捕获监听确实已挂载。
      * 任意页面变化（整文档替换、frame 内部跳转、onFrameNavigated 未覆盖到的边界情形）导致监听被静默丢弃后，
@@ -910,6 +906,23 @@ public final class RoleElementPicker {
             Object res = pickerEval(page, RolePickerScripts.READ_PICK_STATE_JSON_JS);
             if (res instanceof String) return (String) res;
         } catch (Exception ignore) { /* 页面已关闭等：忽略，返回空集 */ }
+        return "{\"picks\":[],\"steps\":[],\"currentStep\":[],\"sigs\":{},\"active\":false}";
+    }
+
+    /**
+     * 短超时版 {@link #readPickStateJson(Page)}（2s 上限）：用于"新页/打开器可能繁忙"的关键路径
+     * （典型：onPopup 跟随新页时读取打开器状态）。
+     *
+     * <p>为何需要：默认 {@code pickerEval} 超时为 10s；弹窗弹出瞬间打开器页可能短暂繁忙，
+     * 读打开器状态的 evaluate 会干等满 10s（内部吞异常故不报错、但会阻塞），把紧随其后的
+     * 新页面板重建 / 库注入一并拖延——用户表现即"打开的新页面长时间没有面板、拾取不了"。
+     * 失败/超时同样返回空集 JSON（调用方按"无状态"处理，Java 权威态仍会经面板回灌补齐）。
+     */
+    static String readPickStateJsonSoft(Page page) {
+        try {
+            Object res = pickerEvalSoft(page, RolePickerScripts.READ_PICK_STATE_JSON_JS);
+            if (res instanceof String) return (String) res;
+        } catch (Exception ignore) { /* 页面已关闭/繁忙：忽略，返回空集 */ }
         return "{\"picks\":[],\"steps\":[],\"currentStep\":[],\"sigs\":{},\"active\":false}";
     }
 
