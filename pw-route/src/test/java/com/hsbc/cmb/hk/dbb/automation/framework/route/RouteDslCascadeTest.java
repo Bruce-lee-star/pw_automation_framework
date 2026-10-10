@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
  * <ul>
  *   <li>一次 on() 声明多段 api(...).capability(...).done()，start() 统一提交——逐条 CAS 注册，无竞态；</li>
  *   <li>done() 仅内存累积（注册前 route() 零绑定）；start() 返回合并注销句柄（优于老版 void）；</li>
- *   <li>同 pattern 后段覆盖前段（V2 replace 语义）；timeout(long) 秒版对齐老版单位。</li>
+ *   <li>同 pattern 后段覆盖前段（replace 语义）；timeout(long) 秒版对齐老版单位。</li>
  * </ul>
  */
 public class RouteDslCascadeTest {
@@ -157,7 +157,7 @@ public class RouteDslCascadeTest {
         ArgumentCaptor<Route.FulfillOptions> captor =
                 ArgumentCaptor.forClass(Route.FulfillOptions.class);
         verify(route).fulfill(captor.capture());
-        assertEquals("同 pattern 后段覆盖前段（V2 replace 语义）", (Object) "{\"v\":2}", (Object) captor.getValue().body);
+        assertEquals("同 pattern 后段覆盖前段（replace 语义）", (Object) "{\"v\":2}", (Object) captor.getValue().body);
     }
 
     @Test

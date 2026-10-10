@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * <pre>
  *   context 创建 → start(opts)             // chunk #0 开始（含 context 建立/会话恢复）
  *   scenario 结束 → stopChunk(trace-&lt;id&gt;-&lt;start&gt;-&lt;end&gt;-PASS|FAIL.zip)
- *   下一个 scenario 开始 → startChunk()    // context 复用（feature 模式）时续段
+ *   下一个 scenario 开始 → startChunk()    // 2026-09-30 收口后每 case 重建 context：chunk #0 覆盖本用例
  *   context 关闭 → 若仍有活动 chunk 则兜底导出（ONCLOSE），随后 stop()
  * </pre>
  * 于是 <b>「trace 的时间 == case 的执行时间」成为结构保证</b>，文件名/报告同时带 scenarioId 与起止时间。
@@ -101,8 +101,8 @@ public final class ScenarioTraceRecorder {
     }
 
     /**
-     * scenario 开始：记录用例标识与起点；若当前 chunk 已被上一个用例导出（feature 模式复用 context），
-     * 则显式开新 chunk。
+     * scenario 开始：记录用例标识与起点；若当前 chunk 已被上一个用例导出（2026-09-30 收口后每 case
+     * 重建 Context、续段场景已不存在，此分支为防御性保留），则显式开新 chunk。
      *
      * @param scenarioId 用例标识（由监听器显式传入，如 {@code uniqueTestName}）
      */

@@ -2,15 +2,19 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
-import org.junit.After;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -23,22 +27,17 @@ import static org.mockito.Mockito.when;
  *
  * <p>覆盖：status 失败/成功、body 断言失败/成功、超时定案、结算幂等（消费式防重）、
  * 去重（{@code tryMarkSettled} CAS）、无期望不结算。并发模型与 {@link MonitorSink} 一致：
- * 结算入队发生在事件线程 / IO 线程，本测试在业务线程 drain 消费。
+ * 结算入队发生在事件线程 / 调度线程，本测试在业务线程 drain 消费。
+ *
+ * <p>2026-10-10 同步化契约：body 断言在 {@code onResponseForSpec} 所在线程<b>就地同步</b>结算
+ * （不再投 IO 线程），故断言结果<b>零等待</b>立即可见，且<b>不可能因队列满被丢弃</b>——
+ * 本文件用显式测试守卫这两条（{@link #bodyAssertionIsSynchronousNoThreadCoordinationNeeded} /
+ * {@link #concurrentAssertionsAreNeverDropped}）。
  */
 public class MonitorSinkAssertionSettlementTest {
 
-    private RouteIoExecutor io;
-
     private MonitorSink newSink() {
-        return new MonitorSink(io);
-    }
-
-    @After
-    public void tearDown() {
-        if (io != null) {
-            io.close();
-            io = null;
-        }
+        return new MonitorSink();
     }
 
     private Request mockRequest(String url) {
@@ -99,8 +98,7 @@ public class MonitorSinkAssertionSettlementTest {
     }
 
     @Test
-    public void bodyAssertionFailureSettlesAfterIoEvaluation() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
+    public void bodyAssertionFailureSettlesSynchronously() throws Exception {
         ApiSpec spec = ApiSpec.builder("/api/user", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.code", 1) // 实际 0 → 失败
@@ -109,10 +107,6 @@ public class MonitorSinkAssertionSettlementTest {
 
         sink.recordRequest(mockRequest("https://host/api/user"), spec);
         sink.onResponseForSpec(spec, mockResponse("https://host/api/user", 200));
-
-        // 等 IO 线程完成 body 断言（优雅停机等待在途任务）
-        io.close();
-        io = null;
 
         List<CapturedExchange> failures = sink.drainSettledFailures();
         assertEquals("body 断言失败必须结算", (long) 1, (long) failures.size());
@@ -124,7 +118,6 @@ public class MonitorSinkAssertionSettlementTest {
 
     @Test
     public void bodyAssertionPassDoesNotSettle() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/user", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.code", 0)
@@ -133,9 +126,6 @@ public class MonitorSinkAssertionSettlementTest {
 
         sink.recordRequest(mockRequest("https://host/api/user"), spec);
         sink.onResponseForSpec(spec, mockResponse("https://host/api/user", 200));
-
-        io.close();
-        io = null;
 
         assertTrue( "body 断言通过不得结算", sink.drainSettledFailures().isEmpty());
     }
@@ -196,5 +186,70 @@ public class MonitorSinkAssertionSettlementTest {
         sink.onResponseForSpec(spec, mockResponse("https://host/api/plain", 200));
 
         assertTrue( "无期望的 monitor 永不结算为失败", sink.drainSettledFailures().isEmpty());
+    }
+
+    @Test
+    public void bodyAssertionIsSynchronousNoThreadCoordinationNeeded() {
+        // 2026-10-10 同步化契约（核心）：onResponseForSpec 返回后，body 断言已就地同步结算——
+        // settledFailureCount 立即可见，零线程协调、零等待。
+        // 历史异步版需 IO 线程执行 + close()/轮询等待（且 IO 队满会丢断言）；本测试守卫该回归。
+        ApiSpec spec = ApiSpec.builder("/api/sync", RouteCapability.MONITOR)
+                .expectStatus(200)
+                .expectJsonPath("$.code", 1) // 实际 0 → 失败
+                .build();
+        MonitorSink sink = newSink();
+
+        sink.recordRequest(mockRequest("https://host/api/sync"), spec);
+        sink.onResponseForSpec(spec, mockResponse("https://host/api/sync", 200));
+
+        assertEquals("onResponseForSpec 返回后失败必须立即可见（同步结算，无 IO 等待）",
+                1, sink.settledFailureCount());
+        List<CapturedExchange> failures = sink.drainSettledFailures();
+        assertEquals("失败明细必须同步带出", (long) 1, (long) failures.size());
+        assertFalse(failures.get(0).assertionPassed());
+    }
+
+    @Test
+    public void concurrentAssertionsAreNeverDropped() throws Exception {
+        // 守卫"假绿"回归：同步化消除了"IO 队列满 → 断言被静默丢弃（rejectedBodyAssertions）"。
+        // N 路并发失败断言必须【全部】结算，任何一条丢失都意味着断言未执行而场景仍绿。
+        ApiSpec spec = ApiSpec.builder("/api/conc", RouteCapability.MONITOR)
+                .expectStatus(200)
+                .expectJsonPath("$.code", 1) // 实际 0 → 失败
+                .build();
+        MonitorSink sink = newSink();
+        int workers = 8;
+        int perWorker = 25;
+        int total = workers * perWorker;
+
+        ExecutorService pool = Executors.newFixedThreadPool(workers);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+        for (int w = 0; w < workers; w++) {
+            final int id = w;
+            futures.add(pool.submit(() -> {
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+                for (int i = 0; i < perWorker; i++) {
+                    String url = "https://host/api/conc/" + id + "/" + i;
+                    sink.recordRequest(mockRequest(url), spec);
+                    sink.onResponseForSpec(spec, mockResponse(url, 200));
+                }
+                return null;
+            }));
+        }
+        start.countDown();
+        for (Future<?> f : futures) {
+            f.get(15, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+        assertTrue("测试线程池未在时限内收敛", pool.awaitTermination(10, TimeUnit.SECONDS));
+
+        assertEquals("并发 body 断言必须全部结算（0 丢失，无假绿）",
+                (long) total, (long) sink.drainSettledFailures().size());
     }
 }

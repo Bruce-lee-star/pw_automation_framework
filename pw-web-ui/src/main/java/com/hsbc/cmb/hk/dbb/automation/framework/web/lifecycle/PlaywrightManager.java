@@ -652,12 +652,10 @@ public class PlaywrightManager {
     /**
      * 带用例结果的场景收尾（A5，2026-09-26；**失败语义已于 2026-09-28 修订**）。
      *
-     * <p>{@code scenarioFailed=true} 时，feature 模式下：
-     * <ul>
-     *   <li>Context <b>承载登录态</b> → <b>保留 Context 与 Page</b>（连 Page 也不丢、不重建）：
-     *       失败不污染会话，下一个同 sessionKey 用例继续免登录；重建只由 sessionKey 变化触发；</li>
-     *   <li><b>无登录态绑定</b> → 丢弃本用例 Page（"存活但已坏"，不许跨用例传染），Context 保留。</li>
-     * </ul>
+     * <p>{@code scenarioFailed} 仅作为<b>结果语义</b>传入（2026-09-30 收口后：<b>无论成败、是否承载
+     * 登录态，都销毁本 case 的 Context 与 Page</b>，scenario-scoped）；失败不再保留 Context ——
+     * 登录复用统一走 {@code storageState} 快照注入（凭证是快照而非活体），
+     * "保留活 Context 延续登录态"已废除。
      * 详见仓库根 {@code FIX_PLAN.md} §1.1（I-1）与 §2.0（时效声明）。</p>
      *
      * @apiNote <b>framework-internal</b>：由 {@code PlaywrightListener} 在 Serenity {@code testFinished} 时

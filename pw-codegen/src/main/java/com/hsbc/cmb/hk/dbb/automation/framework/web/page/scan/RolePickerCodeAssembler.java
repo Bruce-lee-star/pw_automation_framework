@@ -87,22 +87,10 @@ final class RolePickerCodeAssembler {
             if (pc != null && !pc.isEmpty()) { rootPc = pc; break; }
         }
         if (rootPc.isEmpty()) rootPc = (snap.pageClass == null) ? "" : snap.pageClass;
-        // 手动模式（start→stop 未封装）：所有拾取元素封装为【一个步骤】(step1)，
-        // 步骤内元素按全局拾取序号（pickNos 首号）升序排列——即"按拾取顺序封装为一个步骤"。
-        // 序号相等的保持原拾取顺序（避免 ArrayList.sort 不稳定重排）。
-        // 注意：getSeq() 在 __renumberStep 中被设为步骤索引（i+1），会覆盖全局序号，
-        // 因此此处直接用 pickNos 首号排序，而非 getSeq()。
-        // 同元素多次点击（如 pickNos=[1,2,3]）由 RoleElementStepGenerator 内部的
-        // __repeat = pickNos.size() 展开为多个重复操作，无需在此拆分 step。
+        // 不加序号：步骤内元素按拾取自然顺序（javaPickBySig 插入顺序 = 点击先后）排布，
+        // 不再依赖 pickNos 排序。同元素多次点击（pickNos 长度为 N）仍由 RoleElementStepGenerator
+        // 内部 __repeat = pickNos.size() 展开为 N 个重复操作，无需在此拆分 step。
         List<RoleEntry> sorted = new ArrayList<>(all);
-        sorted.sort(java.util.Comparator.comparingInt((RoleEntry e) -> {
-            if (e == null) return Integer.MAX_VALUE;
-            java.util.List<Integer> nos = e.getPickNos();
-            if (nos != null && !nos.isEmpty() && nos.get(0) != null && nos.get(0) > 0) {
-                return nos.get(0);
-            }
-            return Integer.MAX_VALUE;
-        }).thenComparingInt(all::indexOf));
         List<StepRec> steps = new ArrayList<>();
         steps.add(new StepRec(rootPc, sorted));
         return new PickSnapshot(snap.pageClass, snap.entries, steps, snap.ops);
@@ -220,14 +208,6 @@ final class RolePickerCodeAssembler {
             log.warn("[picker] pre-generation reconciliation: dropped {} deleted element reference(s) {}, discarded {} empty step(s)",
                     droppedPicks, droppedByPage, droppedSteps);
         }
-        // 【关键修复"只点了 2 个元素却生成很多步骤"】
-        // 旧逻辑曾在此"兜底"：把 javaPickBySig 中位于 iframe 内但未被任何 step 引用的元素补进最后一个 step，
-        // 目的是修复"嵌套 iframe 元素不进 step"。但该前提在"整页扫描"引入后不再成立——扫描出的全部 iframe
-        // 候选（40 个）也回传进入 javaPickBySig，与"用户真实点击"混在一起。用户只点了 2 个主框架元素时，
-        // referencedKeys(2) < aliveKeys(40) 恒成立，兜底便把 36 个未入 step 的 iframe 扫描候选全补进 step，
-        // 表现为"点 2 个元素、步骤却一大堆"。
-        // 现用户点击的 iframe 元素经 postMessage（不带 __isScan）正常上送顶层进入 __currentStep/__steps，
-        // 无需此兜底；故直接移除，让 step 只含用户真实点击/勾选的元素。主框架元素链路不受影响。
         LinkedHashMap<String, List<String>> opsByPage = new LinkedHashMap<>();
         if (snap.ops != null) for (PageOp op : snap.ops) {
             String pc = (op.pageClass == null || op.pageClass.isEmpty()) ? curClass : op.pageClass;

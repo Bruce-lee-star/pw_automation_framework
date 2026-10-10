@@ -219,8 +219,8 @@ public final class ContextRegistryImpl implements ContextRegistry {
             }
             //  T3-3 修复：per-thread 状态清理必须【无条件】执行。
             // 原实现把 TestServices.clear 等包在 if(context!=null) 内，
-            // 导致 context 为 null 的路径（feature 模式无 session 复用、未创建 context 的场景、
-            // 场景初始化重建路径）下这些 per-thread 状态跨 scenario 残留，污染下一个场景
+            // 导致 context 为 null 的路径（每 case 重建前未创建 context、场景初始化重建路径）下
+            // 这些 per-thread 状态跨 scenario 残留，污染下一个场景
             // （继承旧 entity/env/自定义配置）。现移出 if 块，无论 context 是否存在都清理；
             // 并补上此前遗漏的 CustomOptionsManager 全量清理（调用 closeContext 即视为场景结束）。
             // 注：BasePage 的静态 ThreadLocal 清理（clearAllThreadLocals）已在架构整改中移除——

@@ -24,19 +24,6 @@
       window.addEventListener('message', function(ev) {
         try {
           var d = ev.data;
-          if (d && d.__roleScanRequest) {
-            // 【关键修复"整页/区域扫描穿透 iframe"——跨源 iframe 自扫】
-            // 父 frame 无法 JS 直调跨源 iframe 的 __roleScanPage，改用 postMessage 下发扫描请求；
-            // 本 frame（可能为任意层 iframe）收到后在自己的上下文执行整页扫描（传 null=扫本 frame 整页），
-            // 结果 push 进本 frame 的 __rolePicks 并经绑定桥/console 兜底回传 Java。与 Java 侧
-            // 按 page.frames() 逐帧扫描殊途同归，但专为浏览器侧触发的区域扫描跨源穿透而设。
-            try {
-              if (typeof window.__roleScanPage === 'function' && window.self !== window.top) {
-                window.__roleScanPage(null);
-              }
-            } catch (_rsErr) {}
-            return;
-          }
           if (!d || d.__rolePickMsg !== true || !d.pick) return;
           try {
             var __dbg = (d.pick && (d.pick.role || d.pick._sig || d.pick.name)) || '';
@@ -79,9 +66,9 @@
             try { console.log('__roleOnPick::' + JSON.stringify(p)); } catch (_) {}
           }
           // 与主框架实时点选一致：拾取激活态下，iframe 内的点选也自动入选当前 step（选择集），
-          // 用户无需再到面板重复勾选；整页扫描期间的 iframe 候选仍由用户勾选决定。
+          // 用户无需再到面板重复勾选。
           // 只聚合进 __rolePicks 供面板展示，绝不入选 __currentStep（否则 checkbox 等被默认勾选）。
-          // 【关键修复"用户点击扫描候选不进 step"】与主框架 __recordPick 的 2169 行一致：
+          // 【关键修复"用户点击回灌候选不进 step"】与主框架 __recordPick 的 2169 行一致：
           // 只要不在当前 __currentStep 中就入选 step（用户主动点击 = 明确选择）；已入选的重复点击除外。
           if (window.__rolePickActive && window.__currentStep) {
             var __pkey = (typeof window.__sigKey === 'function') ? window.__sigKey(p) : (p._sigKey || p._sig || '');
@@ -100,39 +87,13 @@
             }
             if (!__pinStep) window.__currentStep.push(p);
           }
-          window.__renumberStep();
+
           if (window.__renderPicks) window.__renderPicks();
         } catch (e) {}
       });
       // 面板 UI 仅顶层文档渲染：iframe / 嵌套 frame 内不应再构建面板（避免面板被嵌入子 frame）。
       // 非顶层 frame 到此为止——上面注册的 message 监听器已能把子 frame 的 pick 逐层上送顶层聚合，
       // 但不再调用 build() 建面板，保证整页只有一个可见面板（顶层）。
-      // 注意：__renumberStep 是 __recordPick 的核心依赖（选择集连续编号），与面板 DOM 无关，
-      // 必须无条件定义（含 iframe 子文档），否则子 frame 内拾取调用 __renumberStep 报 "is not a function"。
-      // 故在此 return 之前定义，与 build() 内的面板 UI 构建解耦。
-      window.__renumberStep = function() {
-        try {
-          var cs = window.__currentStep || [];
-          for (var i = 0; i < cs.length; i++) {
-            if (!cs[i]) continue;
-            // seq：步骤内连续序号（供 __packageStep 排序/生成）。
-            cs[i].seq = i + 1;
-            // 【修复"手动在面板勾选候选时面板没有序号产生"】
-            // 旧实现只设 seq、不写 _pickNos，而面板行前缀（见 panel-core-b.js 渲染）读的是 _pickNos/_pickSeq，
-            // 导致勾选后前缀仍显示 [-]（扫描候选本就无 _pickNos）。现把勾选序同步进 _pickNos 并清 _seqStale，
-            // 使面板前缀按"勾选顺序"显示 [1][2][3]…；与 __packageStep 按 _pickNos 排序封装保持一致。
-            // 【关键修复"全局拾取序号被覆盖（如 user_name 首号应为 4 却变为 2）"】
-            // 原实现无条件 cs[i]._pickNos = [i+1]，会覆盖手动点击产生的全局拾取序号（如 [1,2,3]）。
-            // 仅在元素还没有全局拾取序号（空数组 / 非数组）时设置步骤索引，否则保留浏览器侧已累积的
-            // 真实全局序号（如 [1,2,3] 或 [2,5,6,7]），避免被步骤索引覆盖导致序号错乱/丢失。
-            if (!Array.isArray(cs[i]._pickNos) || cs[i]._pickNos.length === 0) {
-                cs[i]._pickNos = [i + 1];
-                cs[i]._pickSeq = i + 1;
-            }
-            try { cs[i]._seqStale = false; } catch (e) {}
-          }
-        } catch (e) {}
-      };
       if (window.self !== window.top) return;
       // 顶层但面板门禁未开（正常访问，localStorage 开关未置位）→ 仅注册 message 监听用于嵌套 iframe
       // 拾取聚合/转发，不构建面板 UI。
@@ -145,7 +106,7 @@
       window.__panelCmds = window.__panelCmds || [];
       window.__pickDone = false;
       // 面板打开默认进入 IDLE（待命）态：显示"▶ 开始拾取"，页面点击不拾取任何元素；
-      // Java 通过 setPickMode 在 start/scan/scanRegion 时显式切到对应模式（权威驱动）。
+      // Java 通过 setPickMode 在 start 时显式切到手动拾取模式（权威驱动）。
       // 修复：整文档导航/iframe 重建面板后，若本会话仍处于拾取中（sessionOn）
       // 则保持 'manual'，避免按钮掉回"▶ 开始拾取"而底层 active 仍为 true 的错位
       // （用户的停止拾取按钮在 url change 后不应变回开始拾取）。
@@ -173,10 +134,7 @@
         copy:  svg('<path d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/>'), // 📋 复制
         abort: svg('<path d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.42A7 7 0 1 1 7.58 6.59L6.17 5.17a9 9 0 1 0 11.66 0z"/>'), // ⏻ 终止
         close: svg('<path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/>'), // ✕ 关闭
-        hover: svg('<path d="M7 2l12 7-5 1.4L13 18 7 2z"/>'),                                         // ⤢ 悬停拾取
-        // 【已移除】scan（🔍 扫描整页）与 region（▢ 框选区域）两个图标：
-        // 整页扫描与区域扫描功能已从框架去除（见下方工具栏注释），图标随之删除，避免留下无入口的提示。
-      };
+        };
       // 统一的图标按钮：圆形/圆角方块、hover 提亮、带 title 作为无障碍提示
       function mkIconBtn(svgHtml, bg, title, onClick) {
         var b = document.createElement('button');
@@ -302,8 +260,6 @@
                   pkgBtn.style.cursor = willStart ? 'not-allowed' : 'pointer';
                 }
               });
-              // 注：悬停拾取模式已移除（按需求去除 hover 图标）。
-
               // ---- 顶部 Tab：页面元素 / 页面类 / 步骤代码 ----
               var tabBar = document.createElement('div');
               tabBar.style.cssText = 'display:flex;gap:0;background:#252526;border-bottom:1px solid #1b1b1b;';
@@ -447,12 +403,6 @@
                   } catch (e3) { status.textContent = '复制失败，请手动复制'; }
                 }
               });
-              // 【已移除「扫描整页」与「区域扫描」】原因：这两条路径会把整页/整区的候选元素批量走
-              // 「拾取记录」链路（picker-core-b1.js 的 __recordPick），而该链路每次都要分配一个全局
-              // 递增拾取号 ⇒ 仅有 8 个元素的会话会累积出上百个序号（实测 title_username_page 累积到
-              // 180+ 个号、同号被分给多个元素），再经 Java 侧"只增不减"的并集合并不断放大，
-              // 表现为"编号无限增长、生成结果错乱"。手动拾取（8 个元素）不需要扫描，故整体去除入口。
-              // 后端对应命令（scan/scanRegion/regionScanned/regionDone）已同步删除。
               var abortBtn = mkIconBtn(ICON.abort, '#e53935', '终止运行', function() { pushCmd('abort'); });
               toolbar.appendChild(toggleBtn);
               toolbar.appendChild(copyBtn);
@@ -460,7 +410,6 @@
 
               // 根据 window.__roleMode（Java 权威驱动）实时同步按钮态。
               // 模式语义：idle（待命，仅开始可用）/ manual（手动拾取，开始=停止）。
-              // 注：整页扫描 / 区域扫描（scanPage / scanRegion）已从框架移除，模式只剩这两个。
               // 仅在状态变化时重写 DOM，避免定时器无谓重绘（企业级：减少无变化重排）。
               var __lastMode = null;
               function refreshToggle() {
@@ -519,7 +468,7 @@
                 // 确保有序号元素（_pickNos.length>0）被正确计入已选计数，无需等待 checkbox 点击。
                 try { if (typeof window.refreshSelInfo === 'function') window.refreshSelInfo(); } catch (e) {}
               }
-              window.__roleRefreshToggle = refreshToggle;   // 暴露给拾取库作用域（如扫描完成 / 模式切换时刷新按钮态）
+              window.__roleRefreshToggle = refreshToggle;   // 暴露给拾取库作用域（如回灌完成 / 模式切换时刷新按钮态）
               refreshToggle();
               // 状态同步定时器：每 80ms 收敛到真实态，降低"开始"迟滞感。
               window.__roleToggleTimer = setInterval(refreshToggle, 80);
@@ -545,17 +494,8 @@
               pkgBtn.textContent = '封装为步骤';
               pkgBtn.title = '把当前勾选的候选项【按选择顺序】封装为「一个步骤」，自动处理 iframe/弹窗/新页面等边界；未勾选的可继续勾选后再封装';
               pkgBtn.style.cssText = 'padding:6px 14px;border:0;border-radius:6px;cursor:pointer;background:#43a047;color:#fff;font:12px/1.4 sans-serif;';
-              pkgBtn.onclick = function() {
-                // 浏览器侧 __packageStep 先把勾选集打包为 step（与停止时同一逻辑，顺序/去重一致）；
-                // 随后推送 'package' 命令给 Java 立即生成步骤代码并切到「步骤代码」Tab 展示（不再需要等到点 ⏹）。
-                var r = (typeof window.__packageStep === 'function') ? window.__packageStep() : {pages:[],start:-1,count:0};
-                if (r && r.count > 0) {
-                  window.__pendingJump = r;   // 记录"目标 step"，Java 生成代码后由 __afterFillJump 精准定位
-                  status.textContent = '已封装 ' + r.count + ' 个 step（累计 ' + (window.__steps ? window.__steps.length : 0) + ' 个），正在生成步骤代码…';
-                  try { pushCmd('package'); } catch (e) {}
-                } else {
-                  status.textContent = '请先勾选要封装的元素（扫描后请在列表勾选，页面点选会自动勾选）';
-                }
-              };
+              // 封装为步骤按钮逻辑已移除：拾取→停止即生成一个步骤（对齐 page.pause 录制语义，按交互顺序记录）。
+              pkgBtn.onclick = function() { /* no-op */ };
+              pkgBtn.style.display = 'none';
               pageContent.appendChild(subTabBar);
               pageContent.appendChild(listEl);

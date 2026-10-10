@@ -205,7 +205,7 @@ public final class RouteAction {
                 options.setStatus(status);
             }
             if (headers != null && !headers.isEmpty()) {
-                options.setHeaders(headers);
+                options.setHeaders(sanitizeBodyHeaders(headers));
             }
             if (body != null) {
                 options.setBody(body);
@@ -232,7 +232,7 @@ public final class RouteAction {
                 options.setStatus(status);
             }
             if (headers != null && !headers.isEmpty()) {
-                options.setHeaders(headers);
+                options.setHeaders(sanitizeBodyHeaders(headers));
             }
             if (body != null) {
                 options.setBodyBytes(body);
@@ -243,6 +243,47 @@ public final class RouteAction {
             LOGGER.warn("[Route] fulfill(bodyBytes) failed for url='{}': {}", route.request().url(), e.toString());
             return false;
         }
+    }
+
+    /**
+     * 「体编码/长度」相关头：框架交付的响应体一律是<b>已被 Playwright 解码</b>的明文（或重编码后的字节），
+     * 与服务器原始 wire 头不再一致 —— 这三个头必须由 Playwright 依最终体重算，否则浏览器会按
+     * {@code content-encoding} 去解一个已经不匹配的体（2026-10-10 实测：gzip 响应改字段后照抄
+     * {@code content-encoding: gzip} ⇒ 页面取不到数据 ⇒ 顶栏下拉/首页局部空白）。
+     */
+    private static final Set<String> BODY_ENCODING_HEADERS =
+            Set.of("content-encoding", "content-length", "transfer-encoding");
+
+    /**
+     * 过滤「体编码/长度」相关头（大小写不敏感）；其余头原样保留（{@code content-type} / {@code set-cookie} /
+     * {@code cache-control} 等业务需要的头不受影响）。
+     *
+     * @param headers 原头（可为 null / 空）
+     * @return 可安全交付给 {@link Route.FulfillOptions#setHeaders(java.util.Map)} 的头
+     */
+    static Map<String, String> sanitizeBodyHeaders(Map<String, String> headers) {
+        if (headers == null || headers.isEmpty()) {
+            return headers;
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        java.util.List<String> stripped = new java.util.ArrayList<>();
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+            String name = entry.getKey();
+            if (name == null) {
+                continue;
+            }
+            if (BODY_ENCODING_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                stripped.add(name);
+                continue;
+            }
+            out.put(name, entry.getValue());
+        }
+        if (!stripped.isEmpty()) {
+            // 可观测：说明"这三个头由框架接管"，避免排障时误以为头被莫名吞掉
+            LOGGER.debug("[Route] stripped body-encoding headers {} — Playwright recomputes them for the delivered body",
+                    stripped);
+        }
+        return out;
     }
 
     /** 终止请求（仅 MOCK 在途任务取消场景使用；其余场景一律 fallback）。 */

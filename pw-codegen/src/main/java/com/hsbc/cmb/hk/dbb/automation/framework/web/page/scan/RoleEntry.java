@@ -120,6 +120,17 @@ public final class RoleEntry {
     private final boolean dblClick;
 
     /**
+     * 该拾取是否为「右键点击（contextmenu）」交互（区别于默认的单击 click）。
+     * 为 true 时生成 step 应输出 {@code locator.click({ button: 'right' })} 而非 {@code .click()}，
+     * 对齐 {@code page.pause()} 对右键交互的录制（右键的语义是"打开上下文菜单"，
+     * 而非角色默认的点击/勾选/输入，故优先于角色推断：即便右键的是 checkbox/radio，
+     * 也按真实交互输出 click({button:'right'})，而非误生成 setChecked()）。
+     * 设计为可变字段（同 {@link #sigKey}/{@link #framePath} 透传信息，不参与去重签名）——
+     * 浏览器侧 __recordPick 回传的 re-send 经 setter 补回权威内存态，避免被首包不含标记的回传覆盖。
+     */
+    private boolean rightClick;
+
+    /**
      * 该次交互是否触发了浏览器原生对话框（alert / confirm / prompt）。
      * 注意与 ARIA role="dialog"（模态 DOM 元素）区分——此处专指原生弹窗。
      * 对齐 page.pause() 的 dialog 信号（前置插桩，不包裹动作）。
@@ -198,17 +209,6 @@ public final class RoleEntry {
 
     /**
      * 浏览器端固化的「合并去重键」（{@code pick._sigKey}）——元素的永久身份，透传字段。
-     *
-     * <p>根因修复：该键在浏览器端入库瞬间由 {@code __sigKey()} 生成并固化到 pick 上，经
-     * {@code __roleOnPick} 回传 Java。此前 Java 侧只把它当作内存态 Map 的 key 使用，
-     * <b>并未存进实体</b>；于是 {@code syncPanelToBrowser} 把内存态回灌浏览器时，
-     * 产出的 pick 不带 {@code _sigKey}，浏览器只能在<b>当前页上下文</b>重算键——
-     * 区域扫描元素的 {@code pageClass} 常为空，重算会退化到 {@code location.origin+pathname} 兜底，
-     * 每导航到一个新页面就算出一个不同的键，{@code __rolePickSigs} 判为新元素再 push 一份，
-     * 表现为「区域扫描 → 停止 → 手动跳转其它页面，已拾元素成倍增加」（导航 N 次得 N 份）。
-     *
-     * <p>故此处让 Java 实体<b>原样持有</b>该键并在回灌时带回浏览器，使元素身份在
-     * 浏览器 → Java → 浏览器 的整个往返链路中恒定不变，从源头根除重复。
      *
      * <p>设计为可变字段而非构造器参数：纯透传的身份标识，不参与任何代码生成语义，
      * 且 {@code RoleEntry} 已有 10+ 个重载构造器，加参数会波及全部调用点。
@@ -509,6 +509,11 @@ public final class RoleEntry {
         return dblClick;
     }
 
+    /** 该拾取是否为「右键点击（contextmenu）」交互；是则生成 step 应输出 {@code locator.click({ button: 'right' })}。 */
+    public boolean isRightClick() {
+        return rightClick;
+    }
+
     /** 该次交互是否触发了浏览器原生对话框（alert/confirm/prompt）。 */
     public boolean isDialog() {
         return dialog;
@@ -527,6 +532,11 @@ public final class RoleEntry {
     /** 同步对话框标记（用于生成链路把权威内存态的 dialog 标记补回 step 元素）。 */
     public void setDialog(boolean dialog) {
         this.dialog = dialog;
+    }
+
+    /** 同步右键标记（用于生成链路把权威内存态的 rightClick 标记补回 step 元素）。 */
+    public void setRightClick(boolean rightClick) {
+        this.rightClick = rightClick;
     }
 
     public void setDialogType(String dialogType) {
@@ -769,6 +779,7 @@ public final class RoleEntry {
                 + (download ? ", download=true" : "")
                 + (hover ? ", hover=true" : "")
             + (dblClick ? ", dblClick=true" : "")
+            + (rightClick ? ", rightClick=true" : "")
             + (level > 0 ? ", level=" + level : "")
             + (select ? ", select=" + optionText + (optionValue != null ? "(" + optionValue + ")" : "") : "")
             + (checked != null ? ", checked=" + checked : "")

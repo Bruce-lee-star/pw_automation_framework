@@ -5,7 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Route V2 MONITOR 断言失败快照（核心层 DTO，web 侧报告用）。
+ * Route MONITOR 断言失败快照（核心层 DTO，web 侧报告用）。
  *
  * <p>字段对齐 {@code CapturedExchange} 的定案状态：{@code actualStatus} 为 null 表示
  * 未等到响应（配合 {@code timedOut=true} 说明超时），否则为真实响应码；{@code bodyFailures}

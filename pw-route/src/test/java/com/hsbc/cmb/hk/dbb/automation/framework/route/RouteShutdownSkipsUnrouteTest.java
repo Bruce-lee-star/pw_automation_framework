@@ -27,8 +27,8 @@ import static org.mockito.Mockito.when;
  * 这正是「收尾未确证 ⇒ 状态分叉 ⇒ 病态 Context 遗传」的来源。
  *
  * <p>本用例用 {@link CapturingGuardedDriverCall}（只记录、不执行 action）断言<b>协议调用面</b>：
- * 传 {@code true} ⇒ 不出现任何 {@code unroute:}；不传（或传 false）⇒ 仍会出现（行为不变，供 feature 档
- * 「Context 仍需存活」的路径使用）。
+ * 传 {@code true} ⇒ 不出现任何 {@code unroute:}；不传（或传 false）⇒ 仍会出现（行为不变，
+ * 供「Context 仍需存活」的路径使用）。
  */
 public class RouteShutdownSkipsUnrouteTest {
 
@@ -85,7 +85,7 @@ public class RouteShutdownSkipsUnrouteTest {
 
         RouteEngine.shutdown(context, false);
 
-        assertTrue("Context 仍需存活的路径（如 feature 档跨用例复用）必须照旧逐条 unroute",
+        assertTrue("Context 仍需存活的路径（如会话切换）必须照旧逐条 unroute",
                 guard.hasCallWithOpPrefix("unroute"));
     }
 }

@@ -20,8 +20,8 @@ import static org.mockito.Mockito.when;
  * <ul>
  *   <li>RouteEngine 首次使用即触发 RouteLifecycleImpl 自注册（追加位，不覆盖 pw-route primary）；</li>
  *   <li>web 侧统一收尾挂点（stopContextEngine / clearContext / stopAllContextEngines /
- *       shutdownRouteEngine / drainForSuiteTeardown）经 Composite 同步驱动 V2 运行时关闭——不再孤儿；</li>
- *   <li>查询型方法在 primary 缺失时按 V2 语义降级（null / 原样）。</li>
+ *       shutdownRouteEngine / drainForSuiteTeardown）经 Composite 同步驱动各运行时关闭——不再孤儿；</li>
+ *   <li>查询型方法在 primary 缺失时按当前语义降级（null / 原样）。</li>
  * </ul>
  */
 public class RouteLifecycleIntegrationTest {
@@ -44,12 +44,12 @@ public class RouteLifecycleIntegrationTest {
     }
 
     @Test
-    public void engineLoadRegistersV2LifecycleOnAdditionalSlot() {
+    public void engineLoadRegistersRouteLifecycleOnAdditionalSlot() {
         mockContext();
         RouteDsl.on(ctx).api("/api/a").mock().status(200).body("{}").register();
 
         RouteLifecycle lifecycle = RouteLifecycleRegistry.get();
-        assertNotNull( "RouteEngine 加载后 SPI 必须已注册（Composite，含 V2 追加位）", lifecycle);
+        assertNotNull( "RouteEngine 加载后 SPI 必须已注册（Composite，含路由实现追加位）", lifecycle);
     }
 
     @Test
@@ -105,7 +105,7 @@ public class RouteLifecycleIntegrationTest {
 
         RouteDsl.on(ctx).api("/api/a").mock().status(200).body("{}").register();
         RouteLifecycleRegistry.get().drainForSuiteTeardown();
-        assertEquals("drainForSuiteTeardown 必须全关（V2 无跨用例池）", (long) 0, (long) RouteEngine.activeRuntimes());
+        assertEquals("drainForSuiteTeardown 必须全关（无跨用例池）", (long) 0, (long) RouteEngine.activeRuntimes());
     }
 
     @Test
@@ -114,8 +114,8 @@ public class RouteLifecycleIntegrationTest {
         RouteDsl.on(ctx).api("/api/a").mock().status(200).body("{}").register();
 
         RouteLifecycle lifecycle = RouteLifecycleRegistry.get();
-        assertNull( "V2 无 API 捕获 → null（等价未启用降级）", lifecycle.getCurrentCapture());
-        assertNull( "V2 无断言上下文 → null", lifecycle.resolveFailureCapture());
+        assertNull( "Route 实现不向 RouteLifecycle 查询面暴露捕获句柄 → null（等价未启用降级）", lifecycle.getCurrentCapture());
+        assertNull( "无断言上下文 → null", lifecycle.resolveFailureCapture());
         assertEquals("primary 缺失时 sanitizeUrl 原样返回", (Object) "https://api.example/x?a=1", (Object) lifecycle.sanitizeUrl("https://api.example/x?a=1"));
     }
 
@@ -127,7 +127,7 @@ public class RouteLifecycleIntegrationTest {
         RouteLifecycleRegistry.register(null); // 模拟 web 测试收尾清 primary
 
         RouteLifecycle lifecycle = RouteLifecycleRegistry.get();
-        assertNotNull( "primary 清空后 V2 追加位必须仍随 Composite 驱动", lifecycle);
+        assertNotNull( "primary 清空后追加位必须仍随 Composite 驱动", lifecycle);
         lifecycle.stopContextEngine(ctx); // 不得 NPE，必须真实关闭
         assertEquals((long) 0, (long) RouteEngine.activeRuntimes());
     }

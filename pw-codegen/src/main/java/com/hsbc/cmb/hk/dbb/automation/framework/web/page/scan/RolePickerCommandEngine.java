@@ -23,6 +23,7 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerB
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.MAP_STRING_OBJECT_TYPE;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.asString;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.syncPanelToBrowser;
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.anyLivePage;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.setPickMode;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.mergeFramePicksToMain;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.readPickStateJson;
@@ -35,90 +36,17 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElement
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerSnapshotParser.readPickSnapshot;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerSnapshotParser.stopAndRead;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerSnapshotParser.parsePickSnapshot;
-
 /**
- * 鍛戒护寮曟搸绨囷細鎵胯浇 RoleElementPicker 鐨?runPickerCommand锛堥潰鏉挎寚浠ゅ鐞嗕笌浠ｇ爜鐢熸垚缂栨帓锛岀害 640 琛岋級銆? * 鎸?T5-1 浠?RoleElementPicker 鎶界锛涘師 runPickerCommand 鍦?RoleElementPicker 涓粎鐣?1 琛岄棬闈㈠鎵橈紝鍏紑琛屼负瀹屽叏涓嶅彉銆? */
+ * 拾取命令引擎：承载 {@code RoleElementPicker#runPickerCommand} 的面板命令处理与代码生成编排。
+ *
+ * <p>T5-1 拆分产物：原实现整段位于 {@code RoleElementPicker}，拆分后门面类仅保留 1 行委托，
+ * 对外公开行为完全不变。</p>
+ *
+ * <p>2026-10-10：修复本类 javadoc 的历史乱码（GBK/UTF-8 误读导致整段合并成一行），仅改注释。</p>
+ */
 public final class RolePickerCommandEngine {
 
     private static final Logger log = LoggerFactory.getLogger(RolePickerCommandEngine.class);
-    private static PickerResult handleRepickNos(RolePickerContext ctx, Page page, String cmd) {
-        LinkedHashMap<String, RoleEntry> javaPickBySig = ctx.javaPickBySig;
-        if (cmd != null && cmd.trim().startsWith("{")) {
-            try {
-                Map<String, Object> jc = GSON.fromJson(cmd, new TypeToken<Map<String, Object>>(){}.getType());
-                Object t = jc == null ? null : jc.get("type");
-                String type = t == null ? null : t.toString();
-                if ("repickNos".equals(type)) {
-                    String mk = asString(jc.get("mergeKey"));
-                    Object nosObj = jc.get("nos");
-                    List<Integer> nos = new ArrayList<>();
-                    if (nosObj instanceof List) {
-                        for (Object o : (List<?>) nosObj) {
-                            if (o instanceof Number) nos.add(((Number) o).intValue());
-                        }
-                    }
-                    if (mk != null && !mk.isEmpty()) {
-                        synchronized (javaPickBySig) {
-                            for (RoleEntry e : javaPickBySig.values()) {
-                                if (mk.equals(e.getSigKey())) {
-                                    e.setPickNos(nos);
-                                    log.info("[picker] repickNos synced to in-memory state: sigKey={} -> nos={}", mk, nos);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    // 【关键修复】同步删除浏览器侧已不存在的元素
-                    // 用户删除元素后，浏览器侧 __rolePicks 已移除该元素，但 Java 侧 javaPickBySig 仍保留旧记录。
-                    // 当用户重新拾取该元素时，Java 误认为是"已存在元素的新序号"，执行合并逻辑导致序号错误。
-                    // 解决方案：读取浏览器侧当前 __rolePicks 的 sigKey 集合，删除 Java 侧不存在的元素。
-                    try {
-                        @SuppressWarnings("unchecked")
-                        List<?> browserPicks = (List<?>) pickerEval(page, RolePickerScripts.READ_PICK_SIGS_JS);
-                        java.util.Set<String> browserSigs = new java.util.HashSet<>();
-                        if (browserPicks != null) {
-                            for (Object o : browserPicks) {
-                                if (o != null) browserSigs.add(String.valueOf(o));
-                            }
-                        }
-                        synchronized (javaPickBySig) {
-                            java.util.Iterator<java.util.Map.Entry<String, RoleEntry>> it = javaPickBySig.entrySet().iterator();
-                            while (it.hasNext()) {
-                                java.util.Map.Entry<String, RoleEntry> entry = it.next();
-                                RoleEntry e = entry.getValue();
-                                if (e == null) continue;
-                                String sigKey = e.getSigKey();
-                                // 如果 Java 侧元素的 sigKey 不在浏览器侧 __rolePicks 中，则删除该元素
-                                if (sigKey != null && !browserSigs.contains(sigKey)) {
-                                    log.info("[picker] repickNos synced as deleted: sigKey={} (no longer present browser-side)", sigKey);
-                                    it.remove();
-                                }
-                            }
-                        }
-                    } catch (Exception syncEx) {
-                        log.warn("[picker] failed to sync repickNos deletion: {}", syncEx.getMessage());
-                    }
-                    // 重编号后把最新内存态回灌浏览器面板，保证面板/快照/Java 三侧序号一致。
-                    // 强制刷新 ETag：repickNos 只改序号、元素身份未变，若不清除 LAST_SYNC_SIG，
-                    // syncPanelToBrowser 的签名短路会跳过回灌，导致面板序号不刷新（被旧值覆盖）。
-                    try { RolePickerPanelSync.LAST_SYNC_SIG.remove(page); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
-                    try { if (!page.isClosed()) syncPanelToBrowser(page, null, javaPickBySig, true); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
-                    // 【diag-repick】sync 后回读浏览器侧 __rolePicks 的实际 _pickNos，确认回灌生效（而非旧值残留）。
-                    try {
-                        @SuppressWarnings("unchecked")
-                        List<?> rp = (List<?>) pickerEval(page, RolePickerScripts.READ_PICK_KEYS_JS);
-                        log.info("[picker][diag-repick] browser-side __rolePicks after backfill: {}", rp);
-                    } catch (Exception ignoreR) { RolePickerQuiet.ignore("RolePickerCommandEngine#ignoreR", ignoreR); }
-                    return new PickerResult(PickerAction.CONTINUE, null, null,
-                            "已删除拾取序号并重排（" + (nos == null ? 0 : nos.size()) + " 个序号）");
-                }
-            } catch (Exception ex) {
-                log.warn("[picker] failed to parse repickNos command: {}", ex.getMessage());
-            }
-        }
-        return null;
-    }
-
     private static PickerResult cmdStart(RolePickerContext ctx, Page page) {
         AtomicBoolean active = ctx.active;
         String[] nlsFiles = ctx.nlsFiles;
@@ -149,16 +77,15 @@ public final class RolePickerCommandEngine {
                 syncPanelToBrowser(page, null, javaPickBySig, false);
             }
         } catch (Exception ignoreResync) { RolePickerQuiet.ignore("RolePickerCommandEngine#cmdStartResync", ignoreResync); }
-        // 进入手动拾取模式（互斥：此时整页/区域扫描按钮禁用，点击页面只拾取被点元素）。
-        setPickMode(pageNames.keySet().iterator().next(), PickMode.MANUAL, pageNames);
+        // 进入手动拾取模式（当前唯一模式：点击页面只拾取被点元素）。
+        setPickMode(anyLivePage(pageNames), PickMode.MANUAL, pageNames);
         // 反向查表只构建一次（避免对每个被跟踪页面重复读 nls 文件），减少点击"开始"的延迟。
         String startNls = RolePickerNlsCache.buildNlsReverseJson(Arrays.asList(nlsFiles));
         for (Page p : pageNames.keySet()) {
             if (!p.isClosed()) { log.info("[picker][start] calling start for page {}", p.url()); start(p, startNls); }
         }
-        // 注意：开始拾取不做自动避开导航——用户有时也需要拾取 leftmenu/topbar 等全局区域。
-        // start(page, nls) 的 root 为 null（整页），点击拾取即整页可点；仅当用户主动用"区域扫描"
-        // 点选了某块业务区后，window.__rolePickRoot 才被限定到该容器（区域扫描专属语义）。
+        // 注意：开始拾取不做自动避开导航——用户有时也需要拾取 leftmenu/topbar 等全局区域；
+        // 手动拾取全页可点（不再有录制根容器/区域扫描的限定——见 RoleElementPicker.start 的 javadoc）。
         return new PickerResult(PickerAction.CONTINUE, null, null,
                 "RoleElement Picker：点击元素拾取 role/name，按 ESC 结束");
     }
@@ -184,43 +111,6 @@ public final class RolePickerCommandEngine {
         return new PickerResult(PickerAction.CONTINUE, null, null, null);
     }
 
-
-    private static PickerResult cmdPackage(RolePickerContext ctx, Page page) {
-        LinkedHashMap<String, RoleEntry> javaPickBySig = ctx.javaPickBySig;
-        String packageName = ctx.packageName;
-        String pageClassName = ctx.pageClassName;
-        String stepClassName = ctx.stepClassName;
-        String[] nlsFiles = ctx.nlsFiles;
-        // 面板「封装为步骤」按钮触发：浏览器侧 __packageStep 已把勾选集打包进 window.__steps，
-        // 此处读取快照（含 steps/ops）立即生成步骤代码并切到「步骤代码」Tab，无需等到点 ⏹。
-        // 同时顺带重算页面类（若扫后又点选了新元素，页面类亦随之更新）。active 保持开启，可继续拾取。
-        PickSnapshot snap = null;
-        try { snap = readPickSnapshot(page); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
-        if (snap == null) snap = new PickSnapshot("", new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
-        // 状态外置：优先用 Java 侧内存态（javaPickBySig）覆盖（对导航/关闭导致的浏览器端状态清空免疫）。
-        synchronized (javaPickBySig) {
-            if (!javaPickBySig.isEmpty()) {
-                List<RoleEntry> snapshotEntries = new ArrayList<>(javaPickBySig.values());
-                snap = new PickSnapshot(snap.pageClass, snapshotEntries, snap.steps, snap.ops);
-            }
-        }
-        // manual-mode fallback: start->stop whole session = one step; if packaged keep selection order.
-        snap = RolePickerCodeAssembler.snapWithAutoStep(snap);
-        LinkedHashMap<String, String> codePage = RolePickerCodeAssembler.buildPageClassCode(snap.entries, packageName, pageClassName, nlsFiles);
-        LinkedHashMap<String, String> codeStep = RolePickerCodeAssembler.buildStepCode(snap, packageName, stepClassName);
-        // 断言类：与步骤同源同序（同一次封装的勾选元素），独立成类 → 面板「断言」Tab
-        LinkedHashMap<String, String> codeAssert = RolePickerCodeAssembler.buildAssertCode(snap, packageName);
-        // 注：切到步骤 Tab + 精准定位目标 step 由主循环 fillCode 后调用 window.__afterFillJump 统一处理
-        // （该函数在浏览器侧读取 window.__pendingJump 记录的目标 step，避免此处提前切 tab 导致定位错位）。
-        // 只计真正的 step 数（snap.steps）。页面级操作（closeCurrentPage/switchNewPage）是 step 内联的一行，
-        // 不计入 step 总数，否则跨页操作后"封装为一个 step"会被误报成 2 个 step。
-        int stepCount = (snap.steps != null ? snap.steps.size() : 0);
-        return new PickerResult(PickerAction.CONTINUE, codePage, codeStep, codeAssert,
-                codeStep.isEmpty()
-                        ? "（尚无封装的步骤：请先在「页面元素」勾选元素并点「封装为步骤」）"
-                        : ("已生成步骤代码：" + stepCount + " 个 step，页面类 " + snap.entries.size() + " 个字段"
-                                + (codeAssert.isEmpty() ? "" : "，断言类 " + codeAssert.size() + " 个")));
-    }
 
     private static PickerResult cmdRefreshCode(RolePickerContext ctx, Page page) {
         LinkedHashMap<String, RoleEntry> javaPickBySig = ctx.javaPickBySig;
@@ -415,7 +305,7 @@ public final class RolePickerCommandEngine {
                     page.url(), jsMem, browserPicks, safeOrigin(page.url()));
             // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"。
             // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"。
-            setPickMode(pageNames.keySet().iterator().next(), PickMode.IDLE, pageNames);
+            setPickMode(anyLivePage(pageNames), PickMode.IDLE, pageNames);
             return new PickerResult(PickerAction.CONTINUE, null, null, "未拾取到元素");
         }
         // 按 pageClass 分别生成页面类（含"仅 step/ops 无元素 pick"的页，也产出空字段类，保证步骤视图引用不悬空）
@@ -458,7 +348,7 @@ public final class RolePickerCommandEngine {
                 ? "（nls=" + (nlsFiles.length == 1 ? nlsFiles[0] : nlsFiles.length + " 个文件")
                     + "，已反查 " + matched + " 个 key）" : "";
         // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"，页面点击不再拾取。
-        setPickMode(pageNames.keySet().iterator().next(), PickMode.IDLE, pageNames);
+        setPickMode(anyLivePage(pageNames), PickMode.IDLE, pageNames);
         String assertInfo = codeAssert.isEmpty() ? "" : "，断言类 " + codeAssert.size() + " 个（按页）";
         return new PickerResult(PickerAction.CONTINUE, codePage, codeStep, codeAssert,
                 "已生成 " + entriesByPage.size() + " 个页面类 / " + allEntries.size()
@@ -475,11 +365,8 @@ public final class RolePickerCommandEngine {
         // 递增拾取号），使仅有 8 个元素的会话累积出上百个序号、并因 Java 侧"只增不减"的并集合并不断
         // 放大，最终生成结果错乱（详见 panel-core-a.js 工具栏注释）。这四类命令现落入 default
         // （cmdUnknown）被安全忽略，会话不中断。
-        PickerResult repick = handleRepickNos(ctx, page, cmd);
-        if (repick != null) return repick;
         switch (cmd) {
             case RolePickerConstants.CMD_START: return cmdStart(ctx, page);
-            case RolePickerConstants.CMD_PACKAGE: return cmdPackage(ctx, page);
             case RolePickerConstants.CMD_REFRESH_CODE: return cmdRefreshCode(ctx, page);
             case RolePickerConstants.CMD_STOP: return cmdStop(ctx, page);
             case RolePickerConstants.CMD_ABORT: return cmdAbort(ctx, page);

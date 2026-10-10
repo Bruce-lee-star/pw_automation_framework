@@ -2,10 +2,8 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
-import org.junit.After;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -33,19 +31,8 @@ import static org.mockito.Mockito.when;
  */
 public class CaptureSinkConcurrencyTest {
 
-    private RouteIoExecutor io;
-
-    @After
-    public void tearDown() {
-        if (io != null) {
-            io.close();
-            io = null;
-        }
-    }
-
     @Test
     public void concurrentRecordResponseAndDumpLoseNothing() throws Exception {
-        io = new RouteIoExecutor("c", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/**", RouteCapability.MONITOR)
                 .capture(true)
                 .captureBody(true)
@@ -94,9 +81,6 @@ public class CaptureSinkConcurrencyTest {
         pool.shutdown();
         assertTrue( "测试线程池未在时限内收敛", pool.awaitTermination(15, TimeUnit.SECONDS));
 
-        io.close();
-        io = null;
-
         // 最终消费：消费者消费量 + 主线程剩余 = 全部快照（无丢失、无重复）
         List<CapturedApiCall> finalCalls = sink.dump();
         assertEquals("并发 record+onResponse+dump 后快照总数必须等于请求总数（无丢失无重复）", (long) total, (long) (consumed.get() + finalCalls.size()));
@@ -107,7 +91,6 @@ public class CaptureSinkConcurrencyTest {
 
     @Test
     public void concurrentDumpIsIdempotentAndSafe() throws Exception {
-        io = new RouteIoExecutor("d", 1, 8);
         ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR)
                 .capture(true)
                 .build();

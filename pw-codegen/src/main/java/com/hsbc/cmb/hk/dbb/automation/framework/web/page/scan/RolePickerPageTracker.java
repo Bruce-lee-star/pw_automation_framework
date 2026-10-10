@@ -218,10 +218,25 @@ final class RolePickerPageTracker {
 
     /**
      * 对漏登记页面补做"可被拾取"的最小初始化（不搬运 opener 的当前 step，start 自身会续接/重置）。
-     * 与 followPage 的区别：不注册子页跟随（避免重复 onPopup/onClose 监听），仅靠每次 start 的 reconcile
-     * 形成闭环——若漏登页再开子页，子页也会在下次 start 时被补登。
+     * 与 followPage 的区别：不注册子页跟随（避免重复 onPopup/onClose 监听），仅靠每轮 reconcile
+     * 形成闭环——若漏登页再开子页，子页也会在下一轮空闲被补登。
      */
     static void ensurePageTracked(RolePickerContext ctx, Page p) {
+        ensurePageTracked(ctx, p, false);
+    }
+
+    /**
+     * 对漏登记页面补做"可被拾取"的最小初始化（见 {@link #ensurePageTracked(RolePickerContext, Page)}）。
+     *
+     * <p><b>{@code soft}</b> 开关（对齐 page.pause 的 {@code context.on(Page)} 事件驱动页跟踪）：
+     * <ul>
+     *   <li>{@code false}（CMD_START 显式补登记）：用满超时 {@code pickerEval}，确保开始拾取前注入成功；</li>
+     *   <li>{@code true}（主循环每轮空闲调用）：改用软超时 {@code pickerEvalSoft}，注入失败仅记 warn、
+     *       下轮重试，<b>绝不拖慢主循环、也不会引入新的长阻塞</b>（这是把页面跟踪从"点开始才触发"
+     *       改为"每轮空闲自愈"的关键，消灭"漏网页直到点开始才出现"的 84s 静默）。</li>
+     * </ul>
+     */
+    static void ensurePageTracked(RolePickerContext ctx, Page p, boolean soft) {
         ConcurrentHashMap<Page, String> pageNames = ctx.pageNames;
         ConcurrentHashMap<Page, String> snapshots = ctx.snapshots;
         LinkedHashMap<String, String> urlToClass = ctx.urlToClass;
@@ -236,13 +251,38 @@ final class RolePickerPageTracker {
             pageNames.put(p, cls);
             if (!openedPages.contains(p)) openedPages.add(p);
             // 暴露页面类名 + 开启面板开关（与 openPanel/followPage 一致）
-            pickerEval(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
-            pickerEval(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
-            pickerEval(p, RolePickerScripts.PANEL_SCRIPT);   // 立即重建当前已加载文档的面板
+            if (soft) {
+                pickerEvalSoft(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
+                pickerEvalSoft(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
+                pickerEvalSoft(p, RolePickerScripts.PANEL_SCRIPT);   // 软超时重建当前已加载文档的面板
+            } else {
+                pickerEval(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
+                pickerEval(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
+                pickerEval(p, RolePickerScripts.PANEL_SCRIPT);   // 立即重建当前已加载文档的面板
+            }
             snapshots.put(p, RoleElementPicker.readPickStateJson(p));
             log.info("[picker][reconcile] back-registered a missed page, now pickable: {} -> {}", p.url(), cls);
         } catch (Exception e) {
-            log.warn("[picker][reconcile] failed to back-register the page (it may still be unpickable in this start): {}", e.getMessage());
+            log.warn("[picker][reconcile] failed to back-register the page (will retry on the next idle round): {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 每轮空闲对齐（对齐 page.pause 的 {@code context.on(Page)} 事件驱动页跟踪）：
+     * 仅把"浏览器真实打开、但 {@code pageNames} 尚未登记"的页面补登记为可拾取（含面板），
+     * <b>不重复刷新已登记页的类名</b>（该职责由 {@code handleIdle} 的 {@code refreshPageClass} 承担，避免双算）。
+     * 用软超时：漏登页的注入失败可下轮重试，绝不拖慢主循环、也不会引入新的长阻塞。
+     *
+     * <p>效果：任何"早于 {@code ctx.onPage} 注册、或 onPage/onPopup/followPage 因异常漏登记"的已打开页面，
+     * 在 ≤1 个空闲轮（约 1s）内被补登记并出现面板——正是此前"漏网页直到点开始才出现、中间 84s 静默"的根因修复。</p>
+     */
+    static void reconcileMissedPages(RolePickerContext ctx, Page trigger) {
+        if (trigger == null || trigger.isClosed()) return;
+        for (Page p : trigger.context().pages()) {
+            if (p == null || p.isClosed()) continue;
+            if (!ctx.pageNames.containsKey(p)) {
+                ensurePageTracked(ctx, p, true);
+            }
         }
     }
 

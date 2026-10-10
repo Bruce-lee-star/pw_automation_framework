@@ -216,7 +216,8 @@ public class PageElement {
      */
     public PageElement click(String testName) {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
             locatorInternal().click(new Locator.ClickOptions().setDelay(100).setTimeout(opTimeout()));
             PageInteractions.waitForTimeout(page, (int) PlaywrightManager.config().getElementActionPostDelay());
             return true;
@@ -226,7 +227,8 @@ public class PageElement {
 
     public PageElement fill(String text, String testName) {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
             locatorInternal().fill(text, new Locator.FillOptions().setTimeout(opTimeout()));
             return true;
         }, "fill", testName);
@@ -240,7 +242,8 @@ public class PageElement {
 
     public PageElement doubleClick() {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
             locatorInternal().dblclick(new Locator.DblclickOptions().setTimeout(opTimeout()));
             PageInteractions.waitForTimeout(page, (int) PlaywrightManager.config().getElementActionPostDelay());
             return true;
@@ -250,7 +253,8 @@ public class PageElement {
 
     public PageElement rightClick() {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
             locatorInternal().click(new Locator.ClickOptions().setButton(MouseButton.RIGHT).setTimeout(opTimeout()));
             PageInteractions.waitForTimeout(page, (int) PlaywrightManager.config().getElementActionPostDelay());
             return true;
@@ -269,7 +273,8 @@ public class PageElement {
      */
     public PageElement jsClick() {
         executeWithRetry(() -> {
-            locatorInternal().evaluate("el => el.click()");
+            locatorInternal().evaluate("el => el.click()",
+                    new Locator.EvaluateOptions().setTimeout(opTimeout()));
             return true;
         }, "jsClick");
         return this;
@@ -282,8 +287,10 @@ public class PageElement {
 
     public PageElement type(String text) {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
-            locatorInternal().pressSequentially(text);
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
+            locatorInternal().pressSequentially(text,
+                    new Locator.PressSequentiallyOptions().setTimeout(opTimeout()));
             return true;
         }, "type");
         return this;
@@ -291,8 +298,9 @@ public class PageElement {
 
     public PageElement clear() {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
-            locatorInternal().clear();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
+            locatorInternal().clear(new Locator.ClearOptions().setTimeout(opTimeout()));
             return true;
         }, "clear");
         return this;
@@ -300,8 +308,9 @@ public class PageElement {
 
     public PageElement clearAndSetValue(String text) {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
-            locatorInternal().clear();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
+            locatorInternal().clear(new Locator.ClearOptions().setTimeout(opTimeout()));
             locatorInternal().fill(text, new Locator.FillOptions().setTimeout(opTimeout()));
             return true;
         }, "clearAndSetValue");
@@ -310,8 +319,9 @@ public class PageElement {
 
     public PageElement clearAndTypeSequentially(String text) {
         executeWithRetry(() -> {
-            locatorInternal().scrollIntoViewIfNeeded();
-            locatorInternal().clear();
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
+            locatorInternal().clear(new Locator.ClearOptions().setTimeout(opTimeout()));
             locatorInternal().pressSequentially(text, new Locator.PressSequentiallyOptions().setTimeout(opTimeout()));
             return true;
         }, "clearAndTypeSequentially");
@@ -329,7 +339,7 @@ public class PageElement {
 
     public PageElement selectText() {
         executeWithRetry(() -> {
-            locatorInternal().selectText();
+            locatorInternal().selectText(new Locator.SelectTextOptions().setTimeout(opTimeout()));
             return true;
         }, "selectText");
         return this;
@@ -471,7 +481,8 @@ public class PageElement {
     // ==================== Text & Attribute ====================
     public String getText() {
         return executeSafely(() -> {
-            String raw = locatorInternal().innerText();
+            String raw = locatorInternal().innerText(
+                    new Locator.InnerTextOptions().setTimeout(opTimeout()));
             if (raw == null) {
                 logger.warn("getText() returned null for selector: {}", selector);
                 return "";
@@ -485,25 +496,31 @@ public class PageElement {
      */
     public String getTextRaw() {
         return executeSafely(() -> {
-            String raw = locatorInternal().innerText();
+            String raw = locatorInternal().innerText(
+                    new Locator.InnerTextOptions().setTimeout(opTimeout()));
             return raw != null ? raw : "";
         }, "getTextRaw");
     }
 
     public String getInnerHtml() {
-        return executeSafely(() -> locatorInternal().innerHTML(), "getInnerHtml");
+        return executeSafely(() -> locatorInternal().innerHTML(
+                new Locator.InnerHTMLOptions().setTimeout(opTimeout())), "getInnerHtml");
     }
 
     public List<String> getAllTextContents() {
+        // Playwright 的 allTextContents() 没有 options 重载（无法传超时）⇒ 该调用继承上下文默认超时，
+        // 是元素侧读取中唯一的例外；其余读取一律显式传 element.wait.timeout（见 opTimeout()）。
         return executeSafely(() -> locatorInternal().allTextContents(), "getAllTextContents");
     }
 
     public String getAttribute(String attr) {
-        return executeSafely(() -> locatorInternal().getAttribute(attr), "getAttribute");
+        return executeSafely(() -> locatorInternal().getAttribute(attr,
+                new Locator.GetAttributeOptions().setTimeout(opTimeout())), "getAttribute");
     }
 
     public String getValue() {
-        return executeSafely(() -> locatorInternal().inputValue(), "getValue");
+        return executeSafely(() -> locatorInternal().inputValue(
+                new Locator.InputValueOptions().setTimeout(opTimeout())), "getValue");
     }
 
     // ==================== Select ====================
@@ -549,9 +566,16 @@ public class PageElement {
         return Math.max(1, (int) Math.ceil(getDefaultTimeoutMs() / 1000.0));
     }
 
-    /** 元素动作单次操作超时（毫秒），由 {@code playwright.element.operation.timeout} 驱动，注入 Playwright 原生 actionability 等待窗口。 */
+    /**
+     * 元素动作（click/fill/selectOption...）单次操作的注入超时（毫秒）—— <b>与元素等待同源</b>：
+     * {@code playwright.element.wait.timeout}。
+     *
+     * <p>2026-10-10 修正接线：原实现读 {@code playwright.element.operation.timeout}（默认 30000，
+     * 且用户配置里并未声明），使动作的实际等待窗口是「元素等待时间」的 2 倍，与配置语义不符。
+     * 现元素侧（动作 + 等待 + 读取）只有一个事实来源：{@code playwright.element.wait.timeout}。</p>
+     */
     private double opTimeout() {
-        return PlaywrightManager.config().getElementOperationTimeout();
+        return PlaywrightManager.config().getElementCheckTimeout();
     }
 
     public PageElement waitForVisible() {
@@ -802,7 +826,8 @@ public class PageElement {
     // ==================== Event & JS ====================
     public PageElement dispatchEvent(String event) {
         executeWithRetry(() -> {
-            locatorInternal().dispatchEvent(event);
+            locatorInternal().dispatchEvent(event,
+                    new Locator.DispatchEventOptions().setTimeout(opTimeout()));
             return true;
         }, "dispatchEvent");
         return this;
@@ -810,7 +835,8 @@ public class PageElement {
 
     public PageElement dispatchEvent(String event, Object arg) {
         executeWithRetry(() -> {
-            locatorInternal().dispatchEvent(event, arg);
+            locatorInternal().dispatchEvent(event, arg,
+                    new Locator.DispatchEventOptions().setTimeout(opTimeout()));
             return true;
         }, "dispatchEventWithArg");
         return this;
@@ -826,7 +852,8 @@ public class PageElement {
      */
     public Object evaluate(String expression) {
         try {
-            return locatorInternal().evaluate(expression);
+            return locatorInternal().evaluate(expression,
+                    new Locator.EvaluateOptions().setTimeout(opTimeout()));
         } catch (PlaywrightException e) {
             throw new ElementOperationException("evaluate", selector,
                     "Failed to evaluate expression: " + expression, e);
@@ -836,7 +863,8 @@ public class PageElement {
     /** 带参数版本的 {@link #evaluate(String)}，参数 {@code arg} 在表达式中以 {@code arg} 访问。 */
     public Object evaluate(String expression, Object arg) {
         try {
-            return locatorInternal().evaluate(expression, arg);
+            return locatorInternal().evaluate(expression, arg,
+                    new Locator.EvaluateOptions().setTimeout(opTimeout()));
         } catch (PlaywrightException e) {
             throw new ElementOperationException("evaluate", selector,
                     "Failed to evaluate expression: " + expression, e);
@@ -846,7 +874,7 @@ public class PageElement {
     /** 让元素失去焦点（对齐 Playwright {@code Locator.blur}）。 */
     public PageElement blur() {
         executeWithRetry(() -> {
-            locatorInternal().blur();
+            locatorInternal().blur(new Locator.BlurOptions().setTimeout(opTimeout()));
             return true;
         }, "blur");
         return this;
@@ -870,7 +898,8 @@ public class PageElement {
      */
     public String ariaSnapshot() {
         try {
-            return locatorInternal().ariaSnapshot();
+            return locatorInternal().ariaSnapshot(
+                    new Locator.AriaSnapshotOptions().setTimeout(opTimeout()));
         } catch (PlaywrightException e) {
             throw new ElementOperationException("ariaSnapshot", selector,
                     "Failed to capture ARIA snapshot", e);
@@ -883,7 +912,8 @@ public class PageElement {
      */
     public PageElement scrollIntoView() {
         executeWithRetry(() -> {
-            locatorInternal().evaluate("el => el.scrollIntoView({ behavior: 'instant', block: 'center' })");
+            locatorInternal().evaluate("el => el.scrollIntoView({ behavior: 'instant', block: 'center' })",
+                    new Locator.EvaluateOptions().setTimeout(opTimeout()));
             return true;
         }, "scrollIntoView");
         return this;
@@ -1015,7 +1045,8 @@ public class PageElement {
 
     public byte[] screenshot() {
         try {
-            return locatorInternal().screenshot();
+            return locatorInternal().screenshot(
+                    new Locator.ScreenshotOptions().setTimeout(opTimeout()));
         } catch (PlaywrightException e) {
             logger.error("screenshot failed: {}", selector, e);
             return null;
@@ -1052,7 +1083,8 @@ public class PageElement {
      */
     public ElementRect getBoundingBoxSafe() {
         try {
-            com.microsoft.playwright.options.BoundingBox box = locatorInternal().boundingBox();
+            com.microsoft.playwright.options.BoundingBox box = locatorInternal().boundingBox(
+                    new Locator.BoundingBoxOptions().setTimeout(opTimeout()));
             return box == null ? null : new ElementRect(box.x, box.y, box.width, box.height);
         } catch (PlaywrightException e) {
             logger.warn("getBoundingBoxSafe failed for {}: {}", selector, e.getMessage());

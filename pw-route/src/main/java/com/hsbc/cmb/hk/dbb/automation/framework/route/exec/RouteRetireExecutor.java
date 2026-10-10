@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p><b>为什么必须与 IO 池隔离</b>：注销是同步协议调用（{@code setNetworkInterceptionPatterns}，
  * 默认上界 {@link com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCall#UNROUTE_BOUND_MS}），
- * 撤销线程会<b>等待</b>回包。若与 body 断言共用 {@link RouteIoExecutor}，一次不响应的注销就会占住 IO 线程
- * ⇒ 断言任务被拒（{@code rejectedBodyAssertions}，覆盖损失，且属"框架自身导致的观测缺失"）。独立单线程
+ * 撤销线程会<b>等待</b>回包。若与 IO 池共用，一次不响应的注销就会占住 IO 线程
+ * ⇒ DELAY 投递 / 延迟调度闸门被占（延迟与观测路径受损，且属"框架自身导致的时序劣化"）。独立单线程
  * 使两类工作互不挤压。</p>
  *
  * <p><b>设计约束</b>：

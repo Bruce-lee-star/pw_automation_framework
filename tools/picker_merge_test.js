@@ -179,34 +179,15 @@ test('MERGE_CLOSE_OP_STEP_JS inserts one _closeOp marker after the closed page',
 });
 
 // ---------------------------------------------------------------------------
-// T6: 无序号元素的"排序垫底"哨兵必须是 int32 安全值，且与 Java 侧占位语义字面一致。
-//     回归两例：① 占位号 0 → 升序排到【最前】；② Number.MAX_SAFE_INTEGER（> 2^31-1）
-//     → 作为真实序号回传 Java 时只能靠 Double→int 饱和"碰巧"落成 Integer.MAX_VALUE。
-//     封装逻辑内联在 panel-core-b.js（非 merge-* 箭头资源），故此处按源码契约锁定。
+// T6: 无序号元素的"排序垫底"哨兵在 Java 侧必须是 int32 安全值，且与占位语义字面一致。
+//     原「封装为步骤」(window.__packageStep) 的 JS 展开逻辑已移除（步骤生成统一在 Java 侧
+//     RoleElementStepGenerator / snapWithAutoStep 完成），故此处仅锁定 Java 侧兜底口径。
 // ---------------------------------------------------------------------------
-test('__packageStep 的无序号哨兵是 int32 安全值且与 Java 占位号一致', function () {
-  const js = readRes('panel-core-b.js');
-  const m = js.match(/if \(!_nos\.length\) _nos = \[(\d+)\];/);
-  assert.ok(m, 'panel-core-b.js 未找到无序号元素的哨兵赋值');
-  const sentinel = Number(m[1]);
-  assert.ok(Number.isInteger(sentinel) && sentinel > 0, '哨兵必须是正整数: ' + m[1]);
-  assert.ok(sentinel <= 2147483647,
-    '哨兵超出 int32 上界（回传 Java 的 intValue()/List<Integer> 路径不安全）: ' + sentinel);
-  assert.strictEqual(sentinel, 2147483647,
-    '哨兵应与 Java 占位号字面一致（Integer.MAX_VALUE），当前为 ' + sentinel);
+test('Java 侧无序号元素垫底哨兵为 Integer.MAX_VALUE（与步骤生成语义一致）', function () {
   const javaSrc = fs.readFileSync(path.join(ROOT,
     'pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/scan/RoleElementStepGenerator.java'), 'utf8');
   assert.ok(/Integer\.MAX_VALUE/.test(javaSrc),
-    'Java 侧未找到无序号元素的垫底兜底（Integer.MAX_VALUE）——两端口径可能再次背离');
-});
-
-// ---------------------------------------------------------------------------
-// T7: 展开顺序必须是【升序】(a.no - b.no)，"哨兵垫底"才成立；降序会让哨兵跑到最前。
-// ---------------------------------------------------------------------------
-test('__packageStep 展开后按序号升序排序（哨兵因此垫底）', function () {
-  const js = readRes('panel-core-b.js');
-  assert.ok(/_expanded\.sort\(function\s*\(a,\s*b\)\s*\{\s*return\s*\(a\.no\s*\|\|\s*0\)\s*-\s*\(b\.no\s*\|\|\s*0\);\s*\}\)/.test(js),
-    '_expanded 排序不是 (a.no||0)-(b.no||0) 的升序比较，"无序号元素垫底"语义不成立');
+    'Java 侧未找到无序号元素的垫底兜底（Integer.MAX_VALUE）——步骤生成口径可能背离');
 });
 
 // ---------------------------------------------------------------------------

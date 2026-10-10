@@ -3,7 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.route;
 import java.util.List;
 
 /**
- * Route V2 断言失败探针 SPI（核心层定义，web 侧消费，V2 模块实现）。
+ * Route 断言失败探针 SPI（核心层定义，web 侧消费，路由模块实现）。
  *
  * <p>对齐 {@link RouteLifecycle} 的解耦模式：pw-route 在类加载时实现并自注册到
  * {@link RouteAssertionRegistry}；web 侧（PlaywrightListener 的步骤/用例收尾）只依赖本接口

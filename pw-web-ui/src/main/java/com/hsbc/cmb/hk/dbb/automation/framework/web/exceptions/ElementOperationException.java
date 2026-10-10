@@ -96,6 +96,13 @@ public class ElementOperationException extends ElementException {
 
     // ==================== Diagnostic Info ====================
 
+    /**
+     * 失败诊断快照：<b>只保留异常消息/报告真正渲染的字段</b>
+     * （见 {@link ElementOperationException#toString()}：exists / vis / en / ed / count / retries）。
+     *
+     * <p>历史上另有 {@code tagName} 与 {@code attributes}（自选属性白名单）——二者全仓<b>无任何消费方</b>
+     * （无渲染、无读取），已删除；需要结构化 DOM 证据时应使用 Playwright 原生 {@code ariaSnapshot()}。</p>
+     */
     public static class DiagnosticInfo {
         private boolean existsInDom;
         private boolean isVisible;
@@ -103,8 +110,6 @@ public class ElementOperationException extends ElementException {
         private boolean isEditable;
         private int elementCount;
         private int retryCount;
-        private String tagName;
-        private java.util.Map<String, String> attributes;
 
         public DiagnosticInfo existsInDom(boolean val) { this.existsInDom = val; return this; }
         public DiagnosticInfo isVisible(boolean val) { this.isVisible = val; return this; }
@@ -112,8 +117,6 @@ public class ElementOperationException extends ElementException {
         public DiagnosticInfo isEditable(boolean val) { this.isEditable = val; return this; }
         public DiagnosticInfo elementCount(int val) { this.elementCount = val; return this; }
         public DiagnosticInfo retryCount(int val) { this.retryCount = val; return this; }
-        public DiagnosticInfo tagName(String val) { this.tagName = val; return this; }
-        public DiagnosticInfo attributes(java.util.Map<String, String> val) { this.attributes = val; return this; }
 
         // Getters
         public boolean existsInDom() { return existsInDom; }
@@ -122,8 +125,6 @@ public class ElementOperationException extends ElementException {
         public boolean isEditable() { return isEditable; }
         public int elementCount() { return elementCount; }
         public int retryCount() { return retryCount; }
-        public String tagName() { return tagName; }
-        public java.util.Map<String, String> attributes() { return attributes; }
 
         public static DiagnosticInfo create() { return new DiagnosticInfo(); }
     }

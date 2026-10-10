@@ -1,7 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.element;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementNotFoundException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
@@ -38,6 +40,7 @@ final class ElementOperationSupport {
      */
     static <T> T executeSafely(Supplier<Locator> locatorFn, String selector,
                                BasePage page, Supplier<T> action, String operation) {
+        awaitFrameQuiet(page, operation);
         try {
             return action.get();
         } catch (TimeoutError e) {
@@ -103,6 +106,7 @@ final class ElementOperationSupport {
     static void executeWithRetry(Supplier<Locator> locatorFn, String selector,
                                  BasePage page, Supplier<Boolean> action,
                                  String operation, String testName) {
+        awaitFrameQuiet(page, operation);
         try {
             action.get();
         } catch (PlaywrightException e) {
@@ -175,15 +179,40 @@ final class ElementOperationSupport {
     }
 
     /**
-     * 等待 DOM 加载完毕（吸收路由/导航变化），再让上层重试元素操作。
-     * 导航仍在进行时 waitForLoadState 可能本身被中断——忽略该异常，交由重试循环继续探测。
+     * 抖动闸门（<b>先落定，再操作元素</b>）：主框架导航后先等页面静默（有界），再发起元素操作。
+     *
+     * <p><b>为什么必须在"操作之前"</b>：导航抖动窗口内发起操作时，驱动可能推来引用<b>已回收 frame</b> 的
+     * 事件（{@code Object doesn't exist: frame@…}），该异常会<b>中断</b>正在等待的那次调用 —— 失败后重试
+     * 只能补救，事前落定才能避免（2026-10-10 实测：登录后 en-US↔en-us 抖动期点击直接失败）。</p>
+     *
+     * <p>零成本路径：无近期导航时仅一次弱引用查表 + 一次 {@code nanoTime} 比较；等待上界见
+     * {@link PageInteractionMonitor#awaitQuiet(com.microsoft.playwright.Page)}。</p>
+     */
+    private static void awaitFrameQuiet(BasePage page, String operation) {
+        Page pw = page.getPageRaw();
+        if (pw == null) {
+            return;
+        }
+        long waitedMs = PageInteractionMonitor.awaitQuiet(pw);
+        if (waitedMs > 0) {
+            VerboseLogging.logDebugIfVerbose(logger,
+                    "[churn] waited {}ms for the page to settle before '{}'", waitedMs, operation);
+        }
+    }
+
+    /**
+     * 等待页面加载完毕（DOMContentLoaded，吸收路由/导航变化），再让上层重试元素操作。
+     *
+     * <p>超时取 {@code playwright.page.timeout}（该键的语义 = <b>页面加载超时</b>）；原实现硬编码 10s，
+     * 与该键语义脱节（2026-10-10 修正接线）。导航仍在进行时 {@code waitForLoadState} 可能本身被中断
+     * ——忽略该异常，交由上层继续探测。</p>
      */
     private static void waitForDomSettled(BasePage page, String operation, String selector) {
         try {
             Page pw = page.getPageRaw();
             if (pw != null) {
                 pw.waitForLoadState(LoadState.DOMCONTENTLOADED,
-                        new Page.WaitForLoadStateOptions().setTimeout(10_000));
+                        new Page.WaitForLoadStateOptions().setTimeout(page.getConfig().getPageTimeout()));
                 logger.debug("[ElementOperationSupport] nav/route change detected on '{}' ({}); "
                         + "waited for DOMContentLoaded before retry", selector, operation);
             }

@@ -6,6 +6,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.TimeoutError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,20 +16,30 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
- * 元素诊断信息收集器。
+ * 元素失败诊断采集器 —— <b>动作失败时，产出"能直接进报告"的最小证据</b>。
  *
- * <h3>Enterprise-grade diagnostic collector for element failures.</h3>
+ * <p><b>契约（做什么 / 不做什么）</b>：</p>
+ * <ul>
+ *   <li><b>做什么</b>：{@link #collect()} 用 Playwright 原生 API 取元素状态
+ *       （{@code count()} / {@code isVisible()} / {@code isEnabled()} / {@code isEditable()}），
+ *       {@link #getObstructingElements()} 用 actionability {@code trial} 判遮挡，
+ *       {@link #getPageUrl()} / {@link #getPageTitle()} 记录失败现场；
+ *       {@link #captureFailureScreenshot(String)} 存一张失败截图。
+ *       产出由 {@code ElementOperationSupport} 装配进 {@link ElementOperationException}，
+ *       最终出现在 Serenity/Cucumber 报告与控制台 —— 那是本类产出的<b>唯一消费者</b>。</li>
+ *   <li><b>不做什么</b>：不等待、不重试、不做 DOM 抓取（不注入 JS、不维护属性白名单）、
+ *       不解析选择器、不异步。Playwright 对象非线程安全，所有调用都在<b>场景线程</b>内同步完成
+ *       （历史上"异步诊断线程池"跨线程操作 Playwright → pipe closed，已彻底移除）。</li>
+ *   <li><b>为什么用原生 API</b>：判定口径与被测动作<b>同源</b>（同一套 actionability 语义），
+ *       且对 CSS / XPath / role / text 等所有定位引擎一致。</li>
+ * </ul>
  *
- * <p><b>线程模型（CT2-02）</b>：本类持有的 {@link Locator} / {@link Page} / {@link Frame} 均由场景线程创建，
- * Playwright 对象<b>非线程安全</b>，故所有 Playwright 调用（{@code locator.evaluate}、
- * {@code page.screenshot} 等）<b>一律在调用方（场景）线程执行</b>。
- * 原先的「异步诊断线程池」会让诊断线程跨线程操作这些对象（pipe closed / 静默失败），已整体移除；
- * {@link #collectAsync()} / {@link #captureFailureScreenshotAsync(String)} 仅保留异步<b>形态</b>
- * （返回已完成的 future），实际仍在调用线程内同步执行 —— 失败诊断属低频兜底路径，多耗几十 ms 可接受。
+ * <p>频率与成本：仅发生在"动作已失败"之后，属低频兜底路径；单次成本上限 = 若干次即时探测
+ * + 一次超时封顶的 actionability 探测（{@code PROBE_TIMEOUT_MS}）+ 一张截图。</p>
  *
  * @since 1.0.0
  */
@@ -50,168 +62,99 @@ public class ElementDiagnosticsCollector {
     }
 
     /**
-     * 在正确的 DOM 上下文中执行 JS 评估：优先使用 iframe Frame，否则使用主页面 Page。
-     */
-    private Object evaluateInContext(String script, Object arg) {
-        if (currentFrame != null) {
-            return currentFrame.evaluate(script, arg);
-        }
-        return page.evaluate(script, arg);
-    }
-
-    /**
-     * 收集诊断信息并返回已完成 future（保留异步<b>形态</b>）。
+     * 收集元素诊断信息（<b>全部使用 Playwright 原生 API，不注入 JS</b>）。
      *
-     * <p><b>CT2-02</b>：诊断逻辑持有场景线程创建的 {@link Locator}/{@link Page}（非线程安全），
-     * 绝不可交给诊断线程池执行（跨线程操作 Playwright → pipe closed / 静默失败）。
-     * 故此处以 {@code Runnable::run} 在<b>调用线程</b>（即场景线程、对象拥有者）同步执行，
-     * 返回的 future 在方法返回前即已完成。失败诊断属低频兜底路径，多耗几十 ms 可接受。
-     */
-    public CompletableFuture<ElementOperationException.DiagnosticInfo> collectAsync() {
-        return CompletableFuture.supplyAsync(this::collect, Runnable::run)
-                .whenComplete((info, ex) -> {
-                    if (ex != null) {
-                        logger.debug("[diagnostic] Async collect failed for [{}]: {}", selector, ex.getMessage());
-                    }
-                });
-    }
-
-    /**
-     * 收集完整的诊断信息（批量单次 JS 调用，4 次 IPC → 1 次 IPC）
+     * <p><b>为什么不再用 {@code evaluate} / {@code document.querySelector}</b>：</p>
+     * <ol>
+     *   <li><b>语义一致性</b>：判定口径必须与被测动作一致 —— 原生 {@code count()/isVisible()/isEnabled()/
+     *       isEditable()} 就是 Playwright actionability 用的同一套语义；自己写 JS 命中测试会与之分歧。</li>
+     *   <li><b>引擎无关</b>：原生 API 对 CSS / XPath / role / text 等所有定位方式一致；JS 路径必须自己
+     *       解析选择器（历史事故：XPath 交给 {@code querySelector} ⇒ {@code SyntaxError: … is not a valid selector}）。</li>
+     *   <li><b>不引入等待</b>：诊断发生在"元素已判定不可用"之后；原生查询 API <b>即时返回且不抛</b>。</li>
+     * </ol>
+     *
+     * <p>注：{@code tagName} 不再采集（Playwright 无原生 tagName API）；也<b>不再采集自选属性白名单</b>
+     * （{@code id/class/name/...} 这类清单不是 Playwright 的语义，且框架内无任何消费方）。
+     * 需要结构化证据时，{@code detailed=true} 下记录 Playwright 原生的
+     * {@code locator.ariaSnapshot()}（引擎无关、无白名单）。</p>
      */
     public ElementOperationException.DiagnosticInfo collect() {
         ElementOperationException.DiagnosticInfo info = ElementOperationException.DiagnosticInfo.create();
 
-        try {
-            // 批量收集：一次 evaluate() 完成存在性/可见性/可编辑性/数量/标签/属性检查
-            boolean detailed = PlaywrightManager.config().isElementDetailedDiagnostics();
-            Map<String, Object> result;
-
-            // 使用 locator.evaluate() 而非 page.evaluate(selector)，以正确处理
-            // CSS / XPath / role / text 等所有 Playwright 支持的定位语义（P2-19）。
-            // ⚠ 但 locator 语义下传入脚本的是【元素】而非选择器字符串，必须配套使用
-            //   buildElementDiagnosticScript（见其 Javadoc），否则 querySelector 会把元素当选择器而抛 SyntaxError。
-            if (locator != null) {
-                result = castToMap(locator.evaluate(buildElementDiagnosticScript(detailed), null));
+        if (locator == null) {
+            if (selector == null || selector.isBlank()) {
+                logger.warn("Cannot collect element diagnostics: locator is null and selector is blank");
             } else {
-                if (selector == null || selector.isBlank()) {
-                    throw new IllegalArgumentException(
-                            "Cannot collect element diagnostics: locator is null and selector is blank");
-                }
-                result = castToMap(evaluateInContext(buildSelectorDiagnosticScript(detailed), selector));
+                logger.debug("[diagnostic] no Locator available for '{}' — native probes need a Locator; "
+                        + "reporting unknown state", selector);
             }
-
-            info.existsInDom(getBoolean(result, "exists"))
-               .isVisible(getBoolean(result, "visible"))
-               .isEnabled(getBoolean(result, "enabled"))
-               .isEditable(getBoolean(result, "editable"))
-               // locator 语义无法由单元素推导匹配数，改用 locator.count()；selector 语义由脚本统计
-               .elementCount(locator != null ? getElementCount() : getInt(result, "count"));
-
-            if (detailed) {
-                info.tagName(getString(result, "tagName"));
-                Map<String, String> attrs = castToStringMap(result == null ? null : result.get("attributes"));
-                if (attrs != null) {
-                    info.attributes(attrs);
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to collect full diagnostic info for [{}]: {}",
-                selector, e.getMessage());
-            try {
-                info.elementCount(getElementCount());
-            } catch (Exception ignored) {
-                info.elementCount(-1);
-            }
+            return info;
         }
 
+        long startedNanos = System.nanoTime();
+        int matched = getElementCount();                 // 即时、不等待、不抛
+        info.elementCount(matched);
+        if (matched <= 0) {
+            return info.existsInDom(false)
+                       .isVisible(false)
+                       .isEnabled(false)
+                       .isEditable(false);
+        }
+
+        // isVisible 的 timeout 在客户端契约里是 @deprecated「option is ignored」——该 API 不等待、
+        // 立即返回（vendored Locator.java:1562/1568），故不传（传了反而误导读者以为它会被尊重）。
+        info.existsInDom(true)
+            .isVisible(probe(locator::isVisible))
+            // isEnabled / isEditable 的 timeout 会被尊重（元素未 attach 时会等到超时）：
+            // 已 count()>0 时它们立即返回，极端竞态下也最多等 PROBE_TIMEOUT_MS。
+            .isEnabled(probe(() -> locator.isEnabled(
+                    new Locator.IsEnabledOptions().setTimeout(PROBE_TIMEOUT_MS))))
+            .isEditable(probe(() -> locator.isEditable(
+                    new Locator.IsEditableOptions().setTimeout(PROBE_TIMEOUT_MS))));
+
+        if (PlaywrightManager.config().isElementDetailedDiagnostics()) {
+            // 结构化证据用 Playwright 自己的 ARIA 快照（引擎无关、无自选属性白名单）
+            String snapshot = stringProbe(locator::ariaSnapshot);
+            if (snapshot != null && !snapshot.isBlank()) {
+                logger.debug("[diagnostic] ARIA snapshot of [{}]:\n{}", selector, snapshot);
+            }
+        }
+        logger.debug("[diagnostic] collect() for [{}] took {}ms (count={})",
+                selector, elapsedMs(startedNanos), matched);
         return info;
     }
 
     /**
-     * 构建【以元素为入参】的诊断脚本，配合 {@code locator.evaluate()} 使用。
+     * actionability 探测的超时上界（毫秒）。
      *
-     * <p>⚠ <b>为什么必须与 {@link #buildSelectorDiagnosticScript(boolean)} 分开：</b>
-     * Playwright 的 {@code Locator.evaluate(script, arg)} 会把匹配到的<b>元素</b>作为第一个实参传入脚本；
-     * 若沿用 {@code document.querySelector(s)} 的写法，实参会变成元素对象本身，从而抛出
-     * {@code SyntaxError: '[object HTMLInputElement]' is not a valid selector}。
-     * 该错误只在元素定位失败时暴露，导致「最需要诊断信息的时刻，采集器必然失效」。</p>
-     *
-     * <p>locator 语义下无法由单个元素推导匹配总数，count 改由 {@link #getElementCount()} 提供。</p>
+     * <p>只对「timeout 会被尊重」的探测生效：{@code isEnabled()} / {@code isEditable()} /
+     * trial click（{@code isVisible()} 不等待，其 timeout 选项在客户端已 deprecated/ignored）。
+     * 探测只发生在元素已 {@code count()&gt;0} 之后，正常情况下立即返回；本值只是「元素在探测
+     * 途中被 detach」这类竞态的封顶 —— 属<b>安全护栏</b>，不是业务可调参数，故不做成配置项。</p>
      */
-    private static String buildElementDiagnosticScript(boolean detailed) {
-        StringBuilder sb = new StringBuilder(512);
-        sb.append("(e) => {")
-          .append("if(!e) return {exists:false,visible:false,enabled:false,editable:false};")
-          .append("const cs=getComputedStyle(e);")
-          .append("const r={")
-          .append("exists:true,")
-          .append("visible:e.offsetParent!==null&&cs.display!=='none'&&cs.visibility!=='hidden'&&parseFloat(cs.opacity)>0,")
-          .append("enabled:!e.disabled,")
-          .append("editable:!e.disabled&&!e.readOnly");
-        if (detailed) {
-            sb.append(DIAGNOSTIC_DETAIL_FIELDS);
+    private static final double PROBE_TIMEOUT_MS = 250;
+
+    /** 原生布尔探测：任何异常一律归 {@code false}（诊断绝不影响主异常抛出）。 */
+    static boolean probe(BooleanSupplier nativeProbe) {
+        try {
+            return nativeProbe.getAsBoolean();
+        } catch (Exception e) {
+            return false;
         }
-        sb.append("};return r;}");
-        return sb.toString();
     }
 
-    /**
-     * 构建【以选择器字符串为入参】的诊断脚本，配合 {@code page/frame.evaluate()} 使用。
-     * 仅适用于 CSS 选择器；非 CSS 描述符请走 {@link #buildElementDiagnosticScript(boolean)}。
-     */
-    private static String buildSelectorDiagnosticScript(boolean detailed) {
-        StringBuilder sb = new StringBuilder(512);
-        sb.append("(s) => {")
-          .append("const e=document.querySelector(s);")
-          .append("if(!e) return {exists:false,visible:false,enabled:false,editable:false,count:0};")
-          .append("const cs=getComputedStyle(e);")
-          .append("const r={")
-          .append("exists:true,")
-          .append("visible:e.offsetParent!==null&&cs.display!=='none'&&cs.visibility!=='hidden'&&parseFloat(cs.opacity)>0,")
-          .append("enabled:!e.disabled,")
-          .append("editable:!e.disabled&&!e.readOnly,")
-          .append("count:document.querySelectorAll(s).length");
-        if (detailed) {
-            sb.append(DIAGNOSTIC_DETAIL_FIELDS);
+    /** 原生字符串探测：任何异常一律归 {@code null}（诊断绝不影响主异常抛出）。 */
+    private static String stringProbe(Supplier<String> nativeProbe) {
+        try {
+            return nativeProbe.get();
+        } catch (Exception e) {
+            return null;
         }
-        sb.append("};return r;}");
-        return sb.toString();
     }
 
-    /**
-     * 详细模式下追加的字段：tagName 与元素属性集合。
-     * <p>⚠ 旧实现只追加了 {@code tagName}，却从未产出 {@code attributes}，
-     * 而调用方一直在读取 {@code attributes} → 该诊断项恒为 null（静默失真）。</p>
-     */
-    private static final String DIAGNOSTIC_DETAIL_FIELDS =
-            ",tagName:e.tagName"
-          + ",attributes:Object.fromEntries(Array.from(e.attributes||[]).map(a=>[a.name,a.value]))";
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> castToMap(Object value) {
-        return (value instanceof Map) ? (Map<String, Object>) value : null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, String> castToStringMap(Object value) {
-        return (value instanceof Map) ? (Map<String, String>) value : null;
-    }
-
-    private static boolean getBoolean(Map<String, Object> map, String key) {
-        Object v = map.get(key);
-        return v instanceof Boolean ? (Boolean) v : false;
-    }
-
-    private static int getInt(Map<String, Object> map, String key) {
-        Object v = map.get(key);
-        if (v instanceof Number)  {return ((Number) v).intValue();} 
-        return 0;
-    }
-
-    private static String getString(Map<String, Object> map, String key) {
-        Object v = map.get(key);
-        return v != null ? v.toString() : "unknown";
+    /** 自采集开始至此刻的毫秒数（仅留痕用，不参与判定）。 */
+    static long elapsedMs(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
     }
 
     /**
@@ -241,6 +184,13 @@ public class ElementDiagnosticsCollector {
      */
     public String getPageUrl() {
         try {
+            // iframe 上下文下，"元素所在 frame 的 URL" 比顶层页面 URL 更贴近失败现场
+            if (currentFrame != null) {
+                String frameUrl = currentFrame.url();
+                if (frameUrl != null && !frameUrl.isEmpty() && !"about:blank".equals(frameUrl)) {
+                    return frameUrl;
+                }
+            }
             return page.url();
         } catch (Exception e) {
             return "unknown";
@@ -250,44 +200,83 @@ public class ElementDiagnosticsCollector {
     /**
      * 获取可见的遮挡元素信息（selector 作为参数传递，避免字符串注入风险）
      */
+    /**
+     * 遮挡判定（<b>Playwright 原生 actionability trial，不注入 JS</b>）。
+     *
+     * <p>用 {@code click(setTrial(true))} 让 Playwright 自己跑完整 actionability 检查
+     * （attached → visible → stable → enabled → receives events）且<b>只判定不执行</b>：
+     * 通过 ⇒ {@code None}；失败 ⇒ 从其原生报因提取可读结论（{@code … intercepts pointer events} /
+     * {@code not visible} / {@code outside of the viewport} / {@code not stable} / {@code not enabled}…）。</p>
+     *
+     * <p>为什么不用 {@code document.elementFromPoint}：那是"自己再实现一套命中测试"，与浏览器真实的
+     * pointer-events 判定可能不一致，且依赖选择器语义与 JS 注入。trial actionability 的判定口径与
+     * 被测动作<b>完全一致</b>（企业级要求：判定与执行同源）。</p>
+     */
     public String getObstructingElements() {
+        if (locator == null) {
+            return "N/A (no locator)";
+        }
+        if (getElementCount() <= 0) {
+            return "Element not found";
+        }
         try {
-            String script = "(s) => {"
-                + "const e=document.querySelector(s);"
-                + "if(!e) return 'Element not found';"
-                + "const r=e.getBoundingClientRect();"
-                + "const top=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);"
-                + "if(top===e) return 'None';"
-                + "return top?'Obstructed by '+top.tagName:'Unknown';"
-                + "}";
-            Object result = evaluateInContext(script, selector);
-            return result != null ? result.toString() : "Unable to check";
-        } catch (Exception e) {
-            return "Unable to check: " + e.getMessage();
+            locator.click(new Locator.ClickOptions().setTrial(true).setTimeout(PROBE_TIMEOUT_MS));
+            return "None";
+        } catch (TimeoutError e) {
+            return classifyActionability(e.getMessage());
+        } catch (PlaywrightException e) {
+            return "Unable to check: " + firstLine(e.getMessage());
         }
     }
 
+    /** Playwright actionability 报因里的可读原因（顺序即优先级）。 */
+    private static final String[] ACTIONABILITY_REASONS = {
+            "intercepts pointer events", "not visible", "outside of the viewport",
+            "not stable", "not enabled", "not editable", "not attached"};
+
     /**
-     * 获取 DOM 结构上下文（简化为 tagName + id/class 的一行摘要）
+     * 把 Playwright 的 actionability 报因归类为可读结论（包级可测接缝）。
+     *
+     * @param message Playwright 原始报因全文（含 call log）
+     * @return {@code Obstructed by <拦截者>} / {@code Not actionable: <原因>} / 首行兜底
      */
-    public String getDomContext() {
-        try {
-            String script = "(s) => {"
-                + "const e=document.querySelector(s);"
-                + "if(!e) return 'N/A';"
-                + "let p=e.tagName.toLowerCase();"
-                + "if(e.id) p+='#'+e.id;"
-                + "else if(e.className&&typeof e.className==='string'){"
-                + "  const c=e.className.trim().split(/\\s+/).slice(0,2).join('.');"
-                + "  if(c) p+='.'+c;"
-                + "}"
-                + "return p;"
-                + "}";
-            Object result = evaluateInContext(script, selector);
-            return result != null ? result.toString() : "N/A";
-        } catch (Exception e) {
-            return "N/A";
+    static String classifyActionability(String message) {
+        if (message == null || message.isBlank()) {
+            return "Not actionable (no reason reported)";
         }
+        if (message.contains("intercepts pointer events")) {
+            String blocker = interceptorLine(message);
+            return blocker == null
+                    ? "Obstructed by another element (intercepts pointer events)"
+                    : "Obstructed by " + blocker;
+        }
+        for (String reason : ACTIONABILITY_REASONS) {
+            if (message.contains(reason)) {
+                return "Not actionable: " + reason;
+            }
+        }
+        return "Not actionable: " + firstLine(message);
+    }
+
+    /** 从 call log 取"拦截者"那一行（形如 {@code <div class="overlay">…</div> intercepts pointer events}）。 */
+    private static String interceptorLine(String message) {
+        for (String raw : message.split("\\R")) {
+            String line = raw.trim();
+            if (line.contains("intercepts pointer events")) {
+                return line.replaceFirst("^[-*]\\s*", "").trim();
+            }
+        }
+        return null;
+    }
+
+    /** 报文首行（排障用短摘要）。 */
+    private static String firstLine(String message) {
+        if (message == null) {
+            return "unknown";
+        }
+        int idx = message.indexOf('\n');
+        String line = (idx < 0 ? message : message.substring(0, idx)).trim();
+        return line.isEmpty() ? "unknown" : line;
     }
 
     /**
@@ -323,35 +312,4 @@ public class ElementDiagnosticsCollector {
         }
     }
 
-    /**
-     * 捕获失败截图并返回已完成 future（保留异步<b>形态</b>）。
-     *
-     * <p><b>CT2-02</b>：{@code page.screenshot()} 同样是非线程安全的 Playwright 操作，
-     * 必须在拥有该 {@link Page} 的场景线程执行，故以 {@code Runnable::run} 在调用线程同步执行。
-     */
-    public CompletableFuture<String> captureFailureScreenshotAsync(String testName) {
-        // CT2-02：page.screenshot() 同样是非线程安全的 Playwright 操作，必须在拥有该 Page 的场景线程执行。
-        return CompletableFuture.supplyAsync(() -> captureFailureScreenshot(testName), Runnable::run)
-                .whenComplete((path, ex) -> {
-                    if (ex != null) {
-                        logger.debug("[diagnostic] Async screenshot failed for [{}]: {}", selector, ex.getMessage());
-                    }
-                });
-    }
-
-    /**
-     * 获取元素内部 HTML（selector 作为参数传递，安全）
-     */
-    public String getElementHtml() {
-        try {
-            String script = "(s) => {"
-                + "const e=document.querySelector(s);"
-                + "return e&&e.outerHTML?e.outerHTML.substring(0,500):'N/A';"
-                + "}";
-            Object evaluateResult = evaluateInContext(script, selector);
-            return evaluateResult != null ? evaluateResult.toString() : "N/A";
-        } catch (Exception e) {
-            return "Unable to get HTML";
-        }
-    }
 }

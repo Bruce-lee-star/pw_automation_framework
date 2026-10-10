@@ -10,11 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-
 /**
- * nls 鍙嶅悜鏌ヨ〃缂撳瓨涓庤В鏋愶紙浠?{@link RoleElementPicker} 鎶藉嚭锛屽睘 T5-1 鎷嗗垎绗簩姝ワ級銆?
- * 浠呮壙杞?nls 鍙嶆煡 JSON 鐨勭紦瀛樻€佷笌绾嚱鏁拌В鏋愰€昏緫锛屾棤鍏变韩鍙彉鎬佸壇浣滅敤锛?
- * 鍘熸柟娉曚綋閫愬瓧杩佺Щ锛岀敱 RoleElementPicker 浠ュ畬鍏ㄩ檺瀹氬悕濮旀墭璋冪敤锛岃涓哄畬鍏ㄧ瓑浠枫€?
+ * nls 反向查表缓存与解析（从 {@code RoleElementPicker} 抽出，属 T5-1 拆分第二步）。
+ *
+ * <p>仅承载 nls 反查 JSON 的缓存态与纯函数解析逻辑，无共享可变态副作用；原方法体逐字迁移，
+ * 由 {@code RoleElementPicker} 委托调用，行为完全等价。</p>
+ *
+ * <p>2026-10-10：修复本类 javadoc 的历史乱码（GBK/UTF-8 误读导致整段合并成一行），仅改注释。</p>
  */
 final class RolePickerNlsCache {
 

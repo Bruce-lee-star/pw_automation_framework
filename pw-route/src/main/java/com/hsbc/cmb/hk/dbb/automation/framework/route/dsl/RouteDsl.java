@@ -15,9 +15,9 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Route V2 DSL —— 流式构建路由规则并注册到 per-context 运行时。
+ * Route DSL —— 流式构建路由规则并注册到 per-context 运行时。
  *
- * <p>与现有 {@code RouteDsl} 的差异（V2 并发安全契约）：
+ * <p>与现有 {@code RouteDsl} 的差异（并发安全契约）：
  * <ul>
  *   <li>{@code register()} 返回 {@link AutoCloseable} 句柄（对应 Playwright 原生
  *       {@code route()} 返回的句柄），可精确注销，不再需要全局 unroute 守护线程；</li>
@@ -142,7 +142,7 @@ public final class RouteDsl {
         pending.clear();
     }
 
-    /** 只清理指定 BrowserContext 的 V2 运行时（对齐现有 RouteDsl.clear(BrowserContext)）。 */
+    /** 只清理指定 BrowserContext 的 Route 运行时（对齐现有 RouteDsl.clear(BrowserContext)）。 */
     public static void clear(BrowserContext context) {
         if (context == null) {
             return;
@@ -150,7 +150,7 @@ public final class RouteDsl {
         RouteEngine.shutdown(context);
     }
 
-    /** 只清理指定 Page 所属 context 的 V2 运行时（对齐现有 RouteDsl.clear(Page)）。 */
+    /** 只清理指定 Page 所属 context 的 Route 运行时（对齐现有 RouteDsl.clear(Page)）。 */
     public static void clear(Page page) {
         if (page == null) {
             return;
@@ -158,11 +158,11 @@ public final class RouteDsl {
         RouteEngine.shutdown(page.context());
     }
     /**
-     * 只清指定 BrowserContext 的全部 V2 规则，<b>保留</b> runtime 与 Context（V2-2）。
+     * 只清指定 BrowserContext 的全部 Route 规则，<b>保留</b> runtime 与 Context（V2-2）。
      *
-     * <p>与 {@link #clear(BrowserContext)} 的区别：{@code clear(context)} 关闭整个 V2 runtime
+     * <p>与 {@link #clear(BrowserContext)} 的区别：{@code clear(context)} 关闭整个 runtime
      * （线程池 / 注册表条目随之一并释放，下一次注册会重建）；本方法只退役规则，runtime 与 Context
-     * 都保留 —— feature 模式下"复用 Context、又要规则确定性清空"时用它。</p>
+     * 都保留 —— 当同一 Context 需要复用、又要规则确定性清空时用它。</p>
      *
      * @return 本次提交退役的规则数
      */
@@ -170,7 +170,7 @@ public final class RouteDsl {
         return RouteEngine.clearRules(context);
     }
 
-    /** 只清指定 Page 所属 context 的全部 V2 规则，保留 runtime 与 Context（V2-2）。 */
+    /** 只清指定 Page 所属 context 的全部 Route 规则，保留 runtime 与 Context（V2-2）。 */
     public static int clearRules(Page page) {
         Objects.requireNonNull(page, "page");
         return RouteEngine.clearRules(page.context());
@@ -189,14 +189,14 @@ public final class RouteDsl {
                 + context.getClass().getName());
     }
 
-    /** 只清全部 context 的 V2 规则，保留各 runtime 与 Context（V2-2）。 */
+    /** 只清全部 context 的 Route 规则，保留各 runtime 与 Context（V2-2）。 */
     public static int clearRulesAll() {
         return RouteEngine.clearRulesAll();
     }
 
     /**
-     * 全局清理全部 V2 运行时（对齐现有 RouteDsl.resetAll() 的全局语义；幂等）。
-     * V2 无跨用例共享线程池与全局规则表，等价于关闭全部 per-context 运行时。
+     * 全局清理全部 Route 运行时（对齐现有 RouteDsl.resetAll() 的全局语义；幂等）。
+     * 无跨用例共享线程池与全局规则表，等价于关闭全部 per-context 运行时。
      */
     public static void resetAll() {
         RouteEngine.shutdownAll();

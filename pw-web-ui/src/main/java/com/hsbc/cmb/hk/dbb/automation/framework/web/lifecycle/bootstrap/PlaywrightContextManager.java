@@ -624,7 +624,12 @@ public class PlaywrightContextManager {
         }
     }
 
-    /** 页面 / 导航超时的安全下界（与 {@code ConfigKeys.WEB_PLAYWRIGHT_PAGE_TIMEOUT} 的默认值一致）。 */
+    /**
+     * 非正值超时的统一安全下界（毫秒）—— 与 {@code playwright.element.wait.timeout} 的默认值一致。
+     *
+     * <p>{@link #positiveTimeoutOrDefault(String, int)} 供页面/导航/元素三类键共用：配置成 {@code 0}
+     * 或负数（Playwright 语义 = 无限等待）时回落到本值，并留一条 WARN。</p>
+     */
     private static final int DEFAULT_PAGE_TIMEOUT_MS = 15_000;
 
     /**
@@ -636,14 +641,20 @@ public class PlaywrightContextManager {
      * 现补同款下界：非正值回落到默认值并留 WARN（非 verbose 门控，绝不静默改写用户配置）。</p>
      */
     private static void configureTimeouts(BrowserContext context) {
+        // ① 导航超时 ← playwright.page.navigationTimeout（goto/reload/goBack/waitForURL 等导航类操作）
         context.setDefaultNavigationTimeout(positiveTimeoutOrDefault(
                 "playwright.page.navigationTimeout", PlaywrightManager.config().getNavigationTimeout()));
+        // ② 默认动作超时 ← playwright.element.wait.timeout
+        //    Playwright 的 setDefaultTimeout 语义 =「所有未显式传 timeout 的操作」的默认值，在本框架里
+        //    这类操作就是元素操作（innerText / getAttribute / evaluate / allTextContents … 以及遗漏传参的动作）。
+        //    2026-10-10 修正接线：原实现错用 playwright.page.timeout（语义=页面加载超时），导致元素读取按
+        //    30s 等待（7.txt：Timeout 15000ms × 0、Timeout 30000ms × 118）。
         context.setDefaultTimeout(positiveTimeoutOrDefault(
-                "playwright.page.timeout", PlaywrightManager.config().getPageTimeout()));
+                "playwright.element.wait.timeout", PlaywrightManager.config().getElementCheckTimeout()));
     }
 
     /**
-     * N-16：把配置读取到的页面 / 导航超时规整为<b>正值</b>。
+     * N-16：把配置读取到的超时（页面 / 导航 / 元素三类键通用）规整为<b>正值</b>。
      *
      * <p>Playwright 的 {@code 0} 表示无限等待 —— 对测试框架而言那是「永久挂起且无信号」，
      * 远劣于「回落到默认值并告知」。故非正值一律回落 {@link #DEFAULT_PAGE_TIMEOUT_MS}，

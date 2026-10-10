@@ -144,7 +144,13 @@ public final class PageWaits {
     // 内部
     // ═══════════════════════════════════════════════════════════
 
-    /** 以小步长等待条件成立，<b>成立即返回</b>（避免固定间隔盲等）。 */
+    /**
+     * 以小步长等待条件成立，<b>成立即返回</b>（避免固定间隔盲等）。
+     *
+     * <p>轮询步长取 {@code playwright.polling.interval}（该键的语义 = 「各种等待方法的轮询检查间隔」）；
+     * 2026-10-10 修正接线：原实现读 {@code playwright.waits.poll.step.ms}（默认 50ms，用户配置里未声明），
+     * 与用户配置的轮询间隔脱节，且 50ms 的步长会把条件探测（可能触达浏览器）打到 20 次/秒。</p>
+     */
     private static void waitUntil(BasePage bp, BooleanSupplier condition, int maxWaitMs) {
         long deadline = System.currentTimeMillis() + Math.max(0, maxWaitMs);
         while (System.currentTimeMillis() < deadline) {
@@ -161,7 +167,7 @@ public final class PageWaits {
                 break;
             }
             bp.getPage().waitForTimeout((double) Math.min(
-                    WebFrameworkConfig.PLAYWRIGHT_WAITS_POLL_STEP_MS.getLongValue(), remaining));
+                    WebFrameworkConfig.PLAYWRIGHT_POLLING_INTERVAL.getLongValue(), remaining));
         }
     }
 

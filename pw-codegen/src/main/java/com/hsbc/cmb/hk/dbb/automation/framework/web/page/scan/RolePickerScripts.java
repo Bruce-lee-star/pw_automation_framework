@@ -22,8 +22,11 @@ import java.util.Map;
  * which runs {@code node --check} on every standalone script and explicitly composes + validates
  * START_SCRIPT / PANEL_SCRIPT — no separate Java test needed).
  * <p>The {@code .js} resources are the single source of truth; any edit must go through the resource files,
- * never re-introduce inline string concatenation here. The generator {@code tools/gen_picker_scripts.js}
- * regenerates both the resources and these declarations from the canonical inline source.</p>
+ * never re-introduce inline string concatenation here.</p>
+ *
+ * <p>2026-10-10：删除"由 {@code tools/gen_picker_scripts.js} 从权威内联源重生成"的说明 ——
+ * 该生成器<b>在本仓不存在</b>（{@code tools/} 下无此文件），此前属幻影引用；JS 资源即权威源，
+ * 直接编辑 {@code .js} 即可（改完由 {@code tools/validate_picker_js.js} 在 validate 阶段校验语法与组合体）。</p>
  *
  * <p>常量按【依赖顺序】归类：被其他常量引用的基础常量（MERGE_KEY_SHIM / START_SCRIPT 及其部件）一律前置，
  * 保证其在引用者之前声明（Java 禁止编译期常量表达式中引用后声明的字段），纯整理、零行为变更。</p>
@@ -178,6 +181,17 @@ public final class RolePickerScripts {
 
     /** 把按页生成的<b>断言类</b>代码写入面板「断言」Tab。实参 a: {assertByPage, msg}。 */
     public static final String FILL_ASSERT_JS = loadScript("fill-assert-js.js");
+
+    /**
+     * 在<b>同一次</b> page.evaluate 内同步写入「页面类/步骤代码」与「断言」两个 Tab（实参 a:
+     * {pageByPage, stepByPage, assertByPage, msg}）。
+     *
+     * <p><b>修复 SPA 实时生成不对称</b>：旧实现 {@link #FILL_CODE_JS}+{@link #FILL_ASSERT_JS} 是两次
+     * 独立 evaluate，SPA / 后台 iframe 持续繁忙时两次调用之间存在 hang 窗口，第二次（断言）常撞软超时（2000ms）
+     * 被丢弃，表现为「步骤实时生成、断言不生成」。合并为单次 evaluate 后两步渲染同步执行、无中间窗口，
+     * 步骤与断言原子更新。</p>
+     */
+    public static final String FILL_CODE_ASSERT_JS = loadScript("fill-code-assert-js.js");
 
     /** 面板是否已挂载且渲染函数就绪。 */
     public static final String HAS_PANEL_JS = loadScript("has-panel-js.js");

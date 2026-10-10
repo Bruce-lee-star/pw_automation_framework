@@ -377,8 +377,9 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
     public int closeOrphanContextsForCurrentThread() {
         String prefix = Thread.currentThread().threadId() + ":";
         int closed = 0;
-        //  保护「本线程在用/复用的 Context」：绝不被兜底回收误关
-        //  （例如 feature 模式复用同一 Context 时，即便本方法被触达也不动它）。
+        //  保护「本线程当前在用的 Context」：绝不被兜底回收误关
+        //  （2026-09-30 收口后每 case 重建 Context，本方法兜底的是 closeContext 因 CONTEXT_KEY
+        //  丢失而跳过的残留 Context——「在用」的那个仍必须跳过）。
         BrowserContext protectedCtx = PlaywrightRuntime.instance().contextRegistry.currentContextForThread();
         for (Map.Entry<String, Browser> entry
                 : new ArrayList<>(PlaywrightRuntime.instance().state.browserEntries())) {

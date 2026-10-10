@@ -3,7 +3,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
@@ -36,13 +35,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@link Request#existingResponse()}（请求本地字段、零协议往返、不触碰对象表），命中即以
  * {@link #onResponseForSpec(ApiSpec, Response)} 按 <b>spec 精确配对</b>投递。
  *
- * <p>并发模型（<b>快照-断言两阶段</b>，2026-09-28 修正）：
+ * <p>并发模型（<b>快照-断言两阶段</b>，2026-09-28 修正 + 2026-10-10 同步化）：
  * <ul>
  *   <li>{@code recordRequest} 在 route 事件线程调用（入队，不阻塞），返回是否已进入等待响应索引；</li>
  *   <li>{@code onResponseForSpec} 在响应轮询线程调用：<b>就地</b>完成 {@code status}/{@code headers}/
  *       {@code body} 的<b>快照</b>（{@code body()} 是协议调用，必须趁句柄存活时读——旧实现把它交给 IO
  *       线程排队执行，实测在 IO 池繁忙时必失败 {@code Object doesn't exist: response@…}），
- *       随后只把 CPU 型断言（JSONPath/包含/正则/表单）交 IO 线程 ⇒ 断言阶段<b>零句柄依赖</b>；</li>
+ *       body 断言（JSONPath/包含/正则/表单）在<b>本线程同步就地执行</b>（纯 CPU、微秒级）——
+ *       快照后零句柄依赖，不再投 IO 线程（2026-10-10 简化：异步投递曾导致 IO 队列满时<b>静默丢断言</b>，
+ *       即"业务以为断言了、实际没执行"的假绿风险）；</li>
  *   <li>{@code drain} 在业务线程调用（快照消费）。</li>
  * </ul>
  *
@@ -69,18 +70,15 @@ public final class MonitorSink {
      */
     static final int DEFAULT_MAX_TRACKED_EXCHANGES = 1_000;
 
-    /** 观测队列当前上限（可用 {@link #MonitorSink(RouteIoExecutor, java.util.function.Consumer, int)} 覆盖）。 */
+    /** 观测队列当前上限（可用 {@link #MonitorSink(java.util.function.Consumer, int)} 覆盖）。 */
     private final int maxTrackedExchanges;
 
     /** 因超出上限被丢弃的观测条目数（fail-open 可观测指标）。 */
     private final AtomicLong droppedExchanges = new AtomicLong(0);
-    /** 已定案且断言失败的交换（上报队列；事件线程/IO 线程入队，业务线程 drain 消费）。 */
+    /** 已定案且断言失败的交换（上报队列；事件线程/调度线程入队，业务线程 drain 消费）。 */
     private final ConcurrentLinkedQueue<CapturedExchange> settledFailures = new ConcurrentLinkedQueue<>();
     /** pattern → 未收到响应的请求队列（响应断言索引，同一对象也存在于 exchanges）。 */
     private final ConcurrentMap<String, ConcurrentLinkedQueue<CapturedExchange>> pendingByPattern = new ConcurrentHashMap<>();
-    private final RouteIoExecutor io;
-    /** body 断言因 IO 队列满被丢弃的次数（fail-open 可观测指标）。 */
-    private final AtomicLong rejectedBodyAssertions = new AtomicLong(0);
     /**
      * body 断言因响应句柄不可用（驱动已回收 / 页面关闭）而<b>未能判定</b>的次数（inconclusive）。
      *
@@ -109,28 +107,25 @@ public final class MonitorSink {
     private final java.util.function.Consumer<ApiSpec> onPurposeMet;
 
     /** 兼容构造（单测/无撤销驱动场景）：等价于不驱动目的撤销。 */
-    public MonitorSink(RouteIoExecutor io) {
-        this(io, null);
+    public MonitorSink() {
+        this(null);
     }
 
     /**
-     * @param io            IO 线程池（body 断言/CPU 解析）
-     * @param onPurposeMet  "目的达成"回调，入参为<b>规则实例（令牌）</b>；实现必须非阻塞（提交式），可传 {@code null}
+     * @param onPurposeMet "目的达成"回调，入参为<b>规则实例（令牌）</b>；实现必须非阻塞（提交式），可传 {@code null}
      */
-    public MonitorSink(RouteIoExecutor io, java.util.function.Consumer<ApiSpec> onPurposeMet) {
-        this(io, onPurposeMet, DEFAULT_MAX_TRACKED_EXCHANGES);
+    public MonitorSink(java.util.function.Consumer<ApiSpec> onPurposeMet) {
+        this(onPurposeMet, DEFAULT_MAX_TRACKED_EXCHANGES);
     }
 
     /**
      * 完整构造（上限可覆盖：容量标定/单测用小上限验证"丢最旧"路径）。
      *
-     * @param io                  IO 线程池（body 断言/CPU 解析）
      * @param onPurposeMet        "目的达成"回调（可 {@code null}）
      * @param maxTrackedExchanges 观测队列上限；{@code <= 0} 视为 {@link #DEFAULT_MAX_TRACKED_EXCHANGES}
      */
-    public MonitorSink(RouteIoExecutor io, java.util.function.Consumer<ApiSpec> onPurposeMet,
+    public MonitorSink(java.util.function.Consumer<ApiSpec> onPurposeMet,
                        int maxTrackedExchanges) {
-        this.io = io;
         this.onPurposeMet = onPurposeMet;
         this.maxTrackedExchanges = maxTrackedExchanges > 0 ? maxTrackedExchanges : DEFAULT_MAX_TRACKED_EXCHANGES;
     }
@@ -206,7 +201,7 @@ public final class MonitorSink {
             AtomicInteger counter = hitCounts.computeIfAbsent(spec, k -> new AtomicInteger());
             if (counter.incrementAndGet() > spec.minMatches()) {
                 // 已达最小匹配次数：停止后续记录与断言（对齐老版 auto-stop 的近似语义；
-                // 老版为 unroute，V2 为跳过处理——路由仍注册，重新命中不影响）
+                // 旧实现为 unroute，当前为跳过处理——路由仍注册，重新命中不影响）
                 return false;
             }
         }
@@ -254,7 +249,8 @@ public final class MonitorSink {
      * <ul>
      *   <li>无 body 断言 → 调度线程直接 volatile 写 status 断言（零阻塞）；</li>
      *   <li>有 body 断言（jsonPath / bodyContains / bodyRegex / formField）→ 先写 status，
-     *       再把「读 body + 内容类型感知断言（{@link PayloadAssertor}）」投递 IO 线程；
+     *       再在本线程（句柄存活期）<b>就地</b>快照 body（{@link #takeBodySnapshot}），
+     *       把「内容类型感知断言（{@link PayloadAssertor}）」投递 IO 线程（纯 CPU 解析）；
      *       队列满时丢弃断言但保留 status（fail-open，绝不阻塞调度线程）。</li>
      * </ul>
      *
@@ -319,9 +315,8 @@ public final class MonitorSink {
             reportOutcome(exchange); // 结果同样进报告（标注"未判定"，与"通过/失败"区分开）
             return;
         }
-        submitBodyAssertion(exchange, spec, snapshot);
+        assertBodyInPlace(exchange, spec, snapshot);
     }
-
     /**
      * body 快照（{@code headers()} + {@code body()} 的即时副本）。
      *
@@ -402,41 +397,44 @@ public final class MonitorSink {
         }
     }
 
-    /** 投递 body 断言到 IO 线程——只消费快照（零句柄依赖）。 */
-    private void submitBodyAssertion(CapturedExchange exchange, ApiSpec spec, BodySnapshot snapshot) {
-        boolean submitted = io.trySubmit("monitor-assert:" + spec.pattern(), () -> {
-            if (exchange.responseTimedOut()) {
-                return; // 已被 drain 标记超时，断言结果无意义
+    /**
+     * 就地同步执行 body 断言（响应轮询线程；2026-10-10 由"投递 IO 线程"改为同步）。
+     *
+     * <p><b>为什么同步</b>：快照（{@link BodySnapshot}）已在本线程取走，断言只消费快照——
+     * 解码 + {@link PayloadAssertor} 是纯 CPU（微秒级），无任何句柄/协议依赖。异步投递的
+     * 历史依据（读 body 曾是协议调用）已随 2026-09-28 就地快照修复消失；投 IO 反而带来
+     * IO 队列满时<b>静默丢断言</b>（{@code rejectedBodyAssertions} 假绿风险）与结算延迟。
+     * 同步后：断言命中即定案，失败立即入失败队列 → 步骤结束 seam 即可判红（"立即报错"）。
+     *
+     * <p>异常绝不逃逸：断言/解码失败记入失败明细（fail-open），不阻塞调度线程、不影响其它观测。
+     */
+    private void assertBodyInPlace(CapturedExchange exchange, ApiSpec spec, BodySnapshot snapshot) {
+        if (exchange.responseTimedOut()) {
+            return; // 已被 drain 标记超时，断言结果无意义
+        }
+        try {
+            String contentType = snapshot.contentType();
+            Charset charset = MediaType.parse(contentType).charset();
+            String body = new String(snapshot.bytes(), charset);
+            List<String> failures = new ArrayList<>(PayloadAssertor.assertAll(spec, body, contentType));
+            if (contentType == null && !failures.isEmpty()) {
+                // content-type 缺失时补「响应形态」诊断：一次运行即可区分
+                // 「服务端确实没发 Content-Type」与「空体/异常响应（如会话失效的空 200）」。
+                // 只上报 header 名与字节数，绝不上报 header 值/响应体（防 session/凭据泄露）。
+                failures.add("response diagnosis: headerNames=" + snapshot.headerNames()
+                        + ", bodyBytes=" + snapshot.bytes().length);
             }
-            try {
-                String contentType = snapshot.contentType();
-                Charset charset = MediaType.parse(contentType).charset();
-                String body = new String(snapshot.bytes(), charset);
-                List<String> failures = new ArrayList<>(PayloadAssertor.assertAll(spec, body, contentType));
-                if (contentType == null && !failures.isEmpty()) {
-                    // content-type 缺失时补「响应形态」诊断：一次运行即可区分
-                    // 「服务端确实没发 Content-Type」与「空体/异常响应（如会话失效的空 200）」。
-                    // 只上报 header 名与字节数，绝不上报 header 值/响应体（防 session/凭据泄露）。
-                    failures.add("response diagnosis: headerNames=" + snapshot.headerNames()
-                            + ", bodyBytes=" + snapshot.bytes().length);
-                }
-                exchange.markBodyAssertionFailures(failures);
-                // body 断言（含 status 重算）定案：失败立即结算上报，成功同样上报结果（报告需要 PASS 可见）
-                if (Boolean.FALSE.equals(exchange.assertionPassed())) {
-                    settleFailure(exchange);
-                } else {
-                    reportOutcome(exchange);
-                }
-            } catch (Exception e) {
-                // 断言/解码失败：记为失败明细（不允许异常逃逸 IO 线程包装）
-                exchange.markBodyAssertionFailures(List.of("body-assert-error: " + e.getMessage()));
+            exchange.markBodyAssertionFailures(failures);
+            // body 断言（含 status 重算）定案：失败立即结算上报，成功同样上报结果（报告需要 PASS 可见）
+            if (Boolean.FALSE.equals(exchange.assertionPassed())) {
                 settleFailure(exchange);
+            } else {
+                reportOutcome(exchange);
             }
-        });
-        if (!submitted) {
-            rejectedBodyAssertions.incrementAndGet();
-            LOGGER.warn("[Route] monitor body assertion dropped (IO queue full), pattern='{}'",
-                    spec.pattern());
+        } catch (Exception e) {
+            // 断言/解码失败：记为失败明细（不允许异常逃逸调度线程）
+            exchange.markBodyAssertionFailures(List.of("body-assert-error: " + e.getMessage()));
+            settleFailure(exchange);
         }
     }
 
@@ -491,17 +489,12 @@ public final class MonitorSink {
     /**
      * 因超出观测队列上限被丢弃的条目数（fail-open 指标；上限见 {@link #DEFAULT_MAX_TRACKED_EXCHANGES}）。
      *
-     * <p>与 {@link #rejectedBodyAssertions()} 同类：{@code > 0} 说明该上下文"话痨"到超出留存能力，
-     * 最旧的观测快照会缺失 —— <b>断言结算不受影响</b>（结算走响应配对路径，不依赖本队列），
+     * <p>{@code > 0} 说明该上下文"话痨"到超出留存能力，最旧的观测快照会缺失 ——
+     * <b>断言结算不受影响</b>（结算走响应配对路径，不依赖本队列），
      * 丢的只是快照留存与超时扫描的可见性。</p>
      */
     public long droppedExchanges() {
         return droppedExchanges.get();
-    }
-
-    /** 因 IO 队列满被丢弃的 body 断言数。 */
-    public long rejectedBodyAssertions() {
-        return rejectedBodyAssertions.get();
     }
 
     /** body 断言因响应句柄不可用而未能判定的次数（inconclusive；可观测，不判失败）。 */
@@ -512,8 +505,8 @@ public final class MonitorSink {
     /**
      * 结算一条断言失败的交换（幂等：每条失败只入队一次）。
      *
-     * <p>调用方：响应轮询线程（无 body 断言定案）、IO 线程（body 断言定案）、
-     * {@link #drainSettledFailures()}（超时定案）。CAS 保证多路径并发下不重复上报。
+     * <p>调用方：响应轮询线程（status / body 断言定案）、{@link #drainSettledFailures()}（超时定案）。
+     * CAS 保证多路径并发下不重复上报。
      */
     private void settleFailure(CapturedExchange exchange) {
         if (exchange.tryMarkSettled()) {

@@ -29,6 +29,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerCodeAsse
 
 // 行为保持零回归的桥接：openPanel / registerPopupFollow 原样搬自 RoleElementPicker，
 // 其依赖的私有静态助手已放宽到包内可见，此处显式静态导入以保留原调用形态。
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.anyLivePage;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.setPickMode;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerBridgeRegistry.registerContextBridges;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.registerContextInitScripts;
@@ -40,6 +41,7 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElement
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.ensurePickingActive;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.pickerEvalSoft;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.reconcileTrackedPages;
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.reconcileMissedPages;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.refreshPageClass;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerPageTracker.followPage;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.closePanel;
@@ -48,7 +50,6 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElement
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.setStatus;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.fillCode;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.readPickStateJson;
-import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.applyPickState;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.safeOrigin;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.start;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.pickerEval;
@@ -286,7 +287,7 @@ public final class RolePickerPanelController {
                     // 此处捕获后降级为 CONTINUE：若该命令是 stop 则 active 已被复位（runPickerCommand 在 evaluate 前先置 active.get()=false），
                     // 会话继续但不会再拾取；其余命令异常仅告警不中断。
                     log.warn("[picker] failed to handle command '{}' (degraded to keep the session alive): {}", cmd, cmdEx.getMessage());
-                    if (RolePickerConstants.CMD_STOP.equals(cmd)) setPickMode(pageNames.keySet().iterator().next(), PickMode.IDLE, pageNames);
+                    if (RolePickerConstants.CMD_STOP.equals(cmd)) setPickMode(anyLivePage(pageNames), PickMode.IDLE, pageNames);
                     r = new PickerResult(PickerAction.CONTINUE, null, null, "命令 " + cmd + " 执行异常：" + cmdEx.getMessage());
                 }
                 if (r.action == PickerAction.ABORT) {
@@ -378,6 +379,13 @@ public final class RolePickerPanelController {
         String packageName = pc.packageName;
         String pageClassName = pc.pageClassName;
         String stepClassName = pc.stepClassName;
+        // 每轮空闲对齐（对齐 page.pause 的 context.on(Page) 事件驱动页跟踪）：
+        // 任何"早于 ctx.onPage 注册、或 onPage/onPopup/followPage 因异常漏登记"的已打开页面，
+        // 在 ≤1 轮内被补登记为可拾取（含面板），消灭"漏网页直到点开始才出现"的 84s 静默。
+        // 用软超时：漏登页注入失败仅下轮重试，绝不拖慢主循环（不引入新的长阻塞）。
+        try {
+            reconcileMissedPages(pc, pc.current.get());
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
         // 抽干浏览器端兜底命令队列 window.__panelCmds：当 exposeFunction 绑定尚未就绪时，
         // 面板按钮 pushCmd 会把命令推入该队列（见 PANEL_SCRIPT）。若 Java 不消费，▶ 开始/停止等
         // 命令会静默丢失 → active.get() 永远 false、START_SCRIPT 永不注入、点击拾取不到。
@@ -406,13 +414,6 @@ public final class RolePickerPanelController {
         // 可能未可靠填充，导致"内存态增长、面板空白"。每轮空闲用 javaPickBySig 同步【所有】被跟踪页面
         // 的面板并渲染（按各页 pageClass 过滤只显示该页拾取），保证用户在任一页面点击时面板都实时反映
         // 已拾元素（生成链路仍走 javaPickBySig，不受影响）。
-        // 【关键修复"区域选择穿透不了 iframe"】
-        // syncPanelToBrowser 只同步 javaPickBySig；区域扫描穿透 iframe 的元素进【iframe 的
-        // __rolePicks】且经 postMessage/console 回传 Java，若回传链路延迟/失败则 javaPickBySig
-        // 暂缺 iframe 元素，syncPanelToBrowser 同步不到 → 面板只见主框架元素（表象"穿透不了"）。
-        // 每轮空闲先 mergeFramePicksToMain 把各 iframe 的 __rolePicks 直接合并进主框架（Playwright
-        // 协议访问不受 file:// 跨源限制，不依赖 Java 回传），再 syncPanelToBrowser 回灌，双保险
-        // 确保区域扫描穿透的 iframe 元素最终一定出现在面板。
         try {
             for (Page pg : pageNames.keySet()) {
                 if (pg.isClosed()) continue;
@@ -732,9 +733,18 @@ public final class RolePickerPanelController {
                     return;
                 }
                 log.info("[picker][nav] onFrameNavigated triggered: page={} active.get()={}", page.url(), active.get());
+                // 【修复"同一 URL 不同表单（表单切换）后面板丢失已拾元素"】
+                // 表单切换通常是对【同一 URL】的整文档替换，页类名不变；而 refreshPageClass 仅在
+                // "页类名变化"时才 invalidateSync ⇒ 本页 ETag 不失效 ⇒ 主循环 syncPanelToBrowser 判
+                // "Java 权威态没变"而跳过回灌；但导航已新建文档、window.__rolePicks 被清空，于是新表单页
+                // 面板收不到已拾元素（表现为"切表单后面板上又没之前的元素了"）。
+                // 故此处：只要主框架发生导航（文档被重建），【无论页类名是否变化】都作废 ETag，使下一轮 idle
+                // 同步【必然】把 Java 权威态（javaPickBySig，始终含之前所有已拾元素）整体重灌新文档。
+                // 对齐 page.pause：其 recorder 在每次导航后都会重渲染拾取列表。幂等、无副作用
+                // （syncPanelToBrowser 整体替换 window.__rolePicks，不会重复累积）。
+                RolePickerPanelSync.invalidateSync(page);
                 // 仅当该页属于本次拾取会话（有快照）才处理；其它无关页面 snapshots 为 null 自然跳过。
                 // current.get() 只决定"正在操作的页面"，不影响各页自身面板状态的恢复。
-                String st = snapshots.get(page);
                 String prevCls = pageNames.get(page);
                 // 【修复"导航回来后页面类串味 / 扫描为 0"】
                 // 旧实现 onFrameNavigated 仅在末尾激活块才按新 URL 重解析类名（且受后续 evaluate 异常影响可能跳过），
@@ -762,56 +772,28 @@ public final class RolePickerPanelController {
                 // 故跨域场景【跳过此处 applyPickState 覆盖】，把数据恢复完全交给唯一的 start() 权威重建。
                 String __navOrigin = safeOrigin(page.url());
                 boolean __navOriginChanged = needsForcedReinjection(__navOrigin, RolePickerSessionState.LAST_PICK_ORIGIN.get(page));
-                // 无论 window 是否随导航销毁，都确保"之前拾取的元素"不丢失：
-                //  - 整页重建（livePicks=false）：用 applyPickState 从快照整体恢复（含 nls 反查表）；
-                //  - window 仍在（livePicks=true）：把快照中"当前窗口缺少"的 pick/step 合并回来，
-                //    避免某些导航把 window.__rolePicks 连带清空，导致"元素不见了"。
+                // 对齐 page.pause：导航后直接用 Java 权威态（javaPickBySig，始终含本会话全部已拾元素，
+                // 对浏览器侧导航/关闭清空免疫）整体重灌面板，不再依赖浏览器读回的易变快照 st / localStorage 合并
+                // （旧实现在导航抖动时读到空/部分态会把面板覆盖成残缺数据，表现为"不同 URL 跳转回原 URL 元素丢失"）。
                 try {
-                boolean livePicks = Boolean.TRUE.equals(pickerEval(page, 
-                        "!!(window.__rolePicks && window.__rolePicks.length)"));
-                if (!livePicks) {
-                    // 仅当 Java 快照非空才整体恢复（含 nls 反查表）；为空不再提前 return，
-                    // 改由下方 localStorage 兜底——修复"刷新前未来得及空闲刷新 / 首屏"导致 st 为空、
-                    // 早期 return 把 localStorage 兜底也跳过、整页刷新后元素与步骤全丢的问题。
-                    // 【修复"跨域新页点击不回传"】跨域导航交给下方 start() 权威重建，此处不再 applyPickState
-                    // 覆盖（否则 active 被置 false 且 picks 被旧快照覆盖，与 start() 交错导致回传失效）。
-                    if (st != null && !st.isEmpty() && !__navOriginChanged) {
-                        applyPickState(page, st, nlsReverseJson, nlsFiles);
-                    }
-                    // 关键修复：整页跳转（window 重建）后，上面 applyPickState 用的是主循环每 ~1s 刷新的
-                    // Java 快照 st，可能【来不及包含跳转前最后点击的元素】（例如刚点的"返回登录"按钮），
-                    // 于是该元素被旧快照整体覆盖而丢失。此处把浏览器在 pagehide 时落盘到 localStorage 的
-                    // 最新拾取态（含跳转前那次点击）合并回来，以"页面级复合键"去重，补回 st 缺失的最新点击元素。
-                    // 仅同域整页跳转 localStorage 才保留，跨域（如弹窗 PDF）自然为空、不影响。
-                    pickerEval(page, RolePickerScripts.MERGE_LOCALSTORAGE_PICKS_JS);
-                } else {
-                    pickerEval(page, RolePickerScripts.MERGE_SNAPSHOT_PICKS_JS,
-                            RolePickerScripts.args(RolePickerConstants.STATE_KEY_STATE_JSON, st));
-                }
-                // 关键修复（跨页累积不丢失）：SPA / 同 window 跳转时 livePicks=true，上面 if 分支【不会】执行，
-                // 因而从不把 Java 快照 st 中"当前窗口缺失"的元素合并回来。一旦此类导航把 window.__rolePicks
-                // 部分清空（常见框架路由 / 同页整文档替换），之前页（如 Page1）已拾元素便凭空消失，
-                // 表现为"跳转到另一页后之前页面的元素不在了"。此处对 livePicks=true 也补一次合并：
-                // 仅把 st 里有、而当前 window.__rolePicks 没有的元素按签名去重补回（不整体覆盖，不影响导航后新拾元素）。
-                if (livePicks && st != null && !st.isEmpty()) {
-                    pickerEval(page, RolePickerScripts.MERGE_MISSING_PICKS_JS,
-                            RolePickerScripts.args(RolePickerConstants.STATE_KEY_STATE_JSON, st));
-                }
-                // 导航后始终重渲染面板列表并滚动到底部，确保已恢复/合并的元素可见（修复"URL 变化后元素看不见"）；
-                // 用 setTimeout 兜底等待 PANEL_SCRIPT 的 build() 完成（body 就绪才挂载面板），避免提前渲染找不到节点，
-                // 同时恢复上次生成的代码（页面元素 / 步骤代码两个 Tab），刷新后不丢。
-                pickerEval(page, RolePickerScripts.POST_NAV_COMPACT_AND_RENDER_JS);
-                // 依据新 URL 解析本页类名：优先复用会话级 urlToClass 稳定映射（同一 URL 复用同一类名，
-                // 避免"回到默认页 URL 又派生出 LogonPage 之类重复页类"）——仅当该 URL 从未见过时才派生新类名。
-                String curCls = pageNames.get(page);
-                String newCls = RolePickerClassNameResolver.resolvePageClassForUrl(page.url(), pageNames.values(), urlToClass);
-                pickerEval(page, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, newCls));
-                if (!newCls.equals(curCls)) { pageNames.put(page, newCls); navigatedPages.add(page); }
+                    // 立即重灌：瞬态文档未就绪时 evaluate 可能失败，catch 后由 idle 主循环兜底补灌，幂等无副作用。
+                    // 重灌后再次作废 ETag，确保文档真正就绪后 idle 主循环仍会确定性重写一次，
+                    // 避免"提前写旧文档、新文档收不到"的竞态（修复回灌慢/偶发丢元素）。
+                    RolePickerPanelSync.syncPanelToBrowser(page, null, javaPickBySig, false);
+                    RolePickerPanelSync.invalidateSync(page);
+                    // 导航后重渲染面板列表并滚动到底部，确保已恢复元素可见（修复"URL 变化后元素看不见"）。
+                    pickerEval(page, RolePickerScripts.POST_NAV_COMPACT_AND_RENDER_JS);
+                    // 依据新 URL 解析本页类名：优先复用会话级 urlToClass 稳定映射（同一 URL 复用同一类名，
+                    // 避免"回到默认页 URL 又派生出 LogonPage 之类重复页类"）——仅当该 URL 从未见过时才派生新类名。
+                    String curCls = pageNames.get(page);
+                    String newCls = RolePickerClassNameResolver.resolvePageClassForUrl(page.url(), pageNames.values(), urlToClass);
+                    pickerEval(page, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, newCls));
+                    if (!newCls.equals(curCls)) { pageNames.put(page, newCls); navigatedPages.add(page); }
                 } catch (Exception restoreEx) {
-                    // 数据恢复（applyPickState / 合并 / 渲染 / 类名解析）任一 evaluate 因导航瞬间页面不稳抛异常，
-                    // 必须吞掉且【不能影响下方 start() 重激活】——否则会出现"刷新/导航后点了没反应、拾取不了"
-                    // （applyPickState 把 __rolePickActive 置 false 后激活被跳过，监听永久失效）。
-                    log.warn("[picker][nav] data restore error (does not block picker activation): {}", restoreEx.getMessage());
+                    // 重灌/渲染/类名解析任一 evaluate 因导航瞬间页面不稳抛异常，必须吞掉且
+                    // 【不能影响下方 start() 重激活】——否则会出现"刷新/导航后点了没反应、拾取不了"。
+                    // idle 主循环已 invalidateSync，会确定性重试，面板最终必被 Java 权威态补满。
+                    log.warn("[picker][nav] panel re-push error (idle loop will retry; does not block picker activation): {}", restoreEx.getMessage());
                 }
                 // 整页导航的监听重挂已由 context 门控注入脚本在新文档早期原生完成（gatedPickerInitScript）；
                 // 但 applyPickState 恢复数据时会把 __rolePickActive 置 false。若会话仍处于拾取中，
@@ -866,11 +848,14 @@ public final class RolePickerPanelController {
                         // 形成"反复重注入 + 反复合并"的循环，导致已拾元素成倍累积。
                         // 这里仅做轻量激活保活：置位激活态并触发面板渲染，监听由门控脚本保证存活。
                         try {
+                            // 脚本内部已对齐 page.pause：document 仍 loading 时只挂一次性 DOMContentLoaded 监听并
+                            // 立即返回（evaluate 不会被加载中文档拖住/硬超时），DOM 就绪后再置激活态并渲染；
+                            // 已 interactive/complete 则立即执行，行为不变。故此处首轮仅注册监听、几乎不抛。
                             pickerEval(page, RolePickerScripts.SET_PICK_ACTIVE_AND_RENDER_JS);
                         } catch (Exception ex) {
-                            // 导航瞬间新文档执行上下文可能尚未就绪，page.evaluate 会抛"上下文已销毁"类异常；
-                            // 此处等待 DOM 就绪后重试一次轻量激活保活（仍不重注入整套库）。
-                            log.warn("[picker][nav] activation keep-alive first attempt failed; retrying after page is ready @ {} : {}", page.url(), ex.getMessage());
+                            // 兜底安全网：仅当 evaluate 调用本身撞上"执行上下文正在销毁"的极端竞态时才触发；
+                            // 等待 DOM/load 就绪后重试一次轻量激活保活（仍不重注入整套库）。
+                            log.warn("[picker][nav] activation keep-alive first attempt failed (race during context teardown); retrying after page is ready @ {} : {}", page.url(), ex.getMessage());
                             try { page.waitForLoadState(); } catch (Exception ignore2) { RolePickerQuiet.ignore("RolePickerPanelController#waitForLoadState", ignore2); }
                             try { pickerEval(page, RolePickerScripts.SET_PICK_ACTIVE_AND_RENDER_JS); }
                             catch (Exception ex2) { log.warn("[picker][nav] activation keep-alive retry still failed @ {} : {}", page.url(), ex2.getMessage()); }

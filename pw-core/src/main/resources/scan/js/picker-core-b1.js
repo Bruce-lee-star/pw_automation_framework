@@ -693,13 +693,13 @@
               // "计算签名那一刻的 DOM"。若按匹配数有条件赋值，同一个元素会在两种签名间跳变：
 
 
-              //   · 区域扫描时区域内只有它一个同名元素 → ms.length===1 → 无 index → 'role:link:X'
+              //   · 同名元素只有它一个时 → ms.length===1 → 无 index → 'role:link:X'
 
 
-              //   · 整页扫描时全页有多个同名元素     → ms.length>1  → index=0 → 'role:link:X#0'
+              //   · 同名元素有多个时     → ms.length>1  → index=0 → 'role:link:X#0'
 
 
-              // 两个签名被 Java 侧当成不同 key，同一元素每扫一轮就多存一份（实测重复 4~5 次）。
+              // 两个签名被 Java 侧当成不同 key，同一元素会被多存一份（实测重复 4~5 次）。
 
 
               // 统一赋值后签名恒定为 'role:link:X#0'，既不再重复，又保留"同 role 同 name 的第 2 个
@@ -948,13 +948,13 @@
                 // 【关键修复"面板勾选 alert/弹窗元素只生成 click"】
 
 
-                // 真实点击触发 dialog/popup 时由 Java onDialog/onPopup 回写标记；但"面板勾选扫描候选"不经
+                // 真实点击触发 dialog/popup 时由 Java onDialog/onPopup 回写标记；但"面板勾选回灌候选"不经
 
 
                 // 真实点击，无法获得标记 → 生成 step 只是裸 click。此处启发式识别会触发 dialog / 弹窗的元素，
 
 
-                // 使扫描/勾选也能带上 dialog/popup 标记，封装时生成 acceptAlert/waitForNewPage 而非裸 click。
+                // 使回灌/勾选也能带上 dialog/popup 标记，封装时生成 acceptAlert/waitForNewPage 而非裸 click。
 
 
                 //   · dialog：元素任一 on* 事件属性源码含 alert( / confirm( / prompt( → 标记 dialog，
@@ -1166,7 +1166,6 @@
                   while (cur && guard++ < 5) {
                     var node = resolveLabel(cur);
                     if (INTERACTIVE_ROLES[(getRole(node) || '').toLowerCase()]) {
-                      if (window.__roleScanRoot && (node === window.__roleScanRoot || !window.__roleScanRoot.contains(node))) break;
                       el = node; break;
                     }
                     cur = cur.parentElement;
@@ -2404,7 +2403,6 @@
                     console.log('[picker-diag][record] n=' + window.__recDiag
                       + ' hover=' + !!isHover
                       + ' active=' + !!window.__rolePickActive
-                      + ' scanning=' + !!window.__scanning
                       + ' applying=' + !!window.__applyingState
                       + ' seq=' + window.__rolePickSeq
                       + ' targetSig=' + __tSig);
@@ -2439,103 +2437,12 @@
                 } catch (e) {}
 
 
-                // 【关键修复"区域选择模式下点击不触发拾取"】
-
-
-                // 区域扫描态（__scanMode==='region'，用户正在点选业务区域）下，点击的语义是"选中区域并
-
-
-                // 扫描其子元素"，而非"拾取被点击的元素"。若点击拾取监听未被完全摘除，点击 #sec-role 等
-
-
-                // 容器会被 __recordPick 记录成整块 text 定位（"1. 角色与状态 提交 禁用按钮..."），混入
-
-
-                // 页面元素/页面类。此处：区域选择态且【非扫描中】时点击直接不记录——仅当 __roleScanPage
-
-
-                // 扫描时（__scanMode 被覆写为 'page' 且 __scanning=true）才记录区域内子元素。
-
-
-                if (window.__scanMode === 'region') return null;
 
 
                 var t = target;
 
 
                 if (!t) return null;
-
-
-                // 录制根容器约束：若指定了 window.__rolePickRoot，只有落在该选择器内（含其自身）
-
-
-                // 的元素才被录制；leftmenu / topbar 等全局导航区域在范围外，自然不被捕获。
-
-
-                // 对整页 scan 与点击/悬停/双击录制统一生效。选择器无效（querySelector 返回 null）
-
-
-                // 时退化成整页录制，避免误杀全部拾取。
-
-
-                if (window.__rolePickRoot) {
-
-
-                  try {
-
-
-                    var __rootEl = document.querySelector(window.__rolePickRoot);
-
-
-                    if (__rootEl && !(t === __rootEl || __rootEl.contains(t))) {
-
-
-                      // 根外点击（多为 leftmenu/topbar 等全局导航）：面板状态条临时提示，2 秒后恢复计数。
-
-
-                      try {
-
-
-                        var __st = document.getElementById('__roleStatus');
-
-
-                        if (__st) {
-
-
-                          __st.textContent = '⚠ 点击在录制根容器（' + window.__rolePickRoot + '）之外，已忽略（导航区不录制）';
-
-
-                          if (window.__roleStatusTimer) clearTimeout(window.__roleStatusTimer);
-
-
-                          window.__roleStatusTimer = setTimeout(function() {
-
-
-                            if (__st) __st.textContent = 'RoleElement Picker：已拾取 '
-
-
-                              + (window.__rolePicks ? window.__rolePicks.length : 0) + ' 个，按 ESC 结束';
-
-
-                          }, 2000);
-
-
-                        }
-
-
-                      } catch (e2) { /* 面板不存在时忽略 */ }
-
-
-                      return null;
-
-
-                    }
-
-
-                  } catch (e) { /* 选择器非法时忽略约束 */ }
-
-
-                }
 
 
                 var pick = window.__computePick(t);
@@ -2547,61 +2454,10 @@
                 // stable id，只能生成 "body > div:nth-of-type(...)" / "html > body > ..." 这种整页级兜底
 
 
-                // 路径，无业务价值、随 DOM 微调即失效）。无论手动拾取还是扫描态都拦截——这类选择器本就不该
+                // 路径，无业务价值、随 DOM 微调即失效）。无论手动拾取还是回灌态(__applyingState)都拦截——这类选择器本就不该
 
 
                 // 进入拾取集（有语义角色/稳定 id 的元素不会落到这里），从源头保证面板列表与生成的页面类都不含它。
-
-
-                // 补充：无锚点纯位置链 css（div:nth-of-type(3) > div > ...）只在**区域扫描态**拦截。
-
-
-                // 区域扫描无差别遍历区域内全部元素，是这类噪音的唯一来源；手动点选保持 pause 语义，
-
-
-                // 用户主动点的元素即便只能退化到 css 兜底也照常记录。
-
-
-                // 区域态判定用 __roleScanRoot 而非 __scanMode：__roleScanPage 入口会把 __scanMode
-
-
-                // 无条件覆写为 'page'（区域/整页共用该函数），此处读不到 'region'；而 __roleScanRoot
-
-
-                // 仅在区域扫描期间被赋为区域根元素，整页扫描与非扫描态均为 null，是可靠的区域态标志。
-
-
-                if (pick && pick.strategy === 'css' && pick.css
-
-
-                    && (window.__roleScanRoot
-
-
-                        // 仅"区域扫描态"拦截整页级 / 纯位置链 css 噪音；手动点选与整页扫描态放行——
-
-
-                        // 用户主动点的元素即便只能退化到 css 兜底也照常记录（对齐上方注释 pause 语义），
-
-
-                        // 避免"点展开后的说明文案却无回传"这类误杀。
-
-
-                        ? (pick.css.indexOf('body') !== -1 || pick.css.indexOf('html') !== -1
-
-
-                           || (typeof __isNthOnlyCss === 'function' && __isNthOnlyCss(pick.css)))
-
-
-                        : false)) {
-
-
-                  try { console.log('[rolePick][skip body/html/nth-css] css=' + pick.css); } catch (e2) {}
-
-
-                  return null;
-
-
-                }
 
 
                 pick._pageClass = window.__rolePageName || '';
@@ -2928,19 +2784,19 @@
                 if (__maxNo > window.__rolePickSeq) window.__rolePickSeq = __maxNo;
                 // 【诊断】记录本次点击前计数器与续接基线，定位"新元素首号偏小"是否因 max 被拉低。
                 try { console.log('[roleMouseDiag][seq-base] seq=' + window.__rolePickSeq + ' maxNo=' + __maxNo + ' roleMaxNo=' + window.__roleMaxNo); } catch(_){}
-                // 【修复"整页/区域扫描的候选带累加编号、扫一次增加一次"】
-                // 扫描态（window.__scanning）下收集的是「候选清单」，不是「按点击顺序的步骤动作」，
-                // 不应占用手动拾取的全局序号序列（window.__rolePickSeq），否则候选带 [n] 且每次重扫
-                // 会在已有号之上续接 → 表现为"扫一次编号增加一次"、污染手动拾取序号。
-                // 故扫描态跳过序号分配：候选保持 _pickNos 空（面板显示 [-]），待用户在面板勾选时再按
-                // 勾选顺序赋予步骤序号（见 panel-core-b.js __packageStep / 勾选逻辑）。
+                // 【修复"候选带累加编号、重新收集时在旧号上续接"】
+                // 面板勾选出的候选清单不是「按点击顺序的步骤动作」，
+                // 不应占用拾取的全局序号序列（window.__rolePickSeq），否则候选带 [n] 且每次重新收集
+                // 会在已有号之上续接 → 表现为"收集一次编号增加一次"、污染拾取序号。
+                // 故回灌态(__applyingState)跳过序号分配：候选保持 _pickNos 空（面板显示 [-]），待用户在面板勾选时再按
+                // 勾选顺序（见 panel-core-b.js 勾选逻辑）。
                 if (!window.__applyingState) {
                   window.__rolePickSeq += 1;
                   var __thisIndex = window.__rolePickSeq;
                   // 每次真正分配出新号，更新"只增不回退"的最大号基线（供后续续接，不被 __rolePicks 重建干扰）。
                   if (window.__rolePickSeq > window.__roleMaxNo) window.__roleMaxNo = window.__rolePickSeq;
                 } else {
-                  var __thisIndex = 0; // 扫描态不分配动作序号（仅占位，__appendPickNo 调用处已守卫）
+                  var __thisIndex = 0; // 回灌态(__applyingState)不分配动作序号（仅占位，__appendPickNo 调用处已守卫）
                 }
                 // 【修复"后拾取元素首号偏小（如第二个元素拿到 2 而非 4）/ step 排序错乱"】
                 // 旧实现 p._pickSeq = p._pickNos[0]：_pickSeq 取的是"拾取号数组首元素"。但 _pickNos 是
@@ -2964,7 +2820,6 @@
                         console.log('[picker-diag][mint] n=' + window.__mintDiag
                           + ' no=' + __thisIndex
                           + ' hover=' + !!isHover
-                          + ' scanning=' + !!window.__scanning
                           + ' applying=' + !!window.__applyingState
                           + ' sig=' + ((p && p._sigKey) || '')
                           + ' stack=' + __st);
@@ -3059,7 +2914,7 @@
                   } else {
                     window.__rolePicks.push(pick);
                     // 【index 需求】新元素首次被拾取：把当前动作序号写入 _pickNos（首号）。
-                    // 扫描态守卫：候选不分配序号（保持 [-]）。
+                    // 回灌态(__applyingState)守卫：候选不分配序号（保持 [-]）。
                     __appendPickNo(pick);
                   }
 
@@ -3093,19 +2948,13 @@
                   } catch (e) { /* panel not ready: ignore */ }
 
 
-                  // 扫描态下抑制逐元素控制台日志：避免 N 次 console 事件触发 Java onConsoleMessage 监听器空转。
+                  // 抑制逐元素控制台日志：避免 N 次 console 事件触发 Java onConsoleMessage 监听器空转。
 
 
-                  if (!window.__scanning) {
+                                  try { console.log('[rolePick][push] len=' + window.__rolePicks.length + ' render=' + (typeof window.__renderPicks)); } catch(_){}
 
 
-                    try { console.log('[rolePick][push] len=' + window.__rolePicks.length + ' render=' + (typeof window.__renderPicks)); } catch(_){}
-
-
-                  }
-
-
-                  // sig→pick / key→pick 双映射，重复点击时 O(1) 定位原 pick（避免线性扫描 __rolePicks）。
+                                // sig→pick / key→pick 双映射，重复点击时 O(1) 定位原 pick（避免线性扫描 __rolePicks）。
                   // 同时写入 __sigKey（与 dup 判定口径一致），确保 dup 分支用 key 查找时必能命中。
 
 
@@ -3116,16 +2965,10 @@
                 } else {
 
 
-                  if (!window.__scanning) {
+                                  try { console.log('[roleMouseDiag][diag-dup] dup=' + dup + ' key=' + key + ' sig=' + sig + ' hasExisting=' + (!!(existing || (key && window.__sigToPick[key]) || (sig && window.__sigToPick[sig])))); } catch(_){}
 
 
-                    try { console.log('[roleMouseDiag][diag-dup] dup=' + dup + ' key=' + key + ' sig=' + sig + ' hasExisting=' + (!!(existing || (key && window.__sigToPick[key]) || (sig && window.__sigToPick[sig])))); } catch(_){}
-
-
-                  }
-
-
-                  // O(1) 去重定位：优先用与 dup 判定口径一致的 __sigKey（key）取已存在 pick，
+                                // O(1) 去重定位：优先用与 dup 判定口径一致的 __sigKey（key）取已存在 pick，
                   // 回退到 __pickSig（sig）；再不行遍历权威数组 window.__rolePicks（sync 重建后的最新对象）
                   // 按 sig/key 匹配——三重兜底，确保无论 __sigToPick 映射因任何原因丢失，dup 回传都不丢。
 
@@ -3162,7 +3005,7 @@
                   if (existing) {
                     existing.hover = !!isHover;
                     // 【index 需求】重复拾取同一元素：把当前动作序号追加到 _pickNos（如 [1,5]）。
-                    // 扫描态守卫：候选不分配序号。
+                    // 回灌态(__applyingState)守卫：候选不分配序号。
                     if (!window.__applyingState) __appendPickNo(existing);
                     // 【诊断】dup 命中分支：打印 existing 是否拿到、回传前 _pickNos、__roleOnPick 类型、序列化是否成功。
                     try {
@@ -3179,7 +3022,7 @@
                     // __roleOnPick（__rolePickSigs[key] 已置位），导致 Java 权威内存态只持有首次的 _pickNos，
                     // 而浏览器侧 existing 已累积本次点击的全局动作号。主循环每轮 syncPanelToBrowser 用 Java 态
                     // 重建 window.__rolePicks 时，会把浏览器侧累积的 _pickNos 覆盖成 Java 的残缺值 → 面板只显示 [1]。
-                    // 故对真实点击（非 hover/非扫描）主动回传最新 existing（含完整 _pickNos）给 Java，
+                    // 故对真实点击（非 hover/非回灌态）主动回传最新 existing（含完整 _pickNos）给 Java，
                     // 让权威态与浏览器侧一致，重建后面板正确显示 [1,5,9…] 等完整序号。
                     if (!isHover) {
                       var __bType = typeof window.__roleOnPick;
@@ -3292,34 +3135,14 @@
                 // 选择模型（替代原"所有拾取自动并入 currentStep = 一个 step"）：
 
 
-                //   · 整页扫描期间（window.__scanning 为 true）的元素只是"候选"，不直接入选当前 step，
-
-
-                //     由用户在面板上勾选后再「封装为步骤」；
-
-
-                //   · 页面上的实时点选（非扫描、非重复）视为用户主动拾取，自动入选当前 step（选择集）；
+                //   · 页面上的实时点选（非回灌态、非重复）视为用户主动拾取，自动入选当前 step（选择集）；
 
 
                 //   · 重复拾取（dup）不重复入选，避免 step 内出现重复元素。
 
 
-                // 【关键修复"用户点击扫描候选不进 step"】
-
-
-                // 原条件含 !dup：整页扫描会把候选 push 进 __rolePickSigs（回传 javaPickBySig），扫描后
-
-
-                // 用户点击这些候选元素时 dup=true，被误判为"重复点击"而拒绝入选 step → 用户点的元素
-
-
-                // 不出现在步骤里。dup 本意是防"同一元素重复入选"；应改判"该元素是否已在当前 step 中"
-
-
-                // 而非"是否已收录过（扫描也算收录）"。故：非扫描态点击，只要元素不在当前 __currentStep
-
-
-                // 就入选 step（用户主动点击扫描候选 = 明确选择）；已在 step 中的重复点击仍被排除。
+                // 关键修复：dup 不表示“已在当前 step 中”，故以“是否已在当前 __currentStep”判入选，
+                // 而非“是否已收录过”；已在 step 中的重复点击仍被排除。
 
 
                 if (window.__currentStep && !__rapid) {
@@ -3385,6 +3208,6 @@
                 // 故全部加 typeof 守卫 + try，确保子 frame 内即便 UI 辅助缺失也不影响元素回传。
 
 
-                try { if (typeof window.__renumberStep === 'function') window.__renumberStep(); } catch (_) {}
+
 
 

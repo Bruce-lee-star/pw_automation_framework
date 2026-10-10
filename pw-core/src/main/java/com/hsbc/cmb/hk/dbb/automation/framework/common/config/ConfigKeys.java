@@ -396,11 +396,6 @@ public enum ConfigKeys {
         "1000",
         "PageWaits.retry 默认重试间隔（毫秒）"
     ),
-    WEB_PLAYWRIGHT_WAITS_POLL_STEP_MS(
-        "playwright.waits.poll.step.ms",
-        "50",
-        "PageWaits.waitUntil 固定小步长轮询间隔（毫秒）"
-    ),
     WEB_PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS(
         "playwright.browser.startup.backoff.ms",
         "2000",
@@ -809,11 +804,6 @@ public enum ConfigKeys {
         "playwright.element.action.post.delay",
         "200",
         "元素操作后等待时间（毫秒）"
-    ),
-    WEB_PLAYWRIGHT_ELEMENT_OPERATION_TIMEOUT(
-        "playwright.element.operation.timeout",
-        "30000",
-        "元素操作总超时时间（毫秒）"
     ),
     WEB_PLAYWRIGHT_ELEMENT_SCREENSHOT_ON_FAILURE(
         "playwright.element.screenshot.on.failure",

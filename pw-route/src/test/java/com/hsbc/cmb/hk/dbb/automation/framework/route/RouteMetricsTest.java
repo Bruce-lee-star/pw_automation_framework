@@ -43,20 +43,18 @@ public class RouteMetricsTest {
         }
     }
 
-    /** 未确证撤销（无回包）必须被计数，且经 metrics() 暴露。 */
+    /** 2026-10-10 语义：目的退役零协议调用 ⇒ unconfirmedRetirements 结构性恒 0（metrics 如实暴露）。 */
     @Test
-    public void unconfirmedRetirementIsCounted() throws Exception {
-        GuardedDriverCallRegistry.setInstance(new CapturingGuardedDriverCall()); // 首次与重发都无回包
+    public void purposeRetirementNeverProducesUnconfirmedCount() throws Exception {
+        GuardedDriverCallRegistry.setInstance(new CapturingGuardedDriverCall());
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
         runtime.register(ApiSpec.builder("notifications/streams", RouteCapability.MONITOR).build());
 
         runtime.retireByPurpose("notifications/streams");
-        // 未确证计数在撤销执行器异步任务中递增，轮询等待定稿
-        for (int i = 0; i < 150 && runtime.unconfirmedRetirements() == 0; i++) {
-            Thread.sleep(20);
-        }
-        assertEquals(1, runtime.unconfirmedRetirements());
-        assertEquals(1, runtime.metrics().unconfirmedRetirements());
+
+        // 目的退役只做内存规则表移除、不提交 unroute ⇒ 绝无"未确证"（这是竞态修复的结构性保证）
+        assertEquals(0, runtime.unconfirmedRetirements());
+        assertEquals(0, runtime.metrics().unconfirmedRetirements());
     }
 
     /** 目的达成即撤销必须计入 retiredByPurpose，且定稿该规则的 armed 时长。 */

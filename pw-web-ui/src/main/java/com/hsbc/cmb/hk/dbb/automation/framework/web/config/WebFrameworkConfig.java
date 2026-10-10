@@ -433,11 +433,6 @@ public enum WebFrameworkConfig {
     PLAYWRIGHT_WAITS_RETRY_INTERVAL_MS(ConfigKeys.WEB_PLAYWRIGHT_WAITS_RETRY_INTERVAL_MS),
 
     /**
-     * {@code PageWaits.waitUntil} 固定小步长轮询间隔（毫秒）。W-9：原散落字面量 {@code 50} 抽为可配置键。
-     */
-    PLAYWRIGHT_WAITS_POLL_STEP_MS(ConfigKeys.WEB_PLAYWRIGHT_WAITS_POLL_STEP_MS),
-
-    /**
      * 浏览器启动重试的退避基数（毫秒，随尝试次数线性放大）。W-9：原散落字面量 {@code 2000} 抽为可配置键。
      */
     PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS),
@@ -508,8 +503,9 @@ public enum WebFrameworkConfig {
      * trace 是否按 <b>scenario 分段</b>（每个用例一个 trace 文件）——默认 true（方案 A，2026-09-17）。
      *
      * <p>{@code true}：用 Playwright 原生 {@code startChunk()}/{@code stopChunk(path)} 在用例边界切段，
-     * 使「trace 的时间 == 用例执行时间」，文件名/报告带 scenarioId 与起止时间；feature 模式（context 复用）
-     * 下同样正确。{@code false}：回退为「一个 context 一个整段 trace」（旧行为，逃生开关）。
+     * 使「trace 的时间 == 用例执行时间」，文件名/报告带 scenarioId 与起止时间
+     * （2026-09-30 收口后每 case 重建 Context，chunk 边界与 context 边界天然一致）。
+     * {@code false}：回退为「一个 context 一个整段 trace」（旧行为，逃生开关）。
      */
     PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO),
 
@@ -902,13 +898,6 @@ public enum WebFrameworkConfig {
      * 用于 click/fill 等操作后等待 DOM 稳定
      */
     PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY),
-
-    /**
-     * 元素操作总超时时间（毫秒）
-     * 元素操作（click / fill / check 等）的单次操作超时预算，
-     * 取代原「sleep + 轮询」重试循环的截止时间，交由 Playwright 原生 actionability 自动等待。
-     */
-    PLAYWRIGHT_ELEMENT_OPERATION_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_OPERATION_TIMEOUT),
 
     /**
      * 失败时是否自动截图

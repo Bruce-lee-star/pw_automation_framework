@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Route V2 运行时（每 BrowserContext 一份）——{@link RouteRuntime} 角色的生产实现。
+ * Route 运行时（每 BrowserContext 一份）——{@link RouteRuntime} 角色的生产实现。
  *
  * <p>并发安全设计（为什么每个 context 一份、为什么不再有全局 static 可变表）：见 {@link RouteRuntime} 契约。
  *
@@ -62,6 +62,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     private final GenerationRegistry generations = new GenerationRegistry();
     private final PendingGuard pendingGuard;
     private final ClaimRegistry claims;
+    /** F1（2026-10-10）：失败信号下的挂起收敛已触发标记（CAS 幂等 —— 只收敛一次）。 */
+    private final AtomicBoolean failFastAborted = new AtomicBoolean(false);
     private final BoundedOps ops;
     private final RouteIoExecutor io;
     /** 独立撤销执行器（S2，R-4）：与 IO 池隔离，避免撤销等待占住线程、挤压 body 断言/采集。 */
@@ -104,7 +106,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         String tag = String.valueOf(contextSeq.incrementAndGet());
         this.io = new RouteIoExecutor(tag, config.ioThreads(), config.ioQueueCapacity());
         this.retire = new RouteRetireExecutor(tag);
-        this.monitor = new MonitorSink(io, this::retireByPurpose);
+        this.monitor = new MonitorSink(this::retireByPurpose);
         // 采集配置在本刻唯一解析并冻结（RouteCapturePolicy）：两个采集闸门共用同一快照
         this.capturePolicy = RouteCapturePolicy.resolveNow();
         this.capture = new CaptureSink(config.maxCaptured(), config.captureTimeoutMs(), this.capturePolicy);
@@ -160,17 +162,21 @@ public final class RouteRuntimeImpl implements RouteRuntime {
      *
      * <p><b>线程模型</b>：经 {@link RouteDelayScheduler}（模块自有 daemon 调度池）递归调度，
      * 不占用 IO 线程、不使用 {@code Thread.sleep}（框架 ArchUnit 明令禁止）；命中即投递 sink
-     * （sink 内部无阻塞：body 读取另交 IO 线程）。窗口内未命中则静默结束——由 sink 的
-     * drain 超时定案路径兜底（与事件驱动时代语义一致）。轮询间隔按 {@link #RESPONSE_POLL_MAX_MS}
-     * 自适应退避（见该常量的说明），既保证及时定案，又不让观测任务淹没延迟调度池。</p>
+     * （sink 在<b>本线程就地</b>完成 {@code status}/{@code headers}/{@code body} 快照 ——
+     * {@code body()} 是协议调用，必须趁句柄存活时同步读（2026-09-28 修正：旧实现交 IO 线程
+     * 排队执行，实测 IO 池繁忙时句柄被回收、body 恒 null）；CPU 型断言/解析才交 IO 线程，
+     * 断言阶段零句柄依赖，见 {@code MonitorSink}/{@code CaptureSink}）。窗口内未命中则静默结束
+     * ——由 sink 的 drain 超时定案路径兜底（与事件驱动时代语义一致）。轮询间隔按
+     * {@link #RESPONSE_POLL_MAX_MS} 自适应退避（见该常量的说明），既保证及时定案，
+     * 又不让观测任务淹没延迟调度池。</p>
      *
      * @param intervalMs 本轮到下一轮的间隔（每轮翻倍，封顶 {@link #RESPONSE_POLL_MAX_MS}）
      */
     private void scheduleResponsePoll(Request request, ApiSpec spec,
                                       boolean monitorPending, boolean capturePending, long deadlineNs,
                                       long intervalMs) {
-        if (closed.get()) {
-            return; // runtime 已关闭（context 收尾）→ 停止轮询
+        if (closed.get() || DriverFailureSignal.reported()) {
+            return; // runtime 已关闭 / F4：驱动连接已不可信 → 停止轮询（不再泵连接）
         }
         Response response = safeExistingResponse(request);
         if (response != null) {
@@ -261,8 +267,9 @@ public final class RouteRuntimeImpl implements RouteRuntime {
      * 标记路由设施降级（注册失败，或撤销自愈后仍不可确证）。
      *
      * <p><b>语义边界（2026-09-29 裁定）</b>：这是<b>可观测信号</b>（报告/诊断用），
-     * <b>不表示要重建 Context</b> —— feature 模式下同一 sessionKey 不重建（不变式 I-1），
-     * 路由状态分叉由全量快照重发（{@link PatternBinder#retryUnroute()}）自愈。</p>
+     * <b>不表示要重建 Context</b> —— route 层永不动 Context（2026-09-30 收口后 Context 每 case
+     * 由生命周期层重建，不变式 I-1），路由状态分叉由全量快照重发
+     * （{@link PatternBinder#retryUnroute()}）自愈。</p>
      */
     void markDegraded() {
         if (degraded.compareAndSet(false, true)) {
@@ -278,6 +285,11 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public void recordObservation(Request request, ApiSpec spec) {
+        if (DriverFailureSignal.reported()) {
+            // F1/F4：驱动连接已不可信 → 不再启动响应侧观测轮询
+            //（避免调度线程在失败后继续泵连接，与主线程并发驱动同一条连接）。
+            return;
+        }
         // MONITOR 能力位已停止（stop* / 目的退役）⇒ 不再为其做响应侧观测轮询；
         // capture 维度不受 MONITOR 停止影响，照常采集。
         boolean monitorPending = spec.isStopped(RouteCapability.MONITOR) ? false : monitor.recordRequest(request, spec);
@@ -364,8 +376,9 @@ public final class RouteRuntimeImpl implements RouteRuntime {
             PatternBinder binder = binders.computeIfAbsent(spec.pattern(),
                     p -> RouteBinderRegistry.instance().bind(context, spec, this));
             //  注册超时被降级（规则已在内存发布，但驱动层未生效）→ 标记 runtime 降级仅用于
-            //  **可观测/自愈判定**；绝不因此重建 Context（2026-09-29 裁定：feature 模式下同一
-            //  sessionKey 不重建 —— 路由是辅助设施，其可用性不得绑架会话/Context 生命周期）。
+            //  **可观测/自愈判定**；绝不因此重建 Context（2026-09-29 裁定：路由是辅助设施，
+            //  其可用性不得绑架会话/Context 生命周期；2026-09-30 收口后 Context 每 case 重建，
+            //  该裁定与生命周期层解耦，route 层永不动 Context）。
             if (binder.isDegraded()) {
                 markDegraded();
             }
@@ -419,16 +432,34 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public void dispatch(Route route, String pattern) {
-        if (closed.get()) {
-            // context 关闭中 → fail-open
+        if (closed.get() || DriverFailureSignal.reported()) {
+            // context 关闭中 / F1：UI 侧已上报"本场景驱动连接不可信" → fail-open 直通，
+            // 绝不 resume / fulfill / abort（那些是拦截路径，失败信号下不得再碰驱动协议）。
             try {
                 route.fallback();
             } catch (Exception ignored) {
-                LOGGER.trace("[Route] fallback on closed context ignored: {}", ignored.toString());
+                LOGGER.trace("[Route] fallback on closed/degraded context ignored: {}", ignored.toString());
             }
+            abortPendingForFailFast();
             return;
         }
         dispatcher.dispatch(route, pattern, this);
+    }
+
+    /**
+     * F1（2026-10-10）：失败信号下的<b>挂起收敛</b> —— 把已进入 DELAY 挂起（IO_AWAIT）的 claim
+     * 立即终结（fallback 放行），不等 sweep(35s)，也不等场景收尾。
+     *
+     * <p><b>CAS 幂等</b>：首个失败信号下的 dispatch 触发一次收敛后置位，后续 dispatch 不再重复收敛
+     * （不重复终结、route 不重复 fallback 命令）。终结动作是 sendMessageAsync（不泵连接），
+     * 与 O1 单泵原则不冲突。</p>
+     */
+    private void abortPendingForFailFast() {
+        if (failFastAborted.compareAndSet(false, true)) {
+            claims.closeAll();
+            LOGGER.warn("[Route] fail-fast: pending claims force-settled on driver failure "
+                    + "(route is a helper, not a failure cause)");
+        }
     }
 
     /** 巡检（调度线程）：强制落定超龄挂起 claim。 */
@@ -456,26 +487,35 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     /**
      * 只清规则、保留 runtime 与 Context（V2-2；契约见 {@link RouteRuntime#clearRules()}）。
+     *
+     * <p><b>2026-10-10 语义对齐</b>：与目的退役一致 —— 本方法<b>只清内存规则表</b>
+     * （方法返回后"不再有新请求命中"是确定性的，dispatch 即刻 fail-open），<b>不驱动 unroute</b>
+     * （驱动绑定统一由收尾 {@link #close()} flush，消除 scenario 进行中的后台协议调用与
+     * 主线程 UI 的连接竞态，理由见 {@link #retireByPurpose(ApiSpec)}）。</p>
+     *
+     * <p><b>返回值</b>：本次<b>实际清空的规则数</b>（基于规则表，幂等 —— 规则表已空时返回 0）；
+     * 每个被清 pattern 补记退役观测（armed 时长 + 退役计数）。</p>
      */
     @Override
     public int clearRules() {
         if (closed.get()) {
             return 0; // 收尾中：close() 会统一 flush 剩余绑定
         }
-        //  先把内存规则表原子清空：方法返回后"不再有新请求命中"是确定性的；而驱动侧撤销是异步的
-        // （与"目的达成撤销"同路径：独立执行器 + 确证 + 未确证则重同步自愈）。故先清内存，让调用方
-        //  无需等待即可断定"规则已清"，撤销结论仍由 isClean() / unconfirmedRetirements() 完整暴露。
+        RuleGeneration base = generations.snapshot();
+        int size = base.rules().size();
+        if (size == 0) {
+            return 0; // 幂等：规则表已空，无需任何动作
+        }
         clearGenerations();
-        int retired = 0;
-        for (String pattern : binders.keySet().toArray(new String[0])) {
-            if (retireByPurpose(pattern)) {
-                retired++;
-            }
+        for (String pattern : base.rules().keySet()) {
+            recordArmedDuration(pattern); // T1：定稿本次被清规则的 armed 时长
+            retiredByPurpose.incrementAndGet(); // 退役观测：本次清掉的规则计入目的退役
         }
         VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[Route] clearRules @{}: {} rule(s) retired, runtime and context kept",
-                System.identityHashCode(context), retired);
-        return retired;
+                "[Route] clearRules @{}: {} rule(s) cleared in memory (driver bindings kept; "
+                        + "flushed at teardown), runtime and context kept",
+                System.identityHashCode(context), size);
+        return size;
     }
 
     /**
@@ -629,7 +669,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
      * （新规则有自己的生命周期终点，不受旧触发者影响）。</p>
      *
      * @param spec 注册时的规则实例（令牌）
-     * @return true=已提交撤销 / 无需撤销 / 令牌不一致（拒绝撤新规则）；false=IO 队列满（已归还收尾兜底）
+     * @return true=已退役 / 无需退役 / 令牌不一致（拒绝撤新规则）
      */
     public boolean retireByPurpose(ApiSpec spec) {
         if (spec == null || closed.get()) {
@@ -637,106 +677,52 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         }
         // 令牌化摘除本能力位：仅当当前仍是本触发者注册的规则实例时才退役
         // （拒绝误撤新规则 / 已停规则）；同 pattern 其它能力位（MOCK/MODIFY/DELAY）不受影响。
-        // 使用「移除」语义（而非仅标记 disabled）使该能力位彻底脱离合并视图；
-        // 若移除后 pattern 已无任何活跃能力位，则关闭其原生绑定（handler 撤销）。
+        // 使用「移除」语义（而非仅标记 disabled）使该能力位彻底脱离合并视图。
+        //
+        // 【2026-10-10 结构性修复：目的退役不再驱动 unroute】
+        //  此前"目的达成 → 提交独立执行器异步 unroute"会在 scenario 进行中产生<b>后台线程协议调用</b>，
+        //  与主线程 UI 触发的请求 dispatch 并发泵同一条 Playwright 连接（官方模型：一个 Playwright =
+        //  一条 Connection，客户端对象表/回调表<b>非线程安全</b>）→ 实证驱动级异常
+        //  （"Cannot find parent object request@… to create route@…" / "Object doesn't exist: route@…"）
+        //  冒泡为页面未捕获错误 ⇒ route 作为辅助设施反而中断 UI —— 违反核心不变式。
+        //  修复：目的退役只做<b>内存规则表移除</b>（dispatch 即刻 fail-open 放行，观测语义不变），
+        //  <b>驱动侧绑定保留</b>，统一由收尾 {@link #close()} 在场景结束时 flush（Context 即将关闭、
+        //  无活跃 UI 操作 ⇒ 无并发窗口）。driver 侧 handler 常驻到收尾的开销：规则表空时命中即
+        //  fallback（fail-open 出口），每请求一次 handler 调用 —— 可接受，换取「scenario 期间零后台
+        //  驱动调用」的结构性保证。
         generations.removeCapabilityIfCurrent(spec.pattern(), spec.capability(), spec);
         if (generations.snapshot().specFor(spec.pattern()) == null) {
-            PatternBinder binder = binders.remove(spec.pattern());
-            if (binder != null) {
-                retiredByPurpose.incrementAndGet();
-                recordArmedDuration(spec.pattern());
-                boolean submitted = retire.trySubmit("retire:" + spec.pattern(),
-                        () -> confirmRetirement(spec.pattern(), binder));
-                if (!submitted) {
-                    PatternBinder previous = binders.putIfAbsent(spec.pattern(), binder);
-                    if (previous != null) {
-                        LOGGER.warn("[Route] retire '{}' could not be re-queued "
-                                + "(pattern re-registered concurrently); its driver-side handler is "
-                                + "released on context close", spec.pattern());
-                    }
-                    markUnconfirmedRetirement(spec.pattern(),
-                            "retire queue full — deferred to teardown flush");
-                }
-            }
+            retiredByPurpose.incrementAndGet();
+            recordArmedDuration(spec.pattern());
         }
         return true;
     }
 
     /**
-     * 目的达成即撤销该 pattern 的绑定（T2+ 核心入口：<b>规则随目的生灭</b>取代"随用例生灭"）。
+     * 目的达成即退役该 pattern（T2+ 入口：<b>规则随目的生灭</b>取代"随用例生灭"）。
      *
-     * <p><b>为什么不在调用线程同步执行</b>：本方法由"目的定案"路径回调（如 MONITOR 断言结算），
-     * 而该路径运行在事件/轮询线程上；{@code unroute} 是同步协议调用
-     * （{@code setNetworkInterceptionPatterns}，且"调用线程自己泵消息"）⇒ 在事件线程内同步撤销等于
-     * <b>嵌套下发</b>（客户端本身每命中已嵌套下发一次）。因此统一提交<b>独立撤销执行器</b>
-     * （与 IO 池隔离，闭合竞态 R-4）：撤销不阻塞事件线程，也不挤压 body 断言/采集。</p>
+     * <p><b>2026-10-10 语义定稿（结构性竞态修复）</b>：本方法<b>只做内存退役</b>（规则表移除，
+     * dispatch 即刻 fail-open），<b>不再驱动 unroute</b>。理由见 {@link #retireByPurpose(ApiSpec)}
+     * 的注释：scenario 进行中的后台 unroute 与主线程 UI 并发泵同一连接会命中 Playwright
+     * 客户端非线程安全竞态（实证 "Cannot find parent object"），违反"route 是辅助、不中断 UI"。
+     * 驱动侧绑定统一由收尾 {@link #close()} flush（Context 关闭前无 UI 并发）。
+     * 调用方（{@link #clearRules()} 等）负责先清空内存规则表，本方法只补记退役观测。</p>
      *
-     * <p><b>失败处置（不引入"假设干净"、绝不重建 Context）</b>：撤销队列满 ⇒ 把绑定归还给规则表，
-     * 交由收尾兜底 flush 撤销，并按"暂不可确证"记入(降级)；界内无回包 ⇒ 重发一次重同步自愈，仍失败 ⇒
-     * 记入 {@link #unconfirmedRetirements} + {@link #markDegraded()}（不变式 I-9：<b>重同步自愈 + 可见告警，
-     * 绝不重建 Context</b>）。</p>
+     * <p><b>不变式保持</b>：退役计数 {@link #retiredByPurpose} 照常累计（T1 可观测）；
+     * {@code unconfirmedRetirements} 不再因目的退役增长（无协议提交 ⇒ 恒 0 ⇒ {@link #isClean()}
+     * 恒 true）；撤销的"确证结论"由收尾 {@link #close()} 统一汇总。</p>
      *
      * @param pattern 规则 pattern（{@link ApiSpec#pattern()}）
-     * @return true=已提交撤销（或无需撤销 / 收尾中）；false=撤销队列满（已归还给收尾兜底并降级）
+     * @return true（幂等：未注册 / 已退役 / 收尾中均视为已处理）
      */
     @Override
     public boolean retireByPurpose(String pattern) {
-        if (pattern == null) {
-            return true;
-        }
-        if (closed.get()) {
+        if (pattern == null || closed.get()) {
             return true; // 收尾中：close() 会统一 flush 剩余绑定
-        }
-        PatternBinder binder = binders.remove(pattern);
-        if (binder == null) {
-            return true; // 未注册 / 已被目的撤销 → 无待撤状态（幂等）
         }
         retiredByPurpose.incrementAndGet();
         recordArmedDuration(pattern); // T1：定稿 armed 时长
-        boolean submitted = retire.trySubmit("retire:" + pattern, () -> confirmRetirement(pattern, binder));
-        if (!submitted) {
-            PatternBinder previous = binders.putIfAbsent(pattern, binder);
-            if (previous != null) {
-                // 极端竞态：同 pattern 已被新注册占用 → 旧绑定无法归还；其驱动层 handler 随 context 关闭释放
-                LOGGER.warn("[Route] retire '{}' could not be re-queued (pattern re-registered concurrently); "
-                        + "its driver-side handler is released on context close", pattern);
-            }
-            markUnconfirmedRetirement(pattern, "retire queue full — deferred to teardown flush");
-            return false;
-        }
-        LOGGER.debug("[Route] purpose met → retiring rule '{}' (unroute submitted to dedicated retire executor)",
-                pattern);
         return true;
-    }
-
-    /** IO 线程上执行撤销并确证；未确证则**重发一次重同步自愈**，仍失败才计入"不可确证"。 */
-    private void confirmRetirement(String pattern, PatternBinder binder) {
-        if (binder.closeConfirmed()) {
-            LOGGER.debug("[Route] rule '{}' retired by purpose (unroute confirmed)", pattern);
-            return;
-        }
-        if (binder.retryUnroute()) {
-            LOGGER.info("[Route] rule '{}' unroute unconfirmed on first attempt — resync succeeded "
-                            + "(driver pattern list re-synced; no rebuild needed)",
-                    pattern);
-            return;
-        }
-        markUnconfirmedRetirement(pattern, "no ack within unroute bound (initial + resync)");
-    }
-
-    /**
-     * 记一次"未确证的撤销"（自愈后仍失败）：计数 + 响亮 ERROR。
-     *
-     * <p><b>绝不因此重建 Context</b>（2026-09-29 裁定）：路由是辅助设施，其状态不确定性不得绑架
-     * 会话/Context 生命周期（feature 模式下同一 sessionKey 不重建、保留免登录）。状态分叉本身由
-     * {@link PatternBinder#retryUnroute()} 的重同步修复；本计数与 ERROR 仅用于<b>可观测与根因定位</b>。</p>
-     */
-    private void markUnconfirmedRetirement(String pattern, String reason) {
-        unconfirmedRetirements.incrementAndGet();
-        markDegraded();
-        LOGGER.error("[Route] unroute UNCONFIRMED for '{}' ({}) on context @{} — route state not verifiable "
-                        + "after resync. Context/session are NOT rebuilt (I-1); this is an observability signal.",
-                pattern, reason, System.identityHashCode(context));
     }
 
     /** T1：定稿某规则的 armed 时长（毫秒）；未记录起点（如从未 armed）则跳过。 */

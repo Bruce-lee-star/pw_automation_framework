@@ -9,6 +9,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 上下文级「浏览器桥 / 面板命令抽干」注册中心（T5-1 拆分）：
@@ -25,6 +29,26 @@ final class RolePickerBridgeRegistry {
 
     /** 反序列化任意拾取态 JSON 的 Gson 实例（桥方法统一用其解析回传）。 */
     static final Gson GSON = new Gson();
+
+    /**
+     * 拾取回调→面板「即时回灌」线程池（事件驱动，替代主循环 1s 轮询）。
+     *
+     * <p>背景：原设计把拾取权威态放在 Java 业务层（javaPickBySig），浏览器侧面板只是展示页面对象层；
+     * 但面板刷新只发生在主循环 {@code poll(1s)} 的空闲轮里，遇 busy 页 / 跨域 iframe 的硬超时 evaluate 时
+     * 整轮被卡，导致"点了元素、面板列表 1~12s 才出现"。
+     * 现改为：拾取桥回调合并进权威态后，<b>立即</b>异步把面板回灌推回浏览器（页面对象层），与分层无冲突。</p>
+     *
+     * <p>设计约束：exposeBinding 回调跑在 Playwright 的<b>调度线程</b>上，绝不能在此线程内同步做
+     * {@code page.evaluate}（会阻塞同上下文其余事件），故用<b>单线程 daemon</b>线程池把
+     * {@code syncPanelToBrowser} 异步化；其内部用 soft 2s 上限超时、ETag 幂等，失败仅是下一轮补回。
+     * 队列有界 + DiscardOldestPolicy：极端 busy 页下丢弃最旧待回灌，下一轮（主循环 / 下次点击）自然补上，不堆积。</p>
+     */
+    static final ExecutorService PICK_SYNC_POOL =
+            new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
+                    new LinkedBlockingQueue<>(64),
+                    r -> { Thread t = new Thread(r, "picker-pick-sync"); t.setDaemon(true); return t; },
+                    new ThreadPoolExecutor.DiscardOldestPolicy());
+
 
     /**
      * 面板命令事件：由页面内 {@code window.__rolePickerCmd(c)}（经 {@link Page#exposeFunction} 暴露的
@@ -210,6 +234,17 @@ final class RolePickerBridgeRegistry {
                     if (changed) {
                         List<String> fpLog = merged.getFramePath();
                         log.info("[picker] __roleOnPick callback written to in-memory state: key={} pageClass={} framePath={} (current in-memory size={})", key, (merged.getPageClass() == null ? "" : merged.getPageClass()), (fpLog == null || fpLog.isEmpty() ? "" : fpLog.toString()), map.size());
+                        // 【事件驱动即时回灌】拾取合并进权威态后，立即把面板回灌推回浏览器（页面对象层），
+                        // 消除"靠主循环 1s 轮询 + busy 页硬超时卡整轮"导致的面板列表延迟 1~12s 才出现。
+                        // 不在 Playwright 回调线程内同步 evaluate（会阻塞同上下文事件），改用 daemon 线程池异步推；
+                        // syncPanelToBrowser 内部软超时 2s + ETag 幂等，失败仅下一轮补回。
+                        final com.microsoft.playwright.Page srcPage = source.page();
+                        if (srcPage != null && !srcPage.isClosed()) {
+                            try {
+                                PICK_SYNC_POOL.execute(() ->
+                                        RolePickerPanelSync.syncPanelToBrowser(srcPage, null, map, false));
+                            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+                        }
                     }
                 }
             } catch (Exception ex) {
@@ -315,7 +350,7 @@ final class RolePickerBridgeRegistry {
                     // 旧逻辑：会话级"已删集合"（STATE_DELETED，N-18 已删除）永久记录已删键，导致已删判定命中后跳过元素，
                     // 用户永远无法重新拾取已删除的元素。
                     // 新逻辑：允许用户重新拾取（该会话级已删集合已按 N-18 一并删除，不存在任何永久屏蔽）。删除的语义是"从当前拾取列表移除"，
-                    // 而非"永久封杀该元素"。若需防止跨区域扫描复活，应由浏览器侧 __deletedSigs 临时屏蔽。
+                    // 而非"永久封杀该元素"。若需防止本会话内已删元素复活，应由浏览器侧 __deletedSigs 临时屏蔽。
                 }
                 // 【已禁用"清空所有 frame 的 __rolePicks"】
                 // 原逻辑：删除元素时清空所有 frame 的 __rolePicks/__rolePickSigs/__currentStep。

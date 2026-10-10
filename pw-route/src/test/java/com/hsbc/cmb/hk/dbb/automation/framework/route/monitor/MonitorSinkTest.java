@@ -2,7 +2,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
@@ -24,22 +23,12 @@ import static org.mockito.Mockito.when;
 
 /**
  * MonitorSink 观测与响应断言验证：请求记录、按 pattern 匹配响应断言、
- * JSONPath 断言（IO 线程异步）、超时标记与 drain 消费。
+ * JSONPath 断言（调度线程同步）、超时标记与 drain 消费。
  */
 public class MonitorSinkTest {
 
-    private RouteIoExecutor io;
-
     private MonitorSink newSink() {
-        return new MonitorSink(io);
-    }
-
-    @After
-    public void tearDown() {
-        if (io != null) {
-            io.close();
-            io = null;
-        }
+        return new MonitorSink();
     }
 
     private Request mockRequest(String url) {
@@ -119,7 +108,6 @@ public class MonitorSinkTest {
 
     @Test
     public void jsonPathAssertionsPassOnMatch() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/user", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.code", 0)
@@ -138,7 +126,6 @@ public class MonitorSinkTest {
 
     @Test
     public void jsonPathAssertionsFailOnMismatch() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/user", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.code", 1)          // 实际 0 → 失败
@@ -156,7 +143,6 @@ public class MonitorSinkTest {
 
     @Test
     public void bodyContainsWorksOnHtmlResponse() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/page", RouteCapability.MONITOR)
                 .expectBodyContains("transaction ok")
                 .build();
@@ -178,7 +164,6 @@ public class MonitorSinkTest {
 
     @Test
     public void formFieldWorksOnFormUrlEncodedResponse() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/form", RouteCapability.MONITOR)
                 .expectFormField("token", "abc")
                 .build();
@@ -200,7 +185,6 @@ public class MonitorSinkTest {
 
     @Test
     public void jsonPathOnNonJsonResponseFailsWithNotApplicable() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/xml-api", RouteCapability.MONITOR)
                 .expectJsonPath("$.code", 0)
                 .build();
@@ -298,7 +282,6 @@ public class MonitorSinkTest {
      */
     @Test
     public void missingContentTypeFailureCarriesResponseDiagnosis() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/leftmenu", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.enableAdminTools", "Y")
@@ -334,7 +317,6 @@ public class MonitorSinkTest {
      */
     @Test
     public void bodyIsSnapshottedOnce_assertionNeverTouchesHandleAgain() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/leftmenu", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.enableAdminTools", "Y")
@@ -363,7 +345,6 @@ public class MonitorSinkTest {
      */
     @Test
     public void reclaimedResponseHandleIsInconclusive_notFailure() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/leftmenu", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.enableAdminTools", "Y")
@@ -403,7 +384,7 @@ public class MonitorSinkTest {
         ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .build();
-        MonitorSink sink = new MonitorSink(io, null, 2);
+        MonitorSink sink = new MonitorSink(null, 2);
 
         for (int i = 1; i <= 5; i++) {
             sink.recordRequest(mockRequest("https://host/api/users/" + i), spec);
@@ -419,11 +400,10 @@ public class MonitorSinkTest {
     }
 
     /**
-     * 等待 IO 线程完成 JSONPath 断言：关闭 IO 池会等待在途任务完成（优雅停机），
-     * 之后 drain 即拿到含 jsonPath 断言结果的快照。无需轮询，无竞态。
+     * 取回断言结果快照：body 断言已在调度线程<b>同步</b>执行完（2026-10-10 同步化，
+     * 不再需要等待 IO 线程落定），drain 即拿到含断言结果的快照。无需轮询，无竞态。
      */
     private CapturedExchange awaitJsonPathAssertion(MonitorSink sink) {
-        io.close(); // awaitTermination 等待 jsonPath 断言任务落定
         return sink.drain().get(0);
     }
 }

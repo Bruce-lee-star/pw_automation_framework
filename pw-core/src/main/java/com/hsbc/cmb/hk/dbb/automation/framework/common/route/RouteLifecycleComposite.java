@@ -11,8 +11,8 @@ import java.util.List;
  * 多实现路由生命周期组合代理（核心层）。
  *
  * <p>背景：{@link RouteLifecycleRegistry} 原为「单实例可替换」（register 覆盖），web 侧经
- * {@code get()} 调用清理。新增 route V2 模块后，V2 也需要在同一生命周期挂点被驱动收尾
- * （否则 V2 runtime 成为"孤儿"）。本类在不改变 register 替换语义的前提下，为 get() 返回
+ * {@code get()} 调用清理。新增 route 模块实现后，它也需要在同一生命周期挂点被驱动收尾
+ * （否则 runtime 成为"孤儿"）。本类在不改变 register 替换语义的前提下，为 get() 返回
  * 一个聚合代理：primary（可替换实现）+ additions（追加实现）。
  *
  * <p>分发契约：

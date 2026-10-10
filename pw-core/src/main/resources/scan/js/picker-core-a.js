@@ -11,7 +11,6 @@
               if (window.__rolePickScroll) document.addEventListener('scroll', window.__rolePickScroll, true);
               if (window.__rolePickActive) return;   // 已在拾取中：仅保活监听，不重置状态/不重复定义库
               window.__rolePickActive = true;
-              window.__scanMode = 'pick';   // 手动拾取模式（点击元素即定位）
               window.__rolePicks = window.__rolePicks || [];
               window.__steps = window.__steps || [];
               // 保留"进行中的 step"：跨页面切换（弹窗打开/关闭）会先 applyPickState 把父页/弹窗的
@@ -37,36 +36,6 @@
               // 或多页跟随）用一次性守卫跳过这近千行的重解析/重编译，点击"开始"的端到端延迟显著下降；
               // 所有对外入口（window.__recordPick / __computePick / __pickSig / __sigKey /
               // __persistPickState 等）都挂在 window 上会持续存活，跳过定义后仍可被点击 handler 正常调用。
-              // 自动推断录制根容器（辅助函数，当前不再被默认使用）：
-              // 历史曾用于"开始拾取默认避开导航"，但用户需要时可整页拾取，故默认不再调用。
-              // 现保留为可选能力——区域扫描与显式根选择走各自逻辑；如需"默认避开导航"可单独调用。
-              // 定义在此处（库守卫之外）并挂到 window，避免被守卫跳过导致潜在"未定义"。
-              // 策略：① 优先 <main>；② 否则返回"面积最大、且自身不是 landmark"的内容容器；③ 都找不到返回 null。
-              function autoDetectRoot() {
-                try {
-                  var mainEl = document.querySelector('main');
-                  if (mainEl) return 'main';
-                  var LANDMARK = 'nav, header, aside, footer, [role=navigation], [role=banner], [role=complementary], [role=contentinfo]';
-                  var best = null, bestArea = 0;
-                  var all = document.querySelectorAll('body > *, body');
-                  for (var i = 0; i < all.length; i++) {
-                    var el = all[i];
-                    if (!el || el.nodeType !== 1) continue;
-                    if (el.matches && el.matches(LANDMARK)) continue;            // 跳过导航类 landmark
-                    var r = el.getBoundingClientRect();
-                    var area = (r.width || 0) * (r.height || 0);
-                    // 直接子级里若含 landmark（如 leftmenu 与内容并列），取该非 landmark子级为根
-                    if (area > bestArea) { bestArea = area; best = el; }
-                  }
-                  if (best && best !== document.body) {
-                    // 用稳定选择器表达：优先 id，其次 tag
-                    if (best.id) return '#' + best.id;
-                    return best.tagName ? best.tagName.toLowerCase() : null;
-                  }
-                } catch (e) { /* 推断失败忽略 */ }
-                return null;
-              }
-              window.autoDetectRoot = autoDetectRoot;
               if (!window.__rolePickerLib) {
               var kGlobalAriaAttributes = ['aria-atomic','aria-busy','aria-controls','aria-current','aria-describedby','aria-details','aria-disabled','aria-dropeffect','aria-errormessage','aria-flowto','aria-grabbed','aria-haspopup','aria-hidden','aria-invalid','aria-keyshortcuts','aria-label','aria-labelledby','aria-live','aria-owns','aria-relevant','aria-roledescription'];
               function hasGlobalAriaAttribute(e) {
@@ -627,13 +596,9 @@
                 // "#app > div:nth-of-type(2) > span"，既有稳定锚点又保留局部层级，鲁棒性显著提升。
                 // 上限放宽到 12 层（仅作锚点寻找，不计入选择器长度），避免极端深嵌套时仍退化为纯布局链。
                 //
-                // 【关键限定】该锚点增强**仅在"非区域扫描态"启用**：
-                //   区域扫描（window.__roleScanRoot 非空）无差别遍历区域内全部元素，大量无语义布局 div
-                //   会退化出纯 tag 位置链，本就该被 __recordPick 的 __isNthOnlyCss 拦截；若此处先给它加上
-                //   "#app " 锚点前缀，__isNthOnlyCss 因见到 '#' 而 return false，导致拦截失效、记录下
-                //   "#app > div:nth-of-type(2) > ..." 这种长 css（即"区域选择出现很长 css"的回归根因）。
-                //   因此区域态保持原始纯位置链，__isNthOnlyCss 才能正确判真并拦截噪音；
-                //   手动点选态保留锚点前缀，与 page.pause 一致地提升单点元素的 css 兜底稳定性。
+                // 【关键限定】该锚点增强仅在"无锚点位置链"（__isNthOnlyCss 判真）时启用：
+                //   纯 tag 位置链（如 "div:nth-of-type(3) > div"）随布局微变即失效，补一个最近的语义锚点前缀
+                //   （#id / .class / [attr]）可显著提升单点元素 css 兜底的稳定性，与 page.pause 的取向一致。
                 // 附加防御：若原始 css 已是整页级骨架链（含 body / html 段落），绝不画蛇添足加锚点——
                 // 这类链无业务价值，加了锚点（如 ".Mozilla body > ..."）反而绕开 __recordPick 的
                 // body 开头拦截、记录下更长更废的选择器。
@@ -674,11 +639,8 @@
               // 注意：只要路径中**任意一段**带 #id / .class / [attr]，就认为有锚点而放行，
               // 因为该段能把定位约束在一个语义节点上，后续的 nth-of-type 只是相对偏移。
               //
-              // 【适用范围】仅用于**区域扫描**，由 window.__roleScanRoot 非空判定区域态
-              // （注意不能用 __scanMode：__roleScanPage 入口会把它统一覆写为 'page'）。
-              // 区域扫描 querySelectorAll('*') 无差别遍历，区域内大量无语义布局 div 会退化出这类
-              // 路径，是噪音的唯一来源，需要过滤。而手动点选 / 整页扫描不使用本判定——page.pause()
-              // 的 selectorGenerator 永远产出选择器、从不拒绝录制元素，那两个场景保持与 pause 一致。
+              // 【适用范围】以"是否纯位置链"为唯一判据（无 #id / .class / [attr] 锚点即判为噪音）；
+              //   调用点见上方 anchor 增强分支。
               function __isNthOnlyCss(css) {
                 if (!css) return false;
                 var segs = css.split(' > ');

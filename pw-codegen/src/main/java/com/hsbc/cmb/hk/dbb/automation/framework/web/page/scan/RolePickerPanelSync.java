@@ -76,10 +76,11 @@ final class RolePickerPanelSync {
     }
 
     /**
-     * 【关键修复"整页/区域扫描后 iframe 内元素不进面板"】
+     * 【关键修复"iframe 内元素不进面板"】（原标题为"整页/区域扫描后…"，扫描功能已整体移除，
+     * 手动拾取 iframe 元素同样需要本合并）。
      * 由 Java 侧遍历 page.frames()，读回各 iframe 自己的 window.__rolePicks（Playwright 协议访问不受
      * file:// 跨源限制），按 sigKey 去重后显式合并进【主框架】window.__rolePicks 并触发渲染，使面板与
-     * readPickSnapshot（读主框架）都能看到 iframe 内元素。整页扫描与区域扫描共用。
+     * readPickSnapshot（读主框架）都能看到 iframe 内元素。
      */
     static void mergeFramePicksToMain(Page page, LinkedHashMap<String, RoleEntry> javaPickBySig) {
         if (page == null || page.isClosed()) return;
@@ -211,7 +212,6 @@ final class RolePickerPanelSync {
             String newSig = sig.toString();
             String prev = LAST_SYNC_SIG.get(page);
             if (newSig.equals(prev)) return;
-            LAST_SYNC_SIG.put(page, newSig);
             // 只在"确实变了、要写回"时输出一条 INFO（空闲轮次在上一行就 return 了，不再刷屏）。
             if (log.isInfoEnabled()) {
                 log.info("[picker][sync] panel write-back: {} element(s) changed", filtered.size());
@@ -230,6 +230,9 @@ final class RolePickerPanelSync {
             // 导航瞬间抖动会把同一轮的关键动作（页类刷新、计数器垫高、监听重挂）一起卡住（实测 30s 停摆）。
             RoleElementPicker.pickerEvalSoft(page, RolePickerScripts.SYNC_PANEL_TO_BROWSER_JS,
                     java.util.Arrays.asList(syncJsonB64, syncDelB64, overwriteNos));
+            // 【修复 ETag 毒化】必须在浏览器侧写回成功后才记签名：否则写回失败时签名已被标为"已同步"，
+            // 后续相同状态永不重投，面板便再也不更新（表现为"点了元素、面板列表不刷新"）。
+            LAST_SYNC_SIG.put(page, newSig);
         } catch (Exception syncE) {
             try { log.warn("[picker] failed to sync the panel to the browser: {}", syncE.getMessage()); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
         }

@@ -459,15 +459,6 @@ public class PlaywrightConfigManager {
     }
 
     /**
-     * 获取元素操作总超时时间（毫秒）
-     * 作为 Playwright 动作类 API（click / fill / check 等）的单次操作超时，
-     * 取代原「sleep + 轮询」重试循环的截止时间。
-     */
-    public int getElementOperationTimeout() {
-        return FrameworkConfigManager.getInt(WebFrameworkConfig.PLAYWRIGHT_ELEMENT_OPERATION_TIMEOUT);
-    }
-
-    /**
      * 是否在失败时自动截图
      */
     public boolean isElementScreenshotOnFailure() {

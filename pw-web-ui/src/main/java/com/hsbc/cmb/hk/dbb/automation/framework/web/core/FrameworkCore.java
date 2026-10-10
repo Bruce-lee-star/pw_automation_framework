@@ -298,10 +298,11 @@ public class FrameworkCore {
     /**
      * 测试完成后的清理（带用例结果，A5 / 2026-09-26）。
      *
-     * <p><b>为什么必须有这个重载</b>：feature 模式下「上个用例失败」的处置取决于 Context 是否承载登录态
-     * （2026-09-28 修订，取代原"一律丢 Page"）：
-     * <b>承载登录态</b>（同一 sessionKey 绑定存在）⇒ <b>保留 Context 与 Page</b>、不重建（失败不污染会话，
-     * 下个用例继续免登录）；<b>无登录态绑定</b> ⇒ 丢弃其 Page（"存活但已坏"，不许跨用例传染）、保留 Context。
+     * <p><b>为什么必须有这个重载</b>：scenario 收尾必须携带本用例真实结果（{@code scenarioFailed}），
+     * 供 {@code PlaywrightManager.cleanupForScenario} 记录失败语义与探针统计。
+     * <b>2026-09-30 收口：无论成败、是否承载登录态，都销毁本 case 的 Context 与 Page</b>
+     * （scenario-scoped 销毁语义）——登录复用统一走 {@code storageState} 快照注入
+     * （凭证是快照而非活体），"保留活 Context 延续登录态"已被废除。
      *
      * <p>实测（test-automation/1.txt 2026-09-26）框架的<b>实际收尾入口</b>是 glue 的 {@code @After}
      * → 本方法（它先于 Serenity {@code testFinished} 执行，且 glue 包内的 {@code @Before/@After} 对
@@ -361,7 +362,8 @@ public class FrameworkCore {
         //    异常处理的作用域必须限定为"当前线程的 scenario 级资源"，与正常路径
         //    afterTest() → PlaywrightManager.cleanupForScenario() 保持一致。
         try {
-            //  A5：异常发生 ⇒ 本用例的 Page 极可能已坏 → 按"失败"收尾（只丢 Page、保留 Context/登录态）。
+            //  A5：异常发生 ⇒ 按"失败"收尾（2026-09-30 收口：无论成败都销毁本 case 的 Context/Page，
+            //  登录复用走 storageState 快照注入）。
             PlaywrightManager.cleanupForScenario(true);
         } catch (Exception cleanupException) {
             logger.error("Failed to clean up scenario resources after exception", cleanupException);

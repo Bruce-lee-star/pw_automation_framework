@@ -51,7 +51,7 @@ public final class RouteLifecycleRegistry {
 
     public static RouteLifecycle get() {
         ensureRouteModuleLoaded();
-        // 多实现聚合：primary 语义不变，additions（如 Route V2 lifecycle）随同一挂点被驱动
+        // 多实现聚合：primary 语义不变，additions（如 Route 生命周期实现）随同一挂点被驱动
         return RouteLifecycleComposite.of(instance, ADDITIONAL);
     }
 

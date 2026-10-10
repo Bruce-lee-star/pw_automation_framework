@@ -2,7 +2,7 @@
                 // 状态外置（对齐 page.pause）：去掉"每次点击全量序列化 localStorage"这一 O(n) 瓶颈，
                 // 点击延迟不再随已拾元素增多而变慢。整页跳转前的最后点击由 pagehide/beforeunload 的
                 // __persistNow 同步即时落盘兜底（见 __persistPickState 定义），不丢失。
-                // —— UI 反馈 + Java 回传 ——（扫描机制已移除：原本该段由 if (!window.__scanning) 包裹）
+                // —— UI 反馈 + Java 回传 ——
                   var prev = t.style.outline;
                   t.style.outline = dup ? '3px solid #ff9800' : (isHover ? '3px solid #29b6f6' : '3px solid #ffeb3b');
                   // 400ms 后直接清除高亮（而非恢复 prev）：避免快速重复点选同一元素时，
@@ -178,7 +178,7 @@
                 window.__lastClickTs = Date.now();
                 window.__lastClickActive = !!window.__rolePickActive;
                 // 【模式闸门】IDLE（待命）态下点击页面不拾取任何元素——必须等用户点"▶ 开始拾取"进入 MANUAL，
-                // 或点"扫描整页/区域扫描"进入对应扫描模式，点击/扫描才有意义。避免 stop 后再次进入 IDLE 时
+                //避免 stop 后再次进入 IDLE 时
                 // 误拾取（日志里"点了 4 个却出 6 个"的诱因之一：拾取库仍注入、active 未随模式复位）。
                 var _mode = window.__roleMode || 'idle';
                 if (_mode === 'idle') return;
@@ -348,6 +348,28 @@
                 } catch (e) {}
                 try { window.__persistNow(); } catch (e) {}
               };
+              // 右键点击（contextmenu）：对齐 page.pause() 对右键交互的录制。
+              // 右键触发 contextmenu（而非 click），语义是"打开上下文菜单"；录制为一次 click 动作（带 rightClick 标记），
+              // 生成 step 时输出 locator.click({ button: 'right' })。不 preventDefault，保留原生右键菜单
+              // （与 page.pause 的"点击即真实交互 + 定位"一致——点击穿透哲学同样适用于右键）。
+              // 因 __recordPick 内部已"首次即时回传"一份不含 rightClick 的 pick 到 Java 内存态，
+              // 故设标记后须再次经 __roleOnPick 回传（按 _sigKey 覆盖），确保 stop 生成能拿到该标记。
+              window.__rolePickContextMenu = function(event) {
+                // 模式闸门：IDLE（待命）态下不拾取（与 click 一致），避免 stop 后再次进入 IDLE 时误拾取。
+                if ((window.__roleMode || 'idle') === 'idle') return;
+                var t = (typeof event.composedPath === 'function' && event.composedPath().length)
+                  ? event.composedPath()[0] : event.target;
+                if (t && t.closest && t.closest('#__rolePanel, #__roleCodeOverlay')) return;
+                var pick = window.__recordPick(t, false);
+                if (!pick) return;
+                pick.rightClick = true;
+                try {
+                  if (typeof window.__sigKey === 'function') pick._sigKey = window.__sigKey(pick);
+                  if (typeof window.__roleOnPick === 'function') window.__roleOnPick(JSON.stringify(pick));
+                  try { console.log('__roleOnPick::' + JSON.stringify(pick)); } catch(_){}
+                } catch (e) {}
+                try { window.__persistNow(); } catch (e) {}
+              };
               window.__rolePickKey = function(event) {
                 if (event.key === 'Escape') { window.__pickDone = true; return; }
                 // 对齐 page.pause() 的 press 录制：输入框聚焦态下按的"实质按键"（Enter/Tab/Escape 之外的
@@ -369,28 +391,9 @@
               };
               // 对齐 page.pause() 的键盘可达性：Tab 聚焦到元素后（focusin），在拾取/hover 模式下
               // 记录一次"键盘拾取"，使纯键盘可达、hover 不出现的元素也能被捕获（如 hover 才显形/被遮挡的控件）。
-              window.__rolePickFocus = function(event) {
-                if (!window.__rolePickActive) return;
-                // 【扫描机制已移除】原条件为「仅扫描模式才继续」，其等价语义是「手动态不通过 focusin 记录」
-                // （否则输入框一获得焦点就逐次连发回传）。扫描模式已不存在，故直接早退，行为不变；
-                // 纯键盘可达元素仍由 hover/点击路径捕获。
-                return;
-                var el = event.target;
-                if (!el || el === window || el === document) return;
-                if (el.closest && el.closest('#__rolePanel, #__roleCodeOverlay')) return;
-                // 【关键修复"点击操作被 focusin 覆盖成 hover"】
-                // 鼠标点击元素会连带触发 focusin（聚焦）。原实现以 isHover=true 记录并覆盖，导致用户明明是
-                // "点击"，生成代码却变成 locator.hover()（尤其 checkbox/button 被误标 hover）。
-                // 修复：focusin 只用于捕获"纯键盘可达、hover/click 都难拾取"的新元素，且一律按「点击（false）」
-                // 记录——聚焦的语义是接下来会交互（点击/按键），记成 hover 不符合动作意图。真正的悬停由
-                // mouseenter 防抖路径（isHover=true）记录，与 focusin 互不冲突。
-                // 同时：若元素已被鼠标 click/mouseenter 记录过，直接放行，避免 focusin 覆盖其 hover/click 类型。
-                try {
-                  var _fsig = (typeof window.__pickSig === 'function') ? window.__pickSig(el) : '';
-                  if (_fsig && window.__sigToPick && window.__sigToPick[_fsig]) return; // 已记录过，勿覆盖
-                } catch (_fe) {}
-                try { window.__recordPick(el, false); } catch (e) {}
-              };
+              // focusin 拾取（原仅扫描模式使用）已随扫描机制移除：手动态不通过 focusin 记录，
+              // 避免输入框获得焦点即逐次回传；保留空实现以兼容 picker-stop 的 removeEventListener 引用。
+              window.__rolePickFocus = function() {};
               // 滚动时重定位 hover 高亮框（__hoverBox 为 position:fixed，否则滚动后高亮框会漂移残留）。
               window.__rolePickScroll = function() {
                 try { if (window.__lastHoverTarget) __showHoverBox(window.__lastHoverTarget); } catch (e) {}
@@ -450,6 +453,8 @@
               document.addEventListener('keydown', window.__rolePickKey, true);
               document.addEventListener('focusin', window.__rolePickFocus, true);
               document.addEventListener('scroll', window.__rolePickScroll, true);
+              // 右键点击（contextmenu）拾取：对齐 page.pause() 的 right-click 录制（见 __rolePickContextMenu）。
+              document.addEventListener('contextmenu', window.__rolePickContextMenu, true);
               // ===== 诊断：额外鼠标事件监听（仅记录、不拦截、不影响拾取）=====
               // 排查"刷新后点击无反应 / 点击卡顿"：记录 mousedown/up/dblclick/contextmenu 是否真到达 document。
               // 双写：window.__roleMouseLog 环形缓冲（导航后可由 Java 经 page.evaluate 回读）

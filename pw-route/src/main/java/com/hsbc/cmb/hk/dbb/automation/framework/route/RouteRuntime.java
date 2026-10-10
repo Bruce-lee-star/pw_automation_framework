@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Route V2 运行时角色契约 —— 每个 BrowserContext 一份，模块全部状态与线程的装配点。
+ * Route 运行时角色契约 —— 每个 BrowserContext 一份，模块全部状态与线程的装配点。
  *
  * <p>设计对齐企业级 DI 范式（WEB-P1-6）：本接口是「运行时」角色，生产实现
  * {@link RouteRuntimeImpl} 经 {@link RouteRuntimeFactory} SPI 创建，
@@ -30,7 +30,7 @@ import java.util.Map;
  *   <li><b>稳定公开契约</b>（业务/框架消费面，语义稳定）：
  *       {@link #register}/{@link #stop}/{@link #stopApi}/{@link #dispatch}/{@link #close}/
  *       {@link #dumpCapturedApis}/{@link #drainSettledAssertionFailures}/{@link #metrics}；</li>
- *   <li><b>模块内部契约</b>（{@code @apiNote framework-internal}，仅 V2 子包协作者使用）：
+ *   <li><b>模块内部契约</b>（{@code @apiNote framework-internal}，仅本模块内部协作者使用）：
  *       {@link #ruleSnapshot}/{@link #claims}/{@link #pending}/{@link #ops}/{@link #io}/
  *       {@link #recordObservation}/{@link #isDegraded}；</li>
  * </ul>

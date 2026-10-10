@@ -5,7 +5,7 @@ import com.microsoft.playwright.BrowserContext;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * Route V2 运行时工厂（SPI 契约）。
+ * Route 运行时工厂（SPI 契约）。
  *
  * <p>创建收口：{@link RouteEngine} 不再直接 new 运行时，经 {@link RouteRuntimeFactoryRegistry}
  * 解析本接口，使运行时整体可经 SPI/factory 替换（真多态 + 测试可注入替身）。

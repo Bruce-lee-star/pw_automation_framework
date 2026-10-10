@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 /**
- * Route V2 运行时配置（不可变，发布后不修改）。
+ * Route 运行时配置（不可变，发布后不修改）。
  *
  * <p>默认值面向企业级稳定性：挂起额度、IO 并发、预算并发都取保守值——
  * 越界行为一律 fail-open（fallback 放行），不会因配置失误阻塞业务请求。

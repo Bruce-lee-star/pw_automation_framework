@@ -127,7 +127,8 @@ public final class CaptureSink {
      *
      * <p>与请求侧 {@link #recordRequest} 使用同一 {@link ApiSpec} 实例，配对关系由调用方
      * （{@code RouteRuntimeImpl} 的响应轮询）保证，故<b>不再做 URL 匹配</b>。
-     * 响应体采集（{@code captureBody}）交 IO 线程读取（截断 + 入队）；未开启则直接入队。
+     * 响应体采集（{@code captureBody}）在本线程（响应轮询线程）<b>就地</b>读取（3xx 短路、
+     * BodyStore 留存，见 {@link #captureBodyNow}）；未开启则直接入队。
      *
      * @param spec     该请求在 dispatch 时命中的规则（与 recordRequest 同一实例）
      * @param response 已到达的真实响应（本地持有）；null 安全（忽略）
@@ -176,9 +177,21 @@ public final class CaptureSink {
      */
     private void captureBodyNow(CapturedExchange snapshot, ApiSpec spec, Response response) {
         String contentType = null;
-        byte[] bytes = null;
         try {
             contentType = response.headers().get("content-type");
+        } catch (Throwable ignored) {
+            // headers() 为客户端本地快照（协议事件已携带），正常不抛；防御性兜底。
+        }
+        // 3xx 重定向：响应体通常不可用（官方语义：重定向响应无 body 或 body 不可读）。
+        // 显式短路、不发起 body() 协议调用 —— 避免无谓驱动往返 + 误计 bodyReadFailures；
+        // location 等头已由 markResponse 保留，业务断言直接可用。
+        int status = response.status(); // status() 为本地快照（事件已携带），零协议往返
+        if (status >= 300 && status < 400) {
+            enqueue(snapshot, null, contentType, false);
+            return;
+        }
+        byte[] bytes = null;
+        try {
             bytes = response.body();
         } catch (Throwable t) {
             bodyReadFailures.incrementAndGet();

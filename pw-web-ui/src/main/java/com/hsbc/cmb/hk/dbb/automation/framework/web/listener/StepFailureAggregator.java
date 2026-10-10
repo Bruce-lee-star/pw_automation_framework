@@ -195,10 +195,10 @@ final class StepFailureAggregator {
     }
 
     /**
-     * Route V2：每个步骤结束时检查 V2 MONITOR 断言失败并即时抛 AssertionError。
+     * Route：每个步骤结束时检查 MONITOR 断言失败并即时抛 AssertionError。
      *
      * <p>与 {@link #checkAndFailOnApiAssertions}（老版 pw-route）同一 seam，但走独立的
-     * {@link RouteAssertionRegistry} SPI：V2 探针未注册（classpath 无 pw-route 或未使用）时
+     * {@link RouteAssertionRegistry} SPI：探针未注册（classpath 无 pw-route 或未使用）时
      * 空判断跳过，不改变既有行为。
      *
      * <p>幂等性：探针的 {@code drainAndResolveFailures()} 是<b>消费式</b>——失败被取走即清空，
@@ -208,7 +208,7 @@ final class StepFailureAggregator {
     static void checkAndFailOnRouteAssertions() {
         RouteAssertionProbe probe = RouteAssertionRegistry.get();
         if (probe == null) {
-            // V2 模块未启用：跳过（与老版 route 未启用语义一致）
+            // 路由模块未启用：跳过（与老版 route 未启用语义一致）
             return;
         }
         List<RouteAssertionFailure> failures = probe.drainAndResolveFailures();
@@ -233,7 +233,7 @@ final class StepFailureAggregator {
     }
 
     /**
-     * Route V2：用例收尾兜底——检查 V2 MONITOR 断言失败并标记测试结果为 FAILURE。
+     * Route：用例收尾兜底——检查 MONITOR 断言失败并标记测试结果为 FAILURE。
      *
      * <p>与老版 {@link #checkAndMarkApiAssertionFailures} 同一 seam 语义：本方法在
      * {@code testFinished} 收尾阶段执行，<b>只标记不抛出</b>（抛异常会打断 Serenity 自身的

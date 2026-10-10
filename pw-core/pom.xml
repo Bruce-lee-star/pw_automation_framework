@@ -40,11 +40,14 @@
         </dependency>
 
         <!-- CT2-17：core 首次引入模块内单测（LazyInit reset 语义 + AsyncPool 超时裁决器）。
-             纯 JUnit 4（与 pw-route 及 test-automation 的 runner 侧统一），不依赖 Serenity。 -->
+         纯 JUnit 4（与 pw-route 及 test-automation 的 runner 侧统一），不依赖 Serenity。
+         junit:junit 未纳入根 POM DM（JUnit5 迁移时已移除），此处显式钉 4.13.2 版本（适配 JUnit 4），
+         避免离线 / 多模块 reactor 下因版本缺省解析不一致导致 surefire 类加载异常（测试类 ClassNotFound）。 -->
         <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <scope>test</scope>
+        <groupId>junit</groupId>
+        <artifactId>junit</artifactId>
+        <version>4.13.2</version>
+        <scope>test</scope>
         </dependency>
 
     </dependencies>

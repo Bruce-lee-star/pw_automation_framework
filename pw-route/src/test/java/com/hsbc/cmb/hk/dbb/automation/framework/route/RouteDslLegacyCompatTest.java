@@ -311,7 +311,7 @@ public class RouteDslLegacyCompatTest {
         assertEquals((long) 1, (long) RouteEngine.activeRuntimes());
 
         RouteDsl.clear(ctx);
-        assertEquals("clear(context) 必须关闭 V2 运行时", (long) 0, (long) RouteEngine.activeRuntimes());
+        assertEquals("clear(context) 必须关闭 Route 运行时", (long) 0, (long) RouteEngine.activeRuntimes());
 
         mockContext();
         RouteDsl.on(ctx).api("/a").monitor().expectStatus(200).timeout(60).done().start();

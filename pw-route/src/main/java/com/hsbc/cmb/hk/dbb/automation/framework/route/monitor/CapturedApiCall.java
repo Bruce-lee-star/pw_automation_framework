@@ -23,8 +23,8 @@ import java.util.Set;
  * <ul>
  *   <li><b>敏感头脱敏</b>：authorization / cookie / set-cookie / token 等敏感头值一律打码为
  *       {@link SensitiveDataSanitizer#maskToken()}（与全框架统一掩码一致），只保留键名；</li>
- *   <li><b>体截断</b>：请求体预览 ≤ 2 KiB；响应体受 {@code captureBodyLimitBytes} 约束，
- *       超限截断并置 {@link #responseBodyTruncated()}；</li>
+ *   <li><b>体截断</b>：请求体预览 ≤ 2 KiB；响应体<b>整存不截断</b>（{@code captureBodyLimitBytes}
+ *       字段保留兼容旧写法但不再参与截断，{@link #responseBodyTruncated()} 恒 false）；</li>
  *   <li><b>防御拷贝</b>：header 快照不可变，杜绝调用方修改内部状态（EI_EXPOSE_REP2）。</li>
  * </ul>
  *
@@ -35,8 +35,8 @@ import java.util.Set;
  * @param requestBodyPreview     请求体预览（≤2 KiB；null=无请求体）
  * @param responseStatus         实际响应状态码（未等到响应为 null，配合 timedOut）
  * @param responseHeaders        响应头（敏感值已脱敏，不可变）
- * @param responseBody           响应体（captureBody 开启且有响应才非 null；受截断上限约束）
- * @param responseBodyTruncated  响应体是否被截断（超出 captureBodyLimitBytes）
+ * @param responseBody           响应体（captureBody 开启且有响应才非 null；整响应保留不截断）
+ * @param responseBodyTruncated  响应体是否被截断（恒 false：当前策略整响应保留）
  * @param durationMs             请求到响应耗时（毫秒；未响应为 -1）
  * @param timedOut               是否在超时窗口内未等到响应
  * @param recordedAtMillis       记录创建时刻（epoch millis）

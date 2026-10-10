@@ -14,7 +14,7 @@ public interface EngineControl {
      * 停止指定上下文的路由引擎，并告知「该 Context <b>正被主动关闭</b>」（T8-5）。
      *
      * <p><b>为什么需要这个意图信号</b>：路由规则（{@code context.route()} 注册）的生命周期本可终结于两种途径 ——
-     * ① 逐条 {@code unroute}（Context 仍需存活，如 feature 档跨用例复用）；
+     * ① 逐条 {@code unroute}（Context 仍需存活的路径，如会话切换 / 收尾前复用）；
      * ② 随 {@code context.close()} 由驱动<b>原生释放</b>。
      * 二者互斥：既然 Context 马上要关，逐条 unroute 就是纯浪费的<b>同步协议往返</b>
      * （每条一次 {@code setNetworkInterceptionPatterns}，客户端无超时、实测有 10s 未确证的记录），

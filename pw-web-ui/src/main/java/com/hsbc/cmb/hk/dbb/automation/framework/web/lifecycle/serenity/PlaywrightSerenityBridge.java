@@ -147,13 +147,14 @@ public class PlaywrightSerenityBridge {
     }
 
     /**
-     * Scenario 模式下重置自定义配置（保留 Context 实例）
+     * 收尾后重置线程级自定义配置（2026-09-30 收口后统一每 case 重建 Context，本方法在 Context
+     * 已销毁后调用，仅清理线程级配置标志与 PAGE_KEY；方法名保留旧档位命名以兼容调用方）。
      */
     static void resetCustomContextOptionsForScenarioMode() {
-        VerboseLogging.logInfoIfVerbose(logger, "Resetting custom context options for Scenario mode (preserving Context)...");
+        VerboseLogging.logInfoIfVerbose(logger, "Resetting custom context options (context already closed, rebuilding next case)...");
         cleanupThreadLocals(false);
         TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
-        VerboseLogging.logInfoIfVerbose(logger, "Custom context options reset completed (Context preserved)");
+        VerboseLogging.logInfoIfVerbose(logger, "Custom context options reset completed");
     }
 
     // ==================== Context + Page 重建 ====================
@@ -176,13 +177,14 @@ public class PlaywrightSerenityBridge {
     /**
      * 清理页面状态（但不关闭 Context/Page）。
      *
-     * <p>用于 Feature 模式下 scenario 之间复用 Context/Page：
+     * <p>会话切换 / 收尾前的页面状态清理（2026-09-30 收口后每 case 重建 Context，本方法仅用于
+     * 切换会话等不重建 Context 的路径）：
      * <ul>
      *   <li>保留所有 Cookie（维持登录状态）；</li>
      *   <li><b>承载登录态时同时保留 LocalStorage/SessionStorage</b> —— 它们与 Cookie 一样属于
      *       「会话状态」：框架保存会话用的 {@code context.storageState()} 快照本身就含
-     *       {@code origins[].localStorage}（见 {@code SessionStore.saveSession}），而 feature 复用
-     *       路径不会再注入该快照，清掉它就把会话弄成"半有效"：<b>服务端 Cookie 仍有效，但被测 SPA
+     *       {@code origins[].localStorage}（见 {@code SessionStore.saveSession}）；若在保留 Context
+     *       的切换路径上清掉它，就把会话弄成"半有效"：<b>服务端 Cookie 仍有效，但被测 SPA
      *       会自行判定已登出</b>。实测（DBB，2026-09-28）：localStorage 里有
      *       {@code hsbc.session.active.lastTime}、{@code TT_DBB_KEEPALIVE}、
      *       {@code lastKnownProfileValue} 等 21 个键，被清空后前端渲染
@@ -194,8 +196,8 @@ public class PlaywrightSerenityBridge {
     static void cleanupPageState() {
         Page page = TestContextHolder.get().get(PlaywrightManager.PAGE_KEY);
         BrowserContext context = TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
-        //  复用模式（reuse.context.within.feature）下，用例级键可能已被 @After 清空 →
-        //  回退线程级记录，确保「关闭多余 tab / 复位主页面引用」在复用路径上依然生效。
+        //  2026-09-30 收口后每 case 重建 Context：用例级键可能在收尾已被清空 →
+        //  回退线程级记录，确保「关闭多余 tab / 复位主页面引用」在切换会话/收尾路径上依然生效。
         if (page == null) {
             page = PlaywrightManager.currentPageForThread();
         }
@@ -358,7 +360,7 @@ public class PlaywrightSerenityBridge {
      *
      * <p><b>为什么必须独立于 Context 存在性</b>：信道 = {@code Playwright} 实例级（一个实例 = 一条
      * Connection = 一个 Node 驱动进程），Browser 下所有 Context 共享它。因此"本线程当前没有 Context"
-     * 完全不能推出"没有坏连接可承接" —— 恰恰相反，credential / scenario 档每用例都新建 Context，
+     * 完全不能推出"没有坏连接可承接" —— 恰恰相反，2026-09-30 收口后每 case 都新建 Context，
      * 而新 Context 就建在同一条（可能已被污染的）连接上。
      *
      * <p>未注册 SPI / 探针异常 ⇒ 视为可用（fail-open，不打断流程）。
@@ -379,7 +381,7 @@ public class PlaywrightSerenityBridge {
 
     private static void recoverIfConnectionUnresponsive() {
         //  ⚠️ 2026-09-30 修复（原实现有致命早退）：判据原为「当前线程是否存在 Context」，
-        //  context == null 即 return —— 而 credential / scenario 档【每用例关闭 Context】，
+        //  context == null 即 return —— 而收口后每 case【关闭 Context】，
         //  用例起点恒为 null ⇒ 恢复逻辑**永不执行**。但信道污染是【Playwright 实例级】的
         //  （一个实例 = 一条 Connection = 一个 Node 驱动进程），与 Context 是否存在无关：
         //  新 Context 会建在同一条坏连接上，照样卡满 30s ⇒ scenario 之间互相污染。
@@ -503,9 +505,9 @@ public class PlaywrightSerenityBridge {
         // 仅当本 scenario 实际关闭了 Context 才关闭本线程 Browser，下一 scenario 首次 getBrowser() 懒重建；
         // 2026-09-30 收口：已无 feature 模式"跨场景复用同一 Context"，故不再有"复用期不关 Browser"分支；
         // 自定义并发执行器分区模式跳过（跨线程键错配防护）。
-        //  T8-0：credential 档每 scenario 都会关 Context，但必须<b>保留 Browser 进程</b>
-        //  （否则退化成"每用例重启浏览器"，与"轻量 newContext 即可隔离"的初衷相悖）——
-        //  这是它与 scenario 档在 Browser 维度上的唯一差异（见 FIX_PLAN §10.1 I-12 第三维度）。
+        //  T8-0：2026-09-30 收口后每 case 都关 Context，但必须<b>保留 Browser 进程</b>
+        //  （否则退化成"每用例重启浏览器"，与"轻量 newContext 即可隔离"的初衷相悖）。
+        //  Browser 跟随 Context 边界，下一 case 首次 getBrowser() 懒重建。
         if (scenarioClosedContext) {
             closeBrowserForCurrentThreadIfApplicable();
         }

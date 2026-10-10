@@ -20,15 +20,15 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * P0 端到端印证：Route V2 MONITOR 断言失败必须透出为<b>用例失败</b>，不可静默判 PASS（假绿）。
+ * P0 端到端印证：Route MONITOR 断言失败必须透出为<b>用例失败</b>，不可静默判 PASS（假绿）。
  *
- * <p>链路：V2 {@code MonitorSink} 结算失败（status/body/超时定案）→ {@code RouteAssertionProbeImpl}
+ * <p>链路：{@code MonitorSink} 结算失败（status/body/超时定案）→ {@code RouteAssertionProbeImpl}
  * 经 {@link RouteAssertionRegistry} 暴露 → 步骤结束时
  * {@link StepFailureAggregator#checkAndFailOnRouteAssertions()} 抛 {@link AssertionError}
  * （沿 StepInterceptor → Cucumber → JUnit4 传播，IDE 正确标红）；用例收尾
  * {@link StepFailureAggregator#checkAndMarkRouteAssertionFailures(TestOutcome)} 兜底置 FAILURE。
  *
- * <p>本测试在 web 模块内（不依赖 route-v2 实现类，用 registry 注册桩探针）验证链路末端：
+ * <p>本测试在 web 模块内（不依赖 route 实现类，用 registry 注册桩探针）验证链路末端：
  * 消费式语义保证两条上报路径天然防重（第二次调用为空）、探针未注册时安全跳过。
  */
 public class RouteAssertionFailureSurfacesToScenarioTest {

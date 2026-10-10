@@ -690,9 +690,9 @@ public class PlaywrightListener implements StepListener {
             }
         }
 
-        //  2026-09-28 决策：此处不再无条件 closePage/closeContext —— 同一 sessionKey 下失败同样要
-        //  保留 Context/Page（免登录复用），只清用例级资源。是否真正拆除由 cleanupAfterAbnormalTermination
-        //  内的统一判据（当前 Context 是否承载登录 sessionKey）决定，避免两条清理链策略漂移。
+        //  2026-09-30 收口：步骤失败走异常终止清理 —— clearThreadResourcesOnCaseAbort()
+        //  统一销毁本线程 Context/Page（scenario-scoped，失败不复用活 Context）；
+        //  登录复用走 storageState 快照注入（凭证是快照而非活体）。
         VerboseLogging.logInfoIfVerbose(logger,
                 "Last step failed - cleaning up case-scoped resources (scenario-level restart)");
         cleanupAfterAbnormalTermination("lastStepFailed");
@@ -1000,7 +1000,9 @@ public class PlaywrightListener implements StepListener {
     /**
      * 失败链中含 Playwright 异常时，向 route 上报"驱动连接已不可信"（单向信号；幂等）。
      *
-     * <p>只上报、不清零：route 收尾读取后会自行清除，故本类无需"每场景清零"钩子。</p>
+     * <p>只上报、不清零：清零发生在<b>场景边界</b>（{@code ScenarioLifecycle.cleanupForScenario} 统一
+     * reset，覆盖"失败 case 未注册 route 无 runtime 消费"的情形）与 route runtime 收尾
+     * （{@code RouteRuntimeImpl.close()} 消费即清零）——故本类无需"每场景清零"钩子。</p>
      *
      * @param t 步骤失败的异常（可为 null）
      */
@@ -1225,9 +1227,8 @@ public class PlaywrightListener implements StepListener {
             boolean scenarioFailed = result != null && result.getResult() != null
                     && (result.getResult() == TestResult.FAILURE || result.getResult() == TestResult.ERROR);
             ScenarioTraceRecorder.onScenarioEnd(LogContext.currentScenarioId(), scenarioFailed);
-            //  把本用例真实结果告知收尾链路（2026-09-28 修订语义）：feature 模式下
-            //  Context 承载登录态 ⇒ 失败也保留 Context 与 Page（不重建，下个同 sessionKey 用例继续免登录）；
-            //  无登录态绑定 ⇒ 丢弃本用例 Page（防"存活但已坏"跨用例传染），Context 保留。
+            //  把本用例真实结果告知收尾链路（2026-09-30 收口）：无论成败、是否承载登录态，
+            //  统一销毁本 case 的 Context/Page（scenario-scoped）；登录复用走 storageState 快照注入。
             //  详见仓库根 FIX_PLAN.md §1.1（I-1）与 §2.0（时效声明）。
             PlaywrightManager.cleanupForScenario(scenarioFailed);
 
@@ -1567,7 +1568,7 @@ public class PlaywrightListener implements StepListener {
     }
 
     /**
-     * Route V2：步骤结束时检查 V2 MONITOR 断言失败（抛 AssertionError 判红）。
+     * Route：步骤结束时检查 MONITOR 断言失败（抛 AssertionError 判红）。
      * 消费式 drain 天然幂等——同一场景后续步骤/用例收尾不会重复上报。
      */
     private void checkAndFailOnRouteAssertions() {
@@ -1575,7 +1576,7 @@ public class PlaywrightListener implements StepListener {
     }
 
     /**
-     * Route V2：用例收尾兜底——检查 V2 MONITOR 断言失败并标记 FAILURE（不抛）。
+     * Route：用例收尾兜底——检查 MONITOR 断言失败并标记 FAILURE（不抛）。
      * 若步骤结束路径已抛过，此处 drain 到空列表自然跳过。
      */
     private void checkAndMarkRouteAssertionFailures(TestOutcome result) {

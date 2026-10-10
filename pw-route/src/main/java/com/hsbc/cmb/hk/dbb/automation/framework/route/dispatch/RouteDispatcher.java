@@ -387,9 +387,7 @@ public final class RouteDispatcher {
     private void dispatchMock(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime, HitTrace trace) {
         // 事件线程取好请求句柄：IO 线程的 fulfill 分支也要用同一份"完整请求信息"上报结果
         Request request = route.request();
-        boolean hasStaticBody = spec.mockStatus() != null || spec.mockBody() != null
-                || spec.mockBodyBytes() != null
-                || spec.mockContentType() != null || !spec.mockHeaders().isEmpty();
+        boolean hasStaticBody = hasStaticBody(spec);
         if (hasStaticBody && spec.mockReplacements().isEmpty()
                 && spec.conditionalReplacements().isEmpty()) {
             RouteAction.fulfill(route, spec);
@@ -543,6 +541,64 @@ public final class RouteDispatcher {
         mockTask.run();
     }
 
+    /** 规则是否声明了静态伪造体（status / body / bytes / contentType / headers 任一非空）。 */
+    private static boolean hasStaticBody(ApiSpec spec) {
+        return spec.mockStatus() != null || spec.mockBody() != null
+                || spec.mockBodyBytes() != null
+                || spec.mockContentType() != null || !spec.mockHeaders().isEmpty();
+    }
+
+    /**
+     * 已物化的真实响应（F5：DELAY+intercept 预取）。
+     *
+     * <p>在<b>调用线程</b>（泵线程）完成 fetch + 读 body + dispose 后，交付段不再触碰任何
+     * 驱动句柄 —— 到点回调只做 {@code fulfillWithBody}（sendMessageAsync），零同步驱动调用。</p>
+     */
+    private record MaterializedResponse(int status, Map<String, String> headers, byte[] body, long fetchMs) {
+    }
+
+    /**
+     * 调用线程就地物化真实响应（O1：不派发 IO 池，避免并发驱动同一条连接）。
+     *
+     * <p>与 {@link #dispatchMock} 的 intercept 分支同一语义（RequestSnapshot 值拷贝 +
+     * {@code runtime.request()} 独立 HTTP 客户端），区别是这里<b>立即读 body</b>——
+     * 因为 DELAY 到点后的交付只做 {@code fulfillWithBody}，body 必须在物化时刻取走。</p>
+     *
+     * @return 物化结果；fetch 失败 / 预算耗尽 / 响应不可用时返回 empty（调用方 fail-open）
+     */
+    private static Optional<MaterializedResponse> materializeResponse(Route route, ApiSpec spec, RouteRuntime runtime) {
+        // 事件线程（此刻 Request 句柄仍有效）取快照（值类型、复制 headers）
+        final RouteAction.RequestSnapshot snapshot = RouteAction.RequestSnapshot.of(route.request());
+        final APIRequestContext ctx = runtime.request();
+        long fetchStartNs = System.nanoTime();
+        Optional<APIResponse> response = (ctx == null || snapshot == null)
+                ? Optional.empty()
+                : runtime.ops().tryRun("route.fetch", () -> RouteAction.fetch(ctx, snapshot));
+        long fetchMs = (System.nanoTime() - fetchStartNs) / 1_000_000L;
+        if (response.isEmpty()) {
+            return Optional.empty();
+        }
+        APIResponse apiResponse = response.get();
+        try {
+            int status = apiResponse.status();
+            Map<String, String> headers = new LinkedHashMap<>(apiResponse.headers());
+            byte[] body = apiResponse.body();
+            RouteAction.noteApiResponseDisposed(snapshot == null ? null : snapshot.url());
+            return Optional.of(new MaterializedResponse(status, headers, body, fetchMs));
+        } catch (Throwable t) {
+            LOGGER.warn("[Route] materialize response failed for url='{}', pattern='{}': {}",
+                    route.request().url(), spec.pattern(), t.toString());
+            return Optional.empty();
+        } finally {
+            // 响应体已消费（status/headers/body 已读），立即释放句柄
+            try {
+                apiResponse.dispose();
+            } catch (Exception ignore) {
+                LOGGER.debug("[Route] apiResponse.dispose ignored: {}", ignore.toString());
+            }
+        }
+    }
+
     /**
      * MODIFY 阶段（链路第 2 步）：无 body 级修改则直接入链尾（headers/method 由链尾 resume 应用）；
      * 有 body 级修改则<b>就地（调用线程）</b>做内容类型感知修改，再入链尾。链尾 {@link #mockOrResume} 据 MOCK 是否命中
@@ -619,14 +675,13 @@ public final class RouteDispatcher {
      * 返回 {@code PendingHandler}，请求由驱动侧挂起，只能被后续异步终结（本方法的延迟回调）或 sweep 兜底放行——
      * 因此<b>绝不允许在调度延迟任务之后立即 resume</b>（历史缺陷：立即放行导致 delay 空操作）。</p>
      *
-     * <p><b>已知残留（O1b 的第二半：当前只文档化，未修）</b>：若该 spec 同时声明了 intercept MOCK
-     * （{@code spec.mockIntercept()}），到点回调里继续的 MOCK 阶段会在<b>调度器线程</b>上取真实响应
-     * —— 那是一次同步驱动调用，即该组合下 fetch <b>不在调用线程</b>，仍会与主线程并发驱动同一条连接
-     * （O1/O1b 已消除的竞态面在此组合下重新出现）。当前 E2E 覆盖不到该组合（delay 用例走 monitor 采集，
-     * 不是 intercept）。修法（P1）：在 <b>DELAY 阶段（仍在调用线程）</b>预取并<b>物化</b>
-     * （status + headers + body bytes，随即 dispose 句柄），再交由到点回调只做 {@code fulfillWithBody}
-     * —— 交付段因此<b>零同步驱动调用</b>。风险与缓解见提交说明（B1 多余请求 / B2 fail-open 丢失 /
-     * B3 热路径回归 / B4 快照时刻提前）。</p>
+     * <p><b>DELAY + intercept MOCK 组合（F5，2026-10-10 修复）</b>：该组合下链尾的 MOCK 需要取真实响应
+     * （同步驱动调用）。若放到点回调里执行，fetch 会落在<b>调度器线程</b>——与主线程并发驱动同一条连接，
+     * 重新打开 O1/O1b 已消除的竞态面。修法：<b>调用线程预取物化</b>（{@link #materializeResponse}：
+     * fetch + status/headers/body bytes + dispose，仍经 BoundedOps 有界），到点回调只做
+     * {@code fulfillWithBody}（sendMessageAsync）→ <b>交付段零同步驱动调用</b>。
+     * 权衡（显式化）：① 物化多读一次 body（intercept 本就 fetch，读 body 是必须的）；② 延迟计时从
+     * 物化完成后起算，浏览器感知延迟 ≈ fetchMs + delayMs（≥ delayMs，断言"延迟生效"仍成立）。</p>
      */
     private void dispatchDelayChain(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime,
                                     Runnable afterDelay, HitTrace trace) {
@@ -645,6 +700,11 @@ public final class RouteDispatcher {
         }
         final long effectiveDelay = Math.min(delay, MAX_DELAY_MS);
         final long requestedMs = effectiveDelay;
+        // F5：DELAY + intercept MOCK → 调用线程预取物化，到点回调只 fulfillWithBody（零同步驱动调用）
+        if (spec.hasMockFields() && !hasStaticBody(spec)) {
+            dispatchDelayIntercept(route, spec, claim, runtime, effectiveDelay, requestedMs, trace);
+            return;
+        }
         boolean submitted = runtime.io().trySubmit("delay:" + spec.pattern(), () -> {
             if (claim.isTerminal()) {
                 return; // sweep 已兜底（fallback 已放行）
@@ -659,6 +719,51 @@ public final class RouteDispatcher {
                         }
                         trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
                         afterDelay.run();
+                    });
+        });
+        if (!submitted) {
+            RouteAction.fallback(route);
+            runtime.claims().markTerminal(claim, false);
+        }
+    }
+
+    /**
+     * F5：DELAY + intercept MOCK 的专用交付链 —— 调用线程物化，到点回调零驱动调用。
+     *
+     * <p>时序：acquireIoSlot（挂起额度）→ <b>调用线程</b> {@link #materializeResponse}
+     * （fetch + 读 body + dispose，O1 单泵）→ 调度 delay → 到点回调只做
+     * {@code fulfillWithBody} + 终结 + 证据（全程 sendMessageAsync，不泵连接）。</p>
+     */
+    private void dispatchDelayIntercept(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime,
+                                        long effectiveDelay, long requestedMs, HitTrace trace) {
+        Optional<MaterializedResponse> materialized = materializeResponse(route, spec, runtime);
+        if (materialized.isEmpty()) {
+            // 物化失败 / 预算耗尽 → fail-open
+            if (!claim.isTerminal()) {
+                RouteAction.fallback(route);
+                runtime.claims().markTerminal(claim, false);
+            }
+            return;
+        }
+        final MaterializedResponse mat = materialized.get();
+        boolean submitted = runtime.io().trySubmit("delay:" + spec.pattern(), () -> {
+            if (claim.isTerminal()) {
+                return; // sweep 已兜底
+            }
+            final long scheduledNs = System.nanoTime();
+            com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteDelayScheduler
+                    .delay(effectiveDelay, () -> {
+                        if (claim.isTerminal()) {
+                            return; // sweep already settled (fallback resumed)
+                        }
+                        trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
+                        // 交付段：纯 sendMessageAsync（fulfillWithBody），零同步驱动调用 —— 调度线程不再泵连接
+                        RouteAction.fulfillWithBody(route, mat.status(), mat.headers(), mat.body());
+                        runtime.claims().markTerminal(claim, true);
+                        reportOutcome("MOCK RESULT", spec, route.request(), mat.status(), mat.headers(), null,
+                                "delay+intercept: materialized on calling thread, delivered after "
+                                        + effectiveDelay + "ms (fetch=" + mat.fetchMs() + "ms; no driver call at delivery)",
+                                trace);
                     });
         });
         if (!submitted) {

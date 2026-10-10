@@ -57,6 +57,12 @@ public final class RoleElementStepGenerator {
      * 保证 {@code assertStepN} 的第 k 行与 {@code stepN} 的第 k 行严格对应。
      */
     static String operationFor(RoleEntry e) {
+        // 右键点击（contextmenu）：录制为 locator.click({ button: 'right' })，对齐 page.pause() 对右键交互的录制。
+        // 右键的语义是"打开上下文菜单"，而非角色默认的点击/勾选/输入，故优先于角色推断：
+        // 即便右键的是 checkbox/radio，也按真实交互输出 click({button:'right'})，而非误生成 setChecked()。
+        if (e.isRightClick()) {
+            return "click({ button: 'right' })";
+        }
         // 勾选类元素（checkbox/radio）优先于 hover：用户点击 checkbox/radio 的语义是「设置勾选状态」，
         // 而 focusin 聚焦可能把点击误标为 hover（__rolePickFocus 以 isHover=true 记录、时序先于 click），
         // 若 hover 优先会让点击 checkbox 误生成 locator.hover() 而非 setChecked()。故先判定勾选角色。

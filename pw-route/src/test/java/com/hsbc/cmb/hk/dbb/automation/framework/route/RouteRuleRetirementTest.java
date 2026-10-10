@@ -1,7 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.CapturingGuardedDriverCall;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCall;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCallRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.StubGuardedDriverCall;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
@@ -11,9 +10,8 @@ import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -25,15 +23,21 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 规则"按目的生灭"契约（2026-09-28/29，T2+）。
+ * 规则"按目的生灭"契约（2026-09-28/29 T2+；2026-10-10 语义定稿）。
  *
- * <p><b>模型</b>：规则的生命周期跟随<b>目的</b>，不再跟随<b>用例</b> —— 达成目的即撤销该规则
+ * <p><b>模型</b>：规则的生命周期跟随<b>目的</b>，不再跟随<b>用例</b> —— 达成目的即退役该规则
  * （无论断言成功或失败）；<b>没匹配到</b>也不会永久悬挂：监控窗口到期即"清理结束"。</p>
  *
- * <p><b>撤销必须可确证，但绝不重建 Context</b>（2026-09-29 裁定）：未确证 ⇒ 先<b>重发一次全量快照
- * 重同步自愈</b>（{@link com.hsbc.cmb.hk.dbb.automation.framework.route.binding.PatternBinder#retryUnroute()}）；
- * 仍不可确证 ⇒ 响亮 ERROR + 计数（**仅可观测**）——绝不丢弃/重建 Context，因为 feature 模式下
- * 同一 sessionKey 不重建（不变式 I-1）。</p>
+ * <p><b>2026-10-10 结构性竞态修复（语义定稿）</b>：目的退役<b>只做内存规则表移除</b>
+ * （dispatch 即刻 fail-open 放行，观测语义不变），<b>绝不发起驱动 unroute</b>。
+ * 驱动侧绑定统一由收尾 {@code close()} 在场景结束时 flush（Context 即将关闭、无活跃 UI 操作，
+ * 无并发窗口）。理由：scenario 进行中的后台 unroute 与主线程 UI 触发并发泵同一条 Playwright 连接
+ * （官方模型：一个 Playwright = 一条 Connection，客户端对象表/回调表非线程安全），实证驱动级异常
+ * （"Cannot find parent object request@… to create route@…"）冒泡为页面未捕获错误 ——
+ * 违反"route 是辅助设施、绝不中断 UI"的核心不变式。</p>
+ *
+ * <p><b>不变式保持</b>：退役计数照常累计（T1 可观测）；{@code unconfirmedRetirements} 恒 0
+ * （无协议提交 ⇒ {@code isClean()} 恒 true）；撤销确证结论由收尾 {@code close()} 统一汇总。</p>
  */
 public class RouteRuleRetirementTest {
 
@@ -56,51 +60,58 @@ public class RouteRuleRetirementTest {
         }
     }
 
-    /** 场景 1：目的达成即撤销，并确证（nativeHandle.close 被调用），状态 clean。 */
+    /** 场景 1：目的达成即退役（纯内存），不触发驱动 unroute；收尾 flush 才撤销绑定。 */
     @Test
-    public void purposeMetRetiresRuleAndConfirmsUnroute() throws Exception {
-        GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall()); // 执行 action（等价真实成功的协议调用）
+    public void purposeMetRetiresRuleInMemoryWithoutDriverUnroute() throws Exception {
+        GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
         runtime.register(ApiSpec.builder("leftmenu/permissionLeftMenuConfig", RouteCapability.MONITOR)
                 .expectStatus(200).build());
 
-        boolean submitted = runtime.retireByPurpose("leftmenu/permissionLeftMenuConfig");
+        assertTrue(runtime.retireByPurpose("leftmenu/permissionLeftMenuConfig"));
 
-        assertTrue("撤销必须被提交（IO 池可用）", submitted);
+        // 目的退役是纯内存操作：scenario 进行中不得发起驱动 unroute（结构性消除与主线程 UI 的连接竞态）
+        verify(nativeHandle, Mockito.never()).close();
+        assertEquals("目的退役不产生未确证（无协议提交）", 0, runtime.unconfirmedRetirements());
+        assertTrue("无 unroute 提交 ⇒ isClean 恒 true", runtime.isClean());
+
+        // 驱动绑定随收尾统一 flush
+        RouteEngine.shutdown(ctx);
         verify(nativeHandle, Mockito.timeout(3000)).close();
-        assertTrue("撤销已确证 ⇒ 状态必须判为干净", awaitClean(runtime));
-        assertEquals("不应有未确证的撤销", 0, runtime.unconfirmedRetirements());
     }
 
-    /** 场景 2：幂等 —— 重复撤销不重复下发，也不产生"未确证"。 */
+    /** 场景 2：重复退役幂等（无 unroute 提交、无未确证），驱动绑定保留到收尾。 */
     @Test
-    public void retirementIsIdempotent() throws Exception {
+    public void retirementIsIdempotentInMemory() throws Exception {
         GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
         runtime.register(ApiSpec.builder("/api/once", RouteCapability.MONITOR).expectStatus(200).build());
 
         assertTrue(runtime.retireByPurpose("/api/once"));
-        assertTrue("重复撤销必须幂等返回 true（无待撤状态）", runtime.retireByPurpose("/api/once"));
+        assertTrue("重复退役必须幂等返回 true（无待撤状态）", runtime.retireByPurpose("/api/once"));
 
-        verify(nativeHandle, Mockito.timeout(3000)).close();
-        assertTrue(awaitClean(runtime));
+        verify(nativeHandle, Mockito.never()).close();
+        assertEquals(0, runtime.unconfirmedRetirements());
+        assertTrue(runtime.isClean());
     }
 
-    /** 场景 3：自愈也失败 ⇒ 计数并告警（**仅可观测**），但**绝不重建 Context**。 */
+    /** 场景 3：目的退役零协议调用 ⇒ 结构性无"未确证"（Capturing 替身实证无 unroute 下发）。 */
     @Test
-    public void unconfirmedUnrouteIsReportedButNeverRebuildsContext() {
-        // Capturing 替身：不执行 action 且返回 null —— 等价"首次与重发都无回包"
-        GuardedDriverCallRegistry.setInstance(new CapturingGuardedDriverCall());
+    public void purposeRetirementIsZeroProtocolCalls() {
+        CapturingGuardedDriverCall capturing = new CapturingGuardedDriverCall();
+        GuardedDriverCallRegistry.setInstance(capturing);
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
         runtime.register(ApiSpec.builder("notifications/streams", RouteCapability.MONITOR).build());
 
         runtime.retireByPurpose("notifications/streams");
 
-        assertTrue("必须等到异步撤销（含自愈重发）被处理", awaitUnconfirmed(runtime));
-        assertFalse("仍不可确证 ⇒ isClean 必须为 false", runtime.isClean());
+        assertTrue("目的退役不得发起任何 unroute 驱动调用（竞态修复的核心）",
+                capturing.calls().stream().noneMatch(c -> c.opName.startsWith("unroute:")));
+        assertEquals("目的退役不提交 unroute ⇒ 无未确证", 0, runtime.unconfirmedRetirements());
+        assertTrue("无 unroute 提交 ⇒ isClean 恒 true（结构性保证）", runtime.isClean());
     }
 
-    /** 场景 4：收尾兜底 flush —— 未按目的撤销的剩余规则在 runtime 关闭时统一撤销并汇总。 */
+    /** 场景 4：收尾兜底 flush —— 剩余规则在 runtime 关闭时统一撤销并汇总。 */
     @Test
     public void teardownFlushUnroutesRemainingRules() throws Exception {
         GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
@@ -116,37 +127,22 @@ public class RouteRuleRetirementTest {
         assertTrue("收尾 flush 全部确证后应判为干净", runtime.isClean());
     }
 
-    /** 场景 5（2026-09-29 裁定）：首次注销无回包 ⇒ **重发全量快照重同步自愈**，判为干净且不降级。 */
+    /** 场景 5（2026-10-10 语义定稿）：目的退役零协议调用 ⇒ 无"需自愈"状态（重同步路径随契约退役）。 */
     @Test
-    public void unconfirmedUnrouteIsHealedByResyncWithoutRebuild() throws Exception {
-        final AtomicInteger unrouteAttempts = new AtomicInteger();
-        GuardedDriverCallRegistry.setInstance(new GuardedDriverCall() {
-            @Override
-            public <T> T guarded(String opName, long boundMs, GuardedDriverCall.OnTimeout policy,
-                                 Callable<T> action) {
-                if (opName.startsWith("unroute:") && unrouteAttempts.incrementAndGet() == 1) {
-                    return null; // 首次注销"界内无回包"（模拟抖动）；重发（unroute-retry）正常回包
-                }
-                try {
-                    return action.call();
-                } catch (RuntimeException | Error e) {
-                    throw e;
-                } catch (Exception e) {
-                    throw new IllegalStateException(e);
-                }
-            }
-        });
+    public void purposeRetirementNeedsNoResync() throws Exception {
+        GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
         runtime.register(ApiSpec.builder("/api/heal", RouteCapability.MONITOR).expectStatus(200).build());
 
         runtime.retireByPurpose("/api/heal");
 
-        assertTrue("重发重同步应自愈并确证", awaitClean(runtime));
-        assertFalse("自愈成功不得标记降级（更不得重建 Context）", runtime.isDegraded());
-        assertEquals("自愈成功后不得留下未确证记录", 0, runtime.unconfirmedRetirements());
+        verify(nativeHandle, Mockito.never()).close();
+        assertEquals("无 unroute 提交 ⇒ 无未确证", 0, runtime.unconfirmedRetirements());
+        assertTrue(runtime.isClean());
+        assertFalse("无协议提交 ⇒ 不得降级", runtime.isDegraded());
     }
 
-    /** 场景 6（2026-09-29 裁定）：监控窗口到期**仍未匹配** ⇒ 规则也"清理结束"（不留悬挂规则）。 */
+    /** 场景 6（2026-10-10 语义定稿）：监控窗口到期仍未匹配 ⇒ 规则内存退役；驱动绑定随收尾 flush。 */
     @Test
     public void ruleIsRetiredWhenMonitorWindowExpiresWithoutAnyMatch() throws Exception {
         GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
@@ -154,12 +150,16 @@ public class RouteRuleRetirementTest {
         runtime.register(ApiSpec.builder("/api/never-matches", RouteCapability.MONITOR)
                 .expectStatus(200).monitorTimeoutMs(300).build());
 
-        verify(nativeHandle, Mockito.timeout(5000)).close(); // 窗口到期必须撤销（没匹配到也清理）
-        assertTrue(awaitClean(runtime));
+        awaitRetired(runtime); // 窗口到期必须退役（没匹配到也清理）
+        verify(nativeHandle, Mockito.never()).close(); // 目的退役零驱动调用
+        assertTrue(runtime.isClean());
+
+        RouteEngine.shutdown(ctx);
+        verify(nativeHandle, Mockito.timeout(3000)).close(); // 收尾 flush 才撤销绑定
     }
 
     /**
-     * 竞态守护（2026-09-29，R-1）：同 pattern <b>重新注册</b>后，旧规则留下的"窗口到期任务"
+     * 竞态守护（R-1）：同 pattern <b>重新注册</b>后，旧规则留下的"窗口到期任务"
      * <b>绝不得撤掉新规则</b> —— 旧触发者因令牌不一致直接作废，新规则保有自己的生命周期终点。
      */
     @Test
@@ -167,46 +167,51 @@ public class RouteRuleRetirementTest {
         GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
 
-        // 规则 A：带 300ms 监控窗口 ⇒ 会安排一次"到期撤销"
+        // 规则 A：带 300ms 监控窗口 ⇒ 会安排一次"到期退役"
         runtime.register(ApiSpec.builder("/api/reused", RouteCapability.MONITOR)
                 .expectStatus(200).monitorTimeoutMs(300).build());
         // 规则 B：同 pattern 重新注册（新实例）且不设窗口 ⇒ 接管该 pattern 的生命周期
         runtime.register(ApiSpec.builder("/api/reused", RouteCapability.MONITOR)
                 .expectStatus(200).monitorTimeoutMs(0).build());
 
-        // 越过 A 的窗口：A 的到期任务必须被令牌检查拒绝（不得撤掉 B 的绑定）
+        // 越过 A 的窗口：A 的到期任务必须被令牌检查拒绝（不得撤掉 B 的规则表条目/绑定）
         TimeUnit.MILLISECONDS.sleep(700);
 
+        // 新语义下目的退役本就零驱动调用；令牌拒绝的观察点是"退役计数不被 A 抬高"——
+        // A 的到期被拒绝 ⇒ retiredByPurpose 不得增长（B 的规则表条目保留，未退役）
+        assertEquals("旧触发者的到期任务必须被令牌检查拒绝（不得退役新规则）",
+                0, runtime.metrics().retiredByPurpose());
         Mockito.verify(nativeHandle, Mockito.never()).close();
     }
 
     /**
-     * 竞态守护（2026-09-29，R-4）：<b>IO 池被占满时撤销仍必须完成</b> —— 撤销走独立执行器，
-     * 绝不被 body 断言/IO 任务挤压（否则会出现"框架自身导致的观测缺失"）。
+     * 竞态守护（R-4 语义定稿）：目的退役是<b>纯内存</b>操作 ⇒ IO 池饱和绝不影响退役（结构性保证，
+     * 不再依赖独立撤销执行器）。
      */
     @Test
-    public void retirementStillRunsWhenIoPoolIsSaturated() throws Exception {
+    public void retirementIsUnaffectedByIoPoolSaturation() throws Exception {
         GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
         // 极紧配置：IO 单线程 + 队列容量 1 ⇒ 两个阻塞任务即可占满 IO 池
         RouteConfig tight = new RouteConfig(1, 1, 1, 1, 1L, 1000L, 10, 2000L);
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext(), tight);
         runtime.register(ApiSpec.builder("/api/saturated", RouteCapability.MONITOR).expectStatus(200).build());
 
-        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
         assertTrue(runtime.io().trySubmit("block-1", () -> awaitQuietly(release)));
         assertTrue(runtime.io().trySubmit("block-2", () -> awaitQuietly(release)));
 
         try {
-            assertTrue("撤销必须仍被提交（走独立执行器，不依赖 IO 池）",
+            assertTrue("目的退役必须成功（纯内存，不依赖 IO 池）",
                     ((RouteRuntimeImpl) runtime).retireByPurpose("/api/saturated"));
-            verify(nativeHandle, Mockito.timeout(3000)).close();
-            assertTrue("撤销完成后状态必须判为干净", awaitClean(runtime));
+            verify(nativeHandle, Mockito.never()).close();
+            assertEquals("无 unroute 提交 ⇒ 无未确证", 0, runtime.unconfirmedRetirements());
+            assertTrue("无 unroute 提交 ⇒ 状态判为干净", awaitClean(runtime));
         } finally {
             release.countDown();
         }
     }
 
-    private static void awaitQuietly(java.util.concurrent.CountDownLatch latch) {
+    private static void awaitQuietly(CountDownLatch latch) {
         try {
             latch.await(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -224,17 +229,14 @@ public class RouteRuleRetirementTest {
         return runtime.isClean();
     }
 
-    private static boolean awaitUnconfirmed(RouteRuntime runtime) {
-        try {
-            for (int i = 0; i < 150; i++) {
-                if (runtime.unconfirmedRetirements() > 0) {
-                    return true;
-                }
-                TimeUnit.MILLISECONDS.sleep(20);
+    /** 等待监控窗口到期完成规则退役（退役计数增长）。 */
+    private static void awaitRetired(RouteRuntime runtime) throws InterruptedException {
+        for (int i = 0; i < 250; i++) {
+            if (runtime.metrics().retiredByPurpose() > 0) {
+                return;
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            TimeUnit.MILLISECONDS.sleep(20);
         }
-        return runtime.unconfirmedRetirements() > 0;
+        assertEquals("监控窗口到期必须完成退役", 1, runtime.metrics().retiredByPurpose());
     }
 }

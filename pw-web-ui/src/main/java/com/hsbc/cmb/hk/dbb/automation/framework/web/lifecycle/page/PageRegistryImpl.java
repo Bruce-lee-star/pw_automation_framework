@@ -27,7 +27,7 @@ public final class PageRegistryImpl implements PageRegistry {
      * 本线程当前 Page —— <b>线程级</b>持有，独立于用例级的 {@link PlaywrightManager#PAGE_KEY}。
      *
      * <p>与 Context 同因（Cucumber {@code @After} 清用例级存储早于 Serenity {@code testFinished}）：
-     * 使 feature 模式「同 sessionKey 复用 Context/Page」可达，并让收尾可靠关闭本线程 Page。
+     * 使收尾可靠关闭本线程 Page，并让用例级键暂缺时能回退到线程级记录。
      */
     private static final ThreadLocal<Page> CURRENT_PAGE_BY_THREAD = new ThreadLocal<>();
 
@@ -56,12 +56,12 @@ public final class PageRegistryImpl implements PageRegistry {
         // 先检查是否已有有效 Page（快速路径，避免不必要的锁竞争）
         Page page = TestContextHolder.get().get(PlaywrightManager.PAGE_KEY);
         if (page != null && !page.isClosed()) {
-            //  线程级记录同步（供收尾可靠关闭 + feature 模式跨用例复用判定）
+            //  线程级记录同步（供收尾可靠关闭 + 用例级键暂缺时回退复用）
             CURRENT_PAGE_BY_THREAD.set(page);
             return page;
         }
-        //  用例级 PAGE_KEY 可能暂时取不到（@After 之后 / 异步回调路径 / feature 模式跨用例）：
-        //    回退线程级记录复用，避免同一线程重复建页。feature 模式「复用 Context/Page」正依赖此路径。
+        //  用例级 PAGE_KEY 可能暂时取不到（@After 之后 / 异步回调路径）：回退线程级记录复用，
+        //    避免同一线程重复建页（2026-09-30 收口后每 case 重建，此回退仅覆盖收尾/切换路径）。
         Page threaded = CURRENT_PAGE_BY_THREAD.get();
         if (threaded != null && !threaded.isClosed()) {
             TestContextHolder.get().set(PlaywrightManager.PAGE_KEY, threaded);

@@ -30,13 +30,17 @@ final class RolePickerConstants {
     static final String CMD_DONE = "done";
 
     // ───────────────────────── MODE_* : PickMode → 浏览器侧字符串 ─────────────────────────
-    //  取值必须与面板 JS 的比对字面量严格一致（同一 Java↔JS 契约）：
-    //  panel-core-a.js / picker-core-b2.js 全程比对 'idle' / 'manual' / 'scanPage' / 'scanRegion'。
-    //  修复评审 F-06：原 scan_page / scan_region（下划线）与 JS 的 scanPage / scanRegion（驼峰）错位，
-    //  导致窗口模式判定恒不成立 —— 扫描态按钮禁用/提示失效、focusin 键盘可达拾取入口永久 early-return（静默失效）。
-    //  契约由 START_SCRIPT / PANEL_SCRIPT 的 JS 资源 + tools/validate_picker_js.js 在构建期
-    //    node --check 兜底（含组合体就地校验）；Java 侧不另设 phantom 测试（原注释引用的
-    //    RolePickerModeContractTest 并不存在，属 A-03 / doc 22 揭示的虚假引用）。
+    //  取值必须与面板 JS 的比对字面量严格一致（同一 Java↔JS 契约）。
+    //  当前契约面只有两个值：panel-core-a.js / picker-core-b2.js 全程比对 'idle' / 'manual'。
+    //  历史（F-06）：原 scan_page / scan_region（下划线）与 JS 的 scanPage / scanRegion（驼峰）错位，
+    //  导致窗口模式判定恒不成立 —— 该缺陷已随「扫描整页 / 区域扫描」两类命令整体移除而消失
+    //  （见 RolePickerCommandEngine 中「已移除「扫描整页」与「区域扫描」」的说明），
+    //  故此处不再涉及 scanPage / scanRegion。
+    //  守卫方式（2026-10-10 核实）：
+    //    ① JS 侧语法 + 运行期组合体：pw-core 的 validate 阶段
+    //       （exec-maven-plugin → tools/validate_picker_js.js，含就地组合校验）；
+    //    ② Java↔JS 字符串一致性：本包 RolePickerContractTest 逐键比对 JS 资源。
+    //  注：历史上被引用的 RolePickerModeContractTest 并不存在（A-03 幻影守卫），已不再引用。
     static final String MODE_IDLE = "idle";
     static final String MODE_MANUAL = "manual";
 

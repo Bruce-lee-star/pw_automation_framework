@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * Route V2 门面 —— 按 BrowserContext 获取/关闭运行时。
+ * Route 门面 —— 按 BrowserContext 获取/关闭运行时。
  *
  * <p>全局注册表是模块唯一的跨 context 共享结构，且仅做「context → runtime」的映射：
  * <ul>
@@ -28,8 +28,8 @@ import java.util.concurrent.ConcurrentMap;
  *
  * <p>生命周期 SPI：本类静态块触发 {@code RouteLifecycleImpl} 自注册（追加到核心层
  * {@code RouteLifecycleRegistry}），使 Serenity / web 侧统一收尾动作（stopContextEngine /
- * stopAllContextEngines / shutdownRouteEngine / drainForSuiteTeardown）同步驱动 V2 运行时关闭，
- * V2 runtime 不再"孤儿"。
+ * stopAllContextEngines / shutdownRouteEngine / drainForSuiteTeardown）同步驱动各运行时关闭，
+ * runtime 不再"孤儿"。
  */
 public final class RouteEngine {
 
@@ -38,7 +38,7 @@ public final class RouteEngine {
     private static final ConcurrentMap<BrowserContext, RouteRuntime> RUNTIMES = new ConcurrentHashMap<>();
 
     static {
-        // 触发 RouteLifecycleImpl 静态块（registerAdditional）；业务首次使用 V2 即注册
+        // 触发 RouteLifecycleImpl 静态块（registerAdditional）；业务首次使用路由即注册
         try {
             Class.forName("com.hsbc.cmb.hk.dbb.automation.framework.route.lifecycle.RouteLifecycleImpl");
         } catch (ClassNotFoundException e) {
@@ -59,7 +59,7 @@ public final class RouteEngine {
     }
 
     /**
-     * 获取（不存在则创建）指定 context 的 Route V2 运行时。
+     * 获取（不存在则创建）指定 context 的 Route 运行时。
      */
     public static RouteRuntime runtimeOf(BrowserContext context) {
         Objects.requireNonNull(context, "context");
@@ -68,7 +68,7 @@ public final class RouteEngine {
     }
 
     /**
-     * 获取（不存在则创建）指定 context 的 Route V2 运行时（自定义配置）。
+     * 获取（不存在则创建）指定 context 的 Route 运行时（自定义配置）。
      */
     public static RouteRuntime runtimeOf(BrowserContext context, RouteConfig config) {
         Objects.requireNonNull(context, "context");
@@ -201,7 +201,7 @@ public final class RouteEngine {
     }
 
     /**
-     * 只清<b>全部</b> runtime 的规则，保留各 runtime 与 context（V2-2；feature / 套件之间的规则清理）。
+     * 只清<b>全部</b> runtime 的规则，保留各 runtime 与 context（V2-2；套件边界之间的规则清理）。
      *
      * <p>单 runtime 失败不阻断其它（fail-safe 隔离）。</p>
      *

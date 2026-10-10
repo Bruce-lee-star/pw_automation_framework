@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 /**
- * Route 模块 V2 的统一异常类型。
+ * Route 模块的统一异常类型。
  *
  * <p>框架内部所有可控失败都包装为 {@link RouteException} 并以 fail-open 方式处理
  * （转换为 {@code route.fallback()} 继续请求），业务侧不应捕获本异常做分支判断——

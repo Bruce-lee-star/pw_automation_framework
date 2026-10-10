@@ -5,6 +5,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Page;
@@ -14,8 +15,11 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 页面交互事件可观测性监控（与 {@link PageEventMonitor} 同族，单一职责）。
@@ -161,6 +165,106 @@ public final class PageInteractionMonitor {
         ctx.remove(UNMANAGED_POPUPS_KEY);
     }
 
+    // ===================== 1.0 抖动闸门（先落定，再操作元素） =====================
+
+    /**
+     * 抖动静默窗口（毫秒，硬编码，不加配置）：主框架导航后至少静默这么久，元素操作才继续。
+     *
+     * <p>取值依据：DBB 登录后首页会做<b>路由规范化</b>（{@code en-US} ↔ {@code en-us}），
+     * 两次导航间隔通常 &lt; 200ms；300ms 足以覆盖第三次抖动，又不至于明显拖慢正常路径
+     * （只在"刚发生过导航"时生效，正常情况零等待）。</p>
+     */
+    private static final long CHURN_QUIET_MS = 300L;
+
+    /**
+     * 抖动闸门的最长等待（毫秒，硬编码上界）：期间持续有导航也不无限等，到点即返回并由上层
+     * 继续（元素操作自身仍有 Playwright actionability 等待 + 导航丢失重试兜底）。
+     */
+    private static final long CHURN_GATE_MAX_MS = 3_000L;
+
+    /** 每页"最近一次主框架导航"的时刻（{@code System.nanoTime()}）；弱引用键，不阻止页面回收。 */
+    private static final Map<Page, AtomicLong> LAST_MAIN_NAV_NANOS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
+    /**
+     * 抖动闸门：等"最近一次主框架导航"过去 {@link #CHURN_QUIET_MS} 之后才返回（<b>有界</b>）。
+     *
+     * <p><b>要解决的问题</b>：导航抖动窗口内发起元素操作，驱动可能推来引用<b>已回收 frame</b> 的事件
+     * （{@code PageImpl.handleEvent → Connection.getExistingObject} 抛 {@code Object doesn't exist: frame@…}），
+     * 而该异常会<b>中断正在等待的那次调用</b>（7.txt 实测：登录后 en-US→en-us 抖动期点击直接失败）。</p>
+     *
+     * <p><b>代价</b>：无近期导航时仅一次弱引用查表 + 一次 nanoTime 比较（≈0）；刚导航过时最多等
+     * {@link #CHURN_QUIET_MS}；持续抖动的极端情况下最多等 {@link #CHURN_GATE_MAX_MS} 后照常继续。</p>
+     *
+     * @param page 目标页面（null 安全）
+     * @return 实际等待的毫秒数（0 = 未等待）
+     */
+    public static long awaitQuiet(Page page) {
+        return awaitQuiet(page, CHURN_QUIET_MS, CHURN_GATE_MAX_MS);
+    }
+
+    /** 带显式参数的同款闸门（测试/特殊场景用）。 */
+    public static long awaitQuiet(Page page, long quietMs, long maxWaitMs) {
+        if (page == null) {
+            return 0L;
+        }
+        AtomicLong stamp = lastNavStamp(page);
+        if (stamp == null) {
+            return 0L;
+        }
+        return awaitQuietSince(stamp.get(), quietMs, maxWaitMs);
+    }
+
+    /** 距最近一次主框架导航过去的毫秒数；无记录返回 {@link Long#MAX_VALUE}（诊断/测试用）。 */
+    public static long millisSinceLastChurn(Page page) {
+        AtomicLong stamp = lastNavStamp(page);
+        return stamp == null ? Long.MAX_VALUE : (System.nanoTime() - stamp.get()) / 1_000_000L;
+    }
+
+    /**
+     * 可测接缝：给定"最近一次抖动"的 nanoTime，等到静默窗口过去或到达上界。
+     *
+     * <p>轮询步长取 {@code playwright.polling.interval}（用户的"轮询检查间隔"语义），
+     * 静默等待用 {@link PlaywrightManager#parkMillis(long)}（LockSupport，不占调度线程、不调 Thread.sleep）。</p>
+     */
+    static long awaitQuietSince(long lastChurnNanos, long quietMs, long maxWaitMs) {
+        if (lastChurnNanos <= 0L) {
+            return 0L;
+        }
+        long stepMs = Math.max(1L, WebFrameworkConfig.PLAYWRIGHT_POLLING_INTERVAL.getLongValue());
+        long quietNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, quietMs));
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, maxWaitMs));
+        long start = System.nanoTime();
+        while (true) {
+            if (System.nanoTime() - lastChurnNanos >= quietNanos) {
+                return (System.nanoTime() - start) / 1_000_000L;
+            }
+            if (System.nanoTime() >= deadline) {
+                VerboseLogging.logDebugIfVerbose(logger,
+                        "[churn] gate hit its ceiling ({}ms) while navigations keep coming; proceeding", maxWaitMs);
+                return (System.nanoTime() - start) / 1_000_000L;
+            }
+            PlaywrightManager.parkMillis(stepMs);
+        }
+    }
+
+    /** 记录一次主框架导航（抖动源）。 */
+    private static void recordMainFrameChurn(Page page) {
+        stampFor(page).set(System.nanoTime());
+    }
+
+    private static AtomicLong stampFor(Page page) {
+        synchronized (LAST_MAIN_NAV_NANOS) {
+            return LAST_MAIN_NAV_NANOS.computeIfAbsent(page, k -> new AtomicLong());
+        }
+    }
+
+    private static AtomicLong lastNavStamp(Page page) {
+        synchronized (LAST_MAIN_NAV_NANOS) {
+            return LAST_MAIN_NAV_NANOS.get(page);
+        }
+    }
+
     // ===================== 1. 导航轨迹 =====================
 
     /** 每次导航（主框架或 iframe）记录一条轨迹；主框架记 INFO，子框架记 verbose。 */
@@ -178,6 +282,8 @@ public final class PageInteractionMonitor {
                 return;
             }
             if (isMain) {
+                // 抖动闸门信号源：记录"最近一次主框架导航"，供元素操作前的 awaitQuiet 落定等待
+                recordMainFrameChurn(page);
                 // 主框架导航轨迹本身已记入 navTrail（失败时回放用）；此处日志默认关闭，
                 // 仅在 serenity.logging=VERBOSE/TRACE 时输出，避免每次跳转刷屏。
                 VerboseLogging.logInfoIfVerbose(logger, "[nav] main frame navigated -> {}", url);

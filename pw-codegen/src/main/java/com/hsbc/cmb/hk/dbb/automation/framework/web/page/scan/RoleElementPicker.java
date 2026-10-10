@@ -70,12 +70,13 @@ public final class RoleElementPicker {
      */
 
     /**
-     * 拾取模式（一级概念，三种模式互斥）：
+     * 拾取模式（一级概念，两种模式互斥）：
      *  - IDLE：待命（面板显示"▶ 开始拾取"，页面点击不拾取任何元素）
      *  - MANUAL：手动拾取（点哪个元素拾哪个，iframe/新窗口/alert 按归属字段区分）
-     *  - SCAN_PAGE：整页扫描（穿透 iframe/shadow，扫完自动回 IDLE）
-     *  - SCAN_REGION：区域扫描（选区域后扫描，扫完自动回 IDLE）
      * 与浏览器侧 window.__roleMode 同步，由 Java 权威驱动。
+     *
+     * <p>2026-10-10：原先的 SCAN_PAGE（整页扫描）/ SCAN_REGION（区域扫描）已从框架整体移除
+     * （Java 命令分支与面板工具栏入口同步删除），拾取只剩手动模式；此处同步修正口径说明。</p>
      */
     /** 在 BasePage.closeCurrentPage 调 page.close() 前调用：标记本页为"框架主动关闭"。 */
     public static void markFrameworkClose(Page page) {
@@ -253,6 +254,27 @@ public final class RoleElementPicker {
         }
     }
 
+    /**
+     * 取任意一个<b>仍存活</b>的被跟踪页面；没有则返回 {@code null}。
+     *
+     * <p><b>要防的缺陷（CG-C2）</b>：调用方原先写 {@code pageNames.keySet().iterator().next()}，
+     * 一旦 {@code pageNames} 为空（stop / 命令异常路径下页面已全部关闭或尚未登记）就抛
+     * {@link java.util.NoSuchElementException}，而该异常会撕裂面板主循环 —— 表现为"点了停止却卡住/没反应"。
+     * {@link #setPickMode(Page, PickMode, Map)} 已容忍 null（内部 early-return），
+     * 故此处只负责"安全地挑一个页面或 null"。</p>
+     */
+    static Page anyLivePage(Map<Page, String> pageNames) {
+        if (pageNames == null || pageNames.isEmpty()) {
+            return null;
+        }
+        for (Page p : pageNames.keySet()) {
+            if (p != null && !p.isClosed()) {
+                return p;
+            }
+        }
+        return null;
+    }
+
     /** 设置某 context 的拾取模式，并同步到所有未关闭页面（驱动面板按钮态与浏览器侧行为）。 */
     static void setPickMode(Page anyPage, PickMode mode,
                                     Map<Page, String> pageNames) {
@@ -272,15 +294,7 @@ public final class RoleElementPicker {
 
 
 
-    /**
-     * 会话级持久"已删集合"：用户主动删除的元素键（_sig / _sigKey / 去索引 locatorKey）。
-     * 与浏览器端 {@code window.__deletedSigs} 的区别在于后者在【区域扫描入口】会被清空
-     * （区域扫描 = 本次选中区域里的"全新候选"语义，不应继承过往删除屏蔽），而本集合跨扫描/跨页面
-     * 持久。作用：{@code syncPanelToBrowser} 把 Java 权威内存态 javaPickBySig 回灌浏览器时，
-     * 即便 Java 删除因键不匹配未命中实体、且浏览器端 __deletedSigs 已被区域扫描清空，
-     * 仍按本集合永久屏蔽已删元素，杜绝"区域扫描后已删元素被主循环复活"的回归。
-     * key 为 javaPickBySig 对象引用（每会话稳定，O(1) 反查），值为已删键集合。
-     */
+
 
 
 
@@ -395,23 +409,13 @@ public final class RoleElementPicker {
      *
      * @param page              Playwright Page
      * @param nlsReverseJson    nls 反向查表 JSON；为 null/空/"{}" 时退化为不反查（回退 slug）
+     *
+     * <p>2026-10-10：删除原 3 参重载 {@code start(Page, String, String rootSelector)}（「区域扫描」遗留，
+     * 全仓零调用方），方法体已内联至本重载；注入参数不再包含 {@code root} 键 —— JS 侧
+     * {@code apply-pick-state-js.js} 已把 {@code window.__rolePickRoot === undefined} 归一为
+     * {@code null}，故行为与旧版显式传 {@code null} 完全一致。</p>
      */
     public static void start(Page page, String nlsReverseJson) {
-        start(page, nlsReverseJson, null);
-    }
-
-    /**
-     * 开启拾取模式，并预加载 nls 反向查表（JSON：规范化文本值 → key）。
-     * 拾取交互角色元素时，会用 a11y name 反查该表，命中则直接用真实 nls key。
-     *
-     * @param page              Playwright Page
-     * @param nlsReverseJson    nls 反向查表 JSON；为 null/空/"{}" 时退化为不反查（回退 slug）
-     * @param rootSelector      录制根容器选择器（如 "main"、"#content"）；
-     *                          非 null 时只有落在该容器内（含其后代）的点击/悬停才会被录制，
-     *                          leftmenu / topbar 等全局导航区域在范围外，自然不被捕获。
-     *                          为 null 时退化为整页扫描（原行为）。
-     */
-    public static void start(Page page, String nlsReverseJson, String rootSelector) {
         // CI 环境：拾取模式是本地开发工具，自动化测试里不应开启并等待人工拾取，直接跳过。
         if (isCiRun()) {
             log.info("[picker] CI runtime detected, skipping picker mode (start).");
@@ -429,22 +433,20 @@ public final class RoleElementPicker {
         // 会话开关 __rolePickSessionOn（对齐 page.pause 的 mode 下推）：context 级门控注入脚本
         // （gatedPickerInitScript）据此在【每个新文档】自动重挂拾取监听——导航/弹窗/SPA 整文档替换后
         // 拾取存活由浏览器原生保证，无需 Java 端手动重挂。
-        //  关键修复：nls 反向表与 rootSelector 原先是「直接字符串拼接进 JS 表达式」，
+        //  关键修复：nls 反向表原先是「直接字符串拼接进 JS 表达式」，
         // 一旦内容含特殊字符就会破坏整段脚本语法，抛出 SyntaxError 并中断调用方（如 performLogin）。
         // 改为「参数化注入」：Playwright 会自动正确序列化参数，nls 用 JSON.parse 解析，
-        // root 直接作为 JS 值传入（null 或字符串），彻底消除字符串拼接破坏语法的可能。
+        // nls 作为参数注入（Playwright 自动序列化），彻底消除字符串拼接破坏语法的可能。
         // 整个注入包 try-catch：拾取器是开发辅助工具，注入失败只告警并继续，绝不中断主测试流程。
         // 拾取注入脚本本体已外置于 RolePickerScripts.START_INJECT_JS（参数化注入 nls + root，
         // 含脏序号重置、去重表重建、二次开始保活、录制根约束等关键修复的逐条注释见该常量定义）。
         // 此处仅引用常量，Java 侧零字符串拼接，杜绝拼接漂移与 SyntaxError 风险。
         String pickStartScript = RolePickerScripts.START_INJECT_JS;
         try {
-            // evaluate 仅支持单个参数对象：将 nls 与 root 打包为一个 Map 传入，脚本内从 arguments[0] 解构。
-            // 注意：Guava ImmutableMap 不允许 null 值，rootSelector 可能为 null（整页扫描），故用 HashMap 并兜底。
+        // evaluate 仅支持单个参数对象：把 nls 打包为 Map 传入，脚本内从 arguments[0] 解构。
+        // 注意：Guava ImmutableMap 不允许 null 值，nls 允许为 null，故用 HashMap 并兜底。
             java.util.Map<String, String> startArgs = new java.util.HashMap<>();
             startArgs.put("nls", nlsReverseJson);
-            // rootSelector 允许为 null（整页扫描）；HashMap 与 Playwright 参数序列化均支持 null。
-            startArgs.put("root", rootSelector);
             pickerEval(page, pickStartScript, startArgs);
         } catch (Exception e) {
             log.warn("[picker] Failed to inject picker script (main flow unaffected): {}", e.getMessage());
@@ -1011,21 +1013,19 @@ public final class RoleElementPicker {
     static void fillCode(Page page, LinkedHashMap<String, String> pageClassByPage,
                          LinkedHashMap<String, String> stepByPage,
                          LinkedHashMap<String, String> assertByPage, String msg, boolean soft) {
-        Object pageArgs = RolePickerScripts.args(
+        // 步骤与断言合并为同一次 page.evaluate 同步渲染（FILL_CODE_ASSERT_JS 内部依次调
+        // __fillCodeTabs / __fillAssertTabs）。原先分两次独立 evaluate，在 SPA / 后台 iframe 持续繁忙的页面上
+        // 两次调用之间存在 hang 窗口：第一次（步骤）抢在 hang 前成功、第二次（断言）常撞软超时被丢弃，
+        // 表现为"步骤实时生成、断言不生成"。合并后两步渲染原子更新，消除该不对称。
+        Object combinedArgs = RolePickerScripts.args(
                 "pageByPage", pageClassByPage == null ? new LinkedHashMap<String, String>() : pageClassByPage,
                 "stepByPage", stepByPage == null ? new LinkedHashMap<String, String>() : stepByPage,
-                "msg", msg == null ? "" : msg);
-        Object assertArgs = RolePickerScripts.args(
                 "assertByPage", assertByPage == null ? new LinkedHashMap<String, String>() : assertByPage,
                 "msg", msg == null ? "" : msg);
-        // 企业级优化：把"写入消息对象"与"更新 DOM"合并进同一次 page.evaluate（点击"停止"后仅 1 次往返）；
-        // 断言 Tab 走独立资源 + 独立渲染入口（与步骤 Tab 解耦，任一为空都不影响另一个）。
         if (soft) {
-            pickerEvalSoft(page, RolePickerScripts.FILL_CODE_JS, pageArgs);
-            pickerEvalSoft(page, RolePickerScripts.FILL_ASSERT_JS, assertArgs);
+            pickerEvalSoft(page, RolePickerScripts.FILL_CODE_ASSERT_JS, combinedArgs);
         } else {
-            pickerEval(page, RolePickerScripts.FILL_CODE_JS, pageArgs);
-            pickerEval(page, RolePickerScripts.FILL_ASSERT_JS, assertArgs);
+            pickerEval(page, RolePickerScripts.FILL_CODE_ASSERT_JS, combinedArgs);
         }
     }
 

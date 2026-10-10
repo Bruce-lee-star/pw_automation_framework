@@ -9,20 +9,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Route V2 的生命周期 SPI 实现 —— 挂到核心层 {@link RouteLifecycleRegistry} 的追加位
- * （primary 仍由 pw-route 的 {@code RouteLifecycleImpl} 占据，二者经 Composite 聚合分发）。
+ * Route 的生命周期 SPI 实现 —— 挂到核心层 {@link RouteLifecycleRegistry} 的追加位。
+ * <b>2026-09-30 桥接模块删除后，主代码不再注册 primary</b>（仅测试可临时注入），
+ * 本实现即唯一注册者，Composite 直接驱动（primary 恒空时语义不变）。
  *
- * <p>职责边界（V2 无 API 捕获、无全局规则表，只实现「引擎收尾」）：
+ * <p>职责边界（采集管道由 {@code RouteRuntime} 内部自持、不向本接口查询面暴露捕获句柄；无全局规则表，
+ * 只实现「引擎收尾」）：
  * <ul>
- *   <li>{@link #stopContextEngine(Object)} / {@link #clearContext(Object)} → 关闭指定 context 的 V2 运行时
+ *   <li>{@link #stopContextEngine(Object)} / {@link #clearContext(Object)} → 关闭指定 context 的 Route 运行时
  *       （幂等；context 关闭事件本也会触发，这里提供显式生命周期挂点）；</li>
  *   <li>{@link #stopAllContextEngines()} / {@link #shutdownRouteEngine()} / {@link #drainForSuiteTeardown()}
- *       → 关闭全部 V2 运行时（套件收尾）；</li>
- *   <li>采集 / 注册表 / 脱敏：V2 无对应状态 → no-op 或原样返回（Composite 查询型方法由 primary 优先）。</li>
+ *       → 关闭全部 Route 运行时（套件收尾）；</li>
+ *   <li>采集 / 注册表 / 脱敏：本接口不暴露对应状态 → no-op 或原样返回（采集发生在 RouteRuntime 内部）。</li>
  * </ul>
  *
- * <p>注册时机：本类静态块自注册；由 {@link RouteEngine} 静态块在业务首次使用 V2 时触发加载。
- * 若 classpath 无 pw-route（V2 独立使用），primary 为空、Composite 直接驱动本实现，语义不变。
+ * <p>注册时机：本类静态块自注册；由 {@link RouteEngine} 静态块在业务首次使用路由时触发加载。
  */
 public class RouteLifecycleImpl implements RouteLifecycle {
 
@@ -41,10 +42,10 @@ public class RouteLifecycleImpl implements RouteLifecycle {
     }
 
     /**
-     * 带「Context 正被主动关闭」意图的停止（T8-5，{@code EngineControl} 默认方法的 V2 覆写）。
+     * 带「Context 正被主动关闭」意图的停止（T8-5，{@code EngineControl} 默认方法的覆写）。
      *
      * <p>传 {@code true} 时 runtime 跳过逐条 unroute —— 规则随 {@code context.close()} 原生释放。
-     * 这是 credential 档"路由辅助设施零清理"的实现落点（FIX_PLAN §10.3 C-4）。
+     * 2026-09-30 收口后每 case 重建并销毁 Context，本路径即收尾常态（FIX_PLAN §10.3 C-4）。
      */
     @Override
     public void stopContextEngine(Object ctx, boolean contextBeingClosed) {
@@ -84,7 +85,7 @@ public class RouteLifecycleImpl implements RouteLifecycle {
 
     @Override
     public void drainForSuiteTeardown() {
-        // V2 无跨用例共享线程池：套件收尾即关闭全部 per-context 运行时（幂等）
+        // 无跨用例共享线程池：套件收尾即关闭全部 per-context 运行时（幂等）
         RouteEngine.shutdownAll();
     }
 

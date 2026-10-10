@@ -174,6 +174,12 @@ final class RolePickerPickParser {
             }
             // 弹窗标记：任一为 true 即视为触发（onPopup 回写）
             if (!incoming.isPopup() && existing.isPopup()) { incoming.setPopup(true); existing.setPopup(true); }
+            // 右键标记：re-send（contextmenu handler 设标记后回传）为 true 即视为触发，补回权威 existing，
+            // 避免首包不含标记的回传把 rightClick 抹掉。
+            if (incoming.isRightClick() && !existing.isRightClick()) {
+                incoming.setRightClick(true);
+                existing.setRightClick(true);
+            }
         }
         // 【修复"同一元素重复点击，序号数组被回传 null/旧值覆盖"——覆盖 existing==incoming 同引用场景】
         // 现象（22:36 日志实证）：i18n 元素 label 第三次/四次点击时，dup-send 正确发出 pickNos=[2,5,6,7]，
@@ -293,6 +299,8 @@ final class RolePickerPickParser {
         boolean download = Boolean.parseBoolean(asString(m.get("download")));
         boolean hover = Boolean.parseBoolean(asString(m.get("hover")));
         boolean dblClick = Boolean.parseBoolean(asString(m.get("dblclick")));
+        // 右键点击（contextmenu）：前端拦截后打标记，Java 侧解析并映射到 RoleEntry（对齐 page.pause 的 click({button:'right'})）。
+        boolean rightClick = Boolean.parseBoolean(asString(m.get("rightClick")));
         boolean closeOp = Boolean.parseBoolean(asString(m.get("_closeOp")));
         // 原生对话框（alert/confirm/prompt）：前端拦截后打标记，Java 侧解析并映射到 RoleEntry
         boolean dialog = Boolean.parseBoolean(asString(m.get("dialog")));
@@ -340,6 +348,7 @@ final class RolePickerPickParser {
             if (value != null && value.isBlank()) value = null;
             RoleEntry roleEntry = new RoleEntry(role, name, tag, text, "role", null, resolvedKey, cleaned, value, popup, index, download, asString(m.get("_pageClass")), hover, closeOp, level, dblClick, dialog, dialogType, dialogAction, select, optionText, optionValue, checked, setCheckedTarget, pressKey, dragDstKey, disabled, pressed, expanded);
             roleEntry.setSigKey(pickSigKey);
+            roleEntry.setRightClick(rightClick);
             int roleCount = parseCount(m.get("count"));
             roleEntry.setCount(roleCount);
             roleEntry.setFramePath(parseFramePath(m.get("framePath")));
@@ -374,6 +383,7 @@ final class RolePickerPickParser {
         if (value != null && value.isBlank()) value = null;
         RoleEntry entry = new RoleEntry(role, name, tag, text, strategy, selector, resolvedKey, cleaned, value, popup, index, download, asString(m.get("_pageClass")), hover, closeOp, level, dblClick, dialog, dialogType, dialogAction, select, optionText, optionValue, checked, setCheckedTarget, pressKey, dragDstKey, disabled, pressed, expanded);
         entry.setSigKey(pickSigKey);
+        entry.setRightClick(rightClick);
         int nonRoleCount = parseCount(m.get("count"));
         entry.setCount(nonRoleCount);
         entry.setFramePath(parseFramePath(m.get("framePath")));

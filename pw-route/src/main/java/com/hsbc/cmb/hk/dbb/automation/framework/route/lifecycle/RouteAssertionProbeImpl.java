@@ -10,9 +10,9 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 
 /**
- * Route V2 断言失败探针 SPI 实现 —— 自注册到核心层 {@link RouteAssertionRegistry}。
+ * Route 断言失败探针 SPI 实现 —— 自注册到核心层 {@link RouteAssertionRegistry}。
  *
- * <p>职责：把 V2 各 context 运行时（{@link RouteRuntime}）已定案的 MONITOR 断言失败
+ * <p>职责：把各 context 运行时（{@link RouteRuntime}）已定案的 MONITOR 断言失败
  * 聚合给 web 侧消费（步骤结束抛 AssertionError / 用例收尾标记 FAILURE）。
  * 消费式语义保证幂等——失败被取走即清空，两条上报路径不会重复触发。
  *

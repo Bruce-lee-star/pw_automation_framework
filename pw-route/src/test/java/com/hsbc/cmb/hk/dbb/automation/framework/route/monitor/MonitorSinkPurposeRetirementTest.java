@@ -2,10 +2,8 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
-import org.junit.After;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -37,21 +35,6 @@ import static org.mockito.Mockito.when;
  */
 public class MonitorSinkPurposeRetirementTest {
 
-    private RouteIoExecutor io;
-
-    @After
-    public void tearDown() {
-        if (io != null) {
-            io.close();
-            io = null;
-        }
-    }
-
-    private RouteIoExecutor io() {
-        io = new RouteIoExecutor("purpose-test", 1, 8);
-        return io;
-    }
-
     private static Request mockRequest(String url) {
         Request request = mock(Request.class);
         when(request.method()).thenReturn("GET");
@@ -73,7 +56,7 @@ public class MonitorSinkPurposeRetirementTest {
     @Test
     public void firstSettledResponseTriggersRetirement() {
         List<String> retired = new CopyOnWriteArrayList<>();
-        MonitorSink sink = new MonitorSink(io(), spec -> retired.add(spec.pattern()));
+        MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
         ApiSpec spec = ApiSpec.builder("leftmenu/permissionLeftMenuConfig", RouteCapability.MONITOR)
                 .expectStatus(200).build();
 
@@ -87,7 +70,7 @@ public class MonitorSinkPurposeRetirementTest {
     @Test
     public void retirementIsIdempotentPerRule() {
         List<String> retired = new CopyOnWriteArrayList<>();
-        MonitorSink sink = new MonitorSink(io(), spec -> retired.add(spec.pattern()));
+        MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
         ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR).expectStatus(200).build();
 
         sink.recordRequest(mockRequest("https://host/api/users/1"), spec);
@@ -102,7 +85,7 @@ public class MonitorSinkPurposeRetirementTest {
     @Test
     public void assertionFailureStillRetiresButKeepsEvidence() {
         List<String> retired = new CopyOnWriteArrayList<>();
-        MonitorSink sink = new MonitorSink(io(), spec -> retired.add(spec.pattern()));
+        MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
         ApiSpec spec = ApiSpec.builder("/api/pay", RouteCapability.MONITOR).expectStatus(201).build();
 
         sink.recordRequest(mockRequest("https://host/api/pay"), spec);
@@ -118,7 +101,7 @@ public class MonitorSinkPurposeRetirementTest {
     @Test
     public void rulesWithoutSettlementPurposeDoNotRetire() {
         List<String> retired = new CopyOnWriteArrayList<>();
-        MonitorSink sink = new MonitorSink(io(), spec -> retired.add(spec.pattern()));
+        MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
 
         ApiSpec mockSpec = ApiSpec.builder("/api/mock", RouteCapability.MOCK).mockStatus(200).build();
         sink.recordRequest(mockRequest("https://host/api/mock"), mockSpec);
@@ -135,7 +118,7 @@ public class MonitorSinkPurposeRetirementTest {
     @Test
     public void autoStopOnMatchRuleRetiresOnlyAfterMinMatchesReached() {
         List<String> retired = new CopyOnWriteArrayList<>();
-        MonitorSink sink = new MonitorSink(io(), spec -> retired.add(spec.pattern()));
+        MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
         ApiSpec spec = ApiSpec.builder("/api/poll", RouteCapability.MONITOR)
                 .expectStatus(200).autoStopOnMatch(true).minMatches(2).build();
 

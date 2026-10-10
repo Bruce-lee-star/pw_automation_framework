@@ -71,11 +71,17 @@ public class RouteClearRulesTest {
 
         int cleared = RouteEngine.clearRules(ctx);
 
-        assertEquals("必须提交全部规则的退役", 2, cleared);
+        assertEquals("必须清空全部规则（规则表计数）", 2, cleared);
         assertEquals("runtime 必须保留（未被 shutdown）", 1, RouteEngine.activeRuntimes());
         assertSame("必须是同一 runtime 实例（未重建）", runtime, RouteEngine.runtimeOf(ctx));
         assertFalse("runtime 不得被关闭", runtime.isClosed());
         verify(ctx, never()).close();
+        // 2026-10-10 语义：clearRules 只清内存规则表，不驱动 unroute（消除与主线程 UI 的连接竞态）；
+        // 驱动绑定随收尾统一 flush。
+        for (AutoCloseable handle : driverHandles) {
+            verify(handle, never()).close();
+        }
+        RouteEngine.shutdown(ctx);
         for (AutoCloseable handle : driverHandles) {
             verify(handle, timeout(5_000L).atLeastOnce()).close();
         }

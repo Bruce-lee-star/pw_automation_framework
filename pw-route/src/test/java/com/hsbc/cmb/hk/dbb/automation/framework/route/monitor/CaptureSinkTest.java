@@ -26,22 +26,13 @@ import static org.mockito.Mockito.when;
  * 消费式幂等、队列上限与 fail-open 语义。
  *
  * <p>并发模型与 {@link MonitorSink} 一致：record/onResponse 在事件线程（本测试直接调用），
- * body 读取在 IO 线程（本测试用 io.close() 优雅停机等待），dump 在业务线程消费。
+ * body 读取就地同步（2026-09-28 修复：旧实现投 IO 线程排队导致句柄被回收、body 恒 null），
+ * dump 在业务线程消费。
  */
 public class CaptureSinkTest {
 
-    private RouteIoExecutor io;
-
     private CaptureSink newSink(int maxCaptured, long timeoutMs) {
         return new CaptureSink(maxCaptured, timeoutMs);
-    }
-
-    @After
-    public void tearDown() {
-        if (io != null) {
-            io.close();
-            io = null;
-        }
     }
 
     private Request mockRequest(String url) {
@@ -118,7 +109,6 @@ public class CaptureSinkTest {
 
     @Test
     public void responseBodyCapturedInFullWithoutTruncation() throws Exception {
-        io = new RouteIoExecutor("t", 2, 64);
         ApiSpec spec = ApiSpec.builder("/api/big", RouteCapability.MONITOR)
                 .capture(true)
                 .captureBody(true)
@@ -129,9 +119,6 @@ public class CaptureSinkTest {
         sink.recordRequest(mockRequest("https://host/api/big"), spec);
         sink.onResponseForSpec(spec, mockResponse("https://host/api/big", 200,
                 "{\"data\":\"very long payload\"}"));
-
-        io.close();
-        io = null;
 
         List<CapturedApiCall> calls = sink.dump();
         assertEquals((long) 1, (long) calls.size());

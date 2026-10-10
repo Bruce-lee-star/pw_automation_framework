@@ -3,6 +3,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.PlaywrightSerenityBridge;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,9 +43,15 @@ public final class ScenarioLifecycle {
     /**
      * 带用例结果的场景收尾（A5，2026-09-26）。
      *
-     * <p>{@code scenarioFailed=true} 时，桥在 feature 模式下**仅丢弃本用例的 Page**（失败用例的 Page 可能
-     * "存活但已坏"，不许跨用例传染），Context/登录态仍保留 → 同一个 sessionKey 的下个用例
-     * 既不背脏数据、又能免登录。
+     * <p>{@code scenarioFailed} 仅作为<b>结果语义</b>传入：2026-09-30 收口后，无论成败、是否承载
+     * 登录态，桥都<b>销毁本 case 的 Context 与 Page</b>（scenario-scoped）；登录复用统一走
+     * {@code storageState} 快照注入（凭证是快照而非活体），"保留活 Context 延续登录态"已废除。
+     *
+     * <p><b>F2 收口（2026-10-10）</b>：失败信号（{@link DriverFailureSignal}）在<b>场景边界统一清零</b>。
+     * 原因：每 case 重建 Context 后，若失败 case 未注册 route（无 runtime），信号只能由
+     * {@code RouteRuntimeImpl.close()} 消费的路径不存在 → 信号泄漏到下一 case，使其 route 规则
+     * 全部 fail-fast 直通（mock/monitor 静默失效）。本公共出口（每 case 必达）保证
+     * <b>无论本 case 是否有 route runtime，下一 case 都从干净信号开始</b>。
      *
      * @param scenarioFailed 本用例是否失败
      */
@@ -58,6 +65,11 @@ public final class ScenarioLifecycle {
         CustomOptionsManager.removeAllThreadLocals();
         TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
         TestContextHolder.get().remove(PlaywrightManager.CONTEXT_KEY);
+
+        // F2 收口：失败信号在场景边界统一清零（幂等；route runtime close 内亦消费一次）。
+        // 放在所有清理之后 —— 本场景的 route 收尾（可能触发 unroute 确证）已完成，不再需要信号；
+        // 若放在开头，closeContext 阶段的 fail-fast 检查会失效（unroute 可能再次等待超时）。
+        DriverFailureSignal.reset();
     }
 
     /**
