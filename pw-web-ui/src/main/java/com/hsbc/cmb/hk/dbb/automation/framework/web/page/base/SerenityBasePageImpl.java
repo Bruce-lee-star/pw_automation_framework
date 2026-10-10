@@ -284,8 +284,18 @@ public class SerenityBasePageImpl implements SerenityBasePage {
     }
 
     @Override
+    public Page waitForNewPage(Runnable trigger) {
+        return bp.waitForNewPage(trigger);
+    }
+
+    @Override
     public void waitForDownload(Runnable trigger, int timeoutSecs) {
         bp.waitForDownload(trigger, timeoutSecs);
+    }
+
+    @Override
+    public void waitForDownload(Runnable trigger) {
+        bp.waitForDownload(trigger);
     }
 
     @Override

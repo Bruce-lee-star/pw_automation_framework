@@ -146,6 +146,26 @@ public final class PageLifecycleCoordinator {
     }
 
     /**
+     * 触发操作并等待新页面打开（<b>不指定超时</b>）：沿用 Playwright 上下文默认超时
+     * （由框架配置驱动，如 {@code playwright.context.*}），避免在拾取生成物里硬编码秒数——
+     * 硬编码会让慢环境（CI / 跨区域网络）在固定秒数处误报 TimeoutException。
+     *
+     * @param bp      BasePage 实例
+     * @param trigger 触发新页面打开的操作（如点击链接）
+     * @return 新打开的 Page 实例
+     */
+    public static Page waitForNewPage(BasePage bp, Runnable trigger) {
+        requireNonNullPage(bp);
+        bp.ensureContextValid();
+        try {
+            return acceptNewPage(bp, bp.context.waitForPage(
+                    new com.microsoft.playwright.BrowserContext.WaitForPageOptions(), () -> trigger.run()));
+        } catch (PlaywrightException e) {
+            throw new TimeoutException("Waiting for new page timed out (context default timeout)", e);
+        }
+    }
+
+    /**
      * 等待下载：在 {@code trigger} 触发的一次下载完成前阻塞。
      * 框架已通过 {@code setAcceptDownloads(true)} 开启下载能力，下载文件自动保存到配置的下载目录。
      *
@@ -161,6 +181,26 @@ public final class PageLifecycleCoordinator {
                     () -> trigger.run());
         } catch (PlaywrightException e) {
             throw new TimeoutException("Waiting for download timed out after " + timeoutSecs + " seconds", e);
+        }
+    }
+
+    /**
+     * 等待下载（<b>不指定超时</b>）：沿用 Playwright 上下文默认超时，与
+     * {@link #waitForNewPage(BasePage, Runnable)} 同口径。
+     *
+     * <p>本重载同时是拾取生成物里 {@code xxx.waitForDownload(() -> ...)}（单参）的落地入口——
+     * 此前生成器只输出单参调用而框架仅有双参重载，生成代码无法编译。</p>
+     *
+     * @param bp      BasePage 实例
+     * @param trigger 触发下载的操作（如点击下载链接）
+     */
+    public static void waitForDownload(BasePage bp, Runnable trigger) {
+        requireNonNullPage(bp);
+        Page page = bp.getPage();
+        try {
+            page.waitForDownload(new Page.WaitForDownloadOptions(), () -> trigger.run());
+        } catch (PlaywrightException e) {
+            throw new TimeoutException("Waiting for download timed out (context default timeout)", e);
         }
     }
 

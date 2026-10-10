@@ -223,7 +223,13 @@ public interface SerenityBasePage {
 
     Page waitForNewPage(int timeoutSecs);
 
+    /** 触发操作并等待新页面打开，超时沿用框架默认（上下文级配置）；拾取生成物默认走本重载。 */
+    Page waitForNewPage(Runnable trigger);
+
     void waitForDownload(Runnable trigger, int timeoutSecs);
+
+    /** 触发下载并等待完成，超时沿用框架默认（上下文级配置）；拾取生成物默认走本重载。 */
+    void waitForDownload(Runnable trigger);
 
     void closeCurrentPage();
 

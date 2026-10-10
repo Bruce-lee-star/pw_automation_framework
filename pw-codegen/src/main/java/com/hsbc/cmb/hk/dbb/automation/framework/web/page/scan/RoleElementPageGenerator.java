@@ -41,7 +41,7 @@ import java.util.stream.Stream;
  *       （历史无标记块产物回落整文件覆盖，仍先备份 {@code .java.bak}）。
  *       因此人工补充请写在标记块<b>之外</b>（块内视为生成器领地，再生成会被替换）。</li>
  * </ul>
- * 产物为草稿，人工 review 后再合入主干（对齐 PAGEOBJECT_GENERATOR_DESIGN.md §7，注解风格）。
+ * 产物为草稿，人工 review 后再合入主干（注解风格遵循本框架 {@code @RoleFile} / {@code @RoleElement} 约定）。
  *
  * <h3>用法</h3>
  * <pre>

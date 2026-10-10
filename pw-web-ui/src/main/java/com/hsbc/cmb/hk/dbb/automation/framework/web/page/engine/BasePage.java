@@ -567,6 +567,17 @@ public abstract class BasePage {
     }
 
     /**
+     * 触发操作并等待新页面打开（<b>不指定超时</b>）：沿用 Playwright 上下文默认超时（框架配置驱动）。
+     * 拾取生成物默认走本重载，避免把秒数硬编码进产物。
+     * @param trigger 触发新页面打开的操作（如点击链接）
+     * @return 新打开的 Page 实例
+     * @see PageLifecycleCoordinator#waitForNewPage(BasePage, Runnable)
+     */
+    public Page waitForNewPage(Runnable trigger) {
+        return PageLifecycleCoordinator.waitForNewPage(this, trigger);
+    }
+
+    /**
      * 等待下载：在 {@code trigger} 触发的一次下载完成前阻塞，对齐 {@code page.waitForDownload(...)}。
      * 框架已开启下载能力，文件自动保存到配置目录；可与弹窗/新页面嵌套。
      * @param trigger     触发下载的操作（如点击下载链接）
@@ -575,6 +586,15 @@ public abstract class BasePage {
      */
     public void waitForDownload(Runnable trigger, int timeoutSecs) {
         PageLifecycleCoordinator.waitForDownload(this, trigger, timeoutSecs);
+    }
+
+    /**
+     * 等待下载（<b>不指定超时</b>）：沿用 Playwright 上下文默认超时（框架配置驱动）。
+     * @param trigger 触发下载的操作（如点击下载链接）
+     * @see PageLifecycleCoordinator#waitForDownload(BasePage, Runnable)
+     */
+    public void waitForDownload(Runnable trigger) {
+        PageLifecycleCoordinator.waitForDownload(this, trigger);
     }
 
     /**

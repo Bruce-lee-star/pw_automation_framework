@@ -313,27 +313,29 @@ public final class RoleElementStepGenerator {
                         }
                         if (e.isDownload() && !unresolvedDrag) {
                             // 下载（anchor download 属性 / 文件 URL / JS 触发）：用框架封装的
-                            // waitForDownload(trigger, timeoutSecs) 等待下载完成，对齐 page.pause()
-                            // 的 waitForDownload 录制。与弹窗同时发生时嵌套：waitForDownload(waitForNewPage)。
+                            // waitForDownload(trigger) 等待下载完成（超时走框架默认，不在产物里硬编码秒数），
+                            // 对齐 page.pause() 的 waitForDownload 录制。
+                            // 与弹窗同时发生时嵌套：waitForDownload(() -> { waitForNewPage(...); })。
                             if (e.isPopup()) {
                                 methods.append("        ").append(pageVar).append(".waitForDownload(() -> {\n")
                                         .append("            ").append(pageVar).append(".waitForNewPage(() ->\n")
-                                        .append("                    ").append(lambdaBody(op)).append(", 15);\n")
+                                        .append("                    ").append(lambdaBody(op)).append(");\n")
                                         .append("        });\n");
                             } else {
                                 methods.append("        ").append(pageVar).append(".waitForDownload(() ->\n")
                                         .append("                ").append(lambdaBody(op)).append(");\n");
                             }
                         } else if (e.isPopup() && !unresolvedDrag) {
-                            // 弹窗链接（target=_blank）：用框架封装的 waitForNewPage(trigger, timeoutSecs)
-                            // 一步完成“点击 + 等待新页面 + 切换页对象上下文”，并把新页面赋给 Page 变量，
-                            // 后续操作在新页面执行；step 末统一“切回默认页”，使上下文回到默认 page（对齐用户预期）。
-                            // 对齐 page.pause() 的 waitForPopup 语义，但走框架原生 API（无需手写 Playwright）。
+                            // 弹窗链接（target=_blank）：用框架封装的 waitForNewPage(trigger) 一步完成
+                            // “点击 + 等待新页面 + 切换页对象上下文”（超时走框架默认，不在产物里硬编码秒数），
+                            // 并把新页面赋给 Page 变量，后续操作在新页面执行；step 末统一 closeCurrentPage
+                            // 关闭新页并自动切回父页（对齐用户预期）。
+                            // 语义对齐 page.pause() 的 waitForPopup，但走框架原生 API（无需手写 Playwright）。
                             String npVar = nextNewPageVar(npIdx);
                             sawPopup = true;
                             methods.append("        Page ").append(npVar).append(" = ").append(pageVar)
                                     .append(".waitForNewPage(() ->\n")
-                                    .append("                ").append(lambdaBody(op)).append(", 15);\n");
+                                    .append("                ").append(lambdaBody(op)).append(");\n");
                         } else {
                             for (int __r = 0; __r < __repeat; __r++) {
                                 methods.append("        ").append(op).append(";\n");
@@ -348,9 +350,11 @@ public final class RoleElementStepGenerator {
                     }
                 }
                 if (sawPopup) {
-                    // 本 step 触发过弹窗并切到了新页面：关闭弹窗页，由 BasePage 的 page.onClose 自动切回默认页
-                    // （复用录制层 RoleElementPicker 语义，不再手写 switchToPage(0)）。
-                    methods.append("        ").append(pageVar).append(".closeCurrentPage();\n");
+                    // 本 step 触发过弹窗并切到了新页面：关闭弹窗页。closeCurrentPage 内部会在关闭后
+                    // 自动把页上下文切回打开它的父页（故不再手写 switchToPage(0)）；行尾注释点明该语义，
+                    // 避免回放/维护者误以为这里漏了一次页面切换。
+                    methods.append("        ").append(pageVar)
+                            .append(".closeCurrentPage(); // 关闭当前页（弹窗/新页）并自动切回打开它的父页\n");
                 }
                 methods.append("    }\n\n");
             }
@@ -667,15 +671,15 @@ public final class RoleElementStepGenerator {
                             sawPopup = true; if (popupTargetVar == null) popupTargetVar = var;
                             m.append("        ").append(var).append(".waitForDownload(() -> {\n")
                                     .append("            ").append(var).append(".waitForNewPage(() ->\n")
-                                    .append("                    ").append(lambdaBody(op)).append(", 15);\n")
+                                    .append("                    ").append(lambdaBody(op)).append(");\n")
                                     .append("        });\n");
                             } else {
                                 m.append("        ").append(var).append(".waitForDownload(() ->\n")
                                         .append("                ").append(lambdaBody(op)).append(");\n");
                             }
                         } else if (e.isPopup() && !unresolvedDrag) {
-                            // 弹窗链接（target=_blank）：由“目标页对象”（如 privacyAndSecurityPage）触发并接管新页，
-                            // 避免“打开页先接管、再 switchToPage 交给目标页”的语义歧义与打开页引用错位。
+                            // 弹窗链接（target=_blank）：由“目标页对象”（如 privacyAndSecurityPage）触发并接管新页——
+                            // waitForNewPage 内部 acceptNewPage 已把宿主页上下文切到新页，故不再追加 switchToPage。
                             // 触发点击的元素仍属打开页（var），故闭包内用 var + "." + op；waitForNewPage 宿主用 popupTarget。
                             sawPopup = true;
                             lastFp = null; // 弹窗打开新页，frame 栈与旧页不同，重置以避免误切回旧 frame
@@ -684,15 +688,13 @@ public final class RoleElementStepGenerator {
                             if (popupTarget != null) {
                                 m.append("        Page ").append(npVar).append(" = ").append(popupTarget)
                                         .append(".waitForNewPage(() ->\n")
-                                        .append("                ").append(lambdaBody(op)).append(", 15);\n");
-                                m.append("        ").append(popupTarget).append(".switchToPage(")
-                                        .append(npVar).append("); // 显式切换到新页面\n");
+                                        .append("                ").append(lambdaBody(op)).append(");\n");
                                 if (popupTargetVar == null) popupTargetVar = popupTarget;
                                 activeVar = popupTarget; // 当前激活页切到新页，便于后续检测"回到打开页"时切回
                             } else {
                                 m.append("        Page ").append(npVar).append(" = ").append(var)
                                         .append(".waitForNewPage(() ->\n")
-                                        .append("                ").append(lambdaBody(op)).append(", 15);\n");
+                                        .append("                ").append(lambdaBody(op)).append(");\n");
                                 if (popupTargetVar == null) popupTargetVar = var;
                             }
                         } else {
@@ -1114,7 +1116,7 @@ public final class RoleElementStepGenerator {
                                 // 上下文切回打开它的父页（当前 active 页），故后续旧页元素无需再手写 switchToPage。
                                 String cv = (popupTargetVar != null) ? popupTargetVar : var;
                                 methods.append("        ").append(cv)
-                                        .append(".closeCurrentPage();\n");
+                                        .append(".closeCurrentPage(); // 关闭当前页（弹窗/新页）并自动切回打开它的父页\n");
                                 renderedCloseOp = true;
                                 lastFp = null; // 关闭弹窗回到父页，frame 栈与弹窗页不同，重置避免误切
                                 continue;
@@ -1179,7 +1181,7 @@ public final class RoleElementStepGenerator {
                                     sawPopup = true; if (popupTargetVar == null) popupTargetVar = var;
                                     methods.append("        ").append(var).append(".waitForDownload(() -> {\n")
                                             .append("            ").append(var).append(".waitForNewPage(() ->\n")
-                                            .append("                    ").append(op).append(", 15);\n")
+                                            .append("                    ").append(op).append(");\n")
                                             .append("        });\n");
                                 } else {
                                     methods.append("        ").append(var).append(".waitForDownload(() ->\n")
@@ -1190,22 +1192,20 @@ public final class RoleElementStepGenerator {
                                 lastFp = null; // 弹窗/新页在另一个 Page（frame 栈与当前页无关），重置避免误切 frame
                                 String npVar = nextNewPageVar(npIdx);
                                 // 弹窗目标页（popupTarget）已推断出来时，由它来触发并接管新页，
-                                // 避免"openVar 先接管新页、再 switchToPage 交给 popupTarget"造成的语义歧义与
-                                // openVar 引用短暂错位（生成：privacyAndSecurityPage.waitForNewPage(() ->
-                                // logonPage.privacyAndSecurityFooterLink.click(), 15)）。触发点击的元素仍属 openVar，
+                                // 避免"openVar 先接管新页、再切给 popupTarget"造成的语义歧义与引用短暂错位
+                                //（生成：privacyAndSecurityPage.waitForNewPage(() ->
+                                // logonPage.privacyAndSecurityFooterLink.click())）。触发点击的元素仍属 openVar，
                                 // 故闭包内用 var + "." + op；waitForNewPage 的宿主用 popupTarget。
                                 String popupTarget = inferPopupTargetVar(step, var, pageVar, opsByPage);
                                 if (popupTarget != null) {
                                     methods.append("        Page ").append(npVar).append(" = ").append(popupTarget)
                                             .append(".waitForNewPage(() ->\n")
-                                            .append("                ").append(op).append(", 15);\n");
-                                    methods.append("        ").append(popupTarget).append(".switchToPage(")
-                                            .append(npVar).append(");\n");
+                                            .append("                ").append(op).append(");\n");
                                     if (popupTargetVar == null) popupTargetVar = popupTarget;
                                 } else {
                                     methods.append("        Page ").append(npVar).append(" = ").append(var)
                                             .append(".waitForNewPage(() ->\n")
-                                            .append("                ").append(op).append(", 15);\n");
+                                            .append("                ").append(op).append(");\n");
                                     if (popupTargetVar == null) popupTargetVar = var;
                                 }
                             } else {
@@ -1228,14 +1228,14 @@ public final class RoleElementStepGenerator {
                     if ("close".equals(op)) {
                         String var = pageVar.get(pc);
                         if (var == null) continue;
-                        // 该页是弹窗目标页：关闭已内联到“打开弹窗的 step”中（含 switchToPage 绑定），
+                        // 该页是弹窗目标页：关闭已内联到“打开弹窗的 step”中（含 waitForNewPage 的宿主绑定），
                         // 此处跳过独立方法，避免重复生成且独立方法拿不到弹窗引用。
                         if (inlinedTargetVars.contains(var)) continue;
                         any = true;
                         methods.append("    @Step\n");
                         methods.append("    public void close").append(pc).append("() {\n");
                         methods.append("        ").append(var)
-                                .append(".closeCurrentPage();\n");
+                                .append(".closeCurrentPage(); // 关闭当前页并自动切回打开它的父页\n");
                         methods.append("    }\n\n");
                     }
                 }

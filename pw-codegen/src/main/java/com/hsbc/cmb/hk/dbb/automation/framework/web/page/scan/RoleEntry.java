@@ -61,7 +61,8 @@ public final class RoleEntry {
 
     /**
      * 该次点击是否弹出了新页面（target=_blank 链接等）。为 true 时生成 step 应包装为
-     * {@code page.waitForPopup(() -> element.click())}，对齐 {@code page.pause()} 的 codegen 输出。
+     * {@code xxx.waitForNewPage(() -> element.click())}（框架原生 API，超时走框架默认），
+     * 语义对齐 {@code page.pause()} 的 {@code waitForPopup} 录制。
      */
     private boolean popup;
     /**
@@ -71,9 +72,9 @@ public final class RoleEntry {
     private final int index;
     /**
      * 该次点击是否触发了下载（anchor 带 download 属性 / 指向文件 URL，或 JS 触发的下载）。
-     * 为 true 时生成 step 应包装为 {@code page.waitForDownload(() -> element.click())}，
-     * 对齐 {@code page.pause()} 的 codegen 输出；与 {@link #popup} 同时为真时嵌套：
-     * {@code waitForDownload(waitForPopup)}。
+     * 为 true 时生成 step 应包装为 {@code xxx.waitForDownload(() -> element.click())}
+     * （框架原生 API，超时走框架默认），语义对齐 {@code page.pause()} 的录制；
+     * 与 {@link #popup} 同时为真时嵌套：{@code waitForDownload(() -> { waitForNewPage(...); })}。
      */
     private final boolean download;
     /**
@@ -90,7 +91,8 @@ public final class RoleEntry {
     private final String pageClass;
     /**
      * 该拾取是否为「关闭页面」操作标记（由 onClose 在弹窗关闭时写入当前 step）。
-     * 为 true 时生成 step 应输出 {@code page.closeCurrentPage()}，而非元素操作；
+     * 为 true 时生成 step 应输出 {@code xxx.closeCurrentPage()}（框架原生 API：关闭当前页后
+     * 自动切回打开它的父页，故无需再生成 switchToPage），而非元素操作；
      * 与元素 pick 一同落在同一步（start→stop 唯一边界），故关闭页面不会额外拆出 step。
      */
     private final boolean closeOp;
