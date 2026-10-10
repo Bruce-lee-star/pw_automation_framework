@@ -198,37 +198,57 @@
               };
               // 轻量刷新勾选态：仅更新已存在行的复选框与高亮，【不重建整个列表 DOM】，
               // 避免对回灌出的海量元素做 O(n) 全量重建（卡 UI 的根因）。
+              // ============ 勾选态（与「本轮封存」解耦）============
+              // 旧实现把勾选态绑在 window.__currentStep —— 那是【本轮拾取序列】，会被导航、新文档回灌、
+              // 弹窗"本轮转移到新页后清空源页"等操作清空/替换，于是现场表现：
+              //   ① URL change / 新页面 / 回灌后，已拾取元素的勾选整体丢失（本页刚拾的也一起变未勾选）；
+              //   ② 弹窗跟随时原页勾选丢失（本轮被转移到新页后原页被清空）；
+              //   ③ 勾选/取消勾选会改写本轮序列，污染 step 封存语义。
+              // 现改为【勾选 ⇔ 该元素已拾取（在面板列表中）且未被用户显式取消】：
+              //   · 取消勾选只记入 window.__roleUnsel（按 mergeKey 的键集合），不再触碰 __currentStep；
+              //   · 新拾取的元素默认勾选（无需额外挂钩：面板行的数据源就是 __rolePicks）；
+              //   · 导航 / 新页 / 回灌 / 本轮转移都不影响勾选 ⇒ 跨页一致；
+              //   · 本轮 step 的封存与本轮序列彻底不受勾选操作影响。
+              window.__roleUnsel = window.__roleUnsel || {};
+              function __selKey(p) {
+                try { return (typeof window.__mergeKey === 'function') ? window.__mergeKey(p) : (p && (p._sigKey || p._sig)); } catch (e) { return null; }
+              }
+              /** 勾选判定（键版）：唯一判据，供行渲染 / 增量刷新 / 计数 / 全选 / 删除共用。 */
+              window.__isSelKey = function(k) { return !!(k && !window.__roleUnsel[k]); };
+              /** 勾选判定（对象版）。 */
+              window.__isSel = function(p) { return window.__isSelKey(__selKey(p)); };
+              /** 设置勾选：on=true 恢复勾选（移除"已取消"标记）；on=false 记入取消集合。 */
+              window.__setSel = function(p, on) {
+                var k = __selKey(p); if (!k) return;
+                if (on) { delete window.__roleUnsel[k]; } else { window.__roleUnsel[k] = true; }
+              };
+              /** 统计列表中已勾选数量。 */
+              window.__selCount = function(list) { var n = 0; (list || []).forEach(function(p) { if (window.__isSel(p)) n++; }); return n; };
+              /** 复位勾选（清空拾取 / 开新会话时调用）：全部恢复为默认勾选。 */
+              window.__resetSel = function() { window.__roleUnsel = {}; };
               window.__applySelection = function() {
                 try {
                   var listEl = document.getElementById('__rolePickList');
                   if (!listEl) return;
-                  // 勾选态唯一由「选择集」(__currentStep) 决定（面板序号体系已移除，_pickNos 不再是勾选判据）。
-                  var selSet = {};
-                  (window.__currentStep || []).forEach(function(p) {
-                    var k = (typeof window.__mergeKey==='function') ? window.__mergeKey(p) : (p && (p._sigKey || p._sig)); if (k) selSet[k] = true;
-                  });
+                  // 勾选态唯一由 __roleUnsel（"用户显式取消"集合）决定，与 __currentStep 无关（见上方说明）。
                   var rows = listEl.children;
                   for (var i = 0; i < rows.length; i++) {
                     var row = rows[i];
                     if (!row || !row.__cb) continue;
                     var sk = row.__sig;
-                    var sel = !!(sk && selSet[sk]);
+                    var sel = window.__isSelKey(sk);
                     row.__cb.checked = sel;
                     row.style.background = sel ? 'rgba(30,136,229,.18)' : '';
                   }
-                  // 【修复】同步"全选"复选框：selAllCb 是列表外的独立复选框、不在上面 children 遍历范围内。
-                  // 其勾选状态必须由【真实选择集 window.__currentStep】唯一决定，否则会出现
-                  // "元素行全未选中、但全选框仍勾选"的不一致（封装为步骤后切回页面元素 tab 尤为明显）。
-                  // 双保险：① refreshSelInfo 统一刷新计数与全选框（依赖闭包 selAllCb）；
-                  //        ② 直接用全局引用 window.__roleSelAllCb（指向真实 DOM checkbox）按真实选择集兜底复位，
-                  //           不依赖闭包捕获，杜绝因闭包错位导致的复位失效。
+                  // 同步"全选"复选框与计数（refreshSelInfo 为唯一实现，此处再按全局引用兜底一次，
+                  // 防"行已全部勾选、全选框却未勾选"的不一致）。
                   try {
                     if (typeof refreshSelInfo === 'function') { try { refreshSelInfo(); } catch (e3) {} }
                     var _sa = window.__roleSelAllCb;
-                    if (_sa) {
-                      var _cset = window.__currentStep || [];
-                      var _visN = (typeof curVisiblePicks === 'function') ? curVisiblePicks().length : 0;
-                      _sa.checked = (_visN > 0 && _cset.length === _visN);
+                    if (_sa && typeof curVisiblePicks === 'function') {
+                      var _vis = curVisiblePicks();
+                      _sa.disabled = (_vis.length === 0);
+                      _sa.checked = (_vis.length > 0 && window.__selCount(_vis) === _vis.length);
                     }
                   } catch (e2) {}
                 } catch (e) {}
@@ -451,7 +471,8 @@
                     '<path d="M10 11v5M14 11v5"/>' +
                     '</svg>';
                   function syncDelBtn() {
-                    var has = (window.__currentStep || []).length > 0;
+                    // 勾选口径与行渲染一致：当前可见且已勾选（未被用户取消）的元素数 > 0 即可用。
+                    var has = (typeof curVisiblePicks === 'function') ? (window.__selCount(curVisiblePicks()) > 0) : false;
                     if (has) {
                       // 可用态：亮红底 + 白图标 + 亮红描边 + 红色投影，在深色工具栏里一眼可见。
                       delBtn.disabled = false;
@@ -471,7 +492,11 @@
                   delBtn.onclick = function(e) {
                     if (e && e.stopPropagation) e.stopPropagation();
                     if (delBtn.disabled) return;
-                    var cset = window.__currentStep || [];
+                    // 删除目标 = 【当前可见且已勾选】的元素（勾选口径见文件上方 __roleUnsel 说明）。
+                    // 后续逻辑仍按 PageClass 展开到"该页全部元素"，与本口径一致。
+                    var cset = (typeof curVisiblePicks === 'function')
+                      ? curVisiblePicks().filter(function(x) { return window.__isSel(x); })
+                      : [];
                     if (!cset.length) return;
                     var dead = {};
                     // 同时收集 _sigKey 与 _sig 两种键：浏览器端去重 / 清理用（过滤 __rolePicks、__rolePickSigs）。
@@ -659,40 +684,22 @@
                   // 把"全选"工具栏从候选列表内部移出，作为 subTabBar（按页分组的子 Tab 行）正下方
                   // 的兄弟元素，使"全选"这一行与子 Tab 行紧挨着。
                   try { pageContent.insertBefore(selBar, listEl); } catch (e) { listEl.appendChild(selBar); }
+                  /** 计数 + 垃圾桶高亮（渲染期版本；随后会被下方带"全选框同步"的实现覆写，仅作兜底）。 */
                   function refreshSelInfo() {
                     var vis = curVisiblePicks();
-                    var sel = 0;
-                    var cset = window.__currentStep || [];
-                    // 【优化】提前构建 Set 查找表，避免循环内 some() 的 O(n²) 开销
-                    var csetKeys = new Set();
-                    for (var _csi = 0; _csi < cset.length; _csi++) {
-                      var _cs = cset[_csi];
-                      if (_cs) {
-                        var _csk = (typeof window.__mergeKey==='function') ? window.__mergeKey(_cs) : (_cs._sigKey || _cs._sig);
-                        if (_csk) csetKeys.add(_csk);
-                      }
-                    }
-                    // 已选计数唯一由「选择集」(__currentStep) 决定（面板序号体系已移除，_pickNos 不再是判据）。
-                    function __mkey(q){ return (typeof window.__mergeKey==='function') ? window.__mergeKey(q) : (q && (q._sigKey || q._sig)); }
-                    for (var vi = 0; vi < vis.length; vi++) {
-                      var s = __mkey(vis[vi]);
-                      if (s && csetKeys.has(s)) sel++;
-                    }
+                    // 已选计数唯一由勾选判据 __isSel 决定（__currentStep / _pickNos 均不再参与）。
+                    var sel = window.__selCount(vis);
                     selInfo.textContent = '已选 ' + sel + ' / ' + vis.length;
                     syncDelBtn();   // 选中数量变化后同步垃圾桶按钮高亮
                   }
-                  // 勾选态唯一由「选择集」(__currentStep) 决定（面板序号体系已移除，_pickNos 不再是判据）；
-                  // 页面点击拾取的元素会被 recordPick 加入 __currentStep，故其勾选框仍保持勾选。
-                  var selSet = {};
-                  (window.__currentStep || []).forEach(function(p) {
-                    var k = (typeof window.__mergeKey==='function') ? window.__mergeKey(p) : (p && (p._sigKey || p._sig)); if (k) selSet[k] = true;
-                  });
+                  // 勾选态唯一由 __roleUnsel（"用户显式取消"集合）决定，与 __currentStep 无关（见文件上方说明）：
+                  // 拾取过的元素默认勾选，导航 / 新页面 / 回灌 / 本轮转移都不会清掉它。
                   for (var i2 = 0; i2 < picks.length; i2++) {
                     let p = picks[i2] || {};
                     var pc = (p._pageClass) || (window.__rolePageName || '未知页');
                     if (pc !== act) continue;
                     var sk = (typeof window.__mergeKey==='function') ? window.__mergeKey(p) : (p._sigKey || p._sig);
-                    var sel = !!(sk && selSet[sk]);
+                    var sel = window.__isSelKey(sk);
                     var row = document.createElement('label');
                     row.style.cssText = 'display:flex;gap:6px;align-items:flex-start;padding:3px 4px;cursor:pointer;' +
                       (sel ? 'background:rgba(30,136,229,.18);' : '') + 'border-bottom:1px solid #111;';
@@ -711,31 +718,15 @@
                         // 阻断冒泡：勾选只做 O(1) 增量更新（仅该行高亮 + 选择集维护），
                         // 不冒泡到 document 的拾取监听链路，避免意外的 tab 切换/卡顿。
                         if (e && e.stopPropagation) e.stopPropagation();
-                        window.__currentStep = window.__currentStep || [];
-                        // 【关键】用全局健壮键，避免 pk 签名字段缺失时 s 为空、直接 return 导致勾选不生效
-                        //（即"选中了却没进选择集、封装 step 时 SelSet 为空 → 生成 0 条"）。
-                        var s = (typeof window.__mergeKey==='function') ? window.__mergeKey(pk) : (pk && (pk._sigKey || pk._sig));
-                        if (!s) return;
-                        var idx = -1;
-                        for (var j = 0; j < window.__currentStep.length; j++) {
-                          var e = window.__currentStep[j];
-                          var ek = (typeof window.__mergeKey==='function') ? window.__mergeKey(e) : (e && (e._sigKey || e._sig));
-                          if (ek === s) { idx = j; break; }
+                        // 【勾选态与「本轮封存」解耦】只维护 __roleUnsel，不再改写 __currentStep：
+                        //   · 勾选 = 移除"已取消"标记（该元素默认就是勾选的）；
+                        //   · 取消勾选 = 记入取消集合，跨导航 / 新页面 / 回灌都保持未勾选；
+                        //   · 面板序号体系已整体移除，勾选框不再铸号、不再发 repickNos。
+                        if (checkbox.checked !== window.__isSel(pk)) {
+                          window.__setSel(pk, checkbox.checked);
                         }
-                        if (checkbox.checked) {
-                          // 勾选 = 仅把该元素加入「选择集」(__currentStep)（供查看 / 删除使用）。
-                          // 【面板序号体系已整体移除】不再铸号、不再发 repickNos：_pickNos 完全由
-                          // 「真实点击拾取」驱动（picker-core-b1 的 __appendPickNo），面板不参与序号的
-                          // 增加 / 删减 / 重编号，勾选框只是一个纯粹的选择开关。
-                          if (idx < 0) window.__currentStep.push(pk);
-                          rowEl.style.background = 'rgba(30,136,229,.18)';
-                          console.log('[checkbox] CHECK -> mergeKey=' + (typeof window.__mergeKey === 'function' ? window.__mergeKey(pk) : '?'));
-                        } else {
-                          // 取消勾选 = 仅从「选择集」移除，与序号无关（_pickNos 不受影响，仍由真实点击决定）。
-                          if (idx >= 0) window.__currentStep.splice(idx, 1);
-                          rowEl.style.background = '';
-                          console.log('[checkbox] UNCHECK -> mergeKey=' + (typeof window.__mergeKey === 'function' ? window.__mergeKey(pk) : '?'));
-                        }
+                        rowEl.style.background = checkbox.checked ? 'rgba(30,136,229,.18)' : '';
+                        console.log('[checkbox] ' + (checkbox.checked ? 'CHECK' : 'UNCHECK') + ' -> mergeKey=' + String((typeof window.__mergeKey === 'function' ? window.__mergeKey(pk) : '?')));
                         // 选中变化后同步「已选计数」与垃圾桶按钮高亮（轻量，仅刷新工具栏）
                         if (typeof refreshSelInfo === 'function') refreshSelInfo();
                         // 刷新所有行的步骤序号显示
@@ -827,34 +818,10 @@
                   // 全选只做「选择集」维护（供查看/删除使用），与序号无关（面板序号体系已整体移除）。
                   try {
                     function applySelectAll(on) {
+                      // 全选 / 全不选只维护 __roleUnsel（与行勾选框同一判据），不再改写 __currentStep
+                      // —— 勾选态已与本轮封存解耦（见文件上方说明），故不会污染本轮 step。
                       var vis = curVisiblePicks();
-                      if (on) {
-                        window.__currentStep = window.__currentStep || [];
-                        // 【优化】构建 Set 查找表，避免 some() 的 O(n²) 开销
-                        var csetKeys = new Set();
-                        for (var _csi = 0; _csi < window.__currentStep.length; _csi++) {
-                          var _cs = window.__currentStep[_csi];
-                          if (_cs) {
-                            var _csk = (typeof window.__mergeKey==='function') ? window.__mergeKey(_cs) : (_cs._sigKey || _cs._sig);
-                            if (_csk) csetKeys.add(_csk);
-                          }
-                        }
-                        for (var vi = 0; vi < vis.length; vi++) {
-                          var pk = vis[vi]; if (!pk) continue;
-                          var s = (typeof window.__mergeKey==='function') ? window.__mergeKey(pk) : (pk._sigKey || pk._sig); if (!s) continue;
-                          if (!csetKeys.has(s)) {
-                            window.__currentStep.push(pk);
-                            csetKeys.add(s);
-                          }
-                        }
-                        // 全选仅维护选择集（勾选框不再赋序号）
-                      } else {
-                        // 全不选：仅从选择集移除，不再改动 _pickNos —— 面板序号体系已移除，
-                        // 序号完全由真实点击拾取驱动。
-                        var visSigs = {};
-                        vis.forEach(function(pk) { if (pk) { var s = (typeof window.__mergeKey==='function')?window.__mergeKey(pk):(pk._sigKey||pk._sig); if (s) visSigs[s] = true; } });
-                        window.__currentStep = (window.__currentStep || []).filter(function(x) { var sk=(typeof window.__mergeKey==='function')?window.__mergeKey(x):(x&&(x._sigKey||x._sig)); return !(sk && visSigs[sk]); });
-                      }
+                      vis.forEach(function(pk) { if (pk) window.__setSel(pk, on); });
                     }
                     selAllCb.onclick = function(e) {
                       e && e.stopPropagation && e.stopPropagation();
@@ -865,26 +832,9 @@
                     var _refreshSelInfo = refreshSelInfo;
                     window.refreshSelInfo = refreshSelInfo = function() {
                       var vis = curVisiblePicks();
-                      var cset = window.__currentStep || [];
-                      var sel = 0;
-                      // 统一用 __mergeKey 计算勾选键（与 onchange / applySelectAll 完全一致）：
-                      // 旧实现用 vis[vi]._sigKey || vis[vi]._sig，若面板 picks 对象未固化这些字段则 s 恒为空，
-                      // 导致"已选计数"永远显示 0、全选框永远不勾选（用户误以为 i18n/无 _sigKey 元素没被选中）。
-                      function __mkey2(q){ return (typeof window.__mergeKey==='function') ? window.__mergeKey(q) : (q && (q._sigKey || q._sig)); }
-                      // 构建选择集 Set 查找表：唯一来源是「选择集」__currentStep
-                      //（面板序号体系已移除，_pickNos 不再是勾选/计数判据）。
-                      var csetKeys = new Set();
-                      for (var _si = 0; _si < cset.length; _si++) {
-                        var _cs = cset[_si];
-                        if (_cs) {
-                          var _csk = __mkey2(_cs);
-                          if (_csk) csetKeys.add(_csk);
-                        }
-                      }
-                      for (var vi = 0; vi < vis.length; vi++) {
-                        var s = __mkey2(vis[vi]);
-                        if (s && csetKeys.has(s)) sel++;
-                      }
+                      // 已选计数唯一由勾选判据 __isSel 决定（__currentStep / _pickNos 均不再参与）；
+                      // 键统一走 __mergeKey，避免 i18n / 无 _sigKey 元素计数恒为 0。
+                      var sel = window.__selCount(vis);
                       selInfo.textContent = '已选 ' + sel + ' / ' + vis.length;
                       // 【关键修复"删除全部后全选 checkbox 未复位"】
                       // 无可见元素时（如删除全部选中项后 __rolePicks 被清空），全选框应【禁用且未勾选】，
