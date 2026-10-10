@@ -123,7 +123,7 @@ public final class RoleEntry {
 
     /**
      * 该拾取是否为「右键点击（contextmenu）」交互（区别于默认的单击 click）。
-     * 为 true 时生成 step 应输出 {@code locator.click({ button: 'right' })} 而非 {@code .click()}，
+     * 为 true 时生成 step 应输出元素门面的 {@code rightClick()}（{@code PageElement#rightClick}）而非 {@code .click()}，
      * 对齐 {@code page.pause()} 对右键交互的录制（右键的语义是"打开上下文菜单"，
      * 而非角色默认的点击/勾选/输入，故优先于角色推断：即便右键的是 checkbox/radio，
      * 也按真实交互输出 click({button:'right'})，而非误生成 setChecked()）。
@@ -527,7 +527,7 @@ public final class RoleEntry {
         return dblClick;
     }
 
-    /** 该拾取是否为「右键点击（contextmenu）」交互；是则生成 step 应输出 {@code locator.click({ button: 'right' })}。 */
+    /** 该拾取是否为「右键点击（contextmenu）」交互；是则生成 step 应输出元素门面的 {@code rightClick()}。 */
     public boolean isRightClick() {
         return rightClick;
     }

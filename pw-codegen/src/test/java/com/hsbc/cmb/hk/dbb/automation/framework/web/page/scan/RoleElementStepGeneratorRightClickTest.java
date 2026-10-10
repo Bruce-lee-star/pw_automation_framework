@@ -15,9 +15,10 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * 右键点击（contextmenu）录制对齐 {@code page.pause()} 的契约：
- * {@code operationFor} 必须输出 {@code click({ button: 'right' })}，且优先级高于角色推断
- * （右键 checkbox 不应误生成 setChecked），整链 step 产物须含该调用。
+ * 右键点击（contextmenu）录制的契约：
+ * {@code operationFor} 必须输出元素门面的 {@code rightClick()}（{@code PageElement#rightClick}），
+ * 而不是 Playwright 原生串 {@code click({ button: 'right' })}（封装类无该重载、产物编译不过）；
+ * 且优先级高于角色推断（右键 checkbox 不应误生成 setChecked），整链 step 产物须含 {@code .rightClick()}。
  *
  * <p>纯离线用例，复用 {@link RolePickerCodeAssembler#buildStepCode} 全链路，无浏览器依赖。
  */
@@ -38,17 +39,17 @@ public class RoleElementStepGeneratorRightClickTest {
     }
 
     @Test
-    // @DisplayName: "普通按钮右键 → click({ button: 'right' })"
+    // @DisplayName: "普通按钮右键 → rightClick()"
     public void buttonRightClickProducesRightClickCall() {
         RoleEntry e = rightClick(entry("button", "Submit", "k_submit"));
-        assertEquals("click({ button: 'right' })", RoleElementStepGenerator.operationFor(e));
+        assertEquals("rightClick()", RoleElementStepGenerator.operationFor(e));
     }
 
     @Test
     // @DisplayName: "右键优先级高于角色推断：右键 checkbox 不退化成 setChecked"
     public void rightClickBeatsCheckboxInference() {
         RoleEntry e = rightClick(entry("checkbox", "Agree", "k_agree"));
-        assertEquals("click({ button: 'right' })", RoleElementStepGenerator.operationFor(e));
+        assertEquals("rightClick()", RoleElementStepGenerator.operationFor(e));
     }
 
     @Test
@@ -56,7 +57,7 @@ public class RoleElementStepGeneratorRightClickTest {
     public void rightClickBeatsHoverInference() {
         RoleEntry e = rightClick(entry("link", "Home", "k_home"));
         e.setHover(true);
-        assertEquals("click({ button: 'right' })", RoleElementStepGenerator.operationFor(e));
+        assertEquals("rightClick()", RoleElementStepGenerator.operationFor(e));
     }
 
     private static String generateSingleStep(RoleEntry e) {
@@ -79,11 +80,11 @@ public class RoleElementStepGeneratorRightClickTest {
     }
 
     @Test
-    // @DisplayName: "整链产物含 click({ button: 'right' })，且不出现裸 .click() 或 doubleClick()"
+    // @DisplayName: "整链产物含 .rightClick()，且不出现裸 .click() 或 doubleClick()"
     public void pipelineEmitsRightClickCallWithoutBareClick() {
         String body = generateSingleStep(rightClick(entry("button", "Submit", "k_submit")));
-        assertTrue("产物须含右键点击调用：" + body, body.contains("click({ button: 'right' })"));
-        // 裸 .click()（左键）不应出现；右键调用是 click({...})，不是 .click()
+        assertTrue("产物须含右键点击调用：" + body, body.contains(".rightClick()"));
+        // 裸 .click()（左键）不应出现；右键调用是 .rightClick()，不是 .click()
         assertEquals("不应出现裸 .click()：" + body, 0, count(body, ".click()"));
         assertFalse("不应误生成 doubleClick()：" + body, body.contains("doubleClick()"));
     }
@@ -95,6 +96,6 @@ public class RoleElementStepGeneratorRightClickTest {
         e.setPopup(true);
         String body = generateSingleStep(e);
         assertTrue("右键点击应被 waitForNewPage 包裹：" + body, body.contains("waitForNewPage"));
-        assertTrue("包裹体内须是右键调用：" + body, body.contains("click({ button: 'right' })"));
+        assertTrue("包裹体内须是右键调用：" + body, body.contains(".rightClick()"));
     }
 }

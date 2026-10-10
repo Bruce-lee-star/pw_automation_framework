@@ -374,7 +374,7 @@
               };
               // 右键点击（contextmenu）：对齐 page.pause() 对右键交互的录制。
               // 右键触发 contextmenu（而非 click），语义是"打开上下文菜单"；录制为一次 click 动作（带 rightClick 标记），
-              // 生成 step 时输出 locator.click({ button: 'right' })。不 preventDefault，保留原生右键菜单
+              // 生成 step 时输出元素门面的 rightClick()（PageElement#rightClick）。不 preventDefault，保留原生右键菜单
               // （与 page.pause 的"点击即真实交互 + 定位"一致——点击穿透哲学同样适用于右键）。
               // 因 __recordPick 内部已"首次即时回传"一份不含 rightClick 的 pick 到 Java 内存态，
               // 故设标记后须再次经 __roleOnPick 回传（按 _sigKey 覆盖），确保 stop 生成能拿到该标记。
