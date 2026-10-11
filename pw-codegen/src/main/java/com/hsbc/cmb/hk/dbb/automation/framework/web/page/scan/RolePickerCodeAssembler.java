@@ -19,34 +19,15 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickSnapshot
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.StepRec;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PageOp;
 
-/**
- * Code-generation assembler (T5-1 step 3): relocates RoleElementPicker's pure
- * source-generation orchestration into this class. Inputs/outputs are plain data
- * (List<RoleEntry> / PickSnapshot / LinkedHashMap); it reads/writes no CTX_* runtime
- * state and triggers no Playwright/browser calls, only delegating emission to
- * RoleElementPageGenerator / RoleElementStepGenerator plus entries<->steps enrichment
- * and dedup reconciliation. Behavior is identical to the original inline logic.
- */
 final class RolePickerCodeAssembler {
 
     private static final Logger log = LoggerFactory.getLogger(RolePickerCodeAssembler.class);
     private static final Gson GSON = new Gson();
     private static final Type MAP_STRING_OBJECT_TYPE = new TypeToken<Map<String, Object>>() {}.getType();
-    /** 关闭步骤序号器：保证每次"关闭当前页"标记签名唯一、可去重。 */
+
     private static final java.util.concurrent.atomic.AtomicInteger CLOSE_SEQ =
             new java.util.concurrent.atomic.AtomicInteger();
 
-    /**
-     * 由一组已拾取元素按所属页面类分组生成页面类源码（与 stop 命令的生成逻辑一致）。
-     * 返回 pageClass → 该页完整页面类源码 的 map，供面板"页面类"Tab 按页分栏展示（对齐"页面元素"Tab）。
-     * 单页即一个 entry；多页（弹窗/新标签页）则各元素按其 `_pageClass` 各自成类。
-     *
-     * @param entries       全部拾取元素（来自浏览器侧 window.__rolePicks，扫描与点击拾取已合并）
-     * @param packageName   生成类的包名
-     * @param defaultPageClass 兜底页类名（元素未带 _pageClass 时归入此类）
-     * @param nlsFiles      nls 反向查表文件（用于定位键反查）
-     * @return pageClass → 页面类源码（LinkedHashMap 保序，空列表时返回空 map）
-     */
     static LinkedHashMap<String, String> buildPageClassCode(List<RoleEntry> entries, String packageName,
                                              String defaultPageClass, String[] nlsFiles) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
@@ -62,23 +43,9 @@ final class RolePickerCodeAssembler {
         return out;
     }
 
-    /**
-     * 由快照（已拾元素 + 已封装 steps/ops）按页生成步骤代码（与 stop 命令的生成逻辑一致）。
-     * 返回 pageClass → 该页"完整可编译的 Step 类视图"源码 的 map，供面板"步骤代码"Tab 按页分栏展示
-     * （对齐"页面元素"Tab）。多页时主页视图含跨页 step、弹窗页视图含其 close 操作。
-     *
-     * @return pageClass → 步骤类视图源码（LinkedHashMap 保序，无 step/操作时返回空 map）
-     */
-    /**
-     * Manual-mode / not-packaged fallback: treat ALL picked entries as ONE step
-     * (start -> stop = one step). If already packaged (snap.steps non-empty, ordered by selection),
-     * leave it untouched. step.pageClass uses the root page (first entry's pageClass).
-     * Cross iframe/new-page/dialog entries keep their framePath/dialog/popup markers,
-     * handled per-element by RoleElementStepGenerator (switchToFrame/acceptAlert/waitForNewPage).
-     */
     static PickSnapshot snapWithAutoStep(PickSnapshot snap) {
         if (snap == null) return snap;
-        if (snap.steps != null && !snap.steps.isEmpty()) return snap;          // already packaged: keep selection order
+        if (snap.steps != null && !snap.steps.isEmpty()) return snap;
         if (snap.entries == null || snap.entries.isEmpty()) return snap;
         List<RoleEntry> all = new ArrayList<>(snap.entries);
         String rootPc = "";
@@ -87,9 +54,7 @@ final class RolePickerCodeAssembler {
             if (pc != null && !pc.isEmpty()) { rootPc = pc; break; }
         }
         if (rootPc.isEmpty()) rootPc = (snap.pageClass == null) ? "" : snap.pageClass;
-        // 不加序号：步骤内元素按拾取自然顺序（javaPickBySig 插入顺序 = 点击先后）排布，
-        // 不再依赖 pickNos 排序。同元素多次点击（pickNos 长度为 N）仍由 RoleElementStepGenerator
-        // 内部 __repeat = pickNos.size() 展开为 N 个重复操作，无需在此拆分 step。
+
         List<RoleEntry> sorted = new ArrayList<>(all);
         List<StepRec> steps = new ArrayList<>();
         steps.add(new StepRec(rootPc, sorted));
@@ -100,18 +65,11 @@ final class RolePickerCodeAssembler {
         return buildStepCode(snap, packageName, stepClassName, null);
     }
 
-    /**
-     * @param stepRoundNosByPage 【每轮号表】页 → 各 step → 元素身份键 → 该轮序号（可为 null）。
-     *                           由停止流程在清空 pickNos 之前收集，用于彻底按轮隔离序号；
-     *                           为 null 时步骤生成回退到元素身上的 pickNos / committedPickNos。
-     */
     static LinkedHashMap<String, String> buildStepCode(PickSnapshot snap, String packageName, String stepClassName,
             LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
         if (snap == null) return out;
-        // 【一组元素（list）识别 · 步骤侧】分组依据取自【全部条目】snap.entries，再回写到每个 step 的 picks
-        // ——单个 step 可能只含组内部分元素（例如 3 个 QR 图被拆进不同轮次），只在 step 内部识别会漏标。
-        // 标记后步骤用 x.get(index) 取单项，而不是多行一模一样的 click()。
+
         try {
             java.util.Set<String> listBases = RoleElementPageGenerator.listGroupBaseSigs(snap.entries);
             if (!listBases.isEmpty()) {
@@ -127,17 +85,7 @@ final class RolePickerCodeAssembler {
         } catch (Exception ignore) {
             RolePickerQuiet.ignore("RolePickerCodeAssembler#markListGroups", ignore);
         }
-        // 【关键修复"iframe 内元素生成 step 缺 switchToFrame"】
-        // snap.steps 来自浏览器侧 window.__steps 读取，其 pick 的 framePath/dialog/popup 等增强字段
-        // 是浏览器侧 __enrichState / 点击 handler 在拾取瞬间写入的——但 iframe 内：
-        //   · __framePathOf 在 file:// 跨 frame 下整段抛异常被吞为空数组，pick.framePath 未被赋值；
-        //   · 绑定桥失效，console 通道的 framePath backfill 又因 e.getPageClass()（iframe URL）被映射到
-        //     iframe 子页视图，使浏览器侧 pick.framePath 始终为空。
-        // 而 snap.entries 在外层已被 javaPickBySig（带 framePath backfill + 对话框/弹窗双保险）覆盖——
-        // entries 含正确增强，steps 不含。生成时 step 循环用 st.picks、entry 循环用 snap.entries，
-        // 字段名按 entries 的 locatorKey 匹配，但 switchToFrame 按 st.picks.getFramePath()——于是缺。
-        // 此处按 locatorKey 把 entries 的 framePath/dialog/popup 回补到 steps 的 picks 上（idempotent，
-        // 取非空/true 优先），保证生成时 step 能拿到与 Page 类字段一致的增强字段。
+
         if (snap.entries != null && !snap.entries.isEmpty() && snap.steps != null) {
                 java.util.Map<String, RoleEntry> byLocKey = new java.util.HashMap<>();
                 for (RoleEntry en : snap.entries) {
@@ -153,21 +101,11 @@ final class RolePickerCodeAssembler {
                             String lk = (p == null) ? "" : RoleElementPageGenerator.locatorKey(p);
                             RoleEntry mem = (lk.isEmpty()) ? null : byLocKey.get(lk);
                             if (mem != null && p != null) {
-                                // javaPickBySig 是权威内存态：含点击后 checked/setCheckedTarget、framePath backfill、
-                                // dialog/popup 双保险。RoleEntry 的 checked/setCheckedTarget 为 final 不可变，
-                                // 无法 merge，故有增强差异时直接用 mem 替换 pick（保证 setCheckedTarget 是点击后状态，
-                                // 否则点击"未勾选"checkbox 会因浏览器侧点击前状态生成 setChecked(false) 导致"没选择上"）。
+
                                 if (needsReplaceByMemory(p, mem)) {
                                     p = mem;
                                 } else {
-                                    // 回补身份字段（序号 / 列表标记）：浏览器侧 step pick 常为贫化对象——
-                                    // 即便已被 markListGroups 标记为「一组元素」，其 index 也常因回传链路丢失（恒为 -1），
-                                    // 且 sigKey 可能缺失，导致 step 渲染时 parseIndexFromSig 取不到 #N，
-                                    // 于是 list 元素只能退化成无下标的重复 click()（现场：3 个 QR 图 →
-                                    // 3 行 setupSecondPwdPage.qrCodeToDownloadTheMobileApp.click()）。
-                                    // 这些属元素身份，与 framePath/dialog 同理应从权威内存态 mem 补齐。
-                                    // 守卫：仅当本 pick 自身无法还原下标（无 index 且无可用 #N 的 sigKey）时才借用
-                                    // mem 的下标，避免覆盖那些 sigKey 完整、可自还原下标的元素（列表多成员场景）。
+
                                     int recovered = (p.getIndex() >= 0) ? p.getIndex()
                                             : RolePickerPickParser.parseIndexFromSig(p.getSigKey());
                                     if (recovered < 0 && mem.getIndex() >= 0) p.setIndex(mem.getIndex());
@@ -187,11 +125,7 @@ final class RolePickerCodeAssembler {
             String pc = (e.getPageClass() == null || e.getPageClass().isEmpty()) ? curClass : e.getPageClass();
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(e);
         }
-        // 生成前对账：steps 与 picks 是两条独立数据源，且 steps 在导航恢复/已关闭页缓存等路径上
-        // 是「只增不减」地合并回来的，已删元素仍可能以"幽灵 pick"残留在某条 step 里。
-        // 页面类字段只由 picks 生成，故此处按 locatorKey（与字段表同一套匹配口径）把
-        // 在 entries 中已不存在的 pick 从 step 中剔除，并丢弃因此变空的 step。
-        // 不这样做的话，代码生成侧会靠 field==null 静默 continue 跳过：编译能过，但动作凭空消失。
+
         java.util.Set<String> aliveKeys = new java.util.HashSet<>();
         for (RoleEntry e : snap.entries) {
             String lk = RoleElementPageGenerator.locatorKey(e);
@@ -201,9 +135,7 @@ final class RolePickerCodeAssembler {
         LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage = new LinkedHashMap<>();
         LinkedHashMap<String, List<String>> droppedByPage = new LinkedHashMap<>();
         if (snap.steps != null) for (StepRec st : snap.steps) {
-            // 所有 step 归入根页（curClass）保序：步骤类已合并为单类 SampleSteps，
-            // 若按 step 自身所属页分组，不同轮次/不同页的 step 会被"按页交错"编号
-            // （stepIdx++ 基于页序而非封装序）。统一归入 curClass 后，snap.steps 的封装先后即 step1/step2… 顺序。
+
             String pc = curClass;
             List<RoleEntry> picks = st.picks;
             if (picks != null && !aliveKeys.isEmpty()) {
@@ -211,16 +143,15 @@ final class RolePickerCodeAssembler {
                 for (RoleEntry e : picks) {
                     if (e == null) continue;
                     String lk = RoleElementPageGenerator.locatorKey(e);
-                    // 键为空者无法对账，保守保留（生成侧仍有 field==null 兜底，不会产生悬空引用）。
+
                     if (lk == null || lk.isEmpty() || aliveKeys.contains(lk)) kept.add(e);
                     else {
                         droppedPicks++;
-                        // 记入产物注记：面板上有、生成出来少一行时，直接在「步骤代码」里可见，无需翻日志。
+
                         droppedByPage.computeIfAbsent(pc, k -> new ArrayList<>())
                                 .add((e.getName() == null || e.getName().isEmpty())
                                         ? lk : lk + " (" + e.getName() + ")");
-                        // 诊断：i18n/定位器型策略元素若因 locatorKey 不匹配被 drop（典型表现"步骤里完全没有这行"），
-                        // 打印其 strategy/name/lk 与 aliveKeys 中同类键，便于定位 index(#0) 错位或字段不一致根因。
+
                         if (RolePickerConstants.STRATEGY_I18N.equals(e.getStrategy()) || (e.getStrategy() != null
                                 && RoleElementPicker.LOCATOR_IDENTITY_STRATEGIES.contains(e.getStrategy()))) {
                             log.info("[picker][drop-diag] step element removed by reconciliation: strategy={}, name={}, lk={}, count={}, index={}, aliveKeys(i18n class)={}",
@@ -232,7 +163,7 @@ final class RolePickerCodeAssembler {
                 picks = kept;
             }
             if (picks == null || picks.isEmpty()) {
-                // 整条 step 的元素都已被删：不生成空的 @Step 方法。
+
                 if (st.picks != null && !st.picks.isEmpty()) droppedSteps++;
                 continue;
             }
@@ -240,8 +171,7 @@ final class RolePickerCodeAssembler {
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>());
         }
         if (droppedPicks > 0 || droppedSteps > 0) {
-            // 升到 WARN：丢弃本身发生在"元素已删、浏览器侧 step 克隆仍带着它"的正常路径，但它会让产物少一行、
-            // 且症状与生成器 bug 难以区分，故按可告警事件处理，并带上具体引用与所属页。
+
             log.warn("[picker] pre-generation reconciliation: dropped {} deleted element reference(s) {}, discarded {} empty step(s)",
                     droppedPicks, droppedByPage, droppedSteps);
         }
@@ -273,7 +203,7 @@ final class RolePickerCodeAssembler {
                 steps = new java.util.ArrayList<java.util.Map<String, Object>>();
                 m.put("steps", steps);
             }
-            // 去重：同页已存在相同 pageClass 的关闭 step 则不重复追加。
+
             boolean dup = false;
             for (Object s : steps) {
                 if (s instanceof java.util.Map && pageClass.equals(((java.util.Map<?, ?>) s).get("pageClass"))
@@ -292,7 +222,7 @@ final class RolePickerCodeAssembler {
             step.put("picks", picks);
             steps.add(step);
             snapshots.put(closed, GSON.toJson(m));
-        } catch (Exception ignore) { /* 缓存快照不可用：忽略，关闭步骤将缺失（极少见） */ }
+        } catch (Exception ignore) {  }
     }
 
     static boolean hasClosePick(java.util.Map<?, ?> step) {
@@ -309,46 +239,28 @@ final class RolePickerCodeAssembler {
 
     static boolean needsReplaceByMemory(RoleEntry p, RoleEntry mem) {
         if (p == null || mem == null || p == mem) return false;
-        // checked 差异（final 不可 merge）
+
         if (!java.util.Objects.equals(p.getChecked(), mem.getChecked())) return true;
         if (!java.util.Objects.equals(p.getSetCheckedTarget(), mem.getSetCheckedTarget())) return true;
-        // framePath：p 缺、mem 有 → 替换；两者皆非空且相同则不必
+
         List<String> inFp = p.getFramePath();
         List<String> memFp = mem.getFramePath();
         boolean inEmpty = (inFp == null || inFp.isEmpty());
         boolean memEmpty = (memFp == null || memFp.isEmpty());
         if (inEmpty && !memEmpty) return true;
         if (!inEmpty && !memEmpty && !inFp.equals(memFp)) return true;
-        // dialog
+
         if (!p.isDialog() && mem.isDialog()) return true;
-        // popup
+
         if (!p.isPopup() && mem.isPopup()) return true;
         return false;
     }
 
-    /**
-     * 由快照按页生成<b>断言类</b>源码（供面板「断言」Tab 展示）。
-     *
-     * <p><b>与步骤生成同源同序、且逐行同构</b>：同一 {@code snap}、同一次「封装」的切分（一个 step 一个方法）、
-     * 同一「按 pickNos 逐号展开」的元素顺序（同一元素被点多次 ⇒ 与步骤一样出多条）、
-     * 同一 {@code locatorKey → 字段名} 口径（保证断言类与页面类/步骤类引用同一批字段、顺序一致）。
-     * 差别只在方法体：这里是可见性断言而非操作调用 —— 因此 {@code assertStepN} 的第 k 行对应
-     * {@code stepN} 的第 k 行，可直接逐行对照/替换。</p>
-     *
-     * <p><b>与步骤路径的一点刻意不同</b>：不复用 {@link #buildStepCode} 内部的分组/对账代码：
-     * 那条路径上挂着 F-15/P1-6 等历史修复
-     * （iframe framePath 回补、幽灵 pick 对账、drop 诊断），抽取重构会把"经验"搅在一起；
-     * 断言侧只需其中最小子集（按页分组 + 剔除已删元素 + 按序号排序），故独立实现并保持极简。</p>
-     *
-     * @param snap        拾取快照（entries + 已封装 steps）
-     * @param packageName 页面类所在包名（断言类落在其 {@code .assertions} 子包）
-     * @return pageClass → 该页断言类源码（LinkedHashMap 保序；无 step 时返回空 map）
-     */
     static LinkedHashMap<String, String> buildAssertCode(PickSnapshot snap, String packageName) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
         if (snap == null || snap.steps == null || snap.steps.isEmpty()) return out;
         String curClass = (snap.pageClass == null) ? "" : snap.pageClass;
-        // 页面字段只由 entries 生成 ⇒ 已删元素必须从断言里剔除，否则断言引用不存在的字段（产物不可编译）
+
         Set<String> aliveKeys = new HashSet<>();
         for (RoleEntry e : snap.entries) {
             String lk = RoleElementPageGenerator.locatorKey(e);
@@ -360,12 +272,12 @@ final class RolePickerCodeAssembler {
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(e);
         }
         LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage = new LinkedHashMap<>();
-        // 面板全局封装序号（与 stepsByPage 严格同序同长），供产物里的 assertStepN 注记使用（与步骤类同口径）
+
         LinkedHashMap<String, List<Integer>> panelNosByPage = new LinkedHashMap<>();
         int panelStepNo = 0;
         for (StepRec st : snap.steps) {
             if (st == null) continue;
-            panelStepNo++;   // 必须在任何 continue 之前自增，保证与 snap.steps 一一对应（含被丢弃的 step）
+            panelStepNo++;
             String pc = (st.pageClass == null || st.pageClass.isEmpty()) ? curClass : st.pageClass;
             if (st.picks != null) {
                 List<RoleEntry> picks = new ArrayList<>(st.picks.size());
@@ -381,9 +293,7 @@ final class RolePickerCodeAssembler {
                 }
             }
         }
-        // 【跨页修复】字段名是"页内分配"的，所以必须按页建字段表；取字段时用【元素自身所属页】
-        // （而非 step 的 owner 页）。原实现只用 owner 页的表 ⇒ 一次跨页封装里"其它页"的元素查不到字段，
-        // 被下方 field == null 静默 continue 丢弃，症状就是"断言比步骤少行、顺序对不上"。
+
         java.util.LinkedHashSet<String> allPages = new java.util.LinkedHashSet<>();
         for (String k : entriesByPage.keySet()) {
             if (k != null && !k.isEmpty()) allPages.add(k);
@@ -406,11 +316,7 @@ final class RolePickerCodeAssembler {
             String pc = en.getKey();
             List<List<String>> stepLines = new ArrayList<>();
             for (List<RoleEntry> step : en.getValue()) {
-                // 【与步骤严格同构】按 pickNos 逐号展开（同一元素的每个号各出一条断言），与 buildStepCode
-                // 的展开口径完全一致 ⇒ 断言行与步骤操作行【一一对应】（顺序与条数都相同），便于逐行对照/替换。
-                // 原实现按元素去重（"可见性断言重复无意义"），导致断言 5 行 vs 步骤 8 行、用户报
-                // "断言和步骤生成的代码不一样"，故改为逐号展开。
-                // closeOp（关闭当前页）不是元素操作，断言侧跳过、不产生 assert 行。
+
                 List<java.util.Map.Entry<Integer, RoleEntry>> seqEntries = new java.util.ArrayList<>();
                 for (RoleEntry e : step) {
                     if (e == null || e.isCloseOp()) continue;
@@ -433,7 +339,7 @@ final class RolePickerCodeAssembler {
                 for (RoleEntry e : ordered) {
                     String lk = RoleElementPageGenerator.locatorKey(e);
                     if (lk == null) continue;
-                    // 按元素自身所属页取字段与页变量（跨页封装时元素可能不属于 owner 页）
+
                     String epc = (e.getPageClass() == null || e.getPageClass().isEmpty()) ? pc : e.getPageClass();
                     String fieldPage = null;
                     String field = null;
@@ -443,9 +349,7 @@ final class RolePickerCodeAssembler {
                         field = own.get(lk);
                     }
                     if (field == null) {
-                        // 元素自身页查不到该字段（含"owner 页无此元素"的跨页封装）⇒ 全页反查：
-                        // 字段名由元素所在页的 entries 分配，故按键反查即可定位真正声明它的页；
-                        // 不这样做就会在此处 field == null 被静默丢弃 —— 症状即"断言比步骤少行"。
+
                         for (java.util.Map.Entry<String, java.util.Map<String, String>> pe : keyToFieldByPage.entrySet()) {
                             String f = pe.getValue().get(lk);
                             if (f != null) {
@@ -456,14 +360,13 @@ final class RolePickerCodeAssembler {
                         }
                     }
                     if (field == null) continue;
-                    // 传 entry：输入类元素（步骤侧 fill(...)）且捕获到输入值时生成值断言，其余为可见性断言
+
                     lines.add(RoleElementAssertionGenerator.assertStatement(
                             RoleElementAssertionGenerator.pageVarOf(fieldPage == null ? epc : fieldPage), field, e));
                 }
                 stepLines.add(lines);
             }
-            // 声明本次生成涉及的全部页字段（跨页断言行引用"其它页变量"时才能编译通过），
-            // 并标注每个 assertStepN 对应的面板全局封装序号（消除多页时的"编号/顺序"误读）
+
             out.put(pc, RoleElementAssertionGenerator.renderClass(
                     packageName, pc, stepLines, assertPageVars, panelNosByPage.get(pc)));
         }

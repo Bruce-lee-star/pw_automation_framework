@@ -933,21 +933,22 @@ public final class RoleElementStepGenerator {
                             }
 
                             String op = target + "." + operationFor(e);
-
+                            boolean unresolvedDrag = false;
                             if (op.endsWith(".__DRAGTO__")) {
                                 String dstRef = findFieldRefAcrossPages(e.getDragDstKey(), pageFields, pageVar);
-                                op = target + ".dragTo(" + dstRef + ")";
+                                unresolvedDrag = (dstRef == null);
+                                op = dragToStatement(target, dstRef);
                             } else if (e.getPressKey() != null) {
 
                                 op += ";\n        " + target + ".press(\"" + escapeJava(e.getPressKey()) + "\")";
                             }
-                            if (e.isDialog()) {
+                            if (e.isDialog() && !unresolvedDrag) {
                                 String dlgType = (e.getDialogType() == null) ? "alert" : e.getDialogType();
                                 String dlgMethod = "accept".equals(e.getDialogAction()) ? "acceptAlert" : "dismissAlert";
 
                                 op = var + "." + dlgMethod + "(() -> " + op + ")\n        ";
                             }
-                            if (e.isDownload()) {
+                            if (e.isDownload() && !unresolvedDrag) {
                                 if (e.isPopup()) {
                                     sawPopup = true; if (popupTargetVar == null) popupTargetVar = var;
                                     methods.append("        ").append(var).append(".waitForDownload(() -> {\n")
@@ -958,7 +959,7 @@ public final class RoleElementStepGenerator {
                                     methods.append("        ").append(var).append(".waitForDownload(() ->\n")
                                             .append("                ").append(op).append(");\n");
                                 }
-                            } else if (e.isPopup()) {
+                            } else if (e.isPopup() && !unresolvedDrag) {
                                 sawPopup = true;
                                 lastFp = null;
                                 String npVar = nextNewPageVar(npIdx);
@@ -975,7 +976,7 @@ public final class RoleElementStepGenerator {
                                             .append("                ").append(op).append(");\n");
                                     if (popupTargetVar == null) popupTargetVar = var;
                                 }
-                            } else {
+                            } else if (!unresolvedDrag) {
                                 methods.append("        ").append(op).append(";\n");
                             }
                         }
