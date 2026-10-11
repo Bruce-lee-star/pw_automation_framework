@@ -501,13 +501,13 @@ public class PlaywrightSerenityBridge {
         SessionManager.resetCurrentSession();
         scenarioClosedContext = true;
 
-        // Browser 关闭时机（零配置默认行为）：Browser 跟随 Context 边界（per-scenario）。
-        // 仅当本 scenario 实际关闭了 Context 才关闭本线程 Browser，下一 scenario 首次 getBrowser() 懒重建；
-        // 2026-09-30 收口：已无 feature 模式"跨场景复用同一 Context"，故不再有"复用期不关 Browser"分支；
-        // 自定义并发执行器分区模式跳过（跨线程键错配防护）。
-        //  T8-0：2026-09-30 收口后每 case 都关 Context，但必须<b>保留 Browser 进程</b>
-        //  （否则退化成"每用例重启浏览器"，与"轻量 newContext 即可隔离"的初衷相悖）。
-        //  Browser 跟随 Context 边界，下一 case 首次 getBrowser() 懒重建。
+        // Browser 关闭时机（方案 A / 官方模型）：正常模式 Browser 为 worker 级重对象，
+        // scenario 收尾<b>不关闭 Browser</b>（仅销毁 Context/Page），下一 scenario 直接复用同一
+        // Playwright+Browser 新建 Context —— 避免频繁创建 Playwright(driver) 与浏览器进程；
+        // 2026-09-30 收口后已无 feature 模式"跨场景复用同一 Context"分支；
+        // 浏览器进程最终由套件收尾（JVM shutdown hook → cleanupAll）统一回收。
+        //  T8-0（2026-10-10 更新）：方案 A 落地后 Browser 真正跨 scenario 保留，
+        //  与"轻量 newContext 即可隔离"的官方初衷一致，不再退化成"每用例重启浏览器"。
         if (scenarioClosedContext) {
             closeBrowserForCurrentThreadIfApplicable();
         }
@@ -611,29 +611,39 @@ public class PlaywrightSerenityBridge {
         //  窗口堆积修复：兜底回收残留 Context
         PlaywrightManager.reapOrphanContexts();
         SessionManager.resetCurrentSession();
-        // Browser 关闭时机（零配置默认行为）：feature 收尾关本线程 Browser（下一 feature 懒重建）；
-        // 自定义并发执行器分区模式跳过（跨线程键错配防护）。
+        // Browser 关闭时机（方案 A / 官方模型）：feature 收尾同样<b>不关 Browser</b>（worker 级保留），
+        // 仅并发执行器模式按 playwright.browser.close.after.concurrent.task 开关及时关闭；
+        // 浏览器进程最终由套件收尾（JVM shutdown hook → cleanupAll）统一回收。
         closeBrowserForCurrentThreadIfApplicable();
         VerboseLogging.logInfoIfVerbose(logger,
                 "Feature cleanup completed — Context+Page+Session cleared for next feature rebuild");
     }
 
     /**
-     * 收尾时关闭<b>本线程</b>当前 Browser（零配置、默认行为）。
+     * 收尾时是否关闭<b>本线程</b>当前 Browser（方案 A / 官方模型：默认零关闭）。
      *
-     * <p><b>设计铁律：Browser 跟随其服务 Context 的边界（per-scenario）</b>——即「Browser 跟随 Context 走」。
-     * scenario 收尾在 context 关闭后顺手关闭本线程 Browser，下一 scenario 首次 {@code getBrowser()} 懒重建，
-     * 对外行为零回归。并行下因 Browser 键为 {@code <threadId>:<configId>}，天然线程隔离，绝不误伤邻居线程。</p>
+     * <p><b>设计铁律（方案 A，2026-10-10）</b>：对齐 Playwright 官方 worker 级模型 ——
+     * Playwright 与 Browser 是重对象，跨 scenario / 并发任务复用；BrowserContext 每 scenario 新建/销毁。
+     * 正常（非并发）模式下 scenario / feature 收尾<b>一律不关 Browser</b>；并发执行器模式下
+     * <b>默认同样复用</b>（不再每任务关闭），浏览器进程统一挂到套件收尾
+     * （JVM shutdown hook → {@code cleanupAll()}）回收，避免频繁创建 Playwright/Browser。</p>
      *
-     * <p><b>护栏</b>：自定义并发执行器（{@link ConcurrentContextExecutor}）分区模式走「每线程独立 Browser 复用」语义，
-     * 不适用按 scenario 关闭，故该模式跳过（避免线程池复用下的跨线程键错配）；其余情况一律执行。</p>
+     * <p>并行下因 Browser 键为 {@code <threadId>:<configId>}，天然线程隔离，绝不误伤邻居线程。</p>
+     *
+     * <p><b>逃生口（并发执行器）</b>：{@link ConcurrentContextExecutor} 分区模式下如需「每任务及时关闭
+     * 浏览器进程」（headed 多线程及时回收窗口，牺牲启动成本），置
+     * {@code playwright.browser.close.after.concurrent.task=true}。</p>
      */
     private static void closeBrowserForCurrentThreadIfApplicable() {
-        // 并发执行器模式下默认也及时关闭本线程浏览器（多线程跑 case 不等全部跑完才关）；
-        // 需要线程池跨任务复用浏览器（牺牲及时性换启动成本）时置 playwright.browser.close.after.concurrent.task=false。
-        if (ConcurrentContextExecutor.isConcurrentModeActive()
-                && !FrameworkConfigManager.getBoolean(
-                        WebFrameworkConfig.PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK)) {
+        //  方案 A：默认所有模式都保留 Browser（复用），不在此关闭 —— 避免频繁创建 Playwright/Browser；
+        //  仅当并发执行器模式且显式开启"每任务及时关闭"时才执行。
+        if (!ConcurrentContextExecutor.isConcurrentModeActive()) {
+            return;
+        }
+        // 默认 false（复用）：需要线程池跨任务复用浏览器，浏览器挂到 suite 收尾统一回收；
+        // 显式 true：每任务收口后立即关闭本线程浏览器（headed 及时回收窗口）。
+        if (!FrameworkConfigManager.getBoolean(
+                WebFrameworkConfig.PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK)) {
             return;
         }
         PlaywrightManager.closeBrowserForCurrentThread();

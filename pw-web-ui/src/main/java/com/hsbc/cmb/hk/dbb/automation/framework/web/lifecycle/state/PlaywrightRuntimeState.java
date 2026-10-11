@@ -83,6 +83,13 @@ public final class PlaywrightRuntimeState implements LifecycleState {
      */
     private final Set<String> retiredConfigIds = ConcurrentHashMap.newKeySet();
 
+    /**
+     * 脏连接 key 集合（放弃即隔离，2026-10-10）：上次收尾 {@code close()} 超时放弃后登记，
+     * 驱动仍可能被挂起的 close 占用 —— 该连接不可复用，下一场景 {@code getBrowser()} 检测到即重建。
+     * 并发 Set：与 {@code retiredConfigIds} 同语义，支持多 key 并发登记。
+     */
+    private final Set<String> dirtyConnections = ConcurrentHashMap.newKeySet();
+
     /** 初始化幂等判据（{@code static synchronized} 已提供类级互斥，此处补可见性判据，修复 H6/H8）。 */
     private final AtomicBoolean fullInit = new AtomicBoolean(false);
 
@@ -220,6 +227,23 @@ public final class PlaywrightRuntimeState implements LifecycleState {
     @Override
     public void clearRetiredAll() {
         retiredConfigIds.clear();
+    }
+
+    // ==================== LifecycleState：连接脏标记（放弃即隔离） ====================
+
+    @Override
+    public void markConnectionDirty(String key) {
+        dirtyConnections.add(key);
+    }
+
+    @Override
+    public void clearConnectionDirty(String key) {
+        dirtyConnections.remove(key);
+    }
+
+    @Override
+    public boolean isConnectionDirty(String key) {
+        return dirtyConnections.contains(key);
     }
 
     // ==================== LifecycleState：初始化幂等判据 ====================

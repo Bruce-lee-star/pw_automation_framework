@@ -94,7 +94,7 @@ public final class CloseGuard {
     }
 
     /**
-     * 有界执行一次关闭动作，返回完成结果与异常。
+     * 有界执行一次关闭动作，返回完成结果与异常（超时自动记 ERROR + 失败计数）。
      *
      * @param step     可定位的动作名（用于日志与失败计数）
      * @param action   关闭动作
@@ -102,6 +102,26 @@ public final class CloseGuard {
      * @return 结果（completed=false 表示超时放弃；error 为动作内部抛出的异常）
      */
     public static Result runBoundedCapture(String step, Runnable action, long limitMs) {
+        return runBoundedCapture(step, action, limitMs, true);
+    }
+
+    /**
+     * 有界执行一次关闭动作，返回完成结果与异常。
+     *
+     * <p><b>超时记账开关（2026-10-11，browser-close 根治）</b>：{@code recordFailureOnTimeout=false}
+     * 时超时<b>不</b>自动记 {@link ShutdownCoordinator} 失败 —— 由调用方在超时路径执行补偿
+     * （如强收 driver 使浏览器进程确定性回收）并自行决定记账语义：
+     * 补偿成功 → WARN（超时已发生但资源已回收，不判定失败）；补偿失败 → 调用方记 ERROR。
+     * 默认 {@code true} 保持既有行为零变更。</p>
+     *
+     * @param step                    可定位的动作名（用于日志与失败计数）
+     * @param action                  关闭动作
+     * @param limitMs                 等待上限（毫秒）
+     * @param recordFailureOnTimeout  超时放弃时是否自动记 ShutdownCoordinator 失败
+     * @return 结果（completed=false 表示超时放弃；error 为动作内部抛出的异常）
+     */
+    public static Result runBoundedCapture(String step, Runnable action, long limitMs,
+                                           boolean recordFailureOnTimeout) {
         AtomicReference<Throwable> err = new AtomicReference<>();
         Thread worker = new Thread(() -> {
             try {
@@ -123,11 +143,13 @@ public final class CloseGuard {
         }
         if (worker.isAlive()) {
             //  超时：主动中断 worker（尽力而为）。中断对原生 CDP 调用无效，但能解阻塞任何可中断段；
-            //  原生挂死最终由调用方在超时路径强收本线程 driver 使 close() 返回、worker 自然死亡并自行移除。
+            //  原生挂死最终由调用方在超时路径强收 driver 使 close() 返回、worker 自然死亡并自行移除。
             //  无论哪种，worker 终将结束、不会残留到 JVM 退出之后（另有 shutdown hook 兜底 drain）。
             worker.interrupt();
-            ShutdownCoordinator.recordFailure(step + " exceeded " + limitMs + "ms and was abandoned "
-                    + "(Playwright close() has no timeout option; worker interrupted and will be reclaimed)", null);
+            if (recordFailureOnTimeout) {
+                ShutdownCoordinator.recordFailure(step + " exceeded " + limitMs + "ms and was abandoned "
+                        + "(Playwright close() has no timeout option; worker interrupted and will be reclaimed)", null);
+            }
             return new Result(false, null);
         }
         return new Result(true, err.get());

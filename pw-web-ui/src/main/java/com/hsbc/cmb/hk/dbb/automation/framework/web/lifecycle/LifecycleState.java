@@ -135,6 +135,21 @@ public interface LifecycleState {
     /** 清空全部废弃 configId 标记（全量重建后调用）。 */
     void clearRetiredAll();
 
+    // ==================== 连接脏标记（放弃即隔离，2026-10-10） ====================
+
+    /**
+     * 标记指定 key 的 Playwright 连接为 DIRTY（脏）：上次收尾 {@code close()} 超时放弃，
+     * 挂起的 close 仍可能在 daemon 线程占用驱动 —— 该连接不可再复用。
+     * 下一场景 {@code getBrowser()} 检测到 DIRTY 即丢弃现有 Playwright+Browser 并重建，斩断挂起传染链。
+     */
+    void markConnectionDirty(String key);
+
+    /** 清除指定 key 的脏标记（重建完成后调用）。 */
+    void clearConnectionDirty(String key);
+
+    /** 判断指定 key 是否处于 DIRTY 状态。 */
+    boolean isConnectionDirty(String key);
+
     // ==================== 初始化幂等判据 ====================
 
     /** 是否已完成全量初始化。 */

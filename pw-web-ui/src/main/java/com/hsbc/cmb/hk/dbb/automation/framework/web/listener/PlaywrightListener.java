@@ -20,6 +20,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.ConcurrencyGate;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.screenshot.strategy.ScreenshotStrategy;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import net.thucydides.core.steps.StepEventBus;
@@ -429,6 +430,18 @@ public class PlaywrightListener implements StepListener {
             });
         } catch (Exception e) {
             logger.warn("[PlaywrightListener] markStepStart failed: {}", e.getMessage());
+        }
+
+        //  方案 B（2026-10-11）：main 业务 seam —— step 开始前执行 DELAY 到点的协议动作（resume/fulfill）。
+        //  DELAY 到点回调（RouteDelayScheduler 线程）只把协议动作入队；此处（main 线程）串行 drain，
+        //  使 delay 后的下一步骤 UI 操作前挂起请求已恢复 —— 协议调用 100% 收敛到 main（零并发写 Connection）。
+        //  经 common SPI（RouteLifecycle.drainMainThreadActions）桥接，避免 web→route 直接依赖；
+        //  只 drain 当前线程（worker）的 context —— 绝不跨 worker drain。
+        try {
+            withRouteLifecycle(lc -> lc.drainMainThreadActions(
+                    PlaywrightRuntime.instance().contextRegistry.getCurrentContext()));
+        } catch (Exception e) {
+            logger.debug("[PlaywrightListener] drainMainThreadActions skipped: {}", e.getMessage());
         }
 
         // 标记当前步骤为 Cucumber 步骤

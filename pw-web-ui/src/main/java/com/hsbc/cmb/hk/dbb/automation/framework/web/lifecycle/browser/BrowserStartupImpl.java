@@ -175,13 +175,13 @@ public final class BrowserStartupImpl implements BrowserStartup {
         // 场景2: handleBrowserTypeSwitch 切换类型 → 可能需要下载新浏览器
         ensureBrowserInstalledForType();
 
-        // 确保 Playwright 实例最新（不在 initialize() 中提前创建）
-        // 时刻保持：Playwright 实例在浏览器二进制就绪后创建
-        if (PlaywrightRuntime.instance().state.hasPlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId))) {
-            Playwright oldPw = PlaywrightRuntime.instance().state.removePlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId));
-            try { oldPw.close(); } catch (Exception e) { logger.warn("[Playwright] Failed to close old playwright instance for config {}: {}", configId, e.getMessage()); }
+        // 确保 Playwright 实例可用（方案 A / 官方模型：Playwright 是重对象，worker 级复用）。
+        // 仅在缺失（首启 / force-reap 强关后）时才新建；已存在则直接复用，不再无条件重建 driver ——
+        // 修复历史矛盾：closeBrowserForCurrentThread 注释"保留同键 Playwright 以便廉价重建 Browser"，
+        // 此前被这里的无条件 remove+close+重建 抵消，导致 Node driver 每场景启停。
+        if (!PlaywrightRuntime.instance().state.hasPlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId))) {
+            initializePlaywright(configId);
         }
-        initializePlaywright(configId);
 
         Playwright playwright = PlaywrightRuntime.instance().state.getPlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId));
         if (playwright == null) {

@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.binding;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElementList;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.RoleElement;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.LocatorFactory;
@@ -230,7 +231,14 @@ public class RoleElementBinder {
 
             // 写回「字段宿主」而非页面宿主：组合式路径下两者不同（POJO vs 委托 BasePage），
             // 写错宿主会导致字段永不绑定 + ClassCastException（评审 F-01）。
-            ReflectiveField.set(field, fieldOwner, new PageElement(supplier, desc, self));
+            // 【列表字段】字段声明为 List（{@link PageElementList}）时构造列表对象——与
+            // {@code PageContextState#createField} 的 {@code @Element} 路径对称，使角色/语义定位也能产出
+            // 「一组元素」的列表（业务 {@code list.get(index)} 取单项，语义等价 Playwright {@code locator.nth(index)}）。
+            if (List.class.isAssignableFrom(field.getType())) {
+                ReflectiveField.set(field, fieldOwner, new PageElementList(supplier, desc, self));
+            } else {
+                ReflectiveField.set(field, fieldOwner, new PageElement(supplier, desc, self));
+            }
         } catch (Exception e) {
             // 关键保留原始 cause 便于调试 —— ElementException 应传入原异常
             throw new ElementException("Init RoleElement field failed: " + field.getName(), e);

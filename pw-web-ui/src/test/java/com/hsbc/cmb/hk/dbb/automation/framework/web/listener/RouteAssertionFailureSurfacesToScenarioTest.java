@@ -59,7 +59,7 @@ public class RouteAssertionFailureSurfacesToScenarioTest {
             consumed = true;
             return List.of(new RouteAssertionFailure(
                     "/api/login", "POST", "https://host/api/login",
-                    200, 500, List.of(), false, 60_000L));
+                    200, 500, List.of(), false, 60_000L, "", "", "", ""));
         }
     }
 

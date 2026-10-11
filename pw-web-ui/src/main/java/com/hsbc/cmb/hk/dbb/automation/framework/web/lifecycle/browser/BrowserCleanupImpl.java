@@ -162,13 +162,17 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
                     long browserLimitMs = Math.max(1, Math.min(BROWSER_CLOSE_LIMIT_MS,
                             CLEANUP_INTERNAL_BUDGET_MS - TimeUnit.NANOSECONDS.toMillis(
                                     System.nanoTime() - cleanupStartNanos)));
-                    boolean closedWithinLimit = runBounded(browserLabel,
+                    //  根治（2026-10-11）：超时不再自动记 ERROR —— 先尝试强收所属 driver 补偿；
+                    //  补偿成功 → WARN（资源已确定性回收，不判定失败）；补偿失败 → ERROR（真失败保留可观测）。
+                    CloseGuard.Result closeResult = CloseGuard.runBoundedCapture(browserLabel,
                             () -> PlaywrightRuntime.instance().browserCleanup.closeBrowserInstance(browser),
-                            browserLimitMs);
+                            browserLimitMs, false);
                     long closeMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - closeStartNanos);
-                    if (!closedWithinLimit) {
+                    if (!closeResult.completed()) {
                         //  放弃等待后【绝不】再触发第二次 close（会叠加一次同样的长阻塞）；
-                        //  本次放弃已由 runBounded 记 ERROR + 计数，末尾 clearBrowsers() 会统一摘除该实例。
+                        //  强收补偿与记账语义见 forceReapPlaywrightForBrowser；
+                        //  末尾 clearBrowsers() 会统一摘除该实例。
+                        forceReapPlaywrightForBrowser(browser, browserLimitMs);
                         continue;
                     }
                     //  N-22 可观测性：慢关闭是「JVM 退出越过 surefire 30s 宽限 → fork 被硬杀」的唯一事后归因手段。
@@ -239,6 +243,69 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         return CloseGuard.runBounded(step, action, limitMs);
     }
 
+    /**
+     * 套件收尾超时补偿：{@code browser.close()} 超过看门狗上限被放弃后，有界强收该 browser
+     * 所属的 Playwright driver —— driver 退出即带走浏览器子进程，实现<b>确定性回收</b>，
+     * 不再依赖「JVM 退出后 driver 进程树回收」的被动兜底。
+     *
+     * <p><b>为什么这里安全</b>：{@code cleanupAll} 是套件收尾（本 JVM 即将退出），
+     * 本 JVM 内全部 Playwright/Browser 均属「自己的」资源（worker 隔离是 JVM 级，
+     * 其他并行 worker 在独立进程中），强收不影响任何邻居。</p>
+     *
+     * <p><b>记账语义（根治 browser-close 偶发超时被记 ERROR）</b>：
+     * <ul>
+     *   <li>补偿成功（driver 关闭在 {@link CloseGuard#FORCE_REAP_LIMIT_MS} 内完成）→ WARN，
+     *       <b>不</b>记 {@link ShutdownCoordinator} 失败 —— 超时已发生但资源已确定性回收，不判定失败；</li>
+     *   <li>补偿也超时 / 未找到 driver → ERROR + 计数 —— 真失败必须保留可观测（靠 JVM 退出兜底）。</li>
+     * </ul></p>
+     *
+     * @param browser      超时被放弃关闭的 Browser 实例
+     * @param closeLimitMs browser.close() 当时的看门狗上限（仅用于日志归因）
+     * @return true = 补偿成功（driver 已摘除并关闭）；false = 未找到 driver 或强收超时
+     */
+    static boolean forceReapPlaywrightForBrowser(Browser browser, long closeLimitMs) {
+        String key = null;
+        for (Map.Entry<String, Browser> entry
+                : PlaywrightRuntime.instance().state.browserEntries()) {
+            if (entry.getValue() == browser) {
+                key = entry.getKey();
+                break;
+            }
+        }
+        if (key == null) {
+            logger.warn("[cleanupAll] browser-close exceeded {}ms; no driver mapping found for this browser "
+                    + "— left to JVM-exit driver process-tree reaping", closeLimitMs);
+            return false;
+        }
+        Playwright playwright = PlaywrightRuntime.instance().state.getPlaywright(key);
+        if (playwright == null) {
+            logger.warn("[cleanupAll] browser-close exceeded {}ms; no Playwright driver for key={} "
+                    + "— left to JVM-exit driver process-tree reaping", closeLimitMs, key);
+            return false;
+        }
+        //  先摘除再强收：cleanupAll 末尾的 playwright.close() 循环（allPlaywrights()）不会再重复关闭它。
+        PlaywrightRuntime.instance().state.removePlaywright(key);
+        //  4 参重载关闭「超时自动记账」：强收超时只由本方法记一次 ERROR（避免 runBounded 与
+        //  recordFailure 双重记账）；action 内已 catch close 异常，completed=false 仅表示超时。
+        boolean reaped = CloseGuard.runBoundedCapture("force-reap-playwright", () -> {
+            try {
+                playwright.close();
+            } catch (Exception e) {
+                logger.debug("[force-reap] playwright close failed (ignored): {}", e.getMessage());
+            }
+        }, CloseGuard.FORCE_REAP_LIMIT_MS, false).completed();
+        if (reaped) {
+            logger.warn("[cleanupAll] browser-close:{} exceeded {}ms; driver force-reaped (compensated) — "
+                    + "browser process reclaimed deterministically", browserTypeName(browser), closeLimitMs);
+            return true;
+        }
+        ShutdownCoordinator.recordFailure(
+                "browser-close exceeded " + closeLimitMs + "ms and driver force-reap also exceeded "
+                        + CloseGuard.FORCE_REAP_LIMIT_MS + "ms — browser process left to JVM-exit "
+                        + "driver process-tree reaping", null);
+        return false;
+    }
+
     /** 浏览器类型名（仅用于日志/记账；取不到时回落 unknown，绝不因标签本身抛异常）。 */
     private static String browserTypeName(Browser browser) {
         try {
@@ -304,7 +371,11 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
      * 关闭<b>本线程</b>当前持有的 Browser（{@code "<threadId>:<configId>"} 键）并从状态根移除。
      *
      * <p>仅作用于当前线程的 Browser，不触碰并发邻居线程；经 {@link #closeBrowserInstance} 收口关闭，
-     * 使 {@code onDisconnected} 识别为预期关闭。保留同键 Playwright 实例以便下一场景廉价重建 Browser。</p>
+     * 使 {@code onDisconnected} 识别为预期关闭。<b>保留同键 Playwright 实例</b>（重对象不随 Browser 销毁）。</p>
+     *
+     * <p><b>方案 A（2026-10-10）</b>：正常与并发模式默认不调用本方法 ——
+     * Browser 为 worker 级重对象跨场景/跨任务复用，仅并发执行器模式且显式开启
+     * {@code playwright.browser.close.after.concurrent.task=true} 或显式关闭路径调用。</p>
      *
      * @return 实际关闭的 Browser 数（当前线程无存活 Browser 时为 0）
      */
@@ -317,7 +388,8 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         Browser browser = PlaywrightRuntime.instance().state.getBrowser(key);
         if (browser != null && browser.isConnected()) {
             PlaywrightRuntime.instance().state.markClosing(browser);
-            //  场景级收尾：有界关闭本线程 Browser，确保 scenario 线程绝不被 close() 阻塞（IDE 直跑无 fork 超时兜底）。
+            //  有界关闭本线程 Browser（方案 A 下仅并发执行器/显式路径调用）：
+            //  确保调用线程绝不被 close() 阻塞（Playwright close() 无 timeout，IDE 直跑无 fork 超时兜底）。
             boolean closed = CloseGuard.runBounded("browser-close",
                     () -> browser.close(new Browser.CloseOptions().setReason("teardown")),
                     CloseGuard.BROWSER_CLOSE_LIMIT_MS);

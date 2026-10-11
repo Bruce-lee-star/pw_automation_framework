@@ -259,7 +259,21 @@ public final class ContextRegistryImpl implements ContextRegistry {
                 () -> RouteLifecycleRegistry.get().stopContextEngine(context, true));
         //  有界关闭：context.close() 可能挂（SIT 页卸载对话框/挂起导航），限时防止 scenario 线程死挂；
         //  超时由 CloseGuard 记失败计数并放弃等待（daemon 上继续，JVM 退出回收）。
-        CloseGuard.runBounded("context-close", () -> PlaywrightContextManager.closeContext(context), CloseGuard.CONTEXT_CLOSE_LIMIT_MS);
+        boolean closed = CloseGuard.runBounded("context-close",
+                () -> PlaywrightContextManager.closeContext(context), CloseGuard.CONTEXT_CLOSE_LIMIT_MS);
+        if (!closed) {
+            //  放弃即隔离（2026-10-10）：close() 超时放弃后，挂起的 close 仍在 daemon 线程占用驱动 ——
+            //  该连接不可再复用。登记 DIRTY，下一场景 getBrowser() 检测到即丢弃现有 Playwright+Browser
+            //  并重建（罕见路径多付一次浏览器启动，换取斩断挂起传染链，避免在脏连接上继续收发协议消息）。
+            String configId = PlaywrightManager.getCurrentConfigId();
+            if (configId != null) {
+                String dirtyKey = PlaywrightRuntime.instance().browserRegistry.keyFor(configId);
+                PlaywrightRuntime.instance().state.markConnectionDirty(dirtyKey);
+                logger.warn("[context-close] close exceeded {}ms — connection key={} marked DIRTY; "
+                        + "next scenario will rebuild Playwright+Browser instead of reusing the stalled connection",
+                        CloseGuard.CONTEXT_CLOSE_LIMIT_MS, dirtyKey);
+            }
+        }
     }
 
     /**

@@ -98,9 +98,20 @@ public final class BrowserRegistryImpl implements BrowserRegistry {
 
         // 获取期望的浏览器类型（可能来自 @AutoBrowser 标签）
         String desiredBrowserType = PlaywrightManager.config().getBrowserType();
-        
+
+        //  放弃即隔离（2026-10-10）：上次收尾 close() 超时放弃 → 连接被登记为 DIRTY，
+        //  挂起的 close 仍可能在 daemon 线程占用驱动 —— 不复用脏连接，也绝不对它再发任何协议调用
+        //  （v2：纯摘除引用，零 close），直接走慢路径启动全新 Playwright+Browser，斩断挂起传染链。
+        String key = keyFor(currentConfig);
+        if (PlaywrightRuntime.instance().state.isConnectionDirty(key)) {
+            PlaywrightRuntime.instance().state.clearConnectionDirty(key);
+            abandonDirtyConnection(key);
+            logger.warn("[getBrowser] connection key={} was marked DIRTY (previous close timed out) — "
+                    + "abandoning stalled Playwright+Browser (no protocol calls on dirty connection) and rebuilding", key);
+        }
+
         // 快速路径：检查当前浏览器实例是否有效（无锁）
-        Browser currentBrowser = PlaywrightRuntime.instance().state.getBrowser(keyFor(currentConfig));
+        Browser currentBrowser = PlaywrightRuntime.instance().state.getBrowser(key);
         if (currentBrowser != null && currentBrowser.isConnected()) {
             // 浏览器已存在且连接正常，检查是否需要切换
             String[] configParts = currentConfig.split("_");
@@ -149,6 +160,26 @@ public final class BrowserRegistryImpl implements BrowserRegistry {
             
             return PlaywrightRuntime.instance().state.getBrowser(keyFor(effectiveConfig));
         });
+    }
+
+    /**
+     * 放弃即隔离（2026-10-10，v2）：DIRTY 连接<b>纯摘除、零协议调用</b>。
+     *
+     * <p><b>为什么绝不 close</b>：DIRTY 意味着上次收尾 {@code close()} 已超时放弃，
+     * 挂起的 close 仍可能在 daemon 线程占用驱动 —— 此时对同一连接的<b>任何</b>协议调用
+     * （含 {@code browser.close()} / {@code playwright.close()}）都会与挂起操作并发踩踏驱动，
+     * 正是「放弃即隔离」要消灭的竞态（已实证：v1 在主线程 close 脏连接导致
+     * {@code Object doesn't exist: route@...} 跨场景传染）。</p>
+     *
+     * <p>因此本方法只做两件事：从状态根<b>摘除引用</b>（隔离视口，使本线程不再触碰该连接），
+     * 让慢路径 {@code initializeBrowser} 启动<b>全新</b> Playwright+Browser。
+     * 被摘除的旧实例成为孤儿：由 {@code cleanupAll()} / JVM 退出兜底回收
+     * （罕见路径 + 单次泄漏，换取绝不在脏连接上收发协议消息）。</p>
+     */
+    private void abandonDirtyConnection(String key) {
+        PlaywrightRuntime instance = PlaywrightRuntime.instance();
+        instance.state.removeBrowser(key);
+        instance.state.removePlaywright(key);
     }
 
     /**
