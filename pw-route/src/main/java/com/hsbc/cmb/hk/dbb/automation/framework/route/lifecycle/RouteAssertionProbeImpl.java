@@ -4,7 +4,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailu
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.reporting.RouteMonitorFailureReportSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

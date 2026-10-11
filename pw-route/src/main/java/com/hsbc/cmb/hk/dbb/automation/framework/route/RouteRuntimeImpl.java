@@ -434,7 +434,9 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     /** Map<String,String> headers → "key: value\n" 多行文本（null/空 → 空串）。 */
     private static String formatHeaders(java.util.Map<String, String> headers) {
-        if (headers == null || headers.isEmpty()) return "";
+        if (headers == null || headers.isEmpty()) {
+            return "";
+        }
         StringBuilder sb = new StringBuilder(256);
         for (java.util.Map.Entry<String, String> en : headers.entrySet()) {
             sb.append(en.getKey()).append(": ").append(en.getValue()).append('\n');
