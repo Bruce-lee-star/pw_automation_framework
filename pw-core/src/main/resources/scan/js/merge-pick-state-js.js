@@ -26,7 +26,12 @@
       for (i = 0; i < (add || []).length; i++) { k = __mk(add[i]) || ('?a' + i); if (!seen[k]) { seen[k] = 1; out.push(add[i]); } }
       return out;
     }
-    window.__rolePicks = __mergeByKey(window.__rolePicks || [], s.picks || []);
+    // 【归属必须明确】只合并【带 _pageClass】的条目：面板行的归属判据是
+    //   p._pageClass || window.__rolePageName
+    // 缺 _pageClass 的条目会被算进"当前文档的页名"下 —— 现场：LogonPage 上拾取的 i18n 元素
+    // 在自举合并进新文档后，被显示到了新页的 Tab 里（"还没拾取呢，怎么有元素"）。
+    var __incoming = (s.picks || []).filter(function (p) { return !!p && !!p._pageClass; });
+    window.__rolePicks = __mergeByKey(window.__rolePicks || [], __incoming);
     window.__steps = window.__steps || [];
     window.__currentStep = window.__currentStep || [];
     (function () {

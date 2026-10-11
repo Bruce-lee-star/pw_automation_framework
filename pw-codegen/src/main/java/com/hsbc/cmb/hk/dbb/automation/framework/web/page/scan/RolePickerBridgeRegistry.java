@@ -292,11 +292,28 @@ final class RolePickerBridgeRegistry {
             try { pg = source.page(); } catch (Exception ignore) { return null; }
             if (pg == null || pg.isClosed()) return null;
             String json;
+            int skippedNoClass = 0;
             synchronized (map) {
                 if (map.isEmpty()) return null;
+                // 【归属必须明确】只下发【带 pageClass】的条目：面板行的归属判据是
+                //   p._pageClass || window.__rolePageName
+                // 缺 _pageClass 的条目会被算进"当前文档的页名"下 —— 现场：LogonPage 上拾取的 i18n 元素
+                // 在自举合并进 setup-second-pwd 文档后，被显示到了 SetupSecondPwdPage 的 Tab 里。
+                // 这类条目既不能定位也不能按页分组，宁可不下发（Java 权威态仍在，生成链路不受影响）。
+                java.util.List<RoleEntry> picks = new java.util.ArrayList<>(map.size());
+                for (RoleEntry e : map.values()) {
+                    if (e == null) continue;
+                    String pc = e.getPageClass();
+                    if (pc == null || pc.isEmpty()) { skippedNoClass++; continue; }
+                    picks.add(e);
+                }
+                if (picks.isEmpty()) return null;
                 java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
-                payload.put("picks", new java.util.ArrayList<>(map.values()));
+                payload.put("picks", picks);
                 json = GSON.toJson(payload);
+            }
+            if (skippedNoClass > 0) {
+                log.warn("[picker][bootstrap] {} pick(s) skipped: no pageClass (cannot be attributed to a page tab)", skippedNoClass);
             }
             if (json == null || json.isEmpty()) return null;
             final Page target = pg;
