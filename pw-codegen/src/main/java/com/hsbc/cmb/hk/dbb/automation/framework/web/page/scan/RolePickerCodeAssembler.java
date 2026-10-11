@@ -193,7 +193,10 @@ final class RolePickerCodeAssembler {
         if (snap.steps != null) for (StepRec st : snap.steps) {
             // 面板封装序号：必须在任何 continue 之前自增，保证与 snap.steps 一一对应（含被丢弃的 step）。
             panelStepNo++;
-            String pc = (st.pageClass == null || st.pageClass.isEmpty()) ? curClass : st.pageClass;
+            // 所有 step 归入根页（curClass）保序：步骤类已合并为单类 SampleSteps，
+            // 若按 step 自身所属页分组，不同轮次/不同页的 step 会被"按页交错"编号
+            // （stepIdx++ 基于页序而非封装序）。统一归入 curClass 后，snap.steps 的封装先后即 step1/step2… 顺序。
+            String pc = curClass;
             List<RoleEntry> picks = st.picks;
             if (picks != null && !aliveKeys.isEmpty()) {
                 List<RoleEntry> kept = new ArrayList<>(picks.size());
