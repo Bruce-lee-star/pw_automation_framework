@@ -452,8 +452,9 @@
                   hint = '就绪：▶ 开始拾取 = 手动模式（开始到停止为一个步骤）' + stepSuffix;
                 }
                 if (status.textContent !== hint) status.textContent = hint;
-                // 步骤 Tab 标题实时计数
-                if (tabStep) tabStep.textContent = '步骤代码' + (stepTotal > 0 ? (' (' + stepTotal + ')') : '');
+                // 步骤 Tab 标题固定为「步骤代码」，不再追加实时计数 (N)
+                // （产品要求：Tab 名不带 number；step 数量信息仍保留在状态栏文案里，不丢可见性）。
+                if (tabStep) tabStep.textContent = '步骤代码';
                 // 【修复"全选计数为0/7"】每次 refreshToggle 都刷新"已选"计数，
                 // 确保有序号元素（_pickNos.length>0）被正确计入已选计数，无需等待 checkbox 点击。
                 try { if (typeof window.refreshSelInfo === 'function') window.refreshSelInfo(); } catch (e) {}

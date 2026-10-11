@@ -82,15 +82,43 @@ final class RolePickerPanelSync {
      * file:// 跨源限制），按 sigKey 去重后显式合并进【主框架】window.__rolePicks 并触发渲染，使面板与
      * readPickSnapshot（读主框架）都能看到 iframe 内元素。
      */
+    /** 单帧读回超时：兜底动作，必须远小于常规软超时（2s）。 */
+    private static final long FRAME_MERGE_TIMEOUT_MS =
+            Integer.getInteger("codegen.picker.frameMerge.timeout.ms", 300);
+    /** 单轮合并总预算：超出即放弃剩余 frame（幂等，下一轮自然重试）。 */
+    private static final long FRAME_MERGE_BUDGET_MS =
+            Integer.getInteger("codegen.picker.frameMerge.budget.ms", 600);
+    /** 连续失败达到该次数的 frame URL 之后各轮直接跳过（广告/跟踪 frame 的读回成本一次性收敛为 0）。 */
+    private static final int FRAME_MERGE_DEAD_AFTER = 2;
+    /** frame URL → 连续失败次数（有界：超限整体清空，防长跑累积）。 */
+    private static final java.util.Map<String, java.util.concurrent.atomic.AtomicInteger> FRAME_MERGE_FAILS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     static void mergeFramePicksToMain(Page page, LinkedHashMap<String, RoleEntry> javaPickBySig) {
         if (page == null || page.isClosed()) return;
+        final long deadline = System.currentTimeMillis() + FRAME_MERGE_BUDGET_MS;
         for (Frame f : page.frames()) {
             if (f == null || f.equals(page.mainFrame())) continue;
+            // 【整轮预算】读回只是兜底（拾取本身走 __roleOnPick 事件上行），故必须封顶：
+            // 超出预算即放弃剩余 frame，绝不让"广告 frame 集合"把本轮拖住（幂等，下一轮自然重试）。
+            if (System.currentTimeMillis() > deadline) {
+                log.debug("[picker] frame merge budget ({}ms) exhausted; remaining frames deferred: {}",
+                        FRAME_MERGE_BUDGET_MS, page.url());
+                break;
+            }
+            String fu = null;
+            try { fu = f.url(); } catch (Exception ignore) { fu = null; }
+            // about:blank / about:srcdoc 从不承载业务拾取（且常因跨源或已被销毁而 evaluate 失败），直接跳过。
+            if (fu == null || fu.isEmpty() || fu.startsWith("about:")) continue;
+            java.util.concurrent.atomic.AtomicInteger fails = FRAME_MERGE_FAILS.get(fu);
+            if (fails != null && fails.get() >= FRAME_MERGE_DEAD_AFTER) continue;
             try {
-                // 【必须用短超时】这是主循环每轮对子 frame 的读取：跨域/过渡期 frame 的 evaluate 会失败或
-                // 长时间挂起（现场 WARN "failed to merge iframe picks ...: pickerEval failed" 即此处），
-                // 若沿用 30s 默认超时会把同一轮的页类刷新/计数器垫高一起拖住。
-                Object frameJson = RoleElementPicker.pickerEvalSoft(f, RolePickerScripts.READ_FRAME_PICKS_RAW_JS);
+                // 【必须用更短的超时】主循环/自愈每轮对子 frame 的读取：跨域/过渡期 frame 的 evaluate 会失败或
+                // 长时间挂起（现场 WARN "failed to merge iframe picks ...: pickerEval failed" 即此处）。
+                // 页面上的广告/跟踪 frame（如 match.adsrvr.org）常因脚本阻塞而挂住，旧实现逐个吃满 2s，
+                // 十几帧即累加到 10~20s —— 这正是"新页面回灌非常慢"的主因，故此处取 300ms。
+                Object frameJson = RoleElementPicker.pickerEvalSoft(f, RolePickerScripts.READ_FRAME_PICKS_RAW_JS, FRAME_MERGE_TIMEOUT_MS);
+                if (fails != null) fails.set(0);   // 读回成功：复位该 frame 的连续失败计数
                 if (frameJson instanceof String) {
                     final String json = (String) frameJson;
                     if (!json.isEmpty() && !"[]".equals(json.trim())) {
@@ -131,6 +159,14 @@ final class RolePickerPanelSync {
                     }
                 }
             } catch (Exception fe) {
+                // 【自适应跳过】同一批慢/失败 frame（多为广告、跟踪位）每轮都会被遍历到并吃满超时；
+                // 这里对 frame URL 记一次连续失败，达到阈值后各轮直接跳过，使该项成本一次性收敛为 0。
+                // 表有界：条目过多时整体清空，避免长跑套件下无界增长。
+                try {
+                    FRAME_MERGE_FAILS.computeIfAbsent(fu,
+                            k -> new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();
+                    if (FRAME_MERGE_FAILS.size() > 1024) FRAME_MERGE_FAILS.clear();
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
                 try {
                     String feMsg = fe.getMessage() == null ? "" : fe.getMessage();
                     if (feMsg.contains("closed") || feMsg.contains("detached")

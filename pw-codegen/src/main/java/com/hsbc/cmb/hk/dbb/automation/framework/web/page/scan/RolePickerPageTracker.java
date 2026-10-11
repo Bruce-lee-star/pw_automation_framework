@@ -417,11 +417,13 @@ final class RolePickerPageTracker {
             //（现场：`page following failed: pickerEval failed` 后弹窗既无面板也点不动）。
             // 故逐个包 try/catch 做 fail-soft，并一律用【短超时】避免拖住关键路径：单点失败不阻断关键步骤，
             // 随后由本页 onFrameNavigated 与门控 addInitScript 兜底重建。
-            try {
-                if (opener != null && !opener.isClosed()) {
-                    pickerEvalSoft(opener, RolePickerScripts.CLEAR_CURRENT_STEP_JS);
-                }
-            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#clearCurrentStep", ignore); }
+            // 【修复"回到原页后原页拾取没有 step / 步骤被冲刷掉"】此处原先会把打开器页的 __currentStep 清空
+            // （旧语义："把本轮整体转移到新页"）。但 step 的封存是【按文档各自封存自己的本轮】：
+            //   原页本轮被清空 ⇒ 停止时原页封存出空 step ⇒ 原页那一大串拾取在生成物里完全没有 step 承载，
+            //   只剩新页的 step（现场：26 个拾取只生成出 1 个 step，且只含新页 4 个元素）。
+            // 且勾选态已与 __currentStep 解耦（见 panel-core-b 的 __roleUnsel），清空本轮不再有展示意义，
+            // 只会丢步骤。故整段移除：原页保留自己的本轮，新页累积自己的本轮，各页各得一个 step。
+            // （CLEAR_CURRENT_STEP_JS 随之成为无调用点的死脚本，已一并删除。）
             try {
                 pickerEvalSoft(newPage, RolePickerScripts.SET_PAGE_NAME_AND_RESET_INSTANCE_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
             } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#setPageName", ignore); }

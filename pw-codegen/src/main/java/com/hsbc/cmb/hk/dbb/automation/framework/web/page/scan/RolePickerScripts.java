@@ -125,13 +125,16 @@ public final class RolePickerScripts {
      */
     public static final String APPLY_PICK_STATE_JS = loadScript("apply-pick-state-js.js");
 
+    /** 【文档起始自举】把 Java 权威拾取态**只合并**进目标文档（不置 active、不搬 nls），供新文档自拉取使用。 */
+    public static final String MERGE_PICK_STATE_JS = loadScript("merge-pick-state-js.js");
+
+    /** 【文档起始自举】context 级 init 脚本：每个新顶层文档在文档起始调用一次 __rolePullPickState 拉取权威态。 */
+    public static final String PULL_STATE_ON_DOC_START_JS = loadScript("pull-state-on-doc-start.js");
+
     /** 移除常驻面板：摘除点击/悬停/按键/焦点/滚动监听，复位 active，清会话开关并写面板墓碑（阻断门控自启）。 */
     public static final String CLOSE_PANEL_JS = loadScript("close-panel-js.js");
 
     public static final String CLEAR_PICKS_JS = loadScript("clear-picks-js.js");
-
-    /** 清空浏览器侧进行中 step（__currentStep）；用于 followPage 把 opener 的 step 整体转移到新页后清空源页。 */
-    public static final String CLEAR_CURRENT_STEP_JS = loadScript("clear-current-step-js.js");
 
     /** 标记本次停止已生效（自愈钩子据此不再复活拾取）。 */
     public static final String SET_PICK_STOPPED_JS = loadScript("set-pick-stopped-js.js");

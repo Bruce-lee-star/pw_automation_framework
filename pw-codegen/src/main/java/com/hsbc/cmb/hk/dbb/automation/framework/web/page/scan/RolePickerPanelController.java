@@ -446,6 +446,8 @@ public final class RolePickerPanelController {
             try {
                 for (Page pg : pageNames.keySet()) {
                     if (pg.isClosed()) continue;
+                    // 无子 frame ⇒ 聚合必然颗粒无收，跳过（与 selfHealPage 同口径）。
+                    try { if (pg.frames().size() <= 1) continue; } catch (Exception ignoreF) { continue; }
                     try { mergeFramePicksToMain(pg, javaPickBySig); } catch (Exception me) { /* ignore */ }
                 }
             } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
@@ -530,15 +532,45 @@ public final class RolePickerPanelController {
      * 把 iframe 导航 / URL 变化 / 拾取回调的突发合并为单次 {@link #selfHealPage}，避免对单页反复做 frame 读回。
      * 页面关闭时由 {@code onClose} 移除条目；会话结束由 openPanel 的 finally 关闭调度器取消所有在途任务。
      */
+    /** 自愈去抖：事件到达后延迟执行，合并同一页的连续事件。 */
+    private static final long SELF_HEAL_DEBOUNCE_MS = 250;
+
+    /**
+     * 同一页同一 URL 的重复主帧导航的合并窗口（默认 1000ms，可用 {@code -Dcodegen.picker.navDedup.window.ms} 覆盖）。
+     *
+     * <p>现场：{@code onFrameNavigated triggered} 同一 URL 连发两次（间隔 11ms，重定向链/SPA 抖动），
+     * 使"恢复 + 激活 + 回灌 + 诊断"整条链路跑两遍。状态恢复现已由文档起始自举兜住，故窗口内重复可安全跳过。
+     */
+    private static final long NAV_DEDUP_WINDOW_MS =
+            Integer.getInteger("codegen.picker.navDedup.window.ms", 1_000);
+    /**
+     * 同一页两次自愈之间的【最小间隔】（默认 2000ms，可用 {@code -Dcodegen.picker.selfHeal.minGap.ms} 覆盖）。
+     *
+     * <p>广告/跟踪 iframe 频繁导航，而<b>每个子帧导航</b>都会触发一次 {@code scheduleSelfHeal}；只靠 250ms
+     * 去抖，风暴期仍会对同一页反复跑"页类刷新 + 全 frame 读回 + 面板回灌"三件套（现场：iframe 合并 WARN
+     * 成片出现，且这些 evaluate 排在页级锁上，把同页的关键 evaluate 挤到队尾 ⇒ "新页面回灌非常慢"）。
+     *
+     * <p>现再加一道按页最小间隔：未到间隔就把执行推到"剩余时间之后"再排一次 —— 风暴期只跑一次，
+     * 且<b>最后一次变化仍会被处理</b>（不是丢弃），兼顾收敛与正确性。
+     */
+    private static final long SELF_HEAL_MIN_GAP_MS =
+            Integer.getInteger("codegen.picker.selfHeal.minGap.ms", 2_000);
+
     static void scheduleSelfHeal(RolePickerContext pc, Page page) {
         if (page == null || page.isClosed()) return;
         ScheduledFuture<?> existing = pc.selfHealTasks.get(page);
         if (existing != null && !existing.isDone()) return;   // 已排程：跳过，等其执行
+        long delay = SELF_HEAL_DEBOUNCE_MS;
+        Long last = pc.lastSelfHealAt.get(page);
+        if (last != null) {
+            long elapsed = System.currentTimeMillis() - last;
+            if (elapsed < SELF_HEAL_MIN_GAP_MS) delay = SELF_HEAL_MIN_GAP_MS - elapsed;
+        }
         try {
             ScheduledFuture<?> f = pc.selfHealScheduler.schedule(() -> {
                 pc.selfHealTasks.remove(page);
                 selfHealPage(pc, page);
-            }, 250, TimeUnit.MILLISECONDS);
+            }, delay, TimeUnit.MILLISECONDS);
             pc.selfHealTasks.put(page, f);
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
     }
@@ -558,18 +590,39 @@ public final class RolePickerPanelController {
      */
     private static void selfHealPage(RolePickerContext pc, Page page) {
         if (page == null || page.isClosed()) return;
+        // 记录本页自愈时间：供 scheduleSelfHeal 的按页最小间隔节流使用（见该常量说明）。
+        pc.lastSelfHealAt.put(page, System.currentTimeMillis());
         try {
             refreshPageClass(pc, page);
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
         try {
-            mergeFramePicksToMain(page, pc.javaPickBySig);
+            // 【空转零成本】没有任何子 frame 时"跨源 iframe 聚合"必然颗粒无收：直接跳过，
+            // 省去一次 frames() 遍历与逐帧 evaluate（单帧页面占绝大多数，这是最划算的一道闸）。
+            if (page.frames().size() > 1) mergeFramePicksToMain(page, pc.javaPickBySig);
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
         try {
             syncPanelToBrowser(page, null, pc.javaPickBySig);
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
     }
 
+    /**
+     * 已为哪些 page 挂过整组页面监听器（弱键：页关闭即可回收，不泄漏）。
+     *
+     * <p>守卫的必要性：本方法为 page 注册 onPopup / onDialog / onDownload / onFileChooser / onCrash /
+     * onFrameNavigated / onClose 整组监听器。同一 page 被登记两次（典型："onPopup 跟随"一次、
+     * "reconcile 补登记漏页"再一次）时整组会被挂两遍 ⇒ 每个事件都处理两遍。现场日志实证：
+     * {@code start ×2}、{@code onFrameNavigated triggered ×2}、{@code page URL changed ×2}、
+     * {@code post navigation diagnostics ×2} —— 回灌延迟与 evaluate 开销直接翻倍。
+     */
+    private static final java.util.Set<Page> PAGE_LISTENERS_HOOKED =
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Page, Boolean>());
+
     static void registerPopupFollow(RolePickerContext ctx, Page page, Page parent) {
+        // 【一次注册】见 PAGE_LISTENERS_HOOKED 的说明：同一 page 重复登记会让所有事件处理翻倍。
+        if (page != null && !PAGE_LISTENERS_HOOKED.add(page)) {
+            log.debug("[picker] page listeners already registered; skipping duplicate registration: {}", page.url());
+            return;
+        }
         AtomicReference<Page> current = ctx.current;
         AtomicBoolean rootClosed = ctx.rootClosed;
         AtomicBoolean active = ctx.active;
@@ -803,6 +856,21 @@ public final class RolePickerPanelController {
                     return;
                 }
                 log.info("[picker][nav] onFrameNavigated triggered: page={} active.get()={}", page.url(), active.get());
+                // 【去抖】同一 URL 在窗口期内的重复导航（重定向链 / SPA 抖动会让同一 URL 连发两次）只处理一次：
+                // 整套"状态恢复 + 激活同步 + 面板回灌 + 诊断"会被完整跑两遍，翻倍占用 evaluate 与页级锁。
+                // 安全性：状态恢复已由【文档起始自举】接管（新文档自己拉权威态），故跳过重复导航不丢数据。
+                try {
+                    String curUrl = page.url();
+                    Long prevAt = ctx.lastNavHandledAt.get(page);
+                    if (prevAt != null && curUrl != null && curUrl.equals(ctx.lastNavHandledUrl.get(page))
+                            && (System.currentTimeMillis() - prevAt) < NAV_DEDUP_WINDOW_MS) {
+                        log.debug("[picker][nav] duplicate navigation for the same URL within {}ms; skipping: {}",
+                                NAV_DEDUP_WINDOW_MS, curUrl);
+                        return;
+                    }
+                    ctx.lastNavHandledAt.put(page, System.currentTimeMillis());
+                    ctx.lastNavHandledUrl.put(page, curUrl);
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController#navDedup", ignore); }
                 // 【修复"同一 URL 不同表单（表单切换）后面板丢失已拾元素"】
                 // 表单切换通常是对【同一 URL】的整文档替换，页类名不变；而 refreshPageClass 仅在
                 // "页类名变化"时才 invalidateSync ⇒ 本页 ETag 不失效 ⇒ 主循环 syncPanelToBrowser 判

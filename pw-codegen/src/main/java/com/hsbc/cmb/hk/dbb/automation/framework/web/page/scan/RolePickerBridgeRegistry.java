@@ -114,6 +114,8 @@ final class RolePickerBridgeRegistry {
         registerCmdBridge(ctx);
         // 拾取桥：浏览器端经 window.__roleOnPick(JSON.stringify(pick)) 异步投递，零往返回传 Java 内存态。
         registerPickBridge(ctx);
+        // 文档起始自举桥：新文档在文档起始主动拉取权威态（消除"新页面回灌等导航事件 ⇒ 10~20s"）。
+        registerPullStateBridge(ctx);
         // 删除桥：面板「垃圾桶」删除选中元素时，同步落到 Java 侧权威内存态（否则主循环 syncPanelToBrowser 会"复活"被删元素）。
         registerDeleteBridge(ctx);
         // 控制台兜底桥：context 级 onConsoleMessage 捕获所有页面的兜底回传与拾取链路报错，即使绑定失效回传也不丢失。
@@ -249,13 +251,15 @@ final class RolePickerBridgeRegistry {
                         if (srcPage != null && !srcPage.isClosed()) {
                             try {
                                 // ① 即时回灌面板（消除"靠主循环 1s 轮询 + busy 页硬超时卡整轮"导致的列表延迟 1~12s）；
-                                // ② 跨源 iframe 聚合：本回调已将本页 iframe 内拾取并入权威态，但同页其它 frame
-                                //    可能仍有未回传的 straggler；协议级读回所有 frame 的 window.__rolePicks
-                                //    （跨源亦可读，不受 file:// 跨源限制），确保聚合即时，无需等残留轮询。
+                                // ② 【push 化：不再在每次拾取时协议级遍历 frame】拾取本身已由本回调事件上行
+                                //    （__roleOnPick），跨源 iframe 的 straggler 改由 debounce 自愈
+                                //    （scheduleSelfHeal → selfHealPage）按页低频兜底，且该兜底已带
+                                //    「跳过 about:* + 连续失败 frame 永久跳过 + 单帧 300ms + 整轮 600ms 预算」。
+                                //    旧实现每次拾取都全量遍历 page.frames()（含广告/跟踪 frame，每个最长 2s），
+                                //    是"新页面回灌 10~20s / 拾取越久越卡"的主要成本来源。
                                 final LinkedHashMap<String, RoleEntry> snap = map;
                                 PICK_SYNC_POOL.execute(() -> {
                                     RolePickerPanelSync.syncPanelToBrowser(srcPage, null, snap);
-                                    RoleElementPicker.mergeFramePicksToMain(srcPage, snap);
                                 });
                             } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
                         }
@@ -264,6 +268,45 @@ final class RolePickerBridgeRegistry {
             } catch (Exception ex) {
                 log.warn("[picker] failed to parse __roleOnPick callback: {}", ex.getMessage());
             }
+            return null;
+        });
+    }
+
+    /**
+     * 【文档起始自举桥】新文档在自己的文档起始阶段调用 {@code window.__rolePullPickState()}，
+     * 由 Java 把权威拾取态**合并**回该文档（只合并、不动激活态，见 merge-pick-state-js.js）。
+     *
+     * <p>动机：回灌原先挂在 {@code onFrameNavigated} 之后；该事件在"重定向链 + 广告/跟踪资源密集"的
+     * 页面上实测可迟到 10~20s（现场：新页面出现 12s 后才 applyPickState ⇒ "已拾元素迟迟不出现"）。
+     * 让新文档自己开口要，就不再依赖任何事件时序 —— 跨源新页同样适用（binding 是 context 级）。
+     *
+     * <p>约束（与既有桥一致）：exposeBinding 回调跑在 Playwright <b>调度线程</b>上，绝不能在回调线程内
+     * 直接 {@code page.evaluate}（页面正等待 binding 返回，同步 evaluate 有互等风险），故一律异步到
+     * {@link #PICK_SYNC_POOL}；且用 soft 超时、幂等合并，失败仅由导航事件 / 主循环下一轮兜底补回。
+     */
+    private static void registerPullStateBridge(BrowserContext ctx) {
+        ctx.exposeBinding("__rolePullPickState", (source, args) -> {
+            LinkedHashMap<String, RoleEntry> map = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+            if (map == null) return null;
+            Page pg;
+            try { pg = source.page(); } catch (Exception ignore) { return null; }
+            if (pg == null || pg.isClosed()) return null;
+            String json;
+            synchronized (map) {
+                if (map.isEmpty()) return null;
+                java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                payload.put("picks", new java.util.ArrayList<>(map.values()));
+                json = GSON.toJson(payload);
+            }
+            if (json == null || json.isEmpty()) return null;
+            final Page target = pg;
+            final String stateJson = json;
+            PICK_SYNC_POOL.execute(() -> {
+                try {
+                    RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.MERGE_PICK_STATE_JS,
+                            RolePickerScripts.args("stateJson", stateJson));
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+            });
             return null;
         });
     }
@@ -484,14 +527,14 @@ final class RolePickerBridgeRegistry {
                         if (changed) {
                             List<String> fplog = merged.getFramePath();
                             log.info("[picker] __roleOnPick(console) callback written to in-memory state: key={} pageClass={} framePath={} (current in-memory size={})", key, (merged.getPageClass() == null ? "" : merged.getPageClass()), (fplog == null || fplog.isEmpty() ? "" : fplog.toString()), map.size());
-                            // 事件驱动即时回灌 + 跨源 iframe 聚合（与 binding 通道对称）：console 通道经跨源冒泡到达，
-                            // 此处对来源页调度一次回灌 + 聚合，覆盖"binding 回传失败但拾取已落 frame"的跨源 iframe 场景。
+                            // 事件驱动即时回灌（与 binding 通道对称）：console 通道经跨源冒泡到达。
+                            // 【push 化】此处同样不再协议级遍历 frame（理由见 binding 通道同位置说明），
+                            // 跨源 iframe 的 straggler 由 debounce 自愈低频兜底。
                             final Page cp = msg.page();
                             if (cp != null && !cp.isClosed()) {
                                 final LinkedHashMap<String, RoleEntry> snap = map;
                                 PICK_SYNC_POOL.execute(() -> {
                                     RolePickerPanelSync.syncPanelToBrowser(cp, null, snap);
-                                    RoleElementPicker.mergeFramePicksToMain(cp, snap);
                                 });
                             }
                         }

@@ -65,6 +65,24 @@ final class RolePickerContext {
     /** 每页当前在途的自愈任务（去抖用）；页面关闭时移除、任务执行完自移除。 */
     final ConcurrentHashMap<Page, ScheduledFuture<?>> selfHealTasks;
     /**
+     * 每页最近一次"主帧导航事件"的处理时间与 URL，用于对【同一 URL 的重复/抖动导航】去抖。
+     *
+     * <p>重定向链与 SPA 抖动会让同一 URL 连发两次 {@code onFrameNavigated}（现场：{@code onFrameNavigated
+     * triggered ×2} 间隔 11ms），整套"恢复 + 激活 + 回灌 + 诊断"被完整跑两遍，翻倍占用 evaluate 与页级锁。
+     * 回灌已由【文档起始自举】接管，故合并重复导航是安全的（真正的状态恢复不再依赖该事件）。
+     */
+    final ConcurrentHashMap<Page, Long> lastNavHandledAt = new ConcurrentHashMap<>();
+    final ConcurrentHashMap<Page, String> lastNavHandledUrl = new ConcurrentHashMap<>();
+
+    /**
+     * 每页上次自愈（页类刷新 + 跨源 frame 读回 + 面板回灌）完成的时间戳。
+     *
+     * <p>用途：给 {@code scheduleSelfHeal} 提供【按页最小间隔】节流依据。广告/跟踪 iframe 会频繁导航，
+     * 而每个子帧导航都会触发一次自愈；仅靠 250ms 去抖不足以合并这种风暴（现场表现为 iframe 合并 WARN
+     * 成片、并把同页的关键 evaluate 挤到队尾）。
+     */
+    final ConcurrentHashMap<Page, Long> lastSelfHealAt = new ConcurrentHashMap<>();
+    /**
      * 已封存的 step（权威来源＝浏览器 {@code __steps}，每次「停止」时缓存一份）。
      * 供「边拾边生成」实时预览构造 {@code steps = 已封存 + 当轮进行中}，使预览与「停止」生成在两个 Tab
      * （步骤代码 / 断言）上完全一致：每轮「开始→停止」一个 step / 一个 assertStep，跨轮累积。

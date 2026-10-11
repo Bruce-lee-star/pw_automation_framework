@@ -221,6 +221,17 @@ public final class RoleElementPicker {
         return evalWithTimeout(evalLockOf(frame), () -> frame.evaluate(script), PICKER_EVAL_SOFT_TIMEOUT_MS);
     }
 
+    /**
+     * 自定义超时版（Frame 重载）：用于「协议级读回子 frame 拾取」这类<b>纯兜底</b>动作。
+     *
+     * <p>拾取数据本身已由 {@code __roleOnPick}（binding + console 两路）**事件上行**，读回只是兜底，
+     * 故它必须比常规软超时（2s）更短：页面上的广告/跟踪 frame 常因脚本阻塞而 evaluate 挂住，
+     * 逐个吃满 2s 会累积成十几到几十秒的占用（现场"新页面回灌 10~20s"的主因）。
+     */
+    static Object pickerEvalSoft(Frame frame, String script, long timeoutMs) {
+        return evalWithTimeout(evalLockOf(frame), () -> frame.evaluate(script), timeoutMs);
+    }
+
     static Object pickerEvalSoft(Frame frame, String script, Object arg) {
         return evalWithTimeout(evalLockOf(frame), () -> frame.evaluate(script, arg), PICKER_EVAL_SOFT_TIMEOUT_MS);
     }
@@ -309,6 +320,9 @@ public final class RoleElementPicker {
         if (RolePickerSessionState.CTX_PANEL_SCRIPTED.add(ctx)) {
             ctx.addInitScript(RolePickerScripts.PANEL_BOOTSTRAP_SCRIPT);
             ctx.addInitScript(RolePickerScripts.PANEL_SCRIPT);
+            // 【文档起始自举】context 级：每个新文档（含跨源新页）在文档起始主动拉取权威拾取态，
+            // 使新页面"出生即带齐已拾元素"，不再等待可能迟到 10~20s 的 onFrameNavigated。
+            ctx.addInitScript(RolePickerScripts.PULL_STATE_ON_DOC_START_JS);
         }
         String nls = (nlsReverseJson == null || nlsReverseJson.isEmpty()) ? "{}" : nlsReverseJson;
         if (!nls.equals(RolePickerSessionState.CTX_PICKER_NLS.get(ctx))) {
