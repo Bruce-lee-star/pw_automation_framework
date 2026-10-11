@@ -981,7 +981,17 @@ public final class RoleElementPicker {
      * 事件线程与页级锁 —— 现场：新页出现后 9.7s 才出现 applyPickState，观感就是"回灌非常慢"。
      */
     static void applyPickStateSoft(Page target, String stateJson, String nlsReverseJson, String[] nlsFiles) {
-        applyPickState(target, stateJson, nlsReverseJson, nlsFiles, true);
+        long t0 = System.currentTimeMillis();
+        try {
+            applyPickState(target, stateJson, nlsReverseJson, nlsFiles, true);
+            log.info("[picker][applyPickState(soft)] restored into {} in {}ms", target.url(),
+                    (System.currentTimeMillis() - t0));
+        } catch (Exception ex) {
+            // 兜底链失败必须可见：否则日志里只看到"已发起"，实际元素没回来（面板长时间为空）。
+            log.warn("[picker][applyPickState(soft)] failed for {} after {}ms (bootstrap/next round will retry): {}",
+                    target.url(), (System.currentTimeMillis() - t0), ex.getMessage());
+            RolePickerQuiet.ignore("RoleElementPicker", ex);
+        }
     }
 
     private static void applyPickState(Page target, String stateJson, String nlsReverseJson, String[] nlsFiles,
@@ -1066,6 +1076,17 @@ public final class RoleElementPicker {
         // __fillCodeTabs / __fillAssertTabs）。原先分两次独立 evaluate，在 SPA / 后台 iframe 持续繁忙的页面上
         // 两次调用之间存在 hang 窗口：第一次（步骤）抢在 hang 前成功、第二次（断言）常撞软超时被丢弃，
         // 表现为"步骤实时生成、断言不生成"。合并后两步渲染原子更新，消除该不对称。
+        // 【为自举留档】把本次生成的代码（按页）缓存进会话上下文：跨源新页读不到原 origin 的
+        // localStorage 代码缓存，自举时据此把三个代码 Tab 一并填充，避免"新页只见元素、代码空白"。
+        try {
+            RolePickerContext pc = RolePickerPageTracker.contextFor(page.context());
+            if (pc != null) {
+                pc.lastPageByPage = (pageClassByPage == null) ? new LinkedHashMap<>() : new LinkedHashMap<>(pageClassByPage);
+                pc.lastStepByPage = (stepByPage == null) ? new LinkedHashMap<>() : new LinkedHashMap<>(stepByPage);
+                pc.lastAssertByPage = (assertByPage == null) ? new LinkedHashMap<>() : new LinkedHashMap<>(assertByPage);
+                pc.lastCodeMsg = (msg == null) ? "" : msg;
+            }
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RoleElementPicker#cacheCode", ignore); }
         Object combinedArgs = RolePickerScripts.args(
                 "pageByPage", pageClassByPage == null ? new LinkedHashMap<String, String>() : pageClassByPage,
                 "stepByPage", stepByPage == null ? new LinkedHashMap<String, String>() : stepByPage,

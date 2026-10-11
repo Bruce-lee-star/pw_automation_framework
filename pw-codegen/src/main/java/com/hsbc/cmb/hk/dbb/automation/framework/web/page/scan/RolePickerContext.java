@@ -75,6 +75,19 @@ final class RolePickerContext {
     final ConcurrentHashMap<Page, String> lastNavHandledUrl = new ConcurrentHashMap<>();
 
     /**
+     * 最近一次生成的代码（按页），供<b>新文档自举</b>时一并填充「页面类 / 步骤代码 / 断言」三个 Tab。
+     *
+     * <p>为何需要：这三个 Tab 的内容由 Java 的 {@code fillCode} evaluate 写进【目标文档】的 textarea，
+     * 并缓存到 {@code localStorage.__rolePickerCode}；而<b>跨源新页读不到原 origin 的 localStorage</b>，
+     * 且那一轮 fillCode 未必落到新页 ⇒ 新页面板只见「页面元素」、两个代码 Tab 空白。
+     * 故在会话上下文里留一份最新码表，自举时随 picks 一起下发，由浏览器侧直接填充。
+     */
+    volatile java.util.Map<String, String> lastPageByPage = new LinkedHashMap<>();
+    volatile java.util.Map<String, String> lastStepByPage = new LinkedHashMap<>();
+    volatile java.util.Map<String, String> lastAssertByPage = new LinkedHashMap<>();
+    volatile String lastCodeMsg = "";
+
+    /**
      * 每页上次自愈（页类刷新 + 跨源 frame 读回 + 面板回灌）完成的时间戳。
      *
      * <p>用途：给 {@code scheduleSelfHeal} 提供【按页最小间隔】节流依据。广告/跟踪 iframe 会频繁导航，

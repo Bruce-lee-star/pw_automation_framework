@@ -310,6 +310,17 @@ final class RolePickerBridgeRegistry {
                 if (picks.isEmpty()) return null;
                 java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
                 payload.put("picks", picks);
+                // 【代码 Tab 一并下发】跨源新页读不到原 origin 的 localStorage 代码缓存，故把最近一次
+                // 生成的页面类 / 步骤 / 断言码表随自举下发，由浏览器侧直接填充三个 Tab。
+                try {
+                    RolePickerContext pc = RolePickerPageTracker.contextFor(ctx);
+                    if (pc != null) {
+                        if (!pc.lastPageByPage.isEmpty()) payload.put("pageByPage", pc.lastPageByPage);
+                        if (!pc.lastStepByPage.isEmpty()) payload.put("stepByPage", pc.lastStepByPage);
+                        if (!pc.lastAssertByPage.isEmpty()) payload.put("assertByPage", pc.lastAssertByPage);
+                        if (pc.lastCodeMsg != null && !pc.lastCodeMsg.isEmpty()) payload.put("msg", pc.lastCodeMsg);
+                    }
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry#codePayload", ignore); }
                 json = GSON.toJson(payload);
             }
             if (skippedNoClass > 0) {
@@ -319,15 +330,26 @@ final class RolePickerBridgeRegistry {
             final Page target = pg;
             final String stateJson = json;
             // 可见性：自举是"新页面回灌慢"的根治手段，必须能观测到它何时、合并了多少元素。
-            String targetUrl = null;
-            try { targetUrl = target.url(); } catch (Exception ignore) { targetUrl = null; }
+            // 注意：lambda 只能捕获 effectively final 的局部变量，故先求值再转 final 别名。
+            String url;
+            try { url = target.url(); } catch (Exception ignore) { url = null; }
+            final String targetUrl = url;
             log.info("[picker][bootstrap] new document pulled authoritative state: {} pick(s) -> {}",
                     map.size(), targetUrl);
             PICK_SYNC_POOL.execute(() -> {
+                long t0 = System.currentTimeMillis();
                 try {
                     RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.MERGE_PICK_STATE_JS,
                             RolePickerScripts.args("stateJson", stateJson));
-                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+                    // 结果日志：自举是"新页面回灌慢"的根治手段，成败与耗时必须可观测（失败往往意味着
+                    // 该页最终要靠慢兜底链补回，表现为"十几秒后才出现元素"）。
+                    log.info("[picker][bootstrap] merged authoritative state into {} ({} pick(s), {}ms)",
+                            targetUrl, map.size(), (System.currentTimeMillis() - t0));
+                } catch (Exception ex) {
+                    log.warn("[picker][bootstrap] merge failed for {} after {}ms (fallback restore will retry): {}",
+                            targetUrl, (System.currentTimeMillis() - t0), ex.getMessage());
+                    RolePickerQuiet.ignore("RolePickerBridgeRegistry", ex);
+                }
             });
             return null;
         });

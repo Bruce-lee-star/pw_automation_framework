@@ -41,6 +41,20 @@
       });
       if (mx > (window.__rolePickSeq || 0)) window.__rolePickSeq = mx;
     })();
+    // 【代码 Tab 随自举填充】跨源新页读不到原 origin 的 localStorage 代码缓存，故由 Java 把最近一次
+    // 生成的页面类 / 步骤 / 断言码表随载荷下发，这里直接填进三个 Tab（与既有 fillCode 通道幂等）。
+    if (s.pageByPage || s.stepByPage) {
+      try {
+        if (window.__fillCodeTabs) {
+          window.__fillCodeTabs({ pageByPage: s.pageByPage || {}, stepByPage: s.stepByPage || {}, msg: s.msg || '' });
+        }
+      } catch (e) { /* 填充失败无害：后续 fillCode 仍会刷新 */ }
+    }
+    if (s.assertByPage) {
+      try {
+        if (window.__fillAssertTabs) window.__fillAssertTabs({ assertByPage: s.assertByPage, msg: s.msg || '' });
+      } catch (e) { /* 同上 */ }
+    }
     try { if (window.__renderPicks) window.__renderPicks(); } catch (e) {}
   } catch (e) { /* 合并失败无害：导航事件与主循环回灌仍会兜底 */ }
 }
