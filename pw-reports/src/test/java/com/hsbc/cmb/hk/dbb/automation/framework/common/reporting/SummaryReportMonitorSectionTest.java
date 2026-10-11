@@ -19,12 +19,14 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * 端到端验证「有监控失败 / 数据丢失时，summary report（完整 HTML）确实渲染出该显示区域」。
+ * 端到端验证：API 监控失败区块<b>从 summary-report 拆出</b>，独立生成 monitor-failures.html。
  *
  * <p>经测试专用 SPI 实现 {@link TestMonitorFailureReportSink}（注册于 reporting 测试 classpath）注入样例数据，
- * 驱动真实 {@link SummaryReportGenerator} 走通「SPI 收集 → 片段渲染 → summary-report.ftlh 装配」全链路，
- * 断言最终产物 {@code serenity-summary.html} 包含该区域的关键标记。默认（无样例数据）时 sink 返回 empty，
- * 区域不渲染，不污染 golden/branch/trace 基线。
+ * 驱动真实 {@link SummaryReportGenerator} 走通全链路。断言：
+ * <ul>
+ *   <li>{@code monitor-failures.html} 存在且含失败记录 / 数据丢失红框；</li>
+ *   <li>{@code serenity-summary.html} <b>不再</b>内嵌该区块（拆出后 summary 保持干净）。</li>
+ * </ul>
  */
 public class SummaryReportMonitorSectionTest {
     @Rule
@@ -66,7 +68,7 @@ public class SummaryReportMonitorSectionTest {
         items.add(new MonitorFailureItem(
                 "team-a@hsbc.com", "Login", "/api/v1/transfer", "500", "POST",
                 "https://api.example.com/api/v1/transfer", "status=500 expected=200",
-                List.of("Scenario A", "Scenario B"), "{\"amt\":100}", "{\"error\":\"boom\"}"));
+                List.of("Scenario A", "Scenario B"), "{\"amt\":100}", "{\"error\":\"boom\"}", "", ""));
         List<MonitorOwnerBlock> owners = new ArrayList<>();
         owners.add(new MonitorOwnerBlock("team-a@hsbc.com", items));
 
@@ -87,16 +89,21 @@ public class SummaryReportMonitorSectionTest {
 
         new SummaryReportGenerator(dir.getAbsolutePath()).generateSummaryReport();
 
-        String html = Files.readString(dir.toPath().resolve("serenity-summary.html"), StandardCharsets.UTF_8);
+        // standalone monitor-failures.html: contains failure record + data-loss warning
+        String monitorHtml = Files.readString(dir.toPath().resolve("monitor-failures.html"), StandardCharsets.UTF_8);
+        assertTrue("standalone report must contain title", monitorHtml.contains("API Monitor Failure Report"));
+        assertTrue("standalone report must contain owner/pattern", monitorHtml.contains("/api/v1/transfer"));
+        assertTrue("standalone report must contain data-loss warning title", monitorHtml.contains("Data integrity warning"));
+        assertTrue("standalone report must contain loss record count", monitorHtml.contains("3 records"));
+        assertTrue("standalone report must contain deduped failure count", monitorHtml.contains("1x"));
+        // directives/placeholders must be resolved
+        assertFalse("Freemarker directives must not leak into output", monitorHtml.contains("<#"));
+        assertFalse("template placeholders must be resolved", monitorHtml.contains("${"));
 
-        assertTrue("完整报告须含按 Owner 汇总标题", html.contains("API 监控失败（按 Owner 汇总）"));
-        assertTrue("完整报告须含 owner", html.contains("team-a@hsbc.com"));
-        assertTrue("完整报告须含 endpoint", html.contains("/api/v1/transfer"));
-        assertTrue("完整报告须含数据丢失红框标题", html.contains("数据完整性告警（API 监控数据丢失）"));
-        assertTrue("完整报告须含丢失条数", html.contains("3 条"));
-        // 区域经模板装配进完整报告，指令/占位符须已解析
-        assertFalse("Freemarker 指令不得泄漏进产物", html.contains("<#"));
-        assertFalse("模板占位符须已解析", html.contains("${"));
+        // summary-report no longer embeds this section
+        String summaryHtml = Files.readString(dir.toPath().resolve("serenity-summary.html"), StandardCharsets.UTF_8);
+        assertFalse("summary must not embed API monitor failure section", summaryHtml.contains("API Monitor Failure"));
+        assertFalse("summary must not contain data-loss warning", summaryHtml.contains("Data integrity warning"));
     }
 
     @Test
@@ -116,8 +123,10 @@ public class SummaryReportMonitorSectionTest {
         new SummaryReportGenerator(dir.getAbsolutePath()).generateSummaryReport();
 
         String html = Files.readString(dir.toPath().resolve("serenity-summary.html"), StandardCharsets.UTF_8);
-        assertFalse("无数据时不渲染监控区域", html.contains("API 监控失败（按 Owner 汇总）"));
-        assertFalse("无数据时不渲染数据丢失红框", html.contains("数据完整性告警"));
+        assertFalse("summary must not render monitor section when no data", html.contains("API Monitor Failure"));
+        assertFalse("summary must not render data-loss warning when no data", html.contains("Data integrity warning"));
+        assertFalse("无数据时不生成独立 monitor-failures.html",
+                Files.exists(dir.toPath().resolve("monitor-failures.html")));
     }
 
     /**
@@ -154,7 +163,7 @@ public class SummaryReportMonitorSectionTest {
         items.add(new MonitorFailureItem(
                 "team-a@hsbc.com", "Login", "/api/v1/transfer", "500", "POST",
                 "https://api.example.com/api/v1/transfer", "status=500 expected=200",
-                List.of("Scenario A"), "{\"amt\":100}", "{\"error\":\"boom\"}"));
+                List.of("Scenario A"), "{\"amt\":100}", "{\"error\":\"boom\"}", "", ""));
         List<MonitorOwnerBlock> owners = new ArrayList<>();
         owners.add(new MonitorOwnerBlock("team-a@hsbc.com", items));
         Map<String, Long> loss = new LinkedHashMap<>();

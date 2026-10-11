@@ -436,6 +436,9 @@ public final class SummaryReportGenerator {
             //    由 ServiceLoader 发现 route 提供的实现，打破 reporting ↔ route 循环依赖。
             writeMonitorFailureReports();
 
+            // 2026-10-11：API 监控失败独立 HTML 报告（从 summary 拆出，与 summary 同目录生成）
+            generateMonitorFailureReport(actualReportDir);
+
             long pass = count(TestResult.SUCCESS);
             if (total > 0 && pass == total) {
                 logger.info("All {} tests passed! Summary report generated at: {}", total, output.toAbsolutePath());
@@ -524,6 +527,92 @@ public final class SummaryReportGenerator {
             logger.warn("[ApiMonitor] Exception writing monitor failure report (main report unaffected): {}", ex.getMessage());
         }
     }
+
+    /**
+     * 生成 API 监控失败独立 HTML 报告（2026-10-11 从 summary-report 拆出）。
+     *
+     * <p>与 {@code serenity-summary.html} 同目录产出 {@code monitor-failures.html}。
+     * 按 (method, status, reason) 对同 owner 下的多条命中<b>去重合并</b>：同签名多次失败合并为一条，
+     * 显示累计次数 + 去重 URL 列表；数据完整性告警一并保留。无任何内容时不生成本文件。
+     * 本方法失败不影响 summary 报告本身。</p>
+     */
+    private void generateMonitorFailureReport(String actualReportDir) {
+        if (monitorFailureData == null || !monitorFailureData.hasContent()) {
+            return;
+        }
+        try {
+            // 去重合并：同 owner 下按 (method|status|reason) 合并，累计次数 + 收集去重 URL
+            List<Map<String, Object>> dedupedOwners = new ArrayList<>();
+            for (MonitorOwnerBlock block : monitorFailureData.getOwners()) {
+                Map<String, Object> ownerView = new LinkedHashMap<>();
+                ownerView.put("owner", block.getOwner());
+                Map<String, Map<String, Object>> bySignature = new LinkedHashMap<>();
+                for (MonitorFailureItem item : block.getItems()) {
+                    String sig = (item.getMethod() == null ? "" : item.getMethod()) + "|"
+                            + (item.getStatus() == null ? "" : item.getStatus()) + "|"
+                            + (item.getReason() == null ? "" : item.getReason());
+                    Map<String, Object> merged = bySignature.get(sig);
+                    if (merged == null) {
+                        merged = new LinkedHashMap<>();
+                        merged.put("method", item.getMethod());
+                        merged.put("status", item.getStatus());
+                        merged.put("reason", item.getReason());
+                        merged.put("count", 0);
+                        merged.put("urls", new java.util.LinkedHashSet<String>());
+                        merged.put("scenarios", new java.util.LinkedHashSet<String>());
+                        merged.put("requestBody", "");
+                        merged.put("responseBody", "");
+                        bySignature.put(sig, merged);
+                    }
+                    merged.put("count", ((Number) merged.get("count")).intValue() + 1);
+                    if (item.getRequestUrl() != null && !item.getRequestUrl().isEmpty()) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Set<String> urls = (java.util.Set<String>) merged.get("urls");
+                        urls.add(item.getRequestUrl());
+                    }
+                    if (item.getScenarios() != null) {
+                        @SuppressWarnings("unchecked")
+                        java.util.Set<String> scenSet = (java.util.Set<String>) merged.get("scenarios");
+                        scenSet.addAll(item.getScenarios());
+                    }
+                    // representative request/response body: first non-empty wins
+                    if (((String) merged.get("requestBody")).isEmpty()
+                            && item.getRequestBody() != null && !item.getRequestBody().isEmpty()) {
+                        merged.put("requestBody", item.getRequestBody());
+                    }
+                    if (((String) merged.get("responseBody")).isEmpty()
+                            && item.getResponseBody() != null && !item.getResponseBody().isEmpty()) {
+                        merged.put("responseBody", item.getResponseBody());
+                    }
+                }
+                // Set → List（Freemarker 遍历）
+                for (Map<String, Object> m : bySignature.values()) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Set<String> urls = (java.util.Set<String>) m.get("urls");
+                    m.put("urls", new ArrayList<>(urls));
+                    @SuppressWarnings("unchecked")
+                    java.util.Set<String> scen = (java.util.Set<String>) m.get("scenarios");
+                    m.put("scenarios", new ArrayList<>(scen));
+                }
+                ownerView.put("items", new ArrayList<>(bySignature.values()));
+                dedupedOwners.add(ownerView);
+            }
+
+            Map<String, Object> model = new HashMap<>();
+            model.put("report", monitorFailureData);
+            model.put("dedupedOwners", dedupedOwners);
+            String html = renderSummaryTemplate("monitor-failures-report.ftlh", model);
+
+            Path out = safeResolve(actualReportDir, MONITOR_FAILURE_FILE);
+            Files.writeString(out, html, StandardCharsets.UTF_8);
+            logger.info("API monitor failure report: {}", out.toUri());
+        } catch (freemarker.template.TemplateException | java.io.IOException e) {
+            logger.error("Failed to generate monitor-failures.html (summary report unaffected): {}", e.toString());
+        }
+    }
+
+    /** 独立监控失败报告文件名（与 serenity-summary.html 同目录）。 */
+    private static final String MONITOR_FAILURE_FILE = "monitor-failures.html";
 
     /**
      * 经 SPI 收集监控失败 / 数据丢失汇总数据，供 HTML 报告显示区域渲染。
@@ -700,7 +789,8 @@ public final class SummaryReportGenerator {
         appendCoverageSection(frag);         String coverageSection = frag.toString();       frag.setLength(0);
         appendFailureOverview(frag);         String failureOverview = frag.toString();       frag.setLength(0);
         appendFailureAndResultList(frag);    String failureAndResultList = frag.toString();   frag.setLength(0);
-        appendMonitorFailureSection(frag);    String monitorFailureSection = frag.toString();  frag.setLength(0);
+        //  2026-10-11：API 监控失败区块从 summary HTML 拆出，独立生成 monitor-failures.html
+        //  （见 generateMonitorFailureReport）。summary 不再内嵌该区块。
 
         Map<String, Object> model = new HashMap<>();
         model.put("title", title);
@@ -711,7 +801,6 @@ public final class SummaryReportGenerator {
         model.put("coverageSection", coverageSection);
         model.put("failureOverview", failureOverview);
         model.put("failureAndResultList", failureAndResultList);
-        model.put("monitorFailureSection", monitorFailureSection);
 
         try {
             return renderSummaryTemplate("summary-report.ftlh", model);

@@ -8,18 +8,17 @@ import org.junit.Test;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * 校验 {@code summary/monitor-failure-section.ftlh} 模板：
- * 有内容时渲染「按 Owner 汇总」+ 数据丢失红框；无内容时不渲染（保持报告整洁）。
+ * 校验独立报告模板 {@code monitor-failures-report.ftlh}：
+ * 有内容时渲染按接口分组 + 去重后失败次数 + URL 列表 + 数据丢失红框。
  *
- * <p>本测试不依赖 route 模块（reporting 测试 classpath 无 route），直接构造
- * {@link MonitorFailureReportData} 驱动模板，验证模板与 DTO 绑定的正确性。
+ * <p>本测试不依赖 route 模块，直接构造 {@link MonitorFailureReportData} 与去重后的 model 驱动模板。
  */
 public class MonitorFailureSectionTemplateTest {
 
@@ -34,40 +33,67 @@ public class MonitorFailureSectionTemplateTest {
     }
 
     @Test
-    public void rendersOwnerFailuresAndDataLoss() throws Exception {
+    public void rendersOwnerFailuresDedupedAndDataLoss() throws Exception {
         List<MonitorFailureItem> items = new ArrayList<>();
+        // 同签名 3 次命中同 URL + 1 次不同 URL —— 去重后应为 2 条
         items.add(new MonitorFailureItem(
-                "team-a@hsbc.com", "Login", "/api/v1/transfer", "500", "POST",
+                "/api/v1/transfer", "POST", "/api/v1/transfer", "500 (expect 200)", "POST",
                 "https://api.example.com/api/v1/transfer", "status=500 expected=200",
-                List.of("Scenario A", "Scenario B"), "{\"amt\":100}", "{\"error\":\"boom\"}"));
+                List.of("Scenario A"), "", "", "", ""));
+        items.add(new MonitorFailureItem(
+                "/api/v1/transfer", "POST", "/api/v1/transfer", "500 (expect 200)", "POST",
+                "https://api.example.com/api/v1/transfer", "status=500 expected=200",
+                List.of("Scenario B"), "", "", "", ""));
+        items.add(new MonitorFailureItem(
+                "/api/v1/transfer", "POST", "/api/v1/transfer", "500 (expect 200)", "POST",
+                "https://api.example.com/api/v1/transfer?retry=1", "status=500 expected=200",
+                List.of("Scenario C"), "", "", "", ""));
         List<MonitorOwnerBlock> owners = new ArrayList<>();
-        owners.add(new MonitorOwnerBlock("team-a@hsbc.com", items));
+        owners.add(new MonitorOwnerBlock("/api/v1/transfer", items));
 
         Map<String, Long> loss = new LinkedHashMap<>();
         loss.put("route_monitor_record", 3L);
-        MonitorFailureReportData data = new MonitorFailureReportData(owners, loss, 3L, 1, 1);
+        MonitorFailureReportData data = new MonitorFailureReportData(owners, loss, 3L, 1, 3);
 
-        String html = render(data);
-        assertTrue("应包含按 Owner 汇总标题", html.contains("API 监控失败（按 Owner 汇总）"));
-        assertTrue("应包含 owner", html.contains("team-a@hsbc.com"));
-        assertTrue("应包含 endpoint", html.contains("/api/v1/transfer"));
-        assertTrue("应包含数据丢失红框标题", html.contains("数据完整性告警（API 监控数据丢失）"));
-        assertTrue("应包含丢失条数", html.contains("3 条"));
-        assertTrue("应包含触发 scenario 列表", html.contains("Scenario A, Scenario B"));
-    }
+        // 模拟 SummaryReportGenerator 的去重合并
+        Map<String, Object> ownerView = new LinkedHashMap<>();
+        ownerView.put("owner", "/api/v1/transfer");
+        Map<String, Object> merged = new LinkedHashMap<>();
+        merged.put("method", "POST");
+        merged.put("status", "500 (expect 200)");
+        merged.put("reason", "status=500 expected=200");
+        merged.put("count", 3);
+        List<String> urls = new ArrayList<>(new LinkedHashSet<>(List.of(
+                "https://api.example.com/api/v1/transfer",
+                "https://api.example.com/api/v1/transfer?retry=1")));
+        merged.put("urls", urls);
+        merged.put("scenarios", List.of("Scenario A", "Scenario B"));
+        merged.put("requestBody", "{\"amount\":100}");
+        merged.put("responseBody", "{\"error\":\"internal\"}");
+        ownerView.put("items", List.of(merged));
+        List<Map<String, Object>> dedupedOwners = List.of(ownerView);
 
-    @Test
-    public void rendersNothingWhenEmpty() throws Exception {
-        String html = render(MonitorFailureReportData.empty());
-        assertTrue("空数据应不渲染任何内容", html.isEmpty());
-    }
-
-    private String render(MonitorFailureReportData data) throws Exception {
-        Template tpl = FM.getTemplate("summary/monitor-failure-section.ftlh");
         Map<String, Object> model = new LinkedHashMap<>();
         model.put("report", data);
+        model.put("dedupedOwners", dedupedOwners);
+
+        Template tpl = FM.getTemplate("monitor-failures-report.ftlh");
         StringWriter out = new StringWriter();
         tpl.process(model, out);
-        return out.toString();
+        String html = out.toString();
+
+        assertTrue("should contain report title", html.contains("API Monitor Failure Report"));
+        assertTrue("should contain endpoint group", html.contains("/api/v1/transfer"));
+        assertTrue("should contain collapsible structure", html.contains("<details class=\"fail-item\">"));
+        assertTrue("should contain summary row", html.contains("<summary>"));
+        assertTrue("should contain deduped failure count", html.contains("3x"));
+        assertTrue("should contain both deduped URLs", html.contains("api/v1/transfer?retry=1"));
+        assertTrue("should contain nested request/response details", html.contains("Request / response details"));
+        assertTrue("should contain response body", html.contains("{\"error\":\"internal\"}"));
+        assertTrue("should contain scenario names", html.contains("Scenario A"));
+        assertTrue("should contain data-loss warning title", html.contains("Data integrity warning"));
+        assertTrue("should contain loss record count", html.contains("3 records"));
+        assertTrue("should contain white card container", html.contains("class=\"main\""));
+        assertTrue("should contain stat number", html.contains(">3</div>"));
     }
 }
