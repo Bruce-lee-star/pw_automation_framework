@@ -83,6 +83,24 @@ public final class RouteEngine {
     }
 
     /**
+     * 方案 B（2026-10-11）：main 业务 seam —— 执行该 context 已入队的延迟协议动作（DELAY resume/fulfill）。
+     *
+     * <p><b>幂等、不创建</b>：仅当该 context 已有 runtime 时才 drain（{@code RUNTIMES.get} 而非
+     * {@code computeIfAbsent}——否则 step 边界会对每个 context 无谓创建 runtime）。
+     * 供 Serenity step 边界（{@code PlaywrightListener.stepStarted}）等 main 线程钩子调用：
+     * 使 delay 到点后的 resume/fulfill 在下一次 UI 操作前已在 main 串行执行（零并发写 Connection）。</p>
+     */
+    public static void drainMainThreadActions(BrowserContext context) {
+        if (context == null) {
+            return;
+        }
+        RouteRuntime rt = RUNTIMES.get(context);
+        if (rt != null) {
+            rt.drainMainThreadActions();
+        }
+    }
+
+    /**
      * 关闭指定 context 的 runtime（T8-5）。
      *
      * @param context            目标 BrowserContext
@@ -254,6 +272,13 @@ public final class RouteEngine {
         return runtime != null && runtime.stop(capability, urlPattern);
     }
 
+    /** 套件收尾多次钩子触发 shutdownAll 的驱动信道复位去重窗口（毫秒）：窗口内只复位一次。 */
+    private static final long TEARDOWN_RESET_DEDUP_MS = 1_000L;
+
+    /** 上一次套件收尾驱动信道复位时刻（毫秒）。 */
+    private static final java.util.concurrent.atomic.AtomicLong LAST_TEARDOWN_RESET_MS =
+            new java.util.concurrent.atomic.AtomicLong(0L);
+
     /** 关闭全部运行时（套件收尾 / stopAllContextEngines / shutdownRouteEngine；幂等）。 */
     public static void shutdownAll() {
         for (RouteRuntime runtime : RUNTIMES.values()) {
@@ -266,7 +291,18 @@ public final class RouteEngine {
         }
         //  套件收尾：连同驱动信道一起复位 —— 若此前有在途调用未收尾，信道会一直被标记不可用；
         //  不复位会让同一 JVM 内的后续套件全部失去路由能力。
-        resetDriverChannel();
+        //  2026-10-10：收尾的多个钩子（stopAllContextEngines/drainForSuiteTeardown/Serenity 收尾）会幂等
+        //  重复触发本方法，每次无条件换驱动线程 + 报 ERROR 会把例行清理伪装成故障（E2E 实证单轮
+        //  1 ERROR + 3 WARN、epoch 2→5）。故：runtime 关闭仍每次执行（幂等无害），驱动信道复位走
+        //  teardown 专用入口（TRACE 静默）并做 1s 窗口去重 —— 真信号（换连接后的显式 reset）不受影响。
+        long now = System.currentTimeMillis();
+        long last = LAST_TEARDOWN_RESET_MS.get();
+        if (now - last <= TEARDOWN_RESET_DEDUP_MS) {
+            return; // 同一收尾窗口已复位过驱动信道
+        }
+        if (LAST_TEARDOWN_RESET_MS.compareAndSet(last, now)) {
+            GuardedDriverCallImpl.resetChannelForTeardown();
+        }
     }
 
     /** 全部运行时数（测试/可观测性）。 */

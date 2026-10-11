@@ -4,6 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailu
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.reporting.RouteMonitorFailureReportSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,6 +32,10 @@ public final class RouteAssertionProbeImpl implements RouteAssertionProbe {
 
     @Override
     public List<RouteAssertionFailure> drainAndResolveFailures() {
-        return RouteEngine.drainSettledAssertionFailures();
+        List<RouteAssertionFailure> failures = RouteEngine.drainSettledAssertionFailures();
+        //  2026-10-10：monitor 失败报告喂入已下沉到【唯一 drain 出口】
+        //  RouteRuntimeImpl.drainSettledAssertionFailures()（本方法也经 RouteEngine 聚合走到那里），
+        //  此处不再重复 record，避免同一批失败被双份归集。
+        return failures;
     }
 }

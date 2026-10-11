@@ -48,6 +48,11 @@
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
         </dependency>
+        <!-- Gson：monitor 失败报告文件读回（跨进程：探针 JVM 落盘 → 报告 JVM 读回）；版本钉于根 POM dependencyManagement -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+        </dependency>
 
         <!-- 测试：JUnit 4 + Mockito（暂不引入 JUnit 5；junit:junit 未纳入根 POM DM，此处显式钉版本） -->
         <dependency>

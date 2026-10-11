@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
@@ -55,6 +56,15 @@ public final class CaptureSink {
     /** pattern → 未收到响应的请求快照（响应配对索引）。 */
     private final ConcurrentMap<String, ConcurrentLinkedQueue<CapturedExchange>> pendingByPattern =
             new ConcurrentHashMap<>();
+    /**
+     * 「响应已到达、持有句柄、待业务线程读 body 后入队」的 exchange（轮询线程投递、业务线程消费）。
+     *
+     * <p>2026-10-11 定稿：轮询线程<b>零协议调用</b>——onResponseForSpec 只原子配对
+     * （poll pendingByPattern 队头）+ 快照 status/headers（本地字段）+ 持有句柄，然后投递到本队列；
+     * body()（协议调用）一律由业务线程（main）在 flush 时读取。队列顺序 = 响应到达顺序，
+     * 保证 dump/查询的"定案顺序"近似请求顺序（稳定、无跨 pattern 乱序）。</p>
+     */
+    private final ConcurrentLinkedQueue<CapturedExchange> pendingMaterialization = new ConcurrentLinkedQueue<>();
 
     /** 队列上限计数（入队自增 / dump 消费递减；近似约束，防内存失控）。 */
     private final AtomicInteger count = new AtomicInteger();
@@ -118,6 +128,7 @@ public final class CaptureSink {
             return false;
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
+        snapshot.holdSpec(spec); // 业务线程（dump）延迟读 body 需要规则引用
         pendingByPattern.computeIfAbsent(spec.pattern(), k -> new ConcurrentLinkedQueue<>()).add(snapshot);
         return true;
     }
@@ -152,41 +163,59 @@ public final class CaptureSink {
         if (pending == null) {
             return;
         }
+        // 配对：poll 队头（原子移除——并发下每条响应精确配对一条请求，不重复不遗漏；
+        // FIFO 近似，与历史实现同口径：响应乱序时配对按请求到达顺序）。
+        // 轮询线程到此为止只写本地字段（status/headers）+ 持有句柄，
+        // **零协议调用**（body() 是协议调用，一律延后到业务线程 main 读取 —— 2026-10-11 定稿）。
         CapturedExchange snapshot = pending.poll();
-        if (snapshot == null) {
-            return; // 无配对请求快照（响应早于采集规则注册 / 已 dump 定案）→ 忽略
-        }
-        snapshot.markResponse(response.status(), response.headers());
-        if (spec.captureBodyEnabled()) {
-            captureBodyNow(snapshot, spec, response);
-        } else {
-            enqueue(snapshot, null, null, false);
+        if (snapshot != null) {
+            snapshot.markResponse(response.status(), response.headers());
+            snapshot.holdResponse(response); // 持有句柄：业务线程（flush）延迟读 body
+            pendingMaterialization.add(snapshot);
+            // 唤醒所有等待者：记录已到达（待业务线程 flush 物化）——waitFor 循环会先 flush
+            // 再扫描，唤醒后即可命中；与 enqueue 的 release 同款（queueLength+1 = 唤醒全部）。
+            recordVersion.incrementAndGet();
+            recordArrival.release(recordArrival.getQueueLength() + 1);
         }
     }
 
     /**
-     * <b>就地</b>读取并快照响应体（响应轮询线程；<b>不再</b>交 IO 线程排队）。
-     *
-     * <p><b>为什么必须就地读（2026-09-28 修正）</b>：{@code Response.body()} 是协议调用，需要驱动侧
-     * {@code response@<guid>} 句柄存活；旧实现把它丢给 IO 线程排队执行，实测在 IO 池繁忙（mock fetch 等）
-     * 时 body 读晚数秒 ⇒ 句柄已被回收 ⇒ {@code Object doesn't exist: response@…} ⇒ 采集到的 body 恒为 null
-     * （业务基于 body 的断言随之失真）。故改为"趁句柄存活时快照字节"，编码/截断仍在本次调用内完成
-     * （纯 CPU，微秒级）。</p>
+     * <b>业务线程（main）读取并快照响应体</b>——由 {@link #flushPendingResponses} 在 dump/peek/waitFor
+     * 入口调用。<b>轮询线程不再触碰 body()</b>（body() 是协议调用；2026-10-11 定稿：轮询线程零协议调用，
+     * 与 main 并发泵 Connection 会触发 HashMap 竞态 ⇒ 级联 Object doesn't exist，E2E run5 实证）。
      *
      * <p>读取失败保持 fail-open：保留核心快照（body=null）并计数，绝不抛异常、绝不判场景失败。</p>
      */
-    private void captureBodyNow(CapturedExchange snapshot, ApiSpec spec, Response response) {
+    private void captureBodyNow(CapturedExchange snapshot, ApiSpec spec) {
+        Response response = snapshot.takeHeldResponse();
+        if (response == null) {
+            // 句柄已被回收（页面跳转 / 驱动清理）：body 不可读，保留 status/headers 快照
+            bodyReadFailures.incrementAndGet();
+            LOGGER.warn("[Route] capture body unavailable (response handle reclaimed) "
+                            + "pattern='{}' url='{}'",
+                    spec.pattern(), snapshot.url());
+            enqueue(snapshot, null, null, false);
+            return;
+        }
         String contentType = null;
         try {
             contentType = response.headers().get("content-type");
         } catch (Throwable ignored) {
             // headers() 为客户端本地快照（协议事件已携带），正常不抛；防御性兜底。
+            LOGGER.trace("[Route] response.headers() defensive fallback: {}", ignored.toString());
         }
         // 3xx 重定向：响应体通常不可用（官方语义：重定向响应无 body 或 body 不可读）。
         // 显式短路、不发起 body() 协议调用 —— 避免无谓驱动往返 + 误计 bodyReadFailures；
         // location 等头已由 markResponse 保留，业务断言直接可用。
         int status = response.status(); // status() 为本地快照（事件已携带），零协议往返
         if (status >= 300 && status < 400) {
+            enqueue(snapshot, null, contentType, false);
+            return;
+        }
+        // SSE/流式（text/event-stream）：体永不结束，调 body() 会钉死线程直到 close 掐流
+        // 才抛 TargetClosedError（E2E 实证：capture body unavailable WARN 即由此而来，2026-10-10）。
+        // 刻意不读体，只按 status/headers 定案，证据侧由 CapturedExchange 标注「event-stream body not read」。
+        if (isStreamingContentType(contentType)) {
             enqueue(snapshot, null, contentType, false);
             return;
         }
@@ -227,6 +256,39 @@ public final class CaptureSink {
                 enqueue(snapshot, null, contentType, false);
             }
         }
+    }
+
+    /**
+     * <b>业务线程延迟物化</b>：把「响应已到达且持有句柄」的 exchange 读 body 后入队。
+     *
+     * <p>轮询线程（{@code onResponseForSpec}）只写 status/headers 本地字段并持有句柄，
+     * <b>不入队</b>——body 读取（协议调用）一律延后到本方法（main 线程，串行安全）。
+     * 本方法在 dump/peek/waitFor（业务消费入口）调用，保证：
+     * ① 捕获结果只延迟到下一次业务查询（消费式 dump 前 flush 即完整）；
+     * ② 轮询线程零协议调用（竞态根因消除）。</p>
+     */
+    private void flushPendingResponses() {
+        // 按响应到达顺序（pendingMaterialization 队列顺序）逐个物化；顺序稳定，无跨 pattern 乱序。
+        CapturedExchange snapshot;
+        while ((snapshot = pendingMaterialization.poll()) != null) {
+            ApiSpec spec = snapshot.spec();
+            if (spec != null && spec.captureBodyEnabled()) {
+                captureBodyNow(snapshot, spec); // 业务线程（main）：读 body 后入队
+            } else {
+                // 未开启 captureBody：只保留 status/headers（本地快照），不发起 body() 协议调用
+                enqueue(snapshot, null, null, false);
+            }
+        }
+    }
+
+    /**
+     * SSE/流式端点判断（与 {@code MonitorSink.isStreamingContentType} 同口径）：
+     * 体不会结束的响应调 {@code response.body()} 会一直挂到流关闭，等于把观测线程钉死，
+     * 故<b>刻意不读体</b>（只按 status/headers 定案，证据侧注明原因）。
+     */
+    private static boolean isStreamingContentType(String contentType) {
+        return contentType != null
+                && contentType.toLowerCase(Locale.ROOT).contains("text/event-stream");
     }
 
     /** 定案入队（队列满则丢弃并计数）；定案即打一行日志（请求/响应头 + 体 + 耗时，头已脱敏、体已截断）。 */
@@ -347,6 +409,7 @@ public final class CaptureSink {
      * @return 已定案快照（按定案顺序）；无记录时为空列表（永不返回 null）
      */
     public List<CapturedApiCall> dump() {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         sweepPendingTimeouts();
         List<CapturedApiCall> result = new ArrayList<>();
         CapturedApiCall call;
@@ -367,6 +430,7 @@ public final class CaptureSink {
      * @return 已定案快照（按定案顺序）；无记录时为空列表（永不返回 null）
      */
     public List<CapturedApiCall> peek() {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         sweepPendingTimeouts();
         return new ArrayList<>(history);
     }
@@ -392,6 +456,7 @@ public final class CaptureSink {
 
     /** 当前已定案未消费的快照数（可观测；消费后归零）。 */
     public int size() {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         return captured.size();
     }
 
@@ -426,6 +491,7 @@ public final class CaptureSink {
         captured.clear();
         history.clear();
         pendingByPattern.clear();
+        pendingMaterialization.clear(); // 待物化句柄一并丢弃（响应体未读，无载体需释放）
         count.set(0);
         historySize.set(0);
         dropped.set(0);
@@ -448,11 +514,13 @@ public final class CaptureSink {
 
     /** 全部采集记录（非消费式；数据源 = 只增 history）。 */
     public List<CapturedApiCall> all() {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         return new ArrayList<>(history);
     }
 
     /** 每个 pattern 的最近一次记录（非消费式；保持 pattern 首次出现顺序）。 */
     public List<CapturedApiCall> allLastPerPattern() {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         java.util.Map<String, CapturedApiCall> last = new java.util.LinkedHashMap<>();
         for (CapturedApiCall c : history) {
             if (c != null && c.pattern() != null) {
@@ -464,6 +532,7 @@ public final class CaptureSink {
 
     /** 指定 endpoint 的最近一次记录：先按 pattern 精确匹配，再退化为 URL 前缀匹配；无则 null。 */
     public CapturedApiCall lastOf(String endpoint) {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         CapturedApiCall hit = null;
         for (CapturedApiCall c : history) {
             if (c == null || endpoint == null) {
@@ -478,6 +547,7 @@ public final class CaptureSink {
 
     /** 指定 URL 的全部记录（非消费式）。 */
     public List<CapturedApiCall> byUrl(String url) {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         List<CapturedApiCall> out = new ArrayList<>();
         for (CapturedApiCall c : history) {
             if (c != null && url != null && url.equals(c.url())) {
@@ -496,6 +566,7 @@ public final class CaptureSink {
      * 中的判定口径（看 {@code primaryChannel()}）一致，避免"采集按主渠道、查询按声明渠道"的分裂。
      */
     public List<CapturedApiCall> byChannel(String channel) {
+        flushPendingResponses(); // 业务线程（main）：延迟读 body 并入队（轮询线程零协议调用）
         List<CapturedApiCall> out = new ArrayList<>();
         if (channel == null) {
             return out;
@@ -516,6 +587,9 @@ public final class CaptureSink {
         }
         long deadline = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
         while (true) {
+            // 0) 物化已到达响应的 body（业务线程 main，串行安全）——轮询线程零协议调用
+            //    （2026-10-11 定稿：body() 是协议调用，不再在响应轮询线程读取）
+            flushPendingResponses();
             long stampAtScan = resetStamp.get();
             long versionAtScan = recordVersion.get();
             // 1) 扫描（无锁；history 为并发队列，且生产者不持锁 ⇒ 无死锁、无锁竞争）

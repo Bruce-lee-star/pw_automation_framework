@@ -28,6 +28,20 @@ import java.util.Set;
  *   <li><b>防御拷贝</b>：header 快照不可变，杜绝调用方修改内部状态（EI_EXPOSE_REP2）。</li>
  * </ul>
  *
+ * <p><b>超大 / base64 响应体的断言指引（P2，2026-10-11）</b>：
+ * <ul>
+ *   <li><b>整响应即 base64 超长文本</b>（非 JSON）：不要配 {@code expectJsonPath}（必然失败）。
+ *       用 status + headers，或 {@code bodyContains}/{@code bodyRegex}（前缀匹配），
+ *       或业务层自行解码（{@link #responseBodyBytes()} 取原始字节）。</li>
+ *   <li><b>JSON 内嵌 base64 字段</b>：可用 {@code expectJsonPath} 取<b>字段本身</b>（string 值），
+ *       断言其<b>长度 / 前缀 / 存在性</b>，不要把超长字段全值当断言目标（物化成本 + 无意义）。</li>
+ *   <li><b>断言体上限</b>：monitor 断言受 {@code route.monitor.assert.body.max.bytes}（默认 2 MB）约束，
+ *       超限自动降级为仅 status/headers（inconclusive，见 {@code MonitorSink}）——
+ *       <b>本 DTO 的采集留存不受影响</b>：原始字节 / 文本仍完整可取。</li>
+ *   <li><b>解码缓存</b>：超 1 MB 的响应体 {@code responseBody()} 不缓存解码结果（每次按需解码），
+ *       避免超大 String 驻留；需要反复读取时建议业务侧自行持有一次解码结果。</li>
+ * </ul>
+ *
  * @param pattern                命中的规则 pattern
  * @param method                 请求方法（GET / POST / ...）
  * @param url                    请求完整 URL

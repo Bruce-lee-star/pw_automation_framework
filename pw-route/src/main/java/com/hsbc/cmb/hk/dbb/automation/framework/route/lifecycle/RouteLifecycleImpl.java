@@ -170,4 +170,14 @@ public class RouteLifecycleImpl implements RouteLifecycle {
             com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine.resetCapturedApis(bc);
         }
     }
+
+    @Override
+    public void drainMainThreadActions(Object context) {
+        // 方案 B（2026-10-11）：main 业务 seam —— step 边界执行 DELAY 到点的协议动作。
+        // 只 drain 当前线程（worker）的 context —— 绝不跨 worker drain（每个 worker 各自
+        // 一条 Connection，跨线程写别的 Connection 仍是并发写）。
+        if (context instanceof com.microsoft.playwright.BrowserContext bc) {
+            com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine.drainMainThreadActions(bc);
+        }
+    }
 }

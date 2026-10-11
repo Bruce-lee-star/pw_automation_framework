@@ -242,6 +242,31 @@ public interface RouteRuntime extends AutoCloseable {
     List<RouteAssertionFailure> drainSettledAssertionFailures();
 
     /**
+     * 把<b>协议动作</b>投递到 main 业务线程执行（默认实现为空操作，供测试替身兼容）。
+     *
+     * <p>2026-10-11 终极收敛（方案 B）：DELAY 到点回调跑在 {@code RouteDelayScheduler}
+     * 线程池，而 {@code Connection.internalSendMessage}（Connection.java:148）的
+     * {@code ++lastId} / {@code callbacks.put}（HashMap）/ {@code transport.send}
+     * <b>全部无锁</b> —— 非 main 线程发任何协议消息（含 sendMessageAsync）都会与
+     * main 并发写 Connection ⇒ 对象表级联损坏（E2E run5 实证）。
+     * 因此 DELAY 到点后的 resume/fulfill 一律<b>入队</b>，由 {@link #drainMainThreadActions()}
+     * 在 main 业务线程（seam/收尾）串行执行 —— 协议调用<b>全部</b>收敛到 main。</p>
+     *
+     * @param action 协议动作（resume/fulfill 等）；入队后必须再查 claim 终结态（幂等）
+     */
+    default void enqueueMainAction(Runnable action) {
+        // 默认空操作：未实现该通道的 runtime（如测试替身）直接忽略
+    }
+
+    /**
+     * main 业务线程消费队首协议动作（幂等；可重复调用）。
+     * 应在每个业务 seam 调用（断言/采集查询/收尾 close 前）。默认空操作。
+     */
+    default void drainMainThreadActions() {
+        // 默认空操作：未实现该通道的 runtime（如测试替身）直接忽略
+    }
+
+    /**
      * 注册一条规则并绑定驱动。
      *
      * <p>同 pattern 后注册覆盖先注册（代际原子发布，事件线程即刻可见）。

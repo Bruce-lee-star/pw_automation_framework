@@ -30,6 +30,12 @@ public final class RouteConfig {
     public static final int DEFAULT_CAPTURE_INLINE_MAX_BYTES = 262_144;
     /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
     public static final int DEFAULT_CAPTURE_GZIP_MAX_BYTES = 8_388_608;
+    /** MONITOR 响应体<b>断言</b>上限（字节，默认 2 MB）：超限的 body 不再整体物化解析
+     *  （JSONPath/包含/正则），自动降级为仅 status/headers 断言并记 inconclusive
+     *  （{@code body-assert-skipped: too-large}）——不误判、不假绿、可观测。
+     *  <b>与采集留存无关</b>：capture 侧仍整存不截断（{@link #DEFAULT_CAPTURE_GZIP_MAX_BYTES} 之上落盘），
+     *  业务仍可取原始字节。 */
+    public static final int DEFAULT_ASSERT_BODY_MAX_BYTES = 2_097_152;
 
     public static final RouteConfig DEFAULTS = new RouteConfig(
             DEFAULT_MAX_PENDING,

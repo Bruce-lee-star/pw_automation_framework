@@ -73,6 +73,15 @@ public final class MonitorSink {
     /** 观测队列当前上限（可用 {@link #MonitorSink(java.util.function.Consumer, int)} 覆盖）。 */
     private final int maxTrackedExchanges;
 
+    /** MONITOR 响应体<b>断言</b>上限（字节）：超限的 body 不再整体物化解析（降级仅 status/headers，inconclusive）。 */
+    private final int assertBodyMaxBytes;
+
+    /**
+     * MONITOR 响应体断言<b>默认</b>上限（字节，2 MB；与 {@code RouteConfig.DEFAULT_ASSERT_BODY_MAX_BYTES}
+     * 同值 —— 装配方（{@code RouteRuntimeImpl}）从冻结的 {@code RouteCapturePolicy} 注入，此处仅兜底）。
+     */
+    static final int DEFAULT_ASSERT_BODY_MAX_BYTES = 2_097_152;
+
     /** 因超出上限被丢弃的观测条目数（fail-open 可观测指标）。 */
     private final AtomicLong droppedExchanges = new AtomicLong(0);
     /** 已定案且断言失败的交换（上报队列；事件线程/调度线程入队，业务线程 drain 消费）。 */
@@ -86,6 +95,8 @@ public final class MonitorSink {
      * {@link #onResponseForSpec}）。计数使"确实没断言上"仍可被观测（而不是静默放过）。</p>
      */
     private final AtomicLong inconclusiveBodyReads = new AtomicLong(0);
+    /** body 断言因<b>超出断言体上限</b>（{@link #assertBodyMaxBytes}）而<b>被跳过</b>的次数（inconclusive）。 */
+    private final AtomicLong skippedBodyAssertions = new AtomicLong(0);
     /** per-spec 命中计数（autoStopOnMatch + minMatches 对齐：达到后停止记录/断言）。 */
     private final ConcurrentMap<ApiSpec, AtomicInteger> hitCounts = new ConcurrentHashMap<>();
 
@@ -126,8 +137,22 @@ public final class MonitorSink {
      */
     public MonitorSink(java.util.function.Consumer<ApiSpec> onPurposeMet,
                        int maxTrackedExchanges) {
+        this(onPurposeMet, maxTrackedExchanges, DEFAULT_ASSERT_BODY_MAX_BYTES);
+    }
+
+    /**
+     * 完整构造 + 断言体上限（装配方注入：{@code RouteRuntimeImpl} 从冻结的 {@code RouteCapturePolicy}
+     * 传入 {@code assertBodyMaxBytes()}，单测可用小值验证"超限降级"路径）。
+     *
+     * @param onPurposeMet        "目的达成"回调（可 {@code null}）
+     * @param maxTrackedExchanges 观测队列上限；{@code <= 0} 视为 {@link #DEFAULT_MAX_TRACKED_EXCHANGES}
+     * @param assertBodyMaxBytes  响应体断言上限（字节）；{@code <= 0} 视为 {@link #DEFAULT_ASSERT_BODY_MAX_BYTES}
+     */
+    public MonitorSink(java.util.function.Consumer<ApiSpec> onPurposeMet,
+                       int maxTrackedExchanges, int assertBodyMaxBytes) {
         this.onPurposeMet = onPurposeMet;
         this.maxTrackedExchanges = maxTrackedExchanges > 0 ? maxTrackedExchanges : DEFAULT_MAX_TRACKED_EXCHANGES;
+        this.assertBodyMaxBytes = assertBodyMaxBytes > 0 ? assertBodyMaxBytes : DEFAULT_ASSERT_BODY_MAX_BYTES;
     }
 
     /**
@@ -206,6 +231,7 @@ public final class MonitorSink {
             }
         }
         CapturedExchange exchange = CapturedExchange.ofRequest(request, spec);
+        exchange.holdSpec(spec); // 延迟断言需要 spec（业务线程结算时消费期望与 body 断言配置）
         track(exchange);
         pendingByPattern.computeIfAbsent(spec.pattern(), k -> new ConcurrentLinkedQueue<>()).add(exchange);
         return true;
@@ -282,14 +308,18 @@ public final class MonitorSink {
         //  安全性：body 快照在紧接的下方**同步**读取、断言在 IO 线程完成，均不依赖"规则仍 armed"，
         //  故撤销不会丢证据（由 MonitorSinkPurposeRetirementTest 的失败用例钉住该语义）。
         firePurposeMet(spec);
-        //  (ii) 快照-断言两阶段：body 是**协议调用**，必须在本线程（刚拿到句柄的同一时刻）读完；
-        //  一旦推迟（旧实现交给 IO 线程排队执行），句柄可能已被驱动回收 → Object doesn't exist
-        //  （实测：IO 池忙于 mock fetch 时，body 读晚数秒必失败）。IO 线程此后只做 CPU 解析/断言。
-        BodySnapshot snapshot = takeBodySnapshot(response);
-        if (snapshot.preview() != null) {
-            exchange.markResponseBody(snapshot.preview()); // 结果证据展示用（内部再脱敏 + 截断）
+        //  (ii) 线程边界（2026-10-11 定稿）：**轮询线程零协议调用** —— body() 是协议调用，
+        //  从本轮起**不在响应轮询线程读取**（历史实测：轮询线程读 body 与 main 并发泵 Connection
+        //  ⇒ HashMap 竞态 ⇒ Object doesn't exist ⇒ 级联污染后续场景；run5 实证）。
+        //  status/headers 是事件 payload 本地字段（零协议往返），照常在本线程快照；
+        //  body 由业务线程（main，串行安全）在 drain/结算时延迟读取（见 settlePendingBodyAssertions）。
+        String deferredContentType = null;
+        try {
+            deferredContentType = response.headers().get("content-type");
+        } catch (Throwable ignored) {
+            LOGGER.trace("[Route] monitor response.headers() defensive fallback: {}", ignored.toString());
         }
-        if (snapshot.bodySkipped() && spec.hasBodyAssertions()) {
+        if (isStreamingContentType(deferredContentType) && spec.hasBodyAssertions()) {
             // 流式端点：体不读 ⇒ body 断言无法判定（inconclusive，绝不判失败），status 断言照常结算
             exchange.markBodyAssertionInconclusive("streaming response body not read (text/event-stream)");
             inconclusiveBodyReads.incrementAndGet();
@@ -301,21 +331,17 @@ public final class MonitorSink {
         if (!spec.hasBodyAssertions()) {
             // 无 body 断言：响应到达即定案。失败走 settleFailure（失败队列 + 结果上报）；
             // 成功也上报结果 —— 报告要能回答"成功没"，只在失败时可见是答不出来的。
+            // 非流式：持有句柄，main 线程在失败结算时补读 body 供报告展示（流式不持有，避免阻塞）。
+            if (!isStreamingContentType(deferredContentType)) {
+                exchange.holdResponse(response);
+            }
             finishWithoutBodyAssertion(exchange);
             return;
         }
-        if (snapshot.inconclusiveReason() != null) {
-            //  4) 误报防线：句柄已回收属框架/驱动竞态（非应用缺陷）→ 记 inconclusive（WARN + 计数），
-            //  绝不结算为断言失败（与 [timeout] 误报同源治理：框架自身缺陷不得把绿场景判红）。
-            exchange.markBodyAssertionInconclusive(snapshot.inconclusiveReason());
-            inconclusiveBodyReads.incrementAndGet();
-            LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
-                            + "pattern='{}' url='{}': {}",
-                    spec.pattern(), exchange.url(), snapshot.inconclusiveReason());
-            reportOutcome(exchange); // 结果同样进报告（标注"未判定"，与"通过/失败"区分开）
-            return;
-        }
-        assertBodyInPlace(exchange, spec, snapshot);
+        // 有 body 断言：轮询线程【不读 body、不断言】——持有句柄，延迟到业务线程结算
+        // （读 body 的协议调用落在 main 线程，与 UI/断言串行，无并发泵 ⇒ 无竞态）。
+        exchange.holdResponse(response);
+        exchange.markBodyAssertionPending();
     }
     /**
      * body 快照（{@code headers()} + {@code body()} 的即时副本）。
@@ -412,6 +438,20 @@ public final class MonitorSink {
         if (exchange.responseTimedOut()) {
             return; // 已被 drain 标记超时，断言结果无意义
         }
+        // 【断言体上限（P0，2026-10-11）】：超过上限的 body 不再整体物化 + JSONPath/包含/正则解析
+        // （几十 MB base64 / 超长 JSON 的堆峰值与无意义解析）。语义与 streaming / handle-unavailable 同款：
+        // inconclusive（不误判失败、不假绿、可观测计数），status/headers 断言照常结算。
+        // 与采集留存无关：capture 侧整存不截断（BodyStore 三档），业务仍可取原始字节。
+        if (snapshot.bytes() != null && snapshot.bytes().length > assertBodyMaxBytes) {
+            exchange.markBodyAssertionInconclusive("body-assert-skipped: too-large ("
+                    + snapshot.bytes().length + " bytes) > max " + assertBodyMaxBytes);
+            skippedBodyAssertions.incrementAndGet();
+            LOGGER.warn("[Route] monitor body assertion SKIPPED (over body assert limit) "
+                            + "pattern='{}' url='{}' bytes={} max={} — degraded to status/headers only",
+                    spec.pattern(), exchange.url(), snapshot.bytes().length, assertBodyMaxBytes);
+            finishWithoutBodyAssertion(exchange);
+            return;
+        }
         try {
             String contentType = snapshot.contentType();
             Charset charset = MediaType.parse(contentType).charset();
@@ -455,6 +495,72 @@ public final class MonitorSink {
     }
 
     /**
+     * <b>业务线程延迟结算 body 断言</b>（2026-10-11 定稿：轮询线程零协议调用）。
+     *
+     * <p>响应到达时（轮询线程）只快照 status/headers（本地字段）并<b>持有句柄</b>；
+     * body 读取（{@code Response.body()} 是协议调用）与断言延迟到<b>业务线程</b>
+     * （main，与 UI/断言串行 ⇒ 无并发泵 Connection ⇒ 无竞态）在此结算。</p>
+     *
+     * <p>幂等：{@code markBodyAssertionSettled} 先行标记，drain 多轮/多入口不重复断言；
+     * 句柄不可用（页面跳转/驱动回收）→ inconclusive（绝不判失败，与历史误报防线同源）。</p>
+     *
+     * <p>调用点：{@link #drain()} 与 {@link #drainSettledFailures()}（均为业务线程消费入口）。</p>
+     */
+    private void settlePendingBodyAssertions() {
+        for (CapturedExchange exchange : exchanges) {
+            if (!exchange.isBodyAssertionPending() || exchange.isBodyAssertionSettled()) {
+                continue;
+            }
+            settleBodyAssertionNow(exchange);
+        }
+    }
+
+    /** 单条延迟结算（业务线程）：读 body → 快照 → 断言 → 结算/上报。异常绝不逃逸。 */
+    private void settleBodyAssertionNow(CapturedExchange exchange) {
+        exchange.markBodyAssertionSettled(); // 幂等：先标记，任何异常也不重复结算
+        ApiSpec spec = exchange.spec();
+        if (spec == null || exchange.responseStatus() == null || exchange.responseTimedOut()) {
+            return; // 无规则 / 响应未到 / 已超时：不结算（超时由 drain 扫描路径处理）
+        }
+        Response held = exchange.takeHeldResponse();
+        if (held == null) {
+            // 句柄已不可用（页面跳转 / 驱动回收）：body 无法判定 → inconclusive，绝不判失败
+            exchange.markBodyAssertionInconclusive(
+                    "body-unavailable: response handle reclaimed (deferred read)");
+            inconclusiveBodyReads.incrementAndGet();
+            LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
+                            + "pattern='{}' url='{}': {}",
+                    spec.pattern(), exchange.url(), "body-unavailable: response handle reclaimed (deferred read)");
+            reportOutcome(exchange); // 结果进报告（标注"未判定"，与"通过/失败"区分开）
+            return;
+        }
+        BodySnapshot snapshot = takeBodySnapshot(held);
+        if (snapshot.preview() != null) {
+            exchange.markResponseBody(snapshot.preview()); // 结果证据展示用（内部再脱敏 + 截断）
+        }
+        if (snapshot.bodySkipped()) {
+            // 流式端点：体不读 ⇒ body 断言无法判定（inconclusive，绝不判失败），status 断言照常结算
+            exchange.markBodyAssertionInconclusive("streaming response body not read (text/event-stream)");
+            inconclusiveBodyReads.incrementAndGet();
+            LOGGER.warn("[Route] monitor body assertion skipped for streaming response pattern='{}' url='{}'",
+                    spec.pattern(), exchange.url());
+            finishWithoutBodyAssertion(exchange);
+            return;
+        }
+        if (snapshot.inconclusiveReason() != null) {
+            // 误报防线：句柄已回收属框架/驱动竞态（非应用缺陷）→ inconclusive，绝不判失败
+            exchange.markBodyAssertionInconclusive(snapshot.inconclusiveReason());
+            inconclusiveBodyReads.incrementAndGet();
+            LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
+                            + "pattern='{}' url='{}': {}",
+                    spec.pattern(), exchange.url(), snapshot.inconclusiveReason());
+            reportOutcome(exchange);
+            return;
+        }
+        assertBodyInPlace(exchange, spec, snapshot);
+    }
+
+    /**
      * 消费全部观测记录（含未收到响应的超时标记）。
      *
      * <p>超时定案与 {@link #drainSettledFailures()} 走同一结算路径
@@ -464,6 +570,7 @@ public final class MonitorSink {
      * @return 从最早到最新的全部快照
      */
     public List<CapturedExchange> drain() {
+        settlePendingBodyAssertions(); // 业务线程：延迟结算 body 断言（读 body 在 main，串行安全）
         List<CapturedExchange> result = new ArrayList<>();
         long now = System.nanoTime();
         CapturedExchange exchange;
@@ -500,6 +607,11 @@ public final class MonitorSink {
     /** body 断言因响应句柄不可用而未能判定的次数（inconclusive；可观测，不判失败）。 */
     public long inconclusiveBodyReads() {
         return inconclusiveBodyReads.get();
+    }
+
+    /** body 断言因<b>超出断言体上限</b>而被跳过的次数（inconclusive；与采集留存无关，capture 侧仍整存）。 */
+    public long skippedBodyAssertions() {
+        return skippedBodyAssertions.get();
     }
 
     /**
@@ -550,6 +662,7 @@ public final class MonitorSink {
      * @return 已定案失败交换快照（按结算顺序）；无失败时为空列表（永不返回 null）
      */
     public List<CapturedExchange> drainSettledFailures() {
+        settlePendingBodyAssertions(); // 业务线程：延迟结算 body 断言（读 body 在 main，串行安全）
         long now = System.nanoTime();
         for (CapturedExchange exchange : exchanges) {
             if (exchange.responseStatus() == null && !exchange.responseTimedOut()) {
@@ -564,6 +677,21 @@ public final class MonitorSink {
         List<CapturedExchange> result = new ArrayList<>();
         CapturedExchange exchange;
         while ((exchange = settledFailures.poll()) != null) {
+            // 失败补读 body（main 线程协议调用，安全）：无 body 断言的规则也持有句柄，
+            // 失败时读一份预览供报告展示；成功路径不取句柄（不读、不阻塞）。
+            if (exchange.responseBodyPreview() == null) {
+                Response held = exchange.takeHeldResponse();
+                if (held != null) {
+                    try {
+                        BodySnapshot snap = takeBodySnapshot(held);
+                        if (snap.preview() != null) {
+                            exchange.markResponseBody(snap.preview());
+                        }
+                    } catch (Throwable t) {
+                        LOGGER.debug("[Route] monitor failure body read failed (non-fatal): {}", t.toString());
+                    }
+                }
+            }
             result.add(exchange);
         }
         return result;

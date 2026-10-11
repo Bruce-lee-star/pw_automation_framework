@@ -189,10 +189,11 @@ public class MonitorSinkAssertionSettlementTest {
     }
 
     @Test
-    public void bodyAssertionIsSynchronousNoThreadCoordinationNeeded() {
-        // 2026-10-10 同步化契约（核心）：onResponseForSpec 返回后，body 断言已就地同步结算——
-        // settledFailureCount 立即可见，零线程协调、零等待。
-        // 历史异步版需 IO 线程执行 + close()/轮询等待（且 IO 队满会丢断言）；本测试守卫该回归。
+    public void bodyAssertionSettlesOnBusinessThreadDrain() {
+        // 2026-10-11 定稿契约（组合 1）：body() 是协议调用，轮询线程【零协议调用】——
+        // onResponseForSpec 只快照 status/headers（本地字段）+ 持有句柄；body 断言延迟到
+        // 业务线程（main）的 drainSettledFailures 结算（读 body 落在 main，与 UI/断言串行
+        // ⇒ 无并发泵 Connection ⇒ 无竞态）。历史"onResponseForSpec 返回即结算"已随本轮废除。
         ApiSpec spec = ApiSpec.builder("/api/sync", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .expectJsonPath("$.code", 1) // 实际 0 → 失败
@@ -202,10 +203,10 @@ public class MonitorSinkAssertionSettlementTest {
         sink.recordRequest(mockRequest("https://host/api/sync"), spec);
         sink.onResponseForSpec(spec, mockResponse("https://host/api/sync", 200));
 
-        assertEquals("onResponseForSpec 返回后失败必须立即可见（同步结算，无 IO 等待）",
-                1, sink.settledFailureCount());
+        assertEquals("轮询线程不结算 body 断言（零协议调用，等业务线程 drain）",
+                0, sink.settledFailureCount());
         List<CapturedExchange> failures = sink.drainSettledFailures();
-        assertEquals("失败明细必须同步带出", (long) 1, (long) failures.size());
+        assertEquals("业务线程 drain 结算：失败明细必须带出", (long) 1, (long) failures.size());
         assertFalse(failures.get(0).assertionPassed());
     }
 

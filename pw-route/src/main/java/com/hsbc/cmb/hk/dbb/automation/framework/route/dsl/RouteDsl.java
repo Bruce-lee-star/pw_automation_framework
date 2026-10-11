@@ -126,6 +126,54 @@ public final class RouteDsl {
         return context;
     }
 
+    /** UI 条件等待的短窗口切分（毫秒）：每轮先 drain main 队列，再等至多一个短窗口。 */
+    private static final long UI_WAIT_SLICE_MS = 250L;
+
+    /**
+     * 方案 B 可选启用（2026-10-11）：UI 条件等待 —— 内部循环「drain + 短窗口 waitForFunction」。
+     *
+     * <p><b>启用前提</b>：{@code RouteDispatcher.setDelayDeliveryMainQueue(true)} —— delay 到点回调
+     * 只入队，由 main 线程执行 resume/fulfill（零非 main 协议调用）。本方法在等待循环中周期
+     * {@code RouteEngine.drainMainThreadActions(page.context())}：delay 到点（≤250ms 滞后）后
+     * resume 在 main 串行执行，挂起请求恢复、UI 条件随后满足。</p>
+     *
+     * <p><b>行为等效</b>{@code page.waitForFunction(...)}：条件满足即返回；总超时抛
+     * {@code TimeoutError}（含总超时说明）。<b>配套约束</b>：入队模式必须配套本方法 —— 继续用
+     * 原生 {@code page.waitForFunction} 时，main 阻塞在等待中无人 drain，resume 永不执行
+     * （E2E run-b 实证 15s 超时）。默认直发模式（未启用入队）下本方法等价原生等待（drain 空队列）。</p>
+     *
+     * @param page          目标页面（取 page.context() 的 runtime）
+     * @param pageFunction  等待的 JS 条件（同 {@code page.waitForFunction} 参数）
+     * @param arg           JS 参数（可 null）
+     * @param timeoutMs     总超时（毫秒，≤0 视为立即判定一次）
+     */
+    public static void waitForUiFunction(Page page, String pageFunction, Object arg, long timeoutMs) {
+        Objects.requireNonNull(page, "page");
+        Objects.requireNonNull(pageFunction, "pageFunction");
+        long deadlineNs = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
+        while (true) {
+            // main 业务 seam：执行入队的 DELAY resume/fulfill（方案 B 可选启用通道）
+            RouteEngine.drainMainThreadActions(page.context());
+            long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                    deadlineNs - System.nanoTime());
+            if (remainingMs <= 0L) {
+                throw new com.microsoft.playwright.TimeoutError(
+                        "waitForUiFunction timed out after " + timeoutMs + "ms: " + pageFunction);
+            }
+            try {
+                page.waitForFunction(pageFunction, arg,
+                        new Page.WaitForFunctionOptions().setTimeout(Math.min(UI_WAIT_SLICE_MS, remainingMs)));
+                return; // 条件满足
+            } catch (com.microsoft.playwright.TimeoutError e) {
+                // 短窗口超时 → 回循环（先 drain 再等）；总超时由 deadline 判定
+                if (System.nanoTime() >= deadlineNs) {
+                    throw new com.microsoft.playwright.TimeoutError(
+                            "waitForUiFunction timed out after " + timeoutMs + "ms: " + pageFunction, e);
+                }
+            }
+        }
+    }
+
     /**
      * 注销本 DSL 已注册的全部规则并清空 pending（对齐现有 RouteDsl.clear() 实例方法）。
      * 幂等；不影响其它 DSL 实例注册的规则。

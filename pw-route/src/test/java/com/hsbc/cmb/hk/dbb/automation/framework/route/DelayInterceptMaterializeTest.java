@@ -52,6 +52,7 @@ public class DelayInterceptMaterializeTest {
     private BrowserContext ctx;
     private APIRequestContext apiCtx;
     private APIResponse apiResponse;
+    private RouteRuntime rt;
 
     private BrowserContext mockContext() {
         ctx = mock(BrowserContext.class);
@@ -64,7 +65,7 @@ public class DelayInterceptMaterializeTest {
         when(apiResponse.body()).thenReturn("{\"ok\":true}".getBytes(StandardCharsets.UTF_8));
         when(apiCtx.fetch(anyString(), any())).thenReturn(apiResponse);
         when(ctx.request()).thenReturn(apiCtx);
-        RouteEngine.runtimeOf(ctx);
+        rt = RouteEngine.runtimeOf(ctx);
         return ctx;
     }
 
@@ -147,10 +148,13 @@ public class DelayInterceptMaterializeTest {
                 (long) -1, (long) fulfillAtNanos.get());
 
         // 断言③：延迟窗口结束后 fulfill 必然发生（交付走 fulfill，非 resume），真实时延 ≥ delay 的 5/6
+        // 方案 B（2026-10-11）：交付由 main 业务线程 drain 执行——本测试线程模拟 main：轮询 drain。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (fulfillAtNanos.get() < 0 && System.nanoTime() < deadline) {
+            rt.drainMainThreadActions(); // main 业务线程 seam（方案 B：交付在 main 串行执行）
             Thread.sleep(20);
         }
+        rt.drainMainThreadActions();
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(fulfillAtNanos.get() - t0);
         assertTrue("DELAY+intercept 交付从未发生（fulfill 缺失）", fulfillAtNanos.get() > 0);
         assertTrue("真实时延不足: " + elapsedMs + "ms（要求 delay=" + delayMs + "ms）",

@@ -28,14 +28,17 @@ public final class RouteCapturePolicy {
     private final boolean allTypes;
     private final int inlineMaxBytes;
     private final int gzipMaxBytes;
-    /** 三项生效值的来源层（可观测/诊断；不含敏感值语义，均为 boolean/int）。 */
+    /** MONITOR 响应体断言上限（字节）：超限的 body 不再整体物化解析，降级为仅 status/headers 断言。 */
+    private final int assertBodyMaxBytes;
+    /** 四项生效值的来源层（可观测/诊断；不含敏感值语义，均为 boolean/int）。 */
     private final List<ConfigSource.Resolved> provenance;
 
     private RouteCapturePolicy(boolean allTypes, int inlineMaxBytes, int gzipMaxBytes,
-                               List<ConfigSource.Resolved> provenance) {
+                               int assertBodyMaxBytes, List<ConfigSource.Resolved> provenance) {
         this.allTypes = allTypes;
         this.inlineMaxBytes = inlineMaxBytes;
         this.gzipMaxBytes = gzipMaxBytes;
+        this.assertBodyMaxBytes = assertBodyMaxBytes;
         this.provenance = provenance;
     }
 
@@ -52,6 +55,11 @@ public final class RouteCapturePolicy {
     /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
     public int gzipMaxBytes() {
         return gzipMaxBytes;
+    }
+
+    /** MONITOR 响应体断言上限（字节）：超限的 body 不再整体物化解析（降级仅 status/headers，inconclusive）。 */
+    public int assertBodyMaxBytes() {
+        return assertBodyMaxBytes;
     }
 
     /** 三项生效值的来源层（键 + 生效值 + 层），供诊断/日志（返回不可变快照）。 */
@@ -71,15 +79,18 @@ public final class RouteCapturePolicy {
                 Integer.toString(RouteConfig.DEFAULT_CAPTURE_INLINE_MAX_BYTES));
         ConfigSource.Resolved gzip = resolve(ConfigKeys.ROUTE_CAPTURE_GZIP_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_CAPTURE_GZIP_MAX_BYTES));
+        ConfigSource.Resolved assertBody = resolve(ConfigKeys.ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES.key(),
+                Integer.toString(RouteConfig.DEFAULT_ASSERT_BODY_MAX_BYTES));
         RouteCapturePolicy policy = new RouteCapturePolicy(
                 Boolean.parseBoolean(allTypes.value()),
                 positiveInt(inline, RouteConfig.DEFAULT_CAPTURE_INLINE_MAX_BYTES),
                 positiveInt(gzip, RouteConfig.DEFAULT_CAPTURE_GZIP_MAX_BYTES),
-                List.of(allTypes, inline, gzip));
+                positiveInt(assertBody, RouteConfig.DEFAULT_ASSERT_BODY_MAX_BYTES),
+                List.of(allTypes, inline, gzip, assertBody));
         LOGGER.info("[Route] capture policy frozen: allTypes={} (layer={}), inlineMaxBytes={} (layer={}),"
-                        + " gzipMaxBytes={} (layer={})",
+                        + " gzipMaxBytes={} (layer={}), assertBodyMaxBytes={} (layer={})",
                 policy.allTypes, allTypes.layer(), policy.inlineMaxBytes, inline.layer(),
-                policy.gzipMaxBytes, gzip.layer());
+                policy.gzipMaxBytes, gzip.layer(), policy.assertBodyMaxBytes, assertBody.layer());
         return policy;
     }
 

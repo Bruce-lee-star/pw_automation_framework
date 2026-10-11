@@ -45,6 +45,13 @@ final class BodyStore implements CapturedBody {
     /** 落盘专用临时目录（懒创建，见 {@link #spillDir()}）。 */
     private static volatile Path spillDir;
 
+    /**
+     * 解码缓存阈值（字节，1 MB）：超过该长度的 body {@link #text(Charset)} 每次按需解码、<b>不缓存</b> ——
+     * 避免几十 MB 的 base64 / 超长文本在一次解码后永久驻留堆（{@code cachedText} 是强引用）。
+     * 小 body 行为不变（只解一次并缓存，见 {@link #text(Charset)}）。
+     */
+    private static final int TEXT_CACHE_MAX_BYTES = 1_048_576;
+
     private final Storage storage;
     private final String contentType;
     /** MEMORY=原字节；GZIP=gzip 字节；FILE=null。 */
@@ -52,7 +59,7 @@ final class BodyStore implements CapturedBody {
     /** FILE=落盘路径；其余为 null。 */
     private final Path file;
     private final long length;
-    /** 按需解码缓存（volatile：多线程读取时只解一次）。 */
+    /** 按需解码缓存（volatile：多线程读取时只解一次；仅 {@code length <= TEXT_CACHE_MAX_BYTES} 时启用）。 */
     private volatile String cachedText;
 
     private BodyStore(Storage storage, byte[] payload, Path file, long length, String contentType) {
@@ -153,7 +160,11 @@ final class BodyStore implements CapturedBody {
         }
     }
 
-    /** 按需解码为文本（只解一次并缓存）。非文本型调用方不应调用（返回 null 由上层决定）。 */
+    /**
+     * 按需解码为文本。{@code length <= TEXT_CACHE_MAX_BYTES} 时只解一次并缓存（多线程读取只解一次）；
+     * <b>超阈值不缓存</b>（每次按需解码）——避免超大 body（base64 超长文本等）的解码结果永久驻留堆。
+     * 非文本型调用方不应调用（返回 null 由上层决定）。
+     */
     @Override
     public String text(Charset charset) {
         String cached = cachedText;
@@ -162,7 +173,9 @@ final class BodyStore implements CapturedBody {
         }
         byte[] raw = readAll();
         String decoded = new String(raw, charset == null ? java.nio.charset.StandardCharsets.UTF_8 : charset);
-        cachedText = decoded;
+        if (raw.length <= TEXT_CACHE_MAX_BYTES) {
+            cachedText = decoded;   // 小 body：缓存（避免重复解码）；超大 body：不缓存（防驻留）
+        }
         return decoded;
     }
 

@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
+import com.microsoft.playwright.Response;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,6 +53,18 @@ public final class CapturedExchange {
     private volatile boolean responseBodyTruncated;
     /** 断言失败是否已结算（入失败队列）；CAS 保证每条失败只结算一次（防多路径重复上报）。 */
     private final AtomicBoolean settled = new AtomicBoolean(false);
+
+    /**
+     * 已到达的真实响应句柄（响应轮询线程写入、业务线程消费时读取 body）。
+     * <b>绝不跨线程做协议调用</b>：body() 是协议调用，必须由业务线程（main，串行安全）在结算时读取。
+     */
+    private volatile Response heldResponse;
+    /** body 断言是否待业务线程结算（轮询线程只写本地字段，不读 body）。 */
+    private volatile boolean bodyAssertionPending;
+    /** body 断言是否已在业务线程结算（幂等保护：drain 多轮/多入口不重复断言）。 */
+    private volatile boolean bodyAssertionSettled;
+    /** 命中规则引用（业务线程延迟断言需要：PayloadAssertor 消费 spec 的期望与 body 断言配置）。 */
+    private volatile ApiSpec heldSpec;
 
     /** 兼容构造（旧 8 参签名）：不携带渠道信息（channels 为空集、primaryChannel 为 null）。 */
     CapturedExchange(String method, String url, String pattern, Map<String, String> requestHeaders,
@@ -150,6 +163,45 @@ public final class CapturedExchange {
 
     // ── 仅 MonitorSink 调用（包内可见）──
 
+    /** 持有已到达的真实响应句柄（轮询线程写入；业务线程 take 后读 body —— 单线程串行）。 */
+    void holdResponse(Response response) {
+        this.heldResponse = response;
+    }
+
+    /** 取走持有的响应句柄（业务线程调用；取走后本 exchange 不再持有句柄引用）。 */
+    Response takeHeldResponse() {
+        Response r = heldResponse;
+        heldResponse = null;
+        return r;
+    }
+
+    /** 标记 body 断言待业务线程结算（有 body 断言且响应已到达；轮询线程不读 body）。 */
+    void markBodyAssertionPending() {
+        this.bodyAssertionPending = true;
+    }
+
+    boolean isBodyAssertionPending() {
+        return bodyAssertionPending;
+    }
+
+    /** 标记 body 断言已在业务线程结算（幂等：drain 多轮/多入口不重复断言）。 */
+    void markBodyAssertionSettled() {
+        this.bodyAssertionSettled = true;
+    }
+
+    boolean isBodyAssertionSettled() {
+        return bodyAssertionSettled;
+    }
+
+    /** 保存命中规则引用（延迟断言时消费期望与 body 断言配置）。 */
+    void holdSpec(ApiSpec spec) {
+        this.heldSpec = spec;
+    }
+
+    ApiSpec spec() {
+        return heldSpec;
+    }
+
     void markResponse(int status, Map<String, String> headers) {
         this.responseStatus = status;
         this.responseHeaders = Collections.unmodifiableMap(new LinkedHashMap<>(headers));
@@ -190,6 +242,11 @@ public final class CapturedExchange {
     /** body 断言未能判定的原因；null 表示已判定（或未配置 body 断言）。 */
     public String bodyAssertionInconclusiveReason() {
         return bodyAssertionInconclusive;
+    }
+
+    /** 响应体预览（已脱敏 + 截断）；无 body 断言或未读体时为 null。 */
+    public String responseBodyPreview() {
+        return responseBodyPreview;
     }
 
     /**

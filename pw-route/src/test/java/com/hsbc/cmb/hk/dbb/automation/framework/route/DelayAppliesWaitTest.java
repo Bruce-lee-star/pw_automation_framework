@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.RoutePatterns;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.dispatch.RouteDispatcher;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Frame;
@@ -39,12 +40,13 @@ import static org.mockito.Mockito.when;
 public class DelayAppliesWaitTest {
 
     private BrowserContext ctx;
+    private RouteRuntime rt;
 
     private BrowserContext mockContext() {
         ctx = mock(BrowserContext.class);
         when(ctx.route(anyString(), any(), any())).thenReturn(mock(AutoCloseable.class));
         doAnswer(inv -> null).when(ctx).onClose(any());
-        RouteEngine.runtimeOf(ctx);
+        rt = RouteEngine.runtimeOf(ctx);
         return ctx;
     }
 
@@ -116,10 +118,13 @@ public class DelayAppliesWaitTest {
         assertEquals("DELAY 期间请求被立即放行——delay 空操作（P1 缺陷未修复或回归）", (long) -1, (long) resumeAtNanos.get());
 
         // 修复断言②：延迟窗口结束后 resume 必然发生，真实时延 ≥ delay 的 5/6
+        // 方案 B（2026-10-11）：resume 由 main 业务线程 drain 执行——本测试线程模拟 main：轮询 drain。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (resumeAtNanos.get() < 0 && System.nanoTime() < deadline) {
+            rt.drainMainThreadActions(); // main 业务线程 seam（方案 B：协议动作在 main 串行执行）
             Thread.sleep(20);
         }
+        rt.drainMainThreadActions();
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(resumeAtNanos.get() - t0);
         assertTrue( "延迟任务未执行（claim 被 sweep 兜底或异常，resume 从未发生）", resumeAtNanos.get() > 0);
         assertTrue(
@@ -152,11 +157,55 @@ public class DelayAppliesWaitTest {
 
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (resumeAtNanos.get() < 0 && System.nanoTime() < deadline) {
+            rt.drainMainThreadActions(); // main 业务线程 seam（方案 B）
             Thread.sleep(20);
         }
+        rt.drainMainThreadActions();
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(resumeAtNanos.get() - t0);
         assertTrue( "randomDelay 任务未执行", resumeAtNanos.get() > 0);
         // 钳制后 min=1000ms、max=1000ms → delay=1000ms；断言真实等待 ≥ 800ms（钳制语义生效，非负）
         assertTrue( "randomDelay 反转区间钳制后时延仍不足: " + elapsedMs + "ms", elapsedMs >= 800);
+    }
+
+    /**
+     * 方案 B 可选通道（2026-10-11）：main 队列交付模式 —— 到点回调只入队（调度线程零协议调用），
+     * resume 由 main {@code drainMainThreadActions()} 串行执行。配套 {@code RouteDsl.waitForUiFunction}
+     * （UI 等待循环内周期 drain）可达成「零非 main 协议调用」。
+     */
+    @Test
+    public void mainQueueModeDeliversOnlyAfterMainDrain() throws Exception {
+        RouteDispatcher.setDelayDeliveryMainQueue(true);
+        try {
+            mockContext();
+            RouteDsl.on(ctx)
+                    .api("/api/queue/**")
+                    .delay(1)
+                    .done()
+                    .start();
+            Consumer<Route> handler = handlerFor("/api/queue/**");
+            Route route = mockRoute("http://h/api/queue/1");
+            AtomicLong resumeAtNanos = new AtomicLong(-1);
+            doAnswer(inv -> {
+                resumeAtNanos.set(System.nanoTime());
+                return null;
+            }).when(route).resume();
+
+            long t0 = System.nanoTime();
+            handler.accept(route);
+
+            // 到点后（未 drain）：resume 不得由调度线程执行（入队模式 = 调度线程零协议调用）
+            Thread.sleep(1_100);
+            assertEquals("main-queue 模式：未 drain 时调度线程不得执行 resume（协议调用只在 main）",
+                    (long) -1, (long) resumeAtNanos.get());
+
+            // main drain → resume 在 main 串行执行（≥ delay 的 5/6，语义不变）
+            rt.drainMainThreadActions();
+            assertTrue("main-queue 模式：drain 后 resume 必须发生", resumeAtNanos.get() > 0);
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(resumeAtNanos.get() - t0);
+            assertTrue("main-queue 模式真实时延不足: " + elapsedMs + "ms（要求 delay=1000ms）",
+                    elapsedMs >= 800);
+        } finally {
+            RouteDispatcher.setDelayDeliveryMainQueue(false);
+        }
     }
 }

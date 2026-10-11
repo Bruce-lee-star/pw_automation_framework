@@ -22,6 +22,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CaptureSink;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedApiCall;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedExchange;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.MonitorSink;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.reporting.RouteMonitorFailureReportSink;
 import com.microsoft.playwright.APIRequestContext;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Request;
@@ -94,6 +95,17 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     private final HangWatchdog hangWatchdog;
     private final ConcurrentMap<BrowserContext, RouteRuntime> ownerRegistry;
     private final AtomicInteger contextSeq = new AtomicInteger(0);
+    /**
+     * 方案 B（2026-10-11）：DELAY 到点后的协议动作队列。
+     *
+     * <p>生产者：{@code RouteDelayScheduler} 线程池（delay 到点回调只入队、零协议）；
+     * 消费者：main 业务线程（{@link #drainMainThreadActions()}，在断言/采集查询/收尾 seam 调用）。
+     * 入队任务都是 <b>协议调用</b>（resume/fulfillWithBody 等 sendMessageAsync）——Connection 的
+     * {@code ++lastId}/{@code callbacks.put}（HashMap）/{@code transport.send} 全部无锁，任何非 main
+     * 线程发消息都与 main 并发写 ⇒ 对象表级联损坏（E2E run5 实证）。收敛后协议调用 100% 在 main。</p>
+     */
+    private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> mainActions =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     private RouteRuntimeImpl(BrowserContext context, RouteConfig config,
                              ConcurrentMap<BrowserContext, RouteRuntime> ownerRegistry) {
@@ -106,9 +118,10 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         String tag = String.valueOf(contextSeq.incrementAndGet());
         this.io = new RouteIoExecutor(tag, config.ioThreads(), config.ioQueueCapacity());
         this.retire = new RouteRetireExecutor(tag);
-        this.monitor = new MonitorSink(this::retireByPurpose);
-        // 采集配置在本刻唯一解析并冻结（RouteCapturePolicy）：两个采集闸门共用同一快照
+        // 采集配置在本刻唯一解析并冻结（RouteCapturePolicy）：两个采集闸门 + monitor 断言体上限共用同一快照
         this.capturePolicy = RouteCapturePolicy.resolveNow();
+        // monitor 观测队列上限回落 MonitorSink 默认（1000）；断言体上限来自冻结策略（超限降级 status/headers）
+        this.monitor = new MonitorSink(this::retireByPurpose, 0, this.capturePolicy.assertBodyMaxBytes());
         this.capture = new CaptureSink(config.maxCaptured(), config.captureTimeoutMs(), this.capturePolicy);
         this.sweeper = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
@@ -306,11 +319,13 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public List<CapturedApiCall> dumpCapturedApis() {
+        drainMainThreadActions(); // 方案 B：业务 seam 先执行延迟协议动作（DELAY resume/fulfill）
         return capture.dump();
     }
 
     @Override
     public List<CapturedApiCall> peekCapturedApis() {
+        drainMainThreadActions(); // 方案 B：业务 seam
         return capture.peek();
     }
 
@@ -323,6 +338,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public List<CapturedApiCall> allCapturedApis() {
+        drainMainThreadActions(); // 方案 B：业务 seam
         return capture.all();
     }
 
@@ -349,22 +365,86 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     @Override
     public CapturedApiCall waitForCapturedApi(java.util.function.Predicate<CapturedApiCall> predicate,
                                               long timeoutMs) {
-        return capture.waitFor(predicate, timeoutMs);
+        //  方案 B（2026-10-11）：等待期间<b>周期</b>执行 main 队列（DELAY resume）——只开头 drain 一次不够：
+        //  delay 到点可能在等待途中发生，resume 入队后若无人执行 ⇒ 请求继续挂起、响应永不到达 ⇒ waitFor 超时。
+        //  短窗口（≤50ms）事件驱动等待 + 每窗口前 drain，delay 到点至多滞后一个窗口即被 main 执行。
+        long deadlineNs = System.nanoTime() + Math.max(0L, timeoutMs) * 1_000_000L;
+        while (true) {
+            drainMainThreadActions();
+            long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadlineNs - System.nanoTime());
+            if (remainingMs <= 0L) {
+                return null;
+            }
+            CapturedApiCall hit = capture.waitFor(predicate, Math.min(50L, remainingMs));
+            if (hit != null) {
+                return hit;
+            }
+        }
+    }
+
+    @Override
+    public void enqueueMainAction(Runnable action) {
+        if (action == null || closed.get()) {
+            return; // 已关闭：丢弃（收尾路径不泵连接，见 closeAfterContextClosed 契约）
+        }
+        mainActions.add(action);
+    }
+
+    @Override
+    public void drainMainThreadActions() {
+        // main 业务线程串行执行：协议调用（resume/fulfillWithBody）在 main 发生 ⇒ 零并发写 Connection。
+        // 异常绝不逃逸（单条失败不影响其余；fail-open）。
+        Runnable action;
+        while ((action = mainActions.poll()) != null) {
+            try {
+                action.run();
+            } catch (Throwable t) {
+                LOGGER.warn("[Route] main-thread action failed (fail-open): {}", t.toString());
+            }
+        }
     }
 
     @Override
     public List<RouteAssertionFailure> drainSettledAssertionFailures() {
+        drainMainThreadActions(); // 方案 B：业务 seam 先执行延迟协议动作（DELAY resume/fulfill）
         List<RouteAssertionFailure> result = new ArrayList<>();
         for (CapturedExchange e : monitor.drainSettledFailures()) {
             result.add(new RouteAssertionFailure(
                     e.pattern(), e.method(), e.url(), e.expectStatus(), e.responseStatus(),
-                    e.bodyAssertionFailures(), e.responseTimedOut(), e.monitorTimeoutMs()));
+                    e.bodyAssertionFailures(), e.responseTimedOut(), e.monitorTimeoutMs(),
+                    e.responseBodyPreview() == null ? "" : e.responseBodyPreview(),
+                    e.postDataPreview() == null ? "" : e.postDataPreview(),
+                    formatHeaders(e.requestHeaders()),
+                    formatHeaders(e.responseHeaders())));
+        }
+        //  2026-10-10：失败数据一份两用 —— 消费方（web 侧抛错/glue 断言/聚合器）拿到原列表之外，
+        //  顺带复制进 monitor 失败报告归集器（喂入即落盘 target/monitor-failures-by-owner.json +
+        //  HTML 报告显示区）。挂在本【唯一 drain 出口】：任何消费路径（RouteEngine 聚合、
+        //  glue 直调 runtime）最终都走本方法，天然无重复、无遗漏。不做二次消费：原列表原样返回。
+        if (!result.isEmpty()) {
+            try {
+                RouteMonitorFailureReportSink.recordFailures(result);
+            } catch (Exception e) {
+                LOGGER.debug("[Route] failed to record assertion failures into monitor report sink: {}",
+                        e.toString());
+            }
         }
         return result;
     }
 
+    /** Map<String,String> headers → "key: value\n" 多行文本（null/空 → 空串）。 */
+    private static String formatHeaders(java.util.Map<String, String> headers) {
+        if (headers == null || headers.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(256);
+        for (java.util.Map.Entry<String, String> en : headers.entrySet()) {
+            sb.append(en.getKey()).append(": ").append(en.getValue()).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
     @Override
     public AutoCloseable register(ApiSpec spec) {
+        drainMainThreadActions(); // 方案 B：业务 seam（注册/启动前先执行延迟协议动作）
         if (closed.get()) {
             throw new IllegalStateException("RouteRuntime is closed for context @" + System.identityHashCode(context));
         }
@@ -593,6 +673,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        drainMainThreadActions(); // 方案 B：收尾 seam —— 最后一批 DELAY 协议动作（resume/fulfill）先执行
         VerboseLogging.logInfoIfVerbose(LOGGER, "[Route] closing runtime for context @{}",
                 System.identityHashCode(context));
         sweeper.shutdownNow();
