@@ -199,15 +199,8 @@ final class RolePickerCodeAssembler {
         }
         int droppedPicks = 0, droppedSteps = 0;
         LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage = new LinkedHashMap<>();
-        // 产物可观测性注记（纯注释注入，见 RoleElementStepGenerator.ViewNotes）：
-        //  · panelStepIndexByPage：各 step 在面板中的全局封装序号（与 stepsByPage 同序同长）；
-        //  · droppedByPage：被下方对账丢弃的"已删除元素引用"——面板步骤里可能仍有该行，产物里却没有。
-        LinkedHashMap<String, List<Integer>> panelStepIndexByPage = new LinkedHashMap<>();
         LinkedHashMap<String, List<String>> droppedByPage = new LinkedHashMap<>();
-        int panelStepNo = 0;
         if (snap.steps != null) for (StepRec st : snap.steps) {
-            // 面板封装序号：必须在任何 continue 之前自增，保证与 snap.steps 一一对应（含被丢弃的 step）。
-            panelStepNo++;
             // 所有 step 归入根页（curClass）保序：步骤类已合并为单类 SampleSteps，
             // 若按 step 自身所属页分组，不同轮次/不同页的 step 会被"按页交错"编号
             // （stepIdx++ 基于页序而非封装序）。统一归入 curClass 后，snap.steps 的封装先后即 step1/step2… 顺序。
@@ -244,8 +237,6 @@ final class RolePickerCodeAssembler {
                 continue;
             }
             stepsByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(picks);
-            // 与 stepsByPage 严格同序同长（仅在此处成对写入），供生成侧标注"面板第几个封装"。
-            panelStepIndexByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(panelStepNo);
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>());
         }
         if (droppedPicks > 0 || droppedSteps > 0) {
@@ -261,7 +252,7 @@ final class RolePickerCodeAssembler {
         }
         if (stepsByPage.isEmpty() && opsByPage.isEmpty()) return out;
         return RoleElementStepGenerator.generatePerPage(stepsByPage, entriesByPage, opsByPage,
-                new RoleElementStepGenerator.ViewNotes(panelStepIndexByPage, droppedByPage, stepRoundNosByPage),
+                new RoleElementStepGenerator.ViewNotes(stepRoundNosByPage),
                 packageName, stepClassName);
     }
 

@@ -2032,6 +2032,22 @@
                   __dbg.push(cp.score + ':' + cp.pick.strategy + '(' + JSON.stringify(cp.pick.name || cp.pick.css || cp.pick.role || '').slice(0,40) + ') match=' + ms.length + ' hit=' + (ms.indexOf(el) >= 0));
                   if (ms.indexOf(el) < 0) continue;
                   if (ms.length === 1) { CHOSEN_UNIQUE = cp; break; }
+                  // 【同 role+name 成组】任一"角色 + 可访问名"候选（role+name）命中【多个】同类元素时
+                  // （同 role 同 name，count>1），绝不退化到"天然唯一"的 cssPath——那样每个元素各得一条
+                  // 互不相同的 css，生成端的成组判定（同基础签名 + 不同 #index，
+                  // RoleElementPageGenerator.listGroupBaseSigs）永远无法把它们识别为一组
+                  // （现场：6 张同 alt 的 QR 图 → 6 条独立 css，本应合成一个 PageElementList）。
+                  // 故直接选中【首个命中的 role+name 候选】（cands 已按分数升序，最稳者在前），
+                  // 由 done() → __attachIndex 补 count/index，签名成 role:<role>:<name>#N；
+                  // 生成端据此合成单个 PageElementList 字段，业务用 x.get(i) 下标操作
+                  // （对齐 page.pause 的 locator.nth(i)）。
+                  // 【适用范围】所有 ARIA 角色（img/link/button/checkbox/radio/listitem/tab/option/
+                  // menuitem/heading…），不再局限于 IMG/LINK —— "同 role+name 重复"即视为一组。
+                  // 无可访问名的裸 role（如无 alt 的 <img>）不在此列，仍走"唯一优先"，
+                  // 避免把页面内同 role 的无关元素并入同一组。
+                  if (cp.pick.strategy === 'role' && cp.pick.name) {
+                    CHOSEN_UNIQUE = cp; break;
+                  }
                   // 对齐官方 selectorGenerator 行 189：nth>5 不接受 locator（太脆弱），跳过试下一个候选。
                   var __idx = ms.indexOf(el);
                   if (__idx > 5) { __dbg.push('(skip nth=' + __idx + ')'); continue; }

@@ -9,27 +9,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 
-/**
- * 根据「多次拾取 = 多个 step」的序列生成 Serenity {@code @Step} 业务步骤类源码（第二步）。
- *
- * <p>与 {@link RoleElementPageGenerator} 共用字段命名（{@link RoleElementPageGenerator#assignFields}），
- * 保证 Tab1（页面元素）与 Tab2（步骤代码）引用的是同一组字段名。每次「开始拾取 → 停止拾取」
- * 对应一个 step：step 内的元素按顺序生成操作调用（按 role 自动推断：button/link→click、
- * textbox→type、checkbox/radio→check，其余→click），一个 step 生成一个 {@code @Step} 方法。
- *
- * <p>产物为草稿，人工 review 后再合入主干。
- */
 public final class RoleElementStepGenerator {
 
-    /**
-     * 元素的【操作序号】：优先用本轮实时序号 {@code pickNos}；为空则回退【已封存轮次快照】
-     * {@code committedPickNos}。
-     *
-     * <p>根因：停止拾取时会清空每个 entry 的 pickNos（并让浏览器侧重新从 1 编号，使新一轮序号从 1
-     * 开始）。但历史 step（step1/step2…）仍要按【它自己那一轮】的序号展开操作；字段一空 ⇒ 该 step
-     * 一行操作都生成不出来（现场实证：第二轮停止时前 20 条 pickNos=[]，产物里第一轮的操作整体消失）。
-     */
-    /** 取第 si 个 step 所属那一轮的号表（无则为 null → 调用方回退到元素身上的序号）。 */
     private static java.util.Map<String, java.util.List<Integer>> roundNosOfStep(ViewNotes notes, String pc, int si) {
         if (notes == null || notes.stepRoundNosByPage == null || pc == null) return null;
         java.util.List<java.util.Map<String, java.util.List<Integer>>> list = notes.stepRoundNosByPage.get(pc);
@@ -37,7 +18,6 @@ public final class RoleElementStepGenerator {
         return list.get(si);
     }
 
-    /** 在【某一轮的号表】里取元素序号；表里没有（如该元素本轮未被拾取）则返回 null。 */
     private static java.util.List<Integer> nosInRound(RoleEntry e,
                                                       java.util.Map<String, java.util.List<Integer>> roundNos) {
         if (e == null) return null;
@@ -47,7 +27,7 @@ public final class RoleElementStepGenerator {
             java.util.List<Integer> v = roundNos.get(k);
             if (v != null && !v.isEmpty()) return v;
         }
-        // 身份键取不到（如无 sigKey 且 locatorKey 为空）时，退化为元素身上的序号。
+
         return pickNosOf(e);
     }
 
@@ -61,73 +41,25 @@ public final class RoleElementStepGenerator {
 
     private RoleElementStepGenerator() {}
 
-    /**
-     * {@link #generatePerPage} 的“可观测性注记”载体（全部为注释注入，不改变任何方法名与运行行为）。
-     *
-     * <p>用途是消除两种"面板看着对、产物看着不对"的误读：
-     * <ol>
-     *   <li>{@code panelStepIndexByPage}：多页时每份按页视图的 {@code stepN} 从 1 重新计数
-     *       （Java 方法名只在类内唯一，必须如此），与面板的<b>全局</b>封装序号必然不同；</li>
-     *   <li>{@code droppedByPage}：生成前对账把"已删除元素的引用"从 step 中剔除后，产物里会"凭空少一行"。</li>
-     * </ol>
-     * 两者均为纯注释；不传（null）时产物与旧版逐字节一致。
-     */
     public static final class ViewNotes {
 
-        /** 页面类名 → 该页各 step 在面板中的全局封装序号（与 stepsByPage 同序同长，可为 null）。 */
-        public final LinkedHashMap<String, List<Integer>> panelStepIndexByPage;
-
-        /** 页面类名 → 生成前对账丢弃的已删除元素引用（可读标签，可为 null）。 */
-        public final LinkedHashMap<String, List<String>> droppedByPage;
-
-        /**
-         * 【每轮号表】页面类名 → 该页各 step（与 stepsByPage 同序同长）→ 该轮内「元素身份键 → 本轮操作序号」。
-         *
-         * <p>用途：彻底按轮隔离序号。元素对象是跨轮共享的同一批实例，序号挂在元素上（pickNos）会在
-         * 新一轮被覆盖；改为由【每个 step 自带该轮的号表】，生成 step k 时只取第 k 轮的号 ——
-         * 同一元素在 step1 / step2 各自按自己那一轮的序号展开，互不干扰。
-         */
         public final LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage;
 
-        public ViewNotes(LinkedHashMap<String, List<Integer>> panelStepIndexByPage,
-                         LinkedHashMap<String, List<String>> droppedByPage) {
-            this(panelStepIndexByPage, droppedByPage, null);
-        }
-
-        public ViewNotes(LinkedHashMap<String, List<Integer>> panelStepIndexByPage,
-                         LinkedHashMap<String, List<String>> droppedByPage,
-                         LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage) {
-            this.panelStepIndexByPage = panelStepIndexByPage;
-            this.droppedByPage = droppedByPage;
+        public ViewNotes(LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage) {
             this.stepRoundNosByPage = stepRoundNosByPage;
         }
     }
 
-    /**
-     * 按角色 / 策略推断元素操作（自动推断，无需用户手动选择）。
-     *
-     * <p>包内可见：断言生成器（{@link RoleElementAssertionGenerator}）需要与步骤<b>同一套判据</b>来区分
-     * "输入类操作"（{@code fill(...)}）与其它操作，从而为输入行生成值断言、其余生成可见性断言 ——
-     * 保证 {@code assertStepN} 的第 k 行与 {@code stepN} 的第 k 行严格对应。
-     */
     static String operationFor(RoleEntry e) {
-        // 右键点击（contextmenu）：生成元素门面的具名能力 rightClick()（PageElement#rightClick，
-        // 内部即 locator.click(ClickOptions.setButton(MouseButton.RIGHT))）。
-        // 【修复"生成 click({ button: 'right' }) 不合理/编译不过"】此前沿用 Playwright 原生字符串
-        // click({ button: 'right' })，而封装类 PageElement 并没有该重载，产物代码编译不了；
-        // 语义仍是"打开上下文菜单"，故优先于角色推断：即便右键的是 checkbox/radio，也输出 rightClick()，
-        // 而非误生成 setChecked()。
+
         if (e.isRightClick()) {
             return "rightClick()";
         }
-        // P1-4 upload：<input type=file> 点击实际打开系统文件选择器，录制时应生成 setInputFiles，
-        // 而非 click()（对隐藏 file input click 会报错/无业务意义）。路径占位由人工补全。
+
         if (e.isFileInput()) {
             return "setInputFiles(\"<path-to-upload-file>\")";
         }
-        // 勾选类元素（checkbox/radio）优先于 hover：用户点击 checkbox/radio 的语义是「设置勾选状态」，
-        // 而 focusin 聚焦可能把点击误标为 hover（__rolePickFocus 以 isHover=true 记录、时序先于 click），
-        // 若 hover 优先会让点击 checkbox 误生成 locator.hover() 而非 setChecked()。故先判定勾选角色。
+
         if (e.isRoleStrategy()) {
             String chkR = (e.getRole() == null ? "" : e.getRole()).toLowerCase();
             if ("checkbox".equals(chkR) || "radio".equals(chkR)) {
@@ -140,18 +72,15 @@ public final class RoleElementStepGenerator {
                 return "check()";
             }
         }
-        // 悬停（hover）交互：录制为 locator.hover()，对齐 page.pause() 对 hover 动作的录制。
-        // （勾选类已在上面优先处理，此处仅剩 link/button/heading 等普通可悬停元素）
+
         if (e.isHover()) {
             return "hover()";
         }
-        // 拖拽源优先：录制为 locator.dragTo(target)，对齐 page.pause() 的 source.dragTo(target)。
-        // 拖拽语义由手势决定，覆盖角色推断（拖拽源本身可能是 button/link，但不应 click）。
+
         if (e.getDragDstKey() != null) {
             return "__DRAGTO__";
         }
-        // 双击（dblclick）：录制为 locator.doubleClick()，对齐 page.pause() 对 doubleClick 动作的录制。
-        // 优先于角色推断——双击语义由用户交互决定，不因元素角色（link/button 等）退化为单击。
+
         if (e.isDblClick()) {
             return "doubleClick()";
         }
@@ -161,15 +90,11 @@ public final class RoleElementStepGenerator {
                 case "textbox":
                 case "searchbox":
                 case "spinbutton":
-                    // 对齐 page.pause() 的 fill() 录制：整值替换（清空原值再写入），比逐字符 type() 更快更稳，
-                    // 也不会与已有值叠加或被输入法干扰。文本框语义为「输入」，即使无值也生成 fill("")（留待补全），
-                    // 而非误生成 click()（点击输入框无业务意义，易与聚焦/触发混淆）。
+
                     return "fill(\"" + escapeJava(e.getValue() == null ? "" : e.getValue()) + "\")";
                 case "checkbox":
                 case "radio":
-                    // 对齐 page.pause() 的 setChecked 语义：按「目标」勾选状态选择 setChecked(bool)，
-                    // 在目标已满足时幂等跳过，避免对已勾选元素再次 check / 已未勾选再次 uncheck 造成误 toggle。
-                    // setCheckedTarget 为 null 时（未捕获目标状态）保守退化 check()/uncheck()（绝对目标状态）。
+
                     if (e.getSetCheckedTarget() != null) {
                         return "setChecked(" + e.getSetCheckedTarget() + ")";
                     }
@@ -179,26 +104,23 @@ public final class RoleElementStepGenerator {
                     return "check()";
                 case "combobox":
                 case "listbox":
-                    // 下拉选择（含原生 <select> 与自定义列表）：录制时拿到了选中项，
-                    // 对齐 page.pause() 的 selectOption 信号，生成 selectByVisibleText("选项文本")。
-                    // 未捕获到选中项时（仅点击展开未选）降级为 click()，由人工补充具体选项。
+
                     if (e.isSelect() && e.getOptionText() != null) {
                         return "selectByVisibleText(\"" + escapeJava(e.getOptionText()) + "\")";
                     }
                     return "click()";
                 default:
-                    return "click()";   // button / link / tab / menuitem / switch ...
+                    return "click()";
             }
         }
-        // 非角色策略：placeholder 通常是输入框；其余（text/title/id/css 等，含 data-i18n 走 @Element 的 css 选择器）默认 click
+
         if (RolePickerConstants.STRATEGY_PLACEHOLDER.equals(e.getStrategy())) {
-            // 同样对齐 page.pause 的 fill 语义：输入框即使无值也生成 fill("")（输入语义，留待补全）。
+
             return "fill(\"" + escapeJava(e.getValue() == null ? "" : e.getValue()) + "\")";
         }
         return "click()";
     }
 
-    /** 转义 Java 字符串字面量中的特殊字符（\" \\ \n \r \t），null 视为空串。包内可见：断言的值断言复用。 */
     static String escapeJava(String s) {
         if (s == null) return "";
         StringBuilder b = new StringBuilder();
@@ -216,16 +138,6 @@ public final class RoleElementStepGenerator {
         return b.toString();
     }
 
-    /**
-     * 生成 Step 类源码。
-     *
-     * @param steps        每个内层 List 是一次「开始 → 停止」拾取出的元素（一个 step）
-     * @param allEntries   所有 step 的并集（去重后对应页面字段），用于字段命名
-     * @param packageName  生成页类的包名（step 类放在其 {@code .steps} 子包下）
-     * @param pageClassName 页类名（step 类通过 {@code PageObjectFactory.getPage} 引用）
-     * @param stepClassName step 类名
-     * @return 完整 Java 类源码
-     */
     public static String generate(List<List<RoleEntry>> steps, List<RoleEntry> allEntries,
                                   String packageName, String pageClassName, String stepClassName) {
         List<RoleElementPageGenerator.GeneratedField> specs =
@@ -239,37 +151,34 @@ public final class RoleElementStepGenerator {
         String stepPkg = packageName + ".steps";
 
         StringBuilder methods = new StringBuilder();
-        int[] npIdx = {0};   // 弹窗触发生成的新页面变量名计数器（newPage / newPage2 ...）
+        int[] npIdx = {0};
         if (steps == null || steps.isEmpty()) {
-            methods.append("    // 还没有任何 step：请在面板点「开始拾取」→ 点击元素 → 「停止拾取」生成一个 step\n");
+
         } else {
             int stepIdx = 0;
             for (List<RoleEntry> rawStep : steps) {
                 stepIdx++;
-                // 【关键修复"按全局序号顺序生成步骤"】
-                // 用户多次点击同一元素会累积多个 pickNos（如 [1,3,5]），不同元素也有各自的 pickNos（如 [2,4]）。
-                // 需要按全局序号顺序生成操作：序号1→元素A，序号2→元素B，序号3→元素A，序号4→元素B，序号5→元素A。
-                // 实现：创建 (序号, 元素) 对列表，按序号排序，生成对应的操作序列。
+
                 List<java.util.Map.Entry<Integer, RoleEntry>> seqEntries = new java.util.ArrayList<>();
                 for (RoleEntry e : rawStep) {
                     if (e == null) continue;
                     java.util.List<Integer> nos = pickNosOf(e);
                     if (nos != null && !nos.isEmpty()) {
-                        // 按 pickNos 中的每个序号展开，每个序号对应一次操作
+
                         for (int no : nos) {
                             if (no > 0) {
                                 seqEntries.add(java.util.Map.entry(no, e));
                             }
                         }
                     } else {
-                        // 无 pickNos 的元素（如 closeOp 标记）用 seq 兜底，排在最后
+
                         int seq = e.getSeq();
                         seqEntries.add(java.util.Map.entry(seq > 0 ? seq : Integer.MAX_VALUE, e));
                     }
                 }
-                // 按序号排序
+
                 seqEntries.sort(java.util.Comparator.comparingInt(java.util.Map.Entry<Integer, RoleEntry>::getKey));
-                // 提取排序后的元素列表
+
                 List<RoleEntry> step = new java.util.ArrayList<>();
                 for (java.util.Map.Entry<Integer, RoleEntry> entry : seqEntries) {
                     step.add(entry.getValue());
@@ -278,109 +187,83 @@ public final class RoleElementStepGenerator {
                 methods.append("    @Step\n");
                 methods.append("    public void step").append(stepIdx).append("() {\n");
                 if (step == null || step.isEmpty()) {
-                    methods.append("        // 该 step 未拾取任何元素\n");
+
                 } else {
-                    List<String> lastFp = null; // 上一个元素的 iframe 路径（主框架为 null/空）
+                    List<String> lastFp = null;
                     for (RoleEntry e : step) {
                         String field = keyToField.get(RoleElementPageGenerator.locatorKey(e));
-                        if (field == null) continue;   // 不在页面字段中（理论上不会发生）
-                        // iframe 上下文切换：若当前元素所在 iframe 链与上一个不同，先回主框架再逐层切入，
-                        // 保证元素操作落在正确的 frame 上下文（生成独立的切换 step，而非缺失）。
+                        if (field == null) continue;
+
                         List<String> fp = e.getFramePath();
-                        if (!sameFramePath(/* 当前 iframe 链 */ fp, lastFp)) {
-                            // 计算与上一个元素 iframe 链的差异，最小化切换动作。设 lastFp=旧链，fp=新链：
-                            // 情形 A 嵌套加深：旧链是新链的前缀（如 [frameOne] → [frameOne, frameTwo]，
-                            //   即 common == lastFp.size() 且新链更长）：在当前上下文基础上「补切」新增层。
-                            // 情形 B 分叉：新链不是旧链的延伸（如 [frameOne] → [frameTwo]）：直接对【新链全部段】
-                            //   逐层 switchToFrame（PageObject.switchToFrame 内部用 page.frame(name) 全局精确查找，
-                            //   从任一 frame 上下文都能直接切到目标 frame，无需先回主框架，故省略多余的 switchToDefaultContent）。
-                            // 情形 C 回主框架：旧链非空、新链为空：仅 switchToDefaultContent。
-                            // 最小化切换：分叉/回退到 iframe 时不再先回主框架再重切，减少来回穿插时的冗余切换。
+                        if (!sameFramePath( fp, lastFp)) {
+
                             int common = commonPrefixLen(fp, lastFp);
                             boolean deepen = lastFp != null && fp != null && !fp.isEmpty()
                                     && common == lastFp.size() && fp.size() > lastFp.size();
                             boolean backToMain = (fp == null || fp.isEmpty());
                             if (lastFp != null && !deepen && backToMain) {
-                                // 仅「回到主框架」情形需 switchToDefaultContent；分叉到另一 iframe 直接切即可。
+
                                 methods.append("        ").append(pageVar)
-                                        .append(".switchToDefaultContent(); // 退出当前 iframe，回到主框架\n");
+                                        .append(".switchToDefaultContent();\n");
                             }
                             if (fp != null && !fp.isEmpty()) {
-                                int start = deepen ? common : 0; // 加深只切新增层；回退/分叉从新链首段重切
+                                int start = deepen ? common : 0;
                                 for (int i = start; i < fp.size(); i++) {
                                     String fsel = fp.get(i);
                                     String name = frameNameOf(fsel);
                                     if (name != null) {
                                         methods.append("        ").append(pageVar).append(".switchToFrame(\"")
-                                                .append(escapeJavaString(name)).append("\"); // 切入 iframe: ").append(fsel).append("\n");
+                                                .append(escapeJavaString(name)).append("\");\n");
                                     } else {
                                         methods.append("        ").append(pageVar).append(".switchToFrame(\"")
-                                                .append(escapeJavaString(fsel)).append("\"); // 切入 iframe (CSS)\n");
+                                                .append(escapeJavaString(fsel)).append("\");\n");
                                     }
                                 }
                             }
                             lastFp = (fp == null) ? null : new ArrayList<>(fp);
                         }
-                        // open shadowRoot 显式切换（对齐 page.pause() 的 >>> shadow 穿透录制）：
-                        // 元素位于 shadow 内时，在 frame 切换之后进入各层 open shadow；操作结束后退出全部 shadow。
-                        // shadowPath 为自顶向下的宿主 CSS 选择器链，逐层 switchToShadow 进入。
+
                         List<String> shadowPath = e.getShadowPath();
                         if (shadowPath != null && !shadowPath.isEmpty()) {
                             for (String host : shadowPath) {
                                 methods.append("        ").append(pageVar).append(".switchToShadow(\"")
-                                        .append(escapeJavaString(host)).append("\"); // 进入 shadow: ")
-                                        .append(host).append("\n");
+                                        .append(escapeJavaString(host)).append("\");\n");
                             }
                         }
-                        // 目标表达式：页字段（+ 一组元素时的索引消歧）。
-                        // 【列表字段】被标记为「一组元素」时字段是 PageElementList，用 {@code x.get(index)} 取单项
-                        // （语义等价 page.pause 的 locator.nth(index)）；普通字段仍用 {@code x.nth(index)}。
+
                         String target = pageVar + "." + field;
-                        // 一组元素的序号：RoleEntry.index 常因回传丢失而为 -1，此时从签名末尾 #N 就地还原
-                        // （只用于本次拼串，不写回 RoleEntry，避免影响其它判据）。
+
                         int __ix1 = (e.getIndex() >= 0) ? e.getIndex() : RolePickerPickParser.parseIndexFromSig(e.getSigKey());
                         if (__ix1 >= 0) {
                             target += e.isList() ? ".get(" + __ix1 + ")" : ".nth(" + __ix1 + ")";
                         }
-                        // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
-                        // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
-                        // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的
-                        // acceptAlert(trigger)/dismissAlert(trigger) 正是"在触发动作内注册一次性监听"的语义，
-                        // 因此以独立 step 形式包裹触发动作（先注册监听再触发），而非裸点击。alert 默认 accept，
-                        // confirm/prompt 默认 dismiss。
+
                         String op = target + "." + operationFor(e);
-                        // 按拾取序号数量展开：同一元素被拾取 N 次（pickNos.size()==N），
-                        // 生成的 step 应在对应位置重复 N 次基础动作（对齐 page.pause 多次点击同一元素的录制）。
+
                         int __repeat = 1;
                         java.util.List<Integer> __pnos = pickNosOf(e);
                         if (__pnos != null && __pnos.size() > 1) __repeat = __pnos.size();
-                        // 拖拽源：operationFor 返回 __DRAGTO__ 占位，展开为 dragTo(目标字段)（对齐 page.pause 的 source.dragTo）。
-                        // 目标元素定位签名经 keyToField 反查为字段名，拼成 pageVar.fieldName。
+
                         boolean unresolvedDrag = false;
                         if (op.endsWith(".__DRAGTO__")) {
                             String dstField = keyToField.get(e.getDragDstKey());
-                            //  F-15：目标未定位时不再把注释文本塞进实参（`dragTo(/* … */)` 属零实参非法调用），
-                            //  改为整条语句退化为注释行，并跳过外层 lambda 封装与重复展开。
+
                             String dstRef = (dstField != null) ? pageVar + "." + dstField : null;
                             unresolvedDrag = (dstRef == null);
                             __repeat = 1;
                             op = dragToStatement(target, dstRef);
                         } else if (e.getPressKey() != null) {
-                            // 键盘序列（对齐 page.pause 的 press("Enter")）：先 fill/click 基础动作，再 press 实质按键。
+
                             op += ";\n        " + target + ".press(\"" + escapeJava(e.getPressKey()) + "\")";
                         }
                         if (e.isDialog() && !unresolvedDrag) {
                             String dlgType = (e.getDialogType() == null) ? "alert" : e.getDialogType();
                             String dlgMethod = "accept".equals(e.getDialogAction()) ? "acceptAlert" : "dismissAlert";
-                            // 独立 step：先注册对话框处理器，再触发点击（时序正确，不再被误读为“裸点击”）
-                            //  F-15：lambda 体经 lambdaBody —— pressKey 的多语句必须包成块体，否则非法 Java。
-                            op = pageVar + "." + dlgMethod + "(() -> " + lambdaBody(op) + ") // 处理 " + dlgType + " 弹窗\n        ";
+
+                            op = pageVar + "." + dlgMethod + "(() -> " + lambdaBody(op) + ")\n        ";
                         }
                         if (e.isDownload() && !unresolvedDrag) {
-                            // 下载（anchor download 属性 / 文件 URL / JS 触发）：用框架封装的
-                            // waitForDownload(trigger) 等待下载完成（超时走框架默认，不在产物里硬编码秒数），
-                            // 对齐 page.pause() 的 waitForDownload 录制。
-                            // 与弹窗同时发生时嵌套：waitForDownload(() -> { waitForNewPage(...); })。
+
                             if (e.isPopup()) {
                                 methods.append("        ").append(pageVar).append(".waitForDownload(() -> {\n")
                                         .append("            ").append(pageVar).append(".waitForNewPage(() ->\n")
@@ -391,35 +274,28 @@ public final class RoleElementStepGenerator {
                                         .append("                ").append(lambdaBody(op)).append(");\n");
                             }
                         } else if (e.isPopup() && !unresolvedDrag) {
-                            // 弹窗链接（target=_blank）：用框架封装的 waitForNewPage(trigger) 一步完成
-                            // “点击 + 等待新页面 + 切换页对象上下文”（超时走框架默认，不在产物里硬编码秒数），
-                            // 并把新页面赋给 Page 变量，后续操作在新页面执行；step 末统一 closeCurrentPage
-                            // 关闭新页并自动切回父页（对齐用户预期）。
-                            // 语义对齐 page.pause() 的 waitForPopup，但走框架原生 API（无需手写 Playwright）。
+
                             String npVar = nextNewPageVar(npIdx);
                             sawPopup = true;
                             methods.append("        Page ").append(npVar).append(" = ").append(pageVar)
                                     .append(".waitForNewPage(() ->\n")
                                     .append("                ").append(lambdaBody(op)).append(");\n");
-                        } else {
+                        } else if (!unresolvedDrag) {
                             for (int __r = 0; __r < __repeat; __r++) {
                                 methods.append("        ").append(op).append(";\n");
                             }
                         }
-                        // 退出该元素所在的全部 open shadow，回到 DOM/iframe 上下文（与进入对称）。
+
                         if (shadowPath != null && !shadowPath.isEmpty()) {
                             methods.append("        ").append(pageVar)
-                                    .append(".switchToDefaultShadow(); // 退出 shadow: ")
-                                    .append(String.join(" > ", shadowPath)).append("\n");
+                                    .append(".switchToDefaultShadow();\n");
                         }
                     }
                 }
                 if (sawPopup) {
-                    // 本 step 触发过弹窗并切到了新页面：关闭弹窗页。closeCurrentPage 内部会在关闭后
-                    // 自动把页上下文切回打开它的父页（故不再手写 switchToPage(0)）；行尾注释点明该语义，
-                    // 避免回放/维护者误以为这里漏了一次页面切换。
+
                     methods.append("        ").append(pageVar)
-                            .append(".closeCurrentPage(); // 关闭当前页（弹窗/新页）并自动切回打开它的父页\n");
+                            .append(".closeCurrentPage();\n");
                 }
                 methods.append("    }\n\n");
             }
@@ -437,47 +313,17 @@ public final class RoleElementStepGenerator {
                 + "}\n";
     }
 
-    /**
-     * 生成 Step 类源码（向后兼容 4 参重载）。
-     * step 类名复用 {@code packageName}，避免破坏既有调用方。
-     *
-     * @param steps         每个内层 List 是一次「开始 → 停止」拾取出的元素（一个 step）
-     * @param allEntries    所有 step 的并集（去重后对应页面字段），用于字段命名
-     * @param packageName   生成页类的包名（step 类放在其 {@code .steps} 子包下）
-     * @param pageClassName 页类名（step 类通过 {@code PageObjectFactory.getPage} 引用）
-     * @return 完整 Java 类源码
-     */
     public static String generate(List<List<RoleEntry>> steps, List<RoleEntry> allEntries,
                                   String packageName, String pageClassName) {
         return generate(steps, allEntries, packageName, pageClassName, packageName);
     }
 
-    /**
-     * 多页面生成：每个被跟踪页面各生成一段 {@code @Step} 方法，并各自声明对应的 Page 字段。
-     * stepsByPage 的 key 为页面类名、value 为该页的 step 列表（每个内层 List 是一次 start→stop）；
-     * entriesByPage 的 key 为页面类名、value 为该页的全部字段来源（与对应 Page 类一致）。
-     * 最终合并为一个 Step 类：每个页面一个 Page 字段，step 方法用对应页字段引用元素
-     * （对齐多页面拾取：元素落到对应页代码、steps 也调用对应页）。
-     *
-     * @param stepsByPage   页面类名 → 该页的 step 列表
-     * @param entriesByPage 页面类名 → 该页的字段来源
-     * @param packageName   页类包名（step 类放在其 {@code .steps} 子包下）
-     * @param stepClassName step 类名
-     * @return 完整 Java 类源码
-     */
-    /**
-     * 多页面生成（含页面级操作，如关闭页面）。
-     *
-     * @param opsByPage 页面类名 → 该页的页面级操作列表（如 {@code ["close"]}），每个操作生成独立 @Step 方法
-     */
     public static String generateMulti(LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage,
                                         LinkedHashMap<String, List<RoleEntry>> entriesByPage,
                                         LinkedHashMap<String, List<String>> opsByPage,
                                         String packageName, String stepClassName) {
         if (opsByPage == null) opsByPage = new LinkedHashMap<>();
-        // 收集所有涉及到的页面类：元素字段来源（entriesByPage）+ 各 step 内 pick 的归属页
-        // + 关闭操作标记页（opsByPage / close 标记）。保证每被引用的 Page 类都有字段声明，
-        // 即使它没有任何元素 pick（例如仅做了“关闭”操作的弹窗页）。
+
         LinkedHashSet<String> allPages = new LinkedHashSet<>();
         allPages.addAll(entriesByPage.keySet());
         allPages.addAll(opsByPage.keySet());
@@ -492,22 +338,17 @@ public final class RoleElementStepGenerator {
                 }
             }
         }
-        // 合并“仅含关闭操作”的 step 进上一个 step：关闭当前页（含整页跳转后关闭根页）不另成 @Step 方法，
-        // 使一次“开始→停止 / 封装为步骤”始终落在同一个 step 内。
+
         for (Map.Entry<String, List<List<RoleEntry>>> en : stepsByPage.entrySet()) {
             en.setValue(mergeCloseOnlySteps(en.getValue()));
         }
 
-        // 每个【页面实例】(pageClass#instanceId) -> (定位键 -> 字段名)，并生成该实例字段声明。
-        // 同 pageClass 被打开多次（同页多标签）时，每个实例生成独立变量（loginPage / loginPage2 …），
-        // 使生成的 step 能区分并独立切换/关闭不同实例，满足"同一页面被打开多次，来回切换"的需求。
-        // 字段命名来源取该页已拾取元素（entriesByPage 已由 __rolePicks 覆盖全部 pick），与 Tab1 页面生成保持一致。
         Map<String, Map<String, String>> pageFields = new LinkedHashMap<>();
-        Map<String, String> pageVar = new LinkedHashMap<>();     // pageClass#instanceId -> 唯一变量名
-        Map<String, String> pageVarClass = new LinkedHashMap<>(); // pageClass#instanceId -> 页面类名
+        Map<String, String> pageVar = new LinkedHashMap<>();
+        Map<String, String> pageVarClass = new LinkedHashMap<>();
         StringBuilder fields = new StringBuilder();
         Set<String> usedVars = new HashSet<>();
-        // 收集全部涉及的页面实例键（pageClass#instanceId），覆盖元素字段来源 + 各 step 拾取 + 关闭标记页。
+
         LinkedHashSet<String> allInstances = new LinkedHashSet<>();
         for (String className : allPages) {
             List<RoleEntry> pes = entriesByPage.get(className);
@@ -527,7 +368,7 @@ public final class RoleElementStepGenerator {
             int hash = instKey.lastIndexOf('#');
             String className = instKey.substring(0, hash);
             int instId = Integer.parseInt(instKey.substring(hash + 1));
-            // 取该实例的实际拾取元素（同 pageClass 下按 instanceId 过滤）
+
             List<RoleEntry> allPageEntries = entriesByPage.get(className);
             List<RoleEntry> pageEntries = new ArrayList<>();
             if (allPageEntries != null) {
@@ -542,7 +383,6 @@ public final class RoleElementStepGenerator {
             }
             pageFields.put(instKey, keyToField);
 
-            // 变量名：首个实例用 pageClass 去首字母小写；后续实例追加序号（loginPage / loginPage2 …）
             String base = decapitalize(className) + (instId > 1 ? instId : "");
             String uniqueVar = base;
             int v = 2;
@@ -555,10 +395,6 @@ public final class RoleElementStepGenerator {
                     .append(" = PageObjectFactory.getPage(").append(className).append(".class);\n\n");
         }
 
-        // 渲染 step 方法：一个 start→stop = 一个 @Step 方法（唯一的 step 边界）。
-        // 方法内每个 pick 按其“自身 _pageClass”选取对应页变量与字段——跨页拾取（默认页 + 弹窗页）
-        // 因此落在同一 step 内，不再被弹窗打开/关闭拆成多个 step（用户明确要求“只有一个条件：开始-停止”）。
-        // 关闭页面标记（_closeOp）内联渲染为 closeCurrentPage()，同样属于该 step。
         StringBuilder methods = new StringBuilder();
         int[] npIdx = {0};
         int stepIdx = 0;
@@ -570,17 +406,10 @@ public final class RoleElementStepGenerator {
                 int __stepPos = __steps.indexOf(rawStep);
                 stepIdx++;
                 any = true;
-                // 按勾选动态序号（seq）升序排布：用户勾选顺序即步骤执行顺序；
-                // seq 为 0（未编号）的元素保持原拾取相对顺序，保证幂等可重复生成。
+
                 List<RoleEntry> step = new java.util.ArrayList<>(rawStep);
                 final List<RoleEntry> src = rawStep;
-                // 按全局拾取序号（pickNos 首号）升序排列，确保同一 step 内元素按点击顺序排列。
-                // 注意：getSeq() 在 __renumberStep 中被设为步骤索引（i+1），非全局序号，
-                // 因此此处直接用 pickNos 首号排序，而非 getSeq()。
-                // 无 pickNos 的元素（如 closeOp 标记）用 seq 兜底，seq=0 时排最后。
-                // seq 相等（如未编号的 needHelp 与跨页 closeMarker 均为 0）时，
-                // 以原列表索引作二级稳定键，确保 closeMarker 紧邻被关闭页最后一个元素，
-                // 避免 ArrayList.sort 在相等键上的不稳定重排导致 closeCurrentPage 顺序错乱。
+
                 step.sort(java.util.Comparator.comparingInt((RoleEntry e) -> {
                     if (e == null) return Integer.MAX_VALUE;
                     java.util.List<Integer> nos = pickNosOf(e);
@@ -595,47 +424,39 @@ public final class RoleElementStepGenerator {
                 m.append("    public void step").append(stepIdx).append("() {\n");
                 boolean sawPopup = false;
                 boolean renderedCloseOp = false;
-                String popupTargetVar = null;   // 弹窗目标页对象变量：交由它接管并在其上 closeCurrentPage
-                String activeVar = null;        // 当前激活页对象变量：用于跨页上下文自动切换检测
-                // 【URL 判据】记录"被打开的新页实例"其最后一次被操作的元素在 step 中的索引，
-                // 以及该实例的 URL。用于循环结束后按"后续 step 中该 URL 不再出现"反推已关闭，
-                // 在精确位置补 closeCurrentPage()（替代 609 行无差别末尾兜底，修复关闭顺序错位）。
-                Map<String, Integer> popupLastIdx = new LinkedHashMap<>(); // 新页实例键 -> 最后操作索引
-                Map<String, String> popupInstUrl = new LinkedHashMap<>();  // 新页实例键 -> 其 URL
+                String popupTargetVar = null;
+                String activeVar = null;
+
+                Map<String, Integer> popupLastIdx = new LinkedHashMap<>();
+                Map<String, String> popupInstUrl = new LinkedHashMap<>();
                 if (step == null || step.isEmpty()) {
-                    m.append("        // 该 step 未拾取任何元素\n");
+
                 } else {
-                    List<String> lastFp = null; // 上一个元素的 iframe 路径（主框架为 null/空）
+                    List<String> lastFp = null;
                     int __idx = -1;
                     for (RoleEntry e : step) {
                         __idx++;
                         String pc = (e.getPageClass() == null || e.getPageClass().isEmpty())
                                 ? stepPageClass : e.getPageClass();
-                        // 按 (pageClass#instanceId) 实例键取对应页面变量：同页多次打开时各实例变量独立。
+
                         String instKey = pc + "#" + e.getPageInstanceId();
                         String var = pageVar.get(instKey);
                         if (var == null) var = pageVar.get(pc + "#1");
                         if (var == null) var = pageVar.get(stepPageClass + "#" + e.getPageInstanceId());
                         if (var == null) var = pageVar.get(stepPageClass + "#1");
                         if (var == null) continue;
-                        // 跨页上下文自动切换：维护"当前激活页变量"activeVar。
-                        // 弹窗打开后 activeVar 指向新页；当后续元素属于【打开页】（原页面）时，
-                        // 说明新页操作已结束、需切回原页才能操作其元素——此时先 closeCurrentPage 切回，
-                        // 再生成该元素的操作（而非把 closeCurrentPage 推到 step 末尾，否则原页元素会夹在新页上下文里）。
+
                         if (activeVar == null) activeVar = var;
                         if (popupTargetVar != null && activeVar.equals(popupTargetVar) && !var.equals(popupTargetVar)) {
-                            // 从弹窗新页切回打开页：先关闭新页（onClose 自动切回其父页/打开页），再操作原页元素。
+
                             m.append("        ").append(popupTargetVar)
-                                    .append(".closeCurrentPage(); // 切回打开页（").append(var).append("）\n");
+                                    .append(".closeCurrentPage();\n");
                             renderedCloseOp = true;
-                            activeVar = null;     // 关闭后回到打开页，下一轮重新锚定
+                            activeVar = null;
                             popupTargetVar = null;
                         }
                         if (e.isCloseOp()) {
-                            // 关闭当前页（弹窗/新页）：在 step 序列中该关闭操作发生的位置内联渲染 closeCurrentPage，
-                            // 使“打开新页 -> 在新页操作 -> 关闭 -> 自动切回 active 父页”的顺序与用户实际操作一致。
-                            // 不再 defer 到 step 末尾（旧逻辑会把旧页元素夹在新页切换与关闭之间，造成错位）。
-                            // closeCurrentPage 的 onClose 会自动把 Page 上下文切回打开它的父页（当前 active 页）。
+
                             String cv = (popupTargetVar != null) ? popupTargetVar : var;
                             m.append("        ").append(cv)
                                     .append(".closeCurrentPage();\n");
@@ -646,23 +467,18 @@ public final class RoleElementStepGenerator {
                         if (kf == null) kf = pageFields.get(pc + "#1");
                         String field = (kf == null) ? null : kf.get(RoleElementPageGenerator.locatorKey(e));
                         if (field == null) continue;
-                        // iframe 上下文切换：若当前元素所在 iframe 链与上一个不同，先回主框架再逐层切入，
-                        // 保证元素操作落在正确的 frame 上下文（避免“切换 iframe 没有切换 step”的问题）。
+
                         List<String> fp = e.getFramePath();
                         if (!sameFramePath(fp, lastFp)) {
-                            // 计算与上一个元素 iframe 链的差异，最小化切换动作（对齐 page 对象版逻辑）：
-                            // - 嵌套加深（[frameOne] → [frameOne, frameTwo]）：只补切新增层，不回主框架；
-                            // - 分叉（[a] → [b] / [a,b] → [a,c]）：直接对【新链全部段】逐层 switchToFrame
-                            //   （page.frame(name) 全局精确查找，无需先回主框架）；
-                            // - 回到主框架：仅 switchToDefaultContent。
+
                             int common = commonPrefixLen(fp, lastFp);
                             boolean deepen = lastFp != null && fp != null && !fp.isEmpty()
                                     && common == lastFp.size() && fp.size() > lastFp.size();
                             boolean backToMain = (fp == null || fp.isEmpty());
                             if (lastFp != null && !deepen && backToMain) {
-                                // 仅「回到主框架」情形需 switchToDefaultContent；分叉到另一 iframe 直接切即可。
+
                                 m.append("        ").append(var)
-                                        .append(".switchToDefaultContent(); // 退出当前 iframe，回到主框架\n");
+                                        .append(".switchToDefaultContent();\n");
                             }
                             if (fp != null && !fp.isEmpty()) {
                                 int start = deepen ? common : 0;
@@ -670,15 +486,11 @@ public final class RoleElementStepGenerator {
                                     String fsel = fp.get(i);
                                     String name = frameNameOf(fsel);
                                     if (name != null) {
-                                        // name 精确查找（对齐 page.pause 的 frameLocator("iframe[name=...]")，
-                                        // 框架 switchToFrame(name) 内部用 page.frame(name) 精确匹配，最稳健）。
-                                        // 说明：page object 里的 iframe 多为【已存在】的静态元素，直接切即可；
-                                        // 若遇动态/异步加载的 iframe，可改用 switchToFrameAndWait(trigger, name)
-                                        // ——该 API 采用 onFrameAttached 事件监听（监听器范式，对标 waitForPopup）。
+
                                         m.append("        ").append(var).append(".switchToFrame(\"")
                                                 .append(escapeJavaString(name)).append("\");\n");
                                     } else {
-                                        // 退化：id（#x）/ nth-of-type 等选择器，按 CSS 选择器切入。
+
                                         m.append("        ").append(var).append(".switchToFrame(\"")
                                                 .append(escapeJavaString(fsel)).append("\");\n");
                                     }
@@ -686,52 +498,42 @@ public final class RoleElementStepGenerator {
                             }
                             lastFp = (fp == null) ? null : new ArrayList<>(fp);
                         }
-                        // open shadowRoot 显式切换（对齐 page.pause() 的 >>> shadow 穿透录制）：
-                        // 元素位于 shadow 内时，在 frame 切换之后进入各层 shadow；操作结束后退出全部 shadow。
+
                         List<String> shadowPath = e.getShadowPath();
                         if (shadowPath != null && !shadowPath.isEmpty()) {
                             for (String host : shadowPath) {
                                 m.append("        ").append(var).append(".switchToShadow(\"")
-                                        .append(escapeJavaString(host)).append("\"); // 进入 shadow: ")
-                                        .append(host).append("\n");
+                                        .append(escapeJavaString(host)).append("\");\n");
                             }
                         }
                         String target = var + "." + field;
-                        // 同上：一组元素的序号优先取 RoleEntry.index，丢失则从签名 #N 就地还原。
+
                         int __ix2 = (e.getIndex() >= 0) ? e.getIndex() : RolePickerPickParser.parseIndexFromSig(e.getSigKey());
                         if (e.isList()) { if (__ix2 >= 0) target += ".get(" + __ix2 + ")"; }
                         else if (e.getCount() > 1 && __ix2 >= 0) target += ".nth(" + __ix2 + ")";
-                        // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
-                        // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
-                        // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的
-                        // acceptAlert(trigger)/dismissAlert(trigger) 正是"在触发动作内注册一次性监听"的语义，
-                        // 因此直接把对话框处理包裹进触发动作，而非放在动作之前。alert 默认 accept，
-                        // confirm/prompt 默认 dismiss。
+
                         String op = target + "." + operationFor(e);
-                        // 按拾取序号数量展开：同一元素被拾取 N 次（pickNos.size()==N），
-                        // 生成的 step 应在对应位置重复 N 次基础动作（对齐 page.pause 多次点击同一元素的录制）。
+
                         int __repeat = 1;
                         java.util.List<Integer> __pnos = pickNosOf(e);
                         if (__pnos != null && __pnos.size() > 1) __repeat = __pnos.size();
-                        // 拖拽源：operationFor 返回 __DRAGTO__ 占位，展开为 dragTo(目标字段)（对齐 page.pause 的 source.dragTo）。
-                        // 目标元素定位签名在所有页字段中反查（支持跨页拖拽），拼成 <页变量>.<字段名>。
+
                         boolean unresolvedDrag = false;
                         if (op.endsWith(".__DRAGTO__")) {
                             String dstRef = findFieldRefAcrossPages(e.getDragDstKey(), pageFields, pageVar);
-                            //  F-15：目标未定位时整条语句退化为注释行（原实现产出 `dragTo(/* … */)` 零实参非法调用）。
+
                             unresolvedDrag = (dstRef == null);
                             __repeat = 1;
                             op = dragToStatement(target, dstRef);
                         } else if (e.getPressKey() != null) {
-                            // 键盘序列（对齐 page.pause 的 press("Enter")）：先 fill/click 基础动作，再 press 实质按键。
+
                             op += ";\n        " + target + ".press(\"" + escapeJava(e.getPressKey()) + "\")";
                         }
                         if (e.isDialog() && !unresolvedDrag) {
                             String dlgType = (e.getDialogType() == null) ? "alert" : e.getDialogType();
                             String dlgMethod = "accept".equals(e.getDialogAction()) ? "acceptAlert" : "dismissAlert";
-                            // 独立 step：先注册对话框处理器，再触发点击（时序正确，不再被误读为“裸点击”）
-                            //  F-15：lambda 体经 lambdaBody —— pressKey 的多语句必须包成块体，否则非法 Java。
-                            op = var + "." + dlgMethod + "(() -> " + lambdaBody(op) + ") // 处理 " + dlgType + " 弹窗\n        ";
+
+                            op = var + "." + dlgMethod + "(() -> " + lambdaBody(op) + ")\n        ";
                         }
                         if (e.isDownload() && !unresolvedDrag) {
                             if (e.isPopup()) {
@@ -745,11 +547,9 @@ public final class RoleElementStepGenerator {
                                         .append("                ").append(lambdaBody(op)).append(");\n");
                             }
                         } else if (e.isPopup() && !unresolvedDrag) {
-                            // 弹窗链接（target=_blank）：由“目标页对象”（如 privacyAndSecurityPage）触发并接管新页——
-                            // waitForNewPage 内部 acceptNewPage 已把宿主页上下文切到新页，故不再追加 switchToPage。
-                            // 触发点击的元素仍属打开页（var），故闭包内用 var + "." + op；waitForNewPage 宿主用 popupTarget。
+
                             sawPopup = true;
-                            lastFp = null; // 弹窗打开新页，frame 栈与旧页不同，重置以避免误切回旧 frame
+                            lastFp = null;
                             String npVar = nextNewPageVar(npIdx);
                             String popupTarget = inferPopupTargetVar(step, var, pageVar, opsByPage);
                             if (popupTarget != null) {
@@ -757,26 +557,24 @@ public final class RoleElementStepGenerator {
                                         .append(".waitForNewPage(() ->\n")
                                         .append("                ").append(lambdaBody(op)).append(");\n");
                                 if (popupTargetVar == null) popupTargetVar = popupTarget;
-                                activeVar = popupTarget; // 当前激活页切到新页，便于后续检测"回到打开页"时切回
+                                activeVar = popupTarget;
                             } else {
                                 m.append("        Page ").append(npVar).append(" = ").append(var)
                                         .append(".waitForNewPage(() ->\n")
                                         .append("                ").append(lambdaBody(op)).append(");\n");
                                 if (popupTargetVar == null) popupTargetVar = var;
                             }
-                        } else {
+                        } else if (!unresolvedDrag) {
                             for (int __r = 0; __r < __repeat; __r++) {
                                 m.append("        ").append(op).append(";\n");
                             }
                         }
-                        // 退出该元素所在的全部 shadow，回到 DOM/iframe 上下文（与进入对称）。
+
                         if (shadowPath != null && !shadowPath.isEmpty()) {
                             m.append("        ").append(var)
-                                    .append(".switchToDefaultShadow(); // 退出 shadow: ")
-                                    .append(String.join(" > ", shadowPath)).append("\n");
+                                    .append(".switchToDefaultShadow();\n");
                         }
-                        // 【URL 判据】当前元素属于新页实例（activeVar 即 popupTargetVar）时，
-                        // 记录其最后操作位置与 URL，供循环后按"该 URL 在后续 step 不再出现"反推已关闭。
+
                         if (popupTargetVar != null && activeVar != null
                                 && activeVar.equals(popupTargetVar)) {
                             popupLastIdx.put(popupTargetVar, __idx);
@@ -785,13 +583,10 @@ public final class RoleElementStepGenerator {
                         }
                     }
                 }
-                // 【URL 判据·精确补关闭】替代旧的无差别末尾兜底：对已打开新页、却未被内联 closeCurrentPage 的实例，
-                // 检查后续 step 中该实例 URL 是否还出现——若不再出现（页面已关闭/跳走），则在该实例最后一次操作之后
-                // 精确插入 closeCurrentPage()；若后续仍有同 URL 元素（页面仍存活/同标签跳转），则不补，避免误关。
-                // 结合两者：优先依赖 onClose 内联（renderedCloseOp）；仅当内联缺失且 URL 证据支持关闭时才兜底。
+
                 if (sawPopup && popupTargetVar != null && !renderedCloseOp
                         && !popupLastIdx.isEmpty()) {
-                    // 收集后续 step（当前 step 之后）出现的全部 URL，用于判断该实例 URL 是否"已消失"。
+
                     Set<String> laterUrls = new LinkedHashSet<>();
                     for (int __j = __stepPos + 1; __j < __steps.size(); __j++) {
                         List<RoleEntry> other = __steps.get(__j);
@@ -801,25 +596,24 @@ public final class RoleElementStepGenerator {
                             if (ru != null && !ru.isEmpty()) laterUrls.add(ru);
                         }
                     }
-                    // 在当前 step 内、该实例最后操作索引之后插入（按索引降序避免偏移）。
+
                     List<Map.Entry<String, Integer>> pend = new ArrayList<>(popupLastIdx.entrySet());
                     pend.sort((a, b) -> b.getValue().compareTo(a.getValue()));
                     for (Map.Entry<String, Integer> entry : pend) {
                         String pv = entry.getKey();
                         String pu = popupInstUrl.get(pv);
-                        // URL 证据：若该实例 URL 在后续 step 中仍存在 → 页面未关，不补（结合两者判据）。
+
                         if (pu != null && !pu.isEmpty() && laterUrls.contains(pu)) continue;
-                        int insertAt = entry.getValue() + 1; // 最后一个同页元素之后
-                        String line = "        " + pv + ".closeCurrentPage(); // (URL 判据) 新页面已关闭，切回打开页\n";
+                        int insertAt = entry.getValue() + 1;
+                        String line = "        " + pv + ".closeCurrentPage();\n";
                         if (insertAt >= step.size()) m.append(line);
                         else {
-                            // 在指定索引后插入：重建 m 的 step 体较复杂，改用末尾追加+注释定位；
-                            // 因 step 已按序渲染，直接追加到末尾与"最后操作之后"等价（同实例元素已连续排布）。
+
                             m.append(line);
                         }
                     }
                 } else if (sawPopup && popupTargetVar != null && !renderedCloseOp) {
-                    // 旧兜底（无 URL 数据时）：沿用打开页上 closeCurrentPage，保证闭环不丢。
+
                     m.append("        ").append(popupTargetVar)
                             .append(".closeCurrentPage();\n");
                 }
@@ -828,9 +622,9 @@ public final class RoleElementStepGenerator {
             }
         }
         if (!any) {
-            methods.append("    // 还没有任何 step：请在面板点「开始拾取」→ 点击元素 → 「停止拾取」生成一个 step\n");
+
         }
-        // import：每个页面类 + PageObjectFactory
+
         StringBuilder imports = new StringBuilder("import net.serenitybdd.annotations.Step;\n"
                 + "import com.microsoft.playwright.Page;\n\n");
         for (String className : allPages) {
@@ -845,7 +639,6 @@ public final class RoleElementStepGenerator {
                 + "}\n";
     }
 
-    /** 判断两个 iframe 路径是否相同（顺序敏感；null 与空列表视为等价，都表示主框架）。 */
     private static boolean sameFramePath(List<String> a, List<String> b) {
         if (a == null) a = java.util.Collections.emptyList();
         if (b == null) b = java.util.Collections.emptyList();
@@ -857,8 +650,6 @@ public final class RoleElementStepGenerator {
         return true;
     }
 
-    /** 两个 iframe 路径的最长公共前缀长度（段级相等，顺序敏感）。用于最小化 frame 切换：
-     *  如 [frameOne] 与 [frameOne, frameTwo] 的公共前缀长度为 1，只需补切第 2 段。 */
     private static int commonPrefixLen(List<String> a, List<String> b) {
         if (a == null) a = java.util.Collections.emptyList();
         if (b == null) b = java.util.Collections.emptyList();
@@ -872,23 +663,11 @@ public final class RoleElementStepGenerator {
         return i;
     }
 
-    /** 转义 Java 双引号字符串字面量中的反斜杠与双引号，避免生成非法源码。 */
     private static String escapeJavaString(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    /**
-     * 从 iframe 选择器串中提取一个可用于 {@code page.frame(label)} 精确匹配的稳定标签，实现通用 frame 段解析。
-     * 支持形态：
-     * <ul>
-     *   <li>{@code iframe[name="x"]} / {@code frame[name='x']} → 提取 name（优先，Playwright 按 name 精确匹配）</li>
-     *   <li>{@code iframe#id} / {@code #id} → 提取 id（Playwright 按 id 精确匹配）</li>
-     * </ul>
-     * 对于 {@code iframe[src=...]}、{@code iframe.login}、{@code iframe:nth-of-type(2)}、裸 {@code iframe} 等
-     * 无法被 page.frame(label) 精确匹配的形态返回 null，交由调用方走 {@code switchToFrame(CSS)} 兜底
-     * （BasePage 内部再按 CSS 选择器定位，src/class/nth 等复杂形态在此通道生效）。
-     */
     private static String frameNameOf(String fsel) {
         if (fsel == null) return null;
         Matcher m;
@@ -903,42 +682,19 @@ public final class RoleElementStepGenerator {
     private static final java.util.regex.Pattern FRAME_ID =
             java.util.regex.Pattern.compile("#([\\w-]+)");
 
-    /**
-     * 渲染 {@code dragTo} 语句（评审 F-15）。
-     *
-     * <p><b>为何不能把注释塞进实参</b>：原实现在目标未定位时把注释文本当作实参，
-     * 生成 {@code page.src.dragTo(/* 拖拽目标未定位 *​/)} —— 括号内零实参的<b>非法 Java</b>。
-     * 现改为：目标未定位时<b>整条语句退化为注释行</b>（可编译且问题可见），而非产出伪调用。</p>
-     *
-     * @param target 拖拽源引用（如 {@code page.dragSrc}）
-     * @param dstRef 拖拽目标引用；{@code null} 表示未定位
-     * @return 合法 Java 语句或等价的注释行
-     */
     static String dragToStatement(String target, String dstRef) {
         if (dstRef == null) {
-            return "// [未生成] 拖拽目标未定位，已跳过 dragTo（源元素：" + target + "）";
+            return "";
         }
         return target + ".dragTo(" + dstRef + ")";
     }
 
-    /**
-     * 把操作渲染为 lambda 体（评审 F-15）。
-     *
-     * <p><b>为何需要它</b>：{@code pressKey} 会把操作扩成<b>多语句</b>
-     * （{@code a.fill("x");\n a.press("Enter")}）。当该操作被塞进弹窗 / 下载 / 新页封装的
-     * {@code () -> <op>} 单表达式 lambda 时，多语句 ⇒ <b>非法 Java</b>。
-     * 故此处按需包成块体：单语句原样内联（保持既有产物形状不变），多语句则
-     * {@code { stmt; stmt; }}，并保证末条语句以 {@code ;} 收尾。</p>
-     *
-     * @param op 操作文本（可能含换行与多条语句）
-     * @return 可直接置于 {@code () -> } 之后的 lambda 体
-     */
     static String lambdaBody(String op) {
         if (op == null) {
             return "";
         }
         if (op.indexOf(';') < 0) {
-            return op; // 单表达式：保持既有生成形状，避免无谓的产物 churn
+            return op;
         }
         StringBuilder sb = new StringBuilder("{\n");
         for (String line : op.split("\n", -1)) {
@@ -954,8 +710,6 @@ public final class RoleElementStepGenerator {
         return body + "\n        }";
     }
 
-    /** 在所有页字段映射中反查拖拽目标的字段引用（支持跨页拖拽，对齐 page.pause 的 source.dragTo(target)）。
-     *  找到则拼成 {@code <页变量>.<字段名>}，未找到返回 {@code null}（由 {@link #dragToStatement} 退化为注释行）。 */
     private static String findFieldRefAcrossPages(String dragDstKey,
                                                   Map<String, Map<String, String>> pageFields,
                                                   Map<String, String> pageVar) {
@@ -970,15 +724,6 @@ public final class RoleElementStepGenerator {
         return null;
     }
 
-    /**
-     * 按页视图生成 Step 代码：每个被跟踪页面各生成一份“完整可编译”的 Step 类视图
-     * （类外壳 + 全部页字段声明 + 全部 import + 仅该页归属的 step/ops 方法）。
-     * 与 {@link #generateMulti} 区别：不合并成一个类，而是按页各出一份，用于面板“步骤代码”Tab 按页分栏对照
-     * （对齐“页面元素”Tab 按 pageClass 分栏的布局）。
-     * 单页场景即唯一一份完整类；多页场景主页视图含跨页 step（引用弹窗页字段），弹窗页视图含其 close 操作。
-     *
-     * @return 页面类名 → 该页视角的完整 Step 类源码（LinkedHashMap 保序）
-     */
     public static LinkedHashMap<String, String> generatePerPage(
             LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage,
             LinkedHashMap<String, List<RoleEntry>> entriesByPage,
@@ -987,16 +732,6 @@ public final class RoleElementStepGenerator {
         return generatePerPage(stepsByPage, entriesByPage, opsByPage, null, packageName, stepClassName);
     }
 
-    /**
-     * 同 {@link #generatePerPage(LinkedHashMap, LinkedHashMap, LinkedHashMap, String, String)}，
-     * 额外接受 {@link ViewNotes} 以在产物源码里注入两类注释：
-     * <ul>
-     *   <li>每个 {@code stepN} 前标注它是<b>面板第几个「封装为步骤」</b>（多页时与本页内的 stepN 编号不同）；
-     *       跨页 step 另列出其中属于其它页的元素页；</li>
-     *   <li>该页在生成前对账中被丢弃的已删除元素引用清单。</li>
-     * </ul>
-     * 纯注释，不影响方法名、注解与语句，因此不影响编译与运行。
-     */
     public static LinkedHashMap<String, String> generatePerPage(
             LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage,
             LinkedHashMap<String, List<RoleEntry>> entriesByPage,
@@ -1005,7 +740,7 @@ public final class RoleElementStepGenerator {
             String packageName, String stepClassName) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
         if (opsByPage == null) opsByPage = new LinkedHashMap<>();
-        // 收集全部涉及页面（同 generateMulti：字段来源 + 各 step 内 pick 归属页 + 关闭操作标记页）
+
         LinkedHashSet<String> allPages = new LinkedHashSet<>();
         allPages.addAll(entriesByPage.keySet());
         allPages.addAll(opsByPage.keySet());
@@ -1020,16 +755,12 @@ public final class RoleElementStepGenerator {
             }
         }
         if (allPages.isEmpty()) return out;
-        // 面板全局封装序号：页类名 → 该页各 step 的面板序号（与 stepsByPage 同序同长），仅供注释标注。
-        LinkedHashMap<String, List<Integer>> panelIdxByPage = (notes == null || notes.panelStepIndexByPage == null)
-                ? new LinkedHashMap<>() : notes.panelStepIndexByPage;
-        // 合并“仅含关闭操作”的 step 进上一个 step，保持单次封装/拾取 = 一个 step（关闭当前页内联其中）。
-        // 序号列表同步合并（被并走的序号一并丢弃），避免注释与最终 step 错位。
+
+
         for (Map.Entry<String, List<List<RoleEntry>>> en : stepsByPage.entrySet()) {
-            en.setValue(mergeCloseOnlySteps(en.getValue(), panelIdxByPage.get(en.getKey())));
+                en.setValue(mergeCloseOnlySteps(en.getValue()));
         }
 
-        // 字段声明 + 变量名（全页共享，保证每份视图可独立编译——引用其它页字段时声明已存在）
         Map<String, Map<String, String>> pageFields = new LinkedHashMap<>();
         Map<String, String> pageVar = new LinkedHashMap<>();
         StringBuilder fields = new StringBuilder();
@@ -1053,15 +784,13 @@ public final class RoleElementStepGenerator {
                     .append(" = PageObjectFactory.getPage(").append(className).append(".class);\n\n");
         }
 
-        // import（全页）
         StringBuilder imports = new StringBuilder("import net.serenitybdd.annotations.Step;\n"
                 + "import com.microsoft.playwright.Page;\n\n");
         for (String className : allPages) {
             imports.append("import ").append(packageName).append(".").append(className).append(";\n");
         }
         imports.append("import com.hsbc.cmb.hk.dbb.automation.framework.web.page.factory.PageObjectFactory;\n\n");
-        // 预计算：哪些页是弹窗的目标页（其关闭已内联到“打开弹窗的 step”里），
-        // 避免下方按页视图再生成独立的 close 方法（重复且独立方法拿不到新页面引用）。
+
         Set<String> inlinedTargetVars = new LinkedHashSet<>();
         for (List<List<RoleEntry>> steps : stepsByPage.values()) {
             if (steps == null) continue;
@@ -1077,24 +806,10 @@ public final class RoleElementStepGenerator {
             }
         }
 
-        // 【关键修复"跳转新页面后 step 类名沿用旧页面类名"】
-        // 旧实现：所有页面使用同一个 stepClassName（如 LogonSteps），跳转到新页面（如 SetupSecondPwdPage）
-        // 后步骤类名仍为 LogonSteps，导致两个页面的步骤类名相同。
-        // 修复：按 pageClass 派生出各自的步骤类名，如 LogonPage → LogonSteps、SetupSecondPwdPage → SetupSecondPwdSteps。
-        // 派生规则：pageClass 以 "Page" 结尾则去掉 "Page" 再拼 "Steps"，否则直接拼 "Steps"。
-        // 包装成函数，供每页视图生成时调用。
-        // 【临时保持按页派生】目标是把各页合并成单个固定名 SampleSteps（RolePickerConstants.STEP_CLASS_NAME），
-        // 但在 generatePerPage 改为"单类输出"之前，若此处直接用固定名会导致【每个页都生成同名类】
-        // （LogonPage/SetupSecondPwdPage/… 各一个 SampleSteps）⇒ 产物重名冲突。合并改造完成后启用：
-        //   java.util.function.Function<String, String> stepClassNameOf = (pc) -> RolePickerConstants.STEP_CLASS_NAME;
         java.util.function.Function<String, String> stepClassNameOf = (pc) -> {
             return pc.endsWith("Page") ? pc.substring(0, pc.length() - 4) + "Steps" : pc + "Steps";
         };
 
-        // 【合并为单个步骤类】用户要求：步骤类不再按页面/URL 派生，统一为固定名 SampleSteps，
-        // 各页面（含弹窗 / 新页面）的 step 全部落在【同一个类】里；页面类仍按页各自生成。
-        // 故类外壳只发一份，methods / stepIdx / npIdx 提到循环外，使 step 序号【跨页连续】
-        // （否则 logon 页有 step1、setup 页也有 step1，合并进同一类会方法重名）。
         String mergedStepClassName = RolePickerConstants.STEP_CLASS_NAME;
         String clsHeader = "package " + packageName + ".steps;\n\n" + imports
                 + "public class " + mergedStepClassName + " {\n\n" + fields;
@@ -1102,80 +817,65 @@ public final class RoleElementStepGenerator {
         int[] npIdx = {0};
         int stepIdx = 0;
         boolean any = false;
-        StringBuilder dropNotes = new StringBuilder();
         for (String pc : allPages) {
-            // 该页各 step 的面板全局封装序号（null = 调用方未提供，则不作任何标注）
-            List<Integer> panelNos = panelIdxByPage.get(pc);
+
             if (stepsByPage.containsKey(pc)) {
                 List<List<RoleEntry>> pageSteps = stepsByPage.get(pc);
                 for (int si = 0; si < pageSteps.size(); si++) {
                     List<RoleEntry> stepRaw = pageSteps.get(si);
-                    Integer panelNo = (panelNos != null && si < panelNos.size()) ? panelNos.get(si) : null;
-                    // 【关键修复"按全局序号顺序生成步骤（非按元素重复）"】
-                    // 旧实现按 e.getSeq() 排序，未展开 pickNos，导致同一元素有多个序号（如 [1,3,5]）时
-                    // 只生成一次操作，而非按序号逐次生成。
-                    // 正确行为：创建 (序号, 元素) 对列表，按序号全局排序，每个序号对应一次独立操作。
-                    // 例如：元素A=[1,3,5], 元素B=[2,4] → 生成顺序：A(1)→B(2)→A(3)→B(4)→A(5)
+
                     List<java.util.Map.Entry<Integer, RoleEntry>> seqEntries = new java.util.ArrayList<>();
                     for (RoleEntry e : stepRaw) {
                         if (e == null) continue;
                         if (e.isCloseOp()) {
-                            // closeOp 标记的元素用 seq 兜底（无 pickNos），排在最后
+
                             int seq = e.getSeq();
                             seqEntries.add(java.util.Map.entry(seq > 0 ? seq : Integer.MAX_VALUE, e));
                             continue;
                         }
-                        // 【按轮取号】优先用【本 step 自带的那轮号表】（step k 只认第 k 轮的序号），
-                        // 取不到再回退元素身上的 pickNos / committedPickNos。这样同一元素在
-                        // step1/step2 各按自己轮次的号展开，不会被后一轮覆盖。
+
                         java.util.Map<String, java.util.List<Integer>> curRoundNos =
                                 roundNosOfStep(notes, pc, si);
                         java.util.List<Integer> nos = nosInRound(e, curRoundNos);
                         if (nos != null && !nos.isEmpty()) {
-                            // 按 pickNos 中的每个序号展开，每个序号对应一次操作
+
                             for (int no : nos) {
                                 if (no > 0) {
                                     seqEntries.add(java.util.Map.entry(no, e));
                                 }
                             }
                         } else {
-                            // 无 pickNos 的元素用 seq 兜底，排在最后
+
                             int seq = e.getSeq();
                             seqEntries.add(java.util.Map.entry(seq > 0 ? seq : Integer.MAX_VALUE, e));
                         }
                     }
-                    // 按序号全局排序
+
                     seqEntries.sort(java.util.Comparator.comparingInt(java.util.Map.Entry<Integer, RoleEntry>::getKey));
-                    // 提取排序后的元素列表（每个序号生成一次操作）
+
                     List<RoleEntry> step = new java.util.ArrayList<>();
                     for (java.util.Map.Entry<Integer, RoleEntry> entry : seqEntries) {
                         step.add(entry.getValue());
                     }
                     stepIdx++;
                     any = true;
-                    appendPanelNoNote(methods, panelNo, stepIdx, step, pc);
+
                     methods.append("    @Step\n");
                     methods.append("    public void step").append(stepIdx).append("() {\n");
                     boolean sawPopup = false;
                     boolean renderedCloseOp = false;
-                    List<String> lastFp = null; // 上一个元素的 iframe 路径（主框架为 null/空）
-                    String popupTargetVar = null;   // 弹窗目标页对象变量：交由它接管并在其上 closeCurrentPage
-                    String activeVar = null;        // 当前激活页对象变量：用于跨页上下文自动切换检测（对齐 generateMulti）
+                    List<String> lastFp = null;
+                    String popupTargetVar = null;
+                    String activeVar = null;
                     if (step == null || step.isEmpty()) {
-                        methods.append("        // 该 step 未拾取任何元素\n");
+
                     } else {
                         for (RoleEntry e : step) {
                             String epc = (e.getPageClass() == null || e.getPageClass().isEmpty()) ? pc : e.getPageClass();
                             String var = pageVar.get(epc);
                             if (var == null) var = pageVar.get(pc);
                             if (var == null) continue;
-                            // 【修复"closeCurrentPage 顺序错位"】跨页上下文自动切换检测：
-                            // 维护当前激活页变量 activeVar。弹窗打开后 activeVar 指向新页(popupTargetVar)；
-                            // 当后续元素属于【打开页】(原页面)时，说明新页操作已结束、需切回原页才能操作其元素——
-                            // 此时先内联 closeCurrentPage 切回，再生成该元素操作（而非把 closeCurrentPage 推到 step
-                            // 末尾，否则原页元素会夹在新页上下文里导致顺序错乱/悬空）。
-                            // 此逻辑原先只在 generateMulti 中有，而 buildStepCode 实际调用的是 generatePerPage，
-                            // 导致该修复未生效——现补齐到生成主路径。
+
                             if (activeVar == null) {
                                 activeVar = var;
                             } else if (var != null && !activeVar.equals(var)) {
@@ -1189,79 +889,63 @@ public final class RoleElementStepGenerator {
                                 activeVar = var;
                             }
                             if (e.isCloseOp()) {
-                                // 关闭当前页（弹窗/新页）：在 step 序列中该关闭操作发生的位置内联渲染
-                                // closeCurrentPage，使“打开新页 -> 在新页操作 -> 关闭 -> 自动切回 active 父页”
-                                // 的顺序与用户实际操作一致（不再 defer 到 step 末尾，否则会把旧页元素夹在
-                                // 新页切换与关闭之间造成错位）。closeCurrentPage 的 onClose 会自动把 Page
-                                // 上下文切回打开它的父页（当前 active 页），故后续旧页元素无需再手写 switchToPage。
+
                                 String cv = (popupTargetVar != null) ? popupTargetVar : var;
                                 methods.append("        ").append(cv)
-                                        .append(".closeCurrentPage(); // 关闭当前页（弹窗/新页）并自动切回打开它的父页\n");
+                                        .append(".closeCurrentPage();\n");
                                 renderedCloseOp = true;
-                                lastFp = null; // 关闭弹窗回到父页，frame 栈与弹窗页不同，重置避免误切
+                                lastFp = null;
                                 continue;
                             }
                             Map<String, String> kf = pageFields.get(epc);
                             String field = (kf == null) ? null : kf.get(RoleElementPageGenerator.locatorKey(e));
                             if (field == null) continue;
-                            // iframe 上下文切换：若当前元素所在 iframe 链与上一个不同，先回主框架再逐层切入，
-                            // 生成独立的切换 step，保证元素操作落在正确的 frame 上下文。
+
                             List<String> fp = e.getFramePath();
                             if (!sameFramePath(fp, lastFp)) {
-                                // 最小化切换：仅当「目标在主框架」(fp 为空) 时才先退出到主框架；
-                                // 分叉到另一 iframe 时，PageObject.switchToFrame(name) 内部用 page.frame(name)
-                                // 全局精确查找，从任意当前上下文都能直接切到目标 frame，无需先回主框架，
-                                // 故省略多余的 switchToDefaultContent（避免来回穿插 iframe 时产生冗余切换）。
+
                                 boolean backToMain = (fp == null || fp.isEmpty());
                                 if (lastFp != null && backToMain) {
                                     methods.append("        ").append(var)
-                                            .append(".switchToDefaultContent(); // 退出当前 iframe，回到主框架\n");
+                                            .append(".switchToDefaultContent();\n");
                                 }
                                 if (fp != null) {
                                     for (String fsel : fp) {
                                         String name = frameNameOf(fsel);
                                         if (name != null) {
                                             methods.append("        ").append(var).append(".switchToFrame(\"")
-                                                    .append(escapeJavaString(name)).append("\"); // 切入 iframe: ").append(fsel).append("\n");
+                                                    .append(escapeJavaString(name)).append("\");\n");
                                         } else {
                                             methods.append("        ").append(var).append(".switchToFrame(\"")
-                                                    .append(escapeJavaString(fsel)).append("\"); // 切入 iframe (CSS)\n");
+                                                    .append(escapeJavaString(fsel)).append("\");\n");
                                         }
                                     }
                                 }
                                 lastFp = (fp == null) ? null : new ArrayList<>(fp);
                             }
                             String target = var + "." + field;
-                            // 一组元素 / 多匹配元素：下标优先取 RoleEntry.index；浏览器回传链路常把 index 丢成 -1，
-                            // 此时从浏览器固化签名 sigKey 末尾的 #N 还原（仅用于拼串，不写回 RoleEntry）。
-                            // 与 4 参 generate 的回退口径保持一致，避免"list 元素在 step 里退化成无下标重复 click()"。
+
                             int __ix = (e.getIndex() >= 0) ? e.getIndex()
                                     : RolePickerPickParser.parseIndexFromSig(e.getSigKey());
                             if (__ix >= 0) {
                                 if (e.isList()) target += ".get(" + __ix + ")";
                                 else if (e.getCount() > 1) target += ".nth(" + __ix + ")";
                             }
-                            // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
-                            // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
-                            // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的
-                            // acceptAlert(trigger)/dismissAlert(trigger) 正是"在触发动作内注册一次性监听"的语义，
-                            // 因此以独立 step 形式包裹触发动作（先注册监听再触发），而非裸点击。alert 默认 accept，
-                            // confirm/prompt 默认 dismiss。
+
                             String op = target + "." + operationFor(e);
-                            // 拖拽源：operationFor 返回 __DRAGTO__ 占位，展开为 dragTo(目标字段)（对齐 page.pause 的 source.dragTo）。
-                            // 目标元素定位签名在所有页字段中反查（支持跨页拖拽），拼成 <页变量>.<字段名>。
+
                             if (op.endsWith(".__DRAGTO__")) {
                                 String dstRef = findFieldRefAcrossPages(e.getDragDstKey(), pageFields, pageVar);
                                 op = target + ".dragTo(" + dstRef + ")";
                             } else if (e.getPressKey() != null) {
-                                // 键盘序列（对齐 page.pause 的 press("Enter")）：先 fill/click 基础动作，再 press 实质按键。
+
                                 op += ";\n        " + target + ".press(\"" + escapeJava(e.getPressKey()) + "\")";
                             }
                             if (e.isDialog()) {
                                 String dlgType = (e.getDialogType() == null) ? "alert" : e.getDialogType();
                                 String dlgMethod = "accept".equals(e.getDialogAction()) ? "acceptAlert" : "dismissAlert";
-                                // 独立 step：先注册对话框处理器，再触发点击（时序正确，不再被误读为“裸点击”）
-                                op = var + "." + dlgMethod + "(() -> " + op + ") // 处理 " + dlgType + " 弹窗\n        ";
+
+                                op = var + "." + dlgMethod + "(() -> " + op + ")\n        ";
                             }
                             if (e.isDownload()) {
                                 if (e.isPopup()) {
@@ -1276,13 +960,9 @@ public final class RoleElementStepGenerator {
                                 }
                             } else if (e.isPopup()) {
                                 sawPopup = true;
-                                lastFp = null; // 弹窗/新页在另一个 Page（frame 栈与当前页无关），重置避免误切 frame
+                                lastFp = null;
                                 String npVar = nextNewPageVar(npIdx);
-                                // 弹窗目标页（popupTarget）已推断出来时，由它来触发并接管新页，
-                                // 避免"openVar 先接管新页、再切给 popupTarget"造成的语义歧义与引用短暂错位
-                                //（生成：privacyAndSecurityPage.waitForNewPage(() ->
-                                // logonPage.privacyAndSecurityFooterLink.click())）。触发点击的元素仍属 openVar，
-                                // 故闭包内用 var + "." + op；waitForNewPage 的宿主用 popupTarget。
+
                                 String popupTarget = inferPopupTargetVar(step, var, pageVar, opsByPage);
                                 if (popupTarget != null) {
                                     methods.append("        Page ").append(npVar).append(" = ").append(popupTarget)
@@ -1300,9 +980,7 @@ public final class RoleElementStepGenerator {
                             }
                         }
                     }
-                    // 弹窗打开（sawPopup）：仅当内联 _closeOp 未渲染时才基于“打开页”统一补 closeCurrentPage，
-                    // 保证“打开弹窗→关闭弹窗”闭环生成（修复：onClose 未捕获关闭时关闭步骤丢失）；
-                    // 若已内联渲染则跳过，避免重复生成 closeCurrentPage。
+
                     if (sawPopup && popupTargetVar != null && !renderedCloseOp) {
                         methods.append("        ").append(popupTargetVar)
                                 .append(".closeCurrentPage();\n");
@@ -1315,47 +993,31 @@ public final class RoleElementStepGenerator {
                     if ("close".equals(op)) {
                         String var = pageVar.get(pc);
                         if (var == null) continue;
-                        // 该页是弹窗目标页：关闭已内联到“打开弹窗的 step”中（含 waitForNewPage 的宿主绑定），
-                        // 此处跳过独立方法，避免重复生成且独立方法拿不到弹窗引用。
+
                         if (inlinedTargetVars.contains(var)) continue;
                         any = true;
                         methods.append("    @Step\n");
                         methods.append("    public void close").append(pc).append("() {\n");
                         methods.append("        ").append(var)
-                                .append(".closeCurrentPage(); // 关闭当前页并自动切回打开它的父页\n");
+                                .append(".closeCurrentPage();\n");
                         methods.append("    }\n\n");
                     }
                 }
             }
-            if (notes != null && notes.droppedByPage != null) {
-                appendDroppedNote(dropNotes, notes.droppedByPage.get(pc));
-            }
         }
-        if (!any) methods.append("    // 暂无 step\n");
-        // 单类输出：所有页共用【同一份】SampleSteps 源码。
-        // 键仍按页面类保留（面板「步骤代码」Tab、既有消费方都按页键取值，故不改为类名键），
-        // 内容是合并后的单个步骤类 —— 每个页签看到的都是同一个 SampleSteps。
-        String merged = clsHeader + dropNotes + methods + "}\n";
+
+        String merged = clsHeader + methods + "}\n";
         for (String pc : allPages) out.put(pc, merged);
         if (allPages.isEmpty()) out.put(mergedStepClassName, merged);
         return out;
     }
 
-    /** 多页面生成（无页面级操作，向后兼容）。 */
     public static String generateMulti(LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage,
                                         LinkedHashMap<String, List<RoleEntry>> entriesByPage,
                                         String packageName, String stepClassName) {
         return generateMulti(stepsByPage, entriesByPage, new LinkedHashMap<>(), packageName, stepClassName);
     }
 
-    /**
-     * 推断弹窗打开后应由哪个 Page 对象接管（目标页变量）。
-     * <p>优先取 step 内弹窗 link 之后、归属页不同于打开页的首个元素所在页（跨页同 step 场景，
-     * 弹窗内继续拾取的元素即归属弹窗页）；否则取 {@code opsByPage} 中标记了 {@code close} 且与打开页不同的
-     * 首个页面（弹窗关闭 op 的 pageClass 即弹窗页，由 {@code onClose} 在弹窗关闭时按当前页写入）。
-     * <p>这样生成的代码会把新页面绑到目标页对象（如 {@code privacyAndSecurityPage}）并在其上关闭，
-     * 而非复用打开页（{@code loginPage}），对齐“弹窗落到独立页对象”的语义。
-     */
     private static String inferPopupTargetVar(List<RoleEntry> step, String openVar,
             Map<String, String> pageVar, LinkedHashMap<String, List<String>> opsByPage) {
         boolean sawPopup = false;
@@ -1364,7 +1026,7 @@ public final class RoleElementStepGenerator {
             for (RoleEntry e : step) {
                 if (e.isPopup()) { pastPopup = true; sawPopup = true; continue; }
                 if (pastPopup) {
-                    // 弹窗之后的元素（含关闭标记 _closeOp）归属页若与打开页不同，即弹窗目标页对象。
+
                     String pc = e.getPageClass();
                     if (pc != null && !pc.isEmpty()) {
                         String v = pageVar.get(pc);
@@ -1381,121 +1043,37 @@ public final class RoleElementStepGenerator {
                 }
             }
         }
-        // 【同页面类弹窗修复】window.open(同URL+'#popup') 弹出的仍是同一页面类（如 PickerComprehensivePage），
-        // 弹窗打开页与目标页是同一个 pageClass 变量，上方"归属页不同"分支无法识别。
-        // 但既然 step 内确实存在 popup 打开行为（sawPopup），其关闭已由 waitForNewPage 的打开页变量
-        // 在 step 末尾内联 closeCurrentPage()（生成器 sawPopup 分支），故把打开页变量本身作为目标，
-        // 使其被 inlinedTargetVars 收录，跳过独立的 closeXXX() 方法，避免重复关闭。
+
         if (sawPopup && openVar != null && !openVar.isEmpty()) return openVar;
         return null;
     }
 
-    /** 首字母小写（userName ← UserName），用于页面字段实例名。 */
     private static String decapitalize(String s) {
         if (s == null || s.isEmpty()) return s;
         return Character.toLowerCase(s.charAt(0)) + s.substring(1);
     }
 
-    /** 一个 step 是否“仅由关闭操作（_closeOp）构成”——这类 step 是“关闭当前页”的标记，不应单独成方法。 */
     private static boolean isCloseOnlyStep(List<RoleEntry> step) {
         if (step == null || step.isEmpty()) return false;
         for (RoleEntry e : step) if (!e.isCloseOp()) return false;
         return true;
     }
 
-    /**
-     * 把“仅含关闭操作”的 step 合并进【上一个 step】，使“开始→停止 / 封装为步骤”过程中
-     * 关闭当前页（含同标签整页跳转后直接关闭根页）仍落在同一个 @Step 方法内，不拆成多个 step。
-     * 合并后关闭操作按原 _pageClass 内联渲染（调用对应页对象的 closeCurrentPage()）。
-     * 若没有前置 step 可并入（极少见，如会话仅有关闭操作），则保留为独立 step。
-     */
     private static List<List<RoleEntry>> mergeCloseOnlySteps(List<List<RoleEntry>> steps) {
-        return mergeCloseOnlySteps(steps, null);
-    }
-
-    /**
-     * 同 {@link #mergeCloseOnlySteps(List)}，并同步维护与 steps 一一对应的面板全局序号列表
-     * （{@code panelIdx} 原地改写：被并走者的序号一并丢弃，并入后沿用目标 step 的序号），
-     * 使 {@link ViewNotes#panelStepIndexByPage} 在合并后仍与最终 step 序列严格对齐。
-     *
-     * @param panelIdx 可为 null（不维护序号）
-     */
-    private static List<List<RoleEntry>> mergeCloseOnlySteps(List<List<RoleEntry>> steps, List<Integer> panelIdx) {
         if (steps == null) return new ArrayList<>();
         List<List<RoleEntry>> out = new ArrayList<>();
-        List<Integer> outIdx = new ArrayList<>();
         List<RoleEntry> last = null;
-        for (int i = 0; i < steps.size(); i++) {
-            List<RoleEntry> st = steps.get(i);
+        for (List<RoleEntry> st : steps) {
             if (st == null) continue;
-            Integer no = (panelIdx != null && i < panelIdx.size()) ? panelIdx.get(i) : null;
             if (isCloseOnlyStep(st)) {
                 if (last != null) { last.addAll(st); continue; }
-                // 无前置 step 可并入：保留为独立 step
             }
             out.add(st);
-            outIdx.add(no);
             last = st;
-        }
-        if (panelIdx != null) {
-            panelIdx.clear();
-            panelIdx.addAll(outIdx);
         }
         return out;
     }
 
-    /**
-     * 在生成的 {@code stepN} 方法前插入一行注释，标注它在面板里的<b>全局</b>封装序号，以及本页视图内的
-     * <b>局部</b>编号（二者不同属正常：Java 方法名只在类内唯一，多页时每份按页视图必然从 1 重新计数）。
-     * 跨页 step 额外列出其中属于其它页的元素页，便于与「页面元素」Tab 对照。
-     *
-     * @param panelNo     面板全局序号（1 起）；null 或 ≤0 时不插入任何内容
-     * @param localStepIdx 本页视图内的编号（即方法名 stepN 的 N）
-     * @param step        该 step 的元素（已按 pickNos 展开排序）
-     * @param viewPage    当前按页视图的页面类名
-     */
-    private static void appendPanelNoNote(StringBuilder methods, Integer panelNo, int localStepIdx,
-                                         List<RoleEntry> step, String viewPage) {
-        if (panelNo == null || panelNo <= 0) return;
-        methods.append("    // 面板第 ").append(panelNo).append(" 个「封装为步骤」");
-        if (panelNo != localStepIdx) {
-            methods.append("（本页视图内为 step").append(localStepIdx).append("）");
-        }
-        LinkedHashSet<String> otherPages = new LinkedHashSet<>();
-        if (step != null) {
-            for (RoleEntry e : step) {
-                if (e == null) continue;
-                String p = e.getPageClass();
-                if (p != null && !p.isEmpty() && !p.equals(viewPage)) otherPages.add(p);
-            }
-        }
-        if (!otherPages.isEmpty()) {
-            methods.append("；含其它页元素：").append(String.join("/", otherPages));
-        }
-        methods.append("\n");
-    }
-
-    /**
-     * 生成前对账把"已删除元素的引用"（面板某条 step 里仍在、但 entries 中已不存在）从 step 中剔除时，
-     * 在产物类里留一行注释说明 —— 避免"面板上有、生成出来少一行"被误当作生成器 bug 排查。
-     * 无丢弃时不写任何内容。
-     */
-    private static void appendDroppedNote(StringBuilder sb, List<String> dropped) {
-        if (dropped == null || dropped.isEmpty()) return;
-        List<String> head = dropped.subList(0, Math.min(10, dropped.size()));
-        sb.append("    // 注意：生成前对账丢弃了 ").append(dropped.size())
-                .append(" 个已删除元素的引用（面板步骤里可能仍有该行，请重新拾取）：")
-                .append(String.join(", ", head));
-        if (dropped.size() > head.size()) sb.append(" …");
-        sb.append("\n\n");
-    }
-
-    /**
-     * 生成“新页面”变量名：首次为 {@code newPage}，其后 {@code newPage2 / newPage3 ...}。
-     * 供弹窗触发 {@code Page x = page.waitForNewPage(...)} 使用，使新页面可被引用、生成代码可读。
-     *
-     * @param idx 计数器（用 int[] 以便在循环内自增），idx[0] 为已生成个数
-     */
     private static String nextNewPageVar(int[] idx) {
         idx[0]++;
         return idx[0] == 1 ? "newPage" : "newPage" + idx[0];

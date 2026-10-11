@@ -179,8 +179,7 @@ public class RoleAssertCodeGenerationTest {
 
         assertTrue("应生成 assertStep1：" + src, src.contains("public void assertStep1()"));
         assertTrue("应生成 assertStep2：" + src, src.contains("public void assertStep2()"));
-        assertTrue("应标注面板全局封装序号（与步骤类同口径）：" + src,
-                src.contains("// 面板第 1 个「封装为步骤」") && src.contains("// 面板第 2 个「封装为步骤」"));
+        assertFalse("断言类产物不应含注释：" + src, src.contains("//"));
         int i1 = src.indexOf("public void assertStep1()");
         int i2 = src.indexOf("public void assertStep2()");
         assertTrue("assertStep1 应排在 assertStep2 之前", i1 > 0 && i1 < i2);
