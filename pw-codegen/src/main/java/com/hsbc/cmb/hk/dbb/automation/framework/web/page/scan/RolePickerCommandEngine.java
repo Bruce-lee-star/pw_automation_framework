@@ -269,12 +269,24 @@ public final class RolePickerCommandEngine {
                 String roundCls = (snap != null && snap.pageClass != null && !snap.pageClass.isEmpty())
                         ? snap.pageClass
                         : (ordered.get(0).getPageClass() != null ? ordered.get(0).getPageClass() : "");
-                java.util.List<StepRec> oneRound = new ArrayList<>();
-                oneRound.add(new StepRec(roundCls, ordered));
+                // 【本轮号表】必须在下方清空 pickNos 之前固化，并与 step 一并封存：
+                // 历史 step 的号不能依赖元素身上的 pickNos（每轮停止都会清）。
+                java.util.Map<String, java.util.List<Integer>> curNos = new java.util.LinkedHashMap<>();
+                for (RoleEntry e : ordered) {
+                    String k = RoleElementPageGenerator.groupIdentityOf(e);
+                    if (k == null || k.isEmpty()) continue;
+                    java.util.List<Integer> nos = e.getPickNos();
+                    if (nos != null && !nos.isEmpty()) curNos.put(k, new java.util.ArrayList<>(nos));
+                }
+                // 【追加而非替换】已封存的各轮 step 必须保留，否则第二轮会把第一轮的步骤整个覆盖掉
+                //（现场：第二轮停止后产物只剩 step2、step1 消失）。
+                java.util.List<StepRec> allRounds = new ArrayList<>();
+                if (ctx.sealedSteps != null) allRounds.addAll(ctx.sealedSteps);
+                allRounds.add(new StepRec(roundCls, ordered, curNos));
                 snap = new PickSnapshot(
                         (snap != null && snap.pageClass != null) ? snap.pageClass : "",
                         (snap != null && snap.entries != null) ? snap.entries : ordered,
-                        oneRound,
+                        allRounds,
                         (snap != null && snap.ops != null) ? snap.ops : new ArrayList<>());
             }
         } catch (Exception re) {
@@ -337,7 +349,10 @@ public final class RolePickerCommandEngine {
             stepsByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(st.picks);
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>());   // 保证 steps 的页在 entries 中也有类
             java.util.Map<String, java.util.List<Integer>> roundNos = new java.util.LinkedHashMap<>();
-            if (st.picks != null) {
+            if (st.roundNos != null && !st.roundNos.isEmpty()) {
+                // 已封存轮次：直接用它自带的那轮号表（元素身上的 pickNos 早被清空了）
+                roundNos.putAll(st.roundNos);
+            } else if (st.picks != null) {
                 for (RoleEntry e : st.picks) {
                     if (e == null) continue;
                     String k = RoleElementPageGenerator.groupIdentityOf(e);

@@ -328,8 +328,14 @@ public final class RolePickerPanelController {
                     // 多实例：把"合并后的全部页面代码"填充到每一个被跟踪页面的面板，
                     // 避免只在当前页（如新页）显示、而默认页面板留空（之前"默认页没生成代码"的根因）。
                     for (Page p : pageNames.keySet()) {
-                        if (!p.isClosed()) {
-                            fillCode(p, r.pageClassByPage, r.stepByPage, r.assertByPage, r.statusMsg);
+                        if (p != null && !p.isClosed()) {
+                            // 【逐页容错】任一页处于跳转 / 跨域瞬态失败时不得影响其它页回填（与即时生成同处理）。
+                            try {
+                                fillCode(p, r.pageClassByPage, r.stepByPage, r.assertByPage, r.statusMsg);
+                            } catch (Exception pEx) {
+                                log.debug("[picker] result fill skipped on a transient page: {}", pEx.getMessage());
+                                RolePickerQuiet.ignore("RolePickerPanelController#resultFill", pEx);
+                            }
                             // 封装为步骤后：在当前命令页精准跳转到目标 step（切步骤 Tab + 激活子 Tab + 选中高亮）；
                             // 仅命令页执行，避免多页都跳；window.__pendingJump 未设置时 __afterFillJump 直接返回。
                             if (p.equals(page)) {
@@ -516,14 +522,23 @@ public final class RolePickerPanelController {
                     LinkedHashMap<String, String> autoAssert = RolePickerCodeAssembler.buildAssertCode(autoSnap, packageName);
                     if (!autoPage.isEmpty() || !autoStep.isEmpty()) {
                         for (Page pg : pageNames.keySet()) {
-                            if (!pg.isClosed()) {
+                            if (pg == null || pg.isClosed()) continue;
+                            // 【逐页容错】旧实现任一页失败即整体中止 ⇒ 弹窗页 / 跨域 iframe 页处于跳转
+                            // 瞬态时（现场：13:20:19 弹窗正在导航）会把"当前页"的代码回填一起带没，
+                            // 表现为"勾选后列表/代码没有即时刷新"。每页独立失败、互不影响。
+                            try {
                                 // 【必须用短超时】这是"边拾边生成"的回填：每轮可重做、失败无害。实测一次
                                 // auto-generate 的 evaluate 超时 30s，就把整轮页类刷新/计数器垫高/监听重挂
                                 // 一起卡住（用户表现：返回上一页后元素恢复慢、序号又从 1 起、元素归到上一页）。
                                 fillCode(pg, autoPage, autoStep, autoAssert, "(picking) auto-generated " + autoSnap.steps.size() + " step(s), " + autoSnap.entries.size() + " field(s)", true);
-                                try { pickerEvalSoft(pg, RolePickerScripts.SET_AUTO_STEP_COUNT_JS,
-                                    RolePickerScripts.args(RolePickerConstants.STATE_KEY_AUTO_STEP_COUNT, autoSnap.steps.size())); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+                            } catch (Exception pgEx) {
+                                log.debug("[picker] auto-generate fill skipped on a transient page: {}", pgEx.getMessage());
+                                RolePickerQuiet.ignore("RolePickerPanelController#autoFill", pgEx);
                             }
+                            try {
+                                pickerEvalSoft(pg, RolePickerScripts.SET_AUTO_STEP_COUNT_JS,
+                                    RolePickerScripts.args(RolePickerConstants.STATE_KEY_AUTO_STEP_COUNT, autoSnap.steps.size()));
+                            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
                         }
                     }
                 } catch (Exception autoEx) {
@@ -625,7 +640,11 @@ public final class RolePickerPanelController {
 
     static void registerPopupFollow(RolePickerContext ctx, Page page, Page parent) {
         // 【一次注册】见 PAGE_LISTENERS_HOOKED 的说明：同一 page 重复登记会让所有事件处理翻倍。
-        if (page != null && !PAGE_LISTENERS_HOOKED.add(page)) {
+        // 防御（spotbugs NP_NULL_ON_SOME_PATH）：空 page 直接忽略（原来会在下方 page.onPopup NPE）。
+        if (page == null) {
+            return;
+        }
+        if (!PAGE_LISTENERS_HOOKED.add(page)) {
             log.debug("[picker] page listeners already registered; skipping duplicate registration: {}", page.url());
             return;
         }
