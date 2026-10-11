@@ -49,6 +49,18 @@ final class RolePickerPickParser {
      *   表现为"data-i18n 元素删了又复活"。改用去索引 locatorKey 后，删除 key 稳定，必能命中。
      * - 其余（role/closeOp）仍按页面作用域键（_sigKey，含 pageClass、不含 index）区分，保留原行为。
      */
+    /** 该拾取所属定位器在页面上匹配到的元素总数（count>1 表示该定位器命中一组元素）。 */
+    private static int countOfPick(Map<Object, Object> m, RoleEntry e) {
+        if (e != null && e.getCount() > 1) return e.getCount();
+        return parseCount((m == null) ? null : m.get("count"));
+    }
+
+    /** 该拾取在所属定位器匹配集中的序号（nth；-1 表示未固化）。 */
+    private static int indexOfPick(Map<Object, Object> m, RoleEntry e) {
+        if (e != null && e.getIndex() >= 0) return e.getIndex();
+        return parseIndex((m == null) ? null : m.get("index"));
+    }
+
     static String pickDedupKey(Map<Object, Object> m, RoleEntry e) {
         if (m == null) return "";
         Object sig = m.get("_sig");
@@ -78,7 +90,11 @@ final class RolePickerPickParser {
                         // 页面上同 role+name 可以有多个不同元素（现场：3 个 QR 图 #3 / #4 / #5）。
                         // 无条件剥索引会把它们塌成同一条 entry —— 用户只看到一个元素，
                         // 三个序号却堆在同一 entry 上（pickNos=[16,17,18]）。
-                        if (locatorIdentity) s0 = s0.replaceAll("#\\d+$", "");
+                        // 【count>1 不剥 #index】locator 匹配到多个元素时 #index 就是 nth 序号
+                        //（page.pause 语义），是区分不同元素的关键；剥掉会把一组元素塌成同一条 entry，
+                        // 序号全堆在同一条上 ⇒ 生成出多行一模一样的 click()。仅"唯一匹配"时才剥
+                        //（彼时 index 会随区域重扫重新分配，带着它反而让删除命中失败）。
+                        if (locatorIdentity && countOfPick(m, e) <= 1) s0 = s0.replaceAll("#\\d+$", "");
                         sigKey = s1 + "|" + s0;
                     }
                 }
@@ -97,7 +113,13 @@ final class RolePickerPickParser {
         String dedupKey;
         if (locatorIdentity) {
             String lk = RoleElementPageGenerator.locatorKey(e);
-            if (lk != null && !lk.isEmpty()) { dedupKey = pc + "|" + lk; log.debug("[picker][diag-dedup] strategy={} branch=locatorIdentity key={} _sigKey(raw)={}", strategy, dedupKey, sigKeyRaw); return dedupKey; }
+            if (lk != null && !lk.isEmpty()) {
+                // 同上：locator 匹配多个元素（count>1）时把 nth 序号并入键，避免一组元素塌成一条。
+                int cnt = countOfPick(m, e);
+                int idx = indexOfPick(m, e);
+                if (cnt > 1 && idx >= 0) lk = lk + "#" + idx;
+                dedupKey = pc + "|" + lk; log.debug("[picker][diag-dedup] strategy={} branch=locatorIdentity key={} _sigKey(raw)={}", strategy, dedupKey, sigKeyRaw); return dedupKey;
+            }
         }
         // role/closeOp 分支：_sigKey 已内嵌 pageClass（JSON.stringify([_sig, pageClass])），
         // 与浏览器 __rolePicks 的 _sigKey 同构，删除/本地过滤均可精确命中，保持原行为。
@@ -339,6 +361,10 @@ final class RolePickerPickParser {
         RoleElement.State disabled = toState(asString(m.get("disabled")));
         RoleElement.State pressed = toState(asString(m.get("pressed")));
         RoleElement.State expanded = toState(asString(m.get("expanded")));
+        // 注意：此处【不】从签名回填 index。index 参与 .nth()/.get() 等多处生成判定，
+        // 擅自把它从 -1 变成 0（大量签名形如 ...#0）会改变既有元素的产物形态。
+        // 成组判定需要的序号由 RoleElementPageGenerator#listGroupBaseSigs 用
+        // parseIndexFromSig 单独取（只影响"是否成组"，不影响其它生成逻辑）。
         int index = parseIndex(m.get("index"));
         int level = parseLevel(m.get("level"));
         // 浏览器端固化的元素永久身份键：所有入站链路（exposeBinding 回传 / console 兜底 / 快照读取）
@@ -473,6 +499,35 @@ final class RolePickerPickParser {
         try {
             int i = (v instanceof Number) ? ((Number) v).intValue() : Integer.parseInt(v.toString().trim());
             return i >= 0 ? i : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * 从浏览器固化的签名里还原 nth 序号：签名形如 {@code role:img:QR code to download the mobile app#3}
+     * 或 JSON 数组形式 {@code ["role:img:...#3","SetupSecondPwdPage"]}。
+     *
+     * @return 序号（0 基）；签名无 {@code #N} 后缀时返回 -1（表示"未固化 / 唯一匹配"）
+     */
+    static int parseIndexFromSig(String sig) {
+        if (sig == null || sig.isEmpty()) return -1;
+        String s = sig.trim();
+        // 兼容 JSON 数组形式：取第一个字符串元素
+        if (s.startsWith("[")) {
+            try {
+                java.util.List<?> arr = GSON.fromJson(s, java.util.List.class);
+                if (arr != null && !arr.isEmpty()) s = String.valueOf(arr.get(0));
+            } catch (Exception ignore) { /* 保留原值 */ }
+        }
+        int h = s.lastIndexOf('#');
+        if (h <= 0 || h >= s.length() - 1) return -1;
+        for (int i = h + 1; i < s.length(); i++) {
+            if (!Character.isDigit(s.charAt(i))) return -1;
+        }
+        try {
+            int v = Integer.parseInt(s.substring(h + 1));
+            return v >= 0 ? v : -1;
         } catch (NumberFormatException e) {
             return -1;
         }

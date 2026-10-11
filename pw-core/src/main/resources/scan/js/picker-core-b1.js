@@ -471,6 +471,35 @@
               }
 
 
+              /**
+               * 元素是否在【可访问性树】中 —— 用于把 JS 侧定位器匹配口径对齐 Playwright 的 getByRole()。
+               *
+               * 背景（根因）：Playwright 的 getByRole() 基于可访问性树匹配，会排除 display:none /
+               * visibility:hidden / hidden 及不可见祖先；而旧实现只排除 aria-hidden="true"。于是 JS 侧
+               * 匹配集【大于】运行期集合 —— 典型场景是响应式页面的"桌面版 + 移动版"双份 DOM，隐藏副本
+               * 也被算进来。后果：pick.index（作为 nth 序号）与运行期 locator.nth(index) 指向的不是
+               * 同一个元素，甚至越界（现场：页面只有 3 个可见 QR 图，却得到 #3/#4/#5）。
+               *
+               * 保守策略：取不到样式（跨源 frame 等）时返回 true，宁可多留也不误杀。
+               */
+              var __inAccessibilityTree = function(el) {
+                try {
+                  if (!el || el.nodeType !== 1) return false;
+                  var node = el;
+                  while (node && node.nodeType === 1) {
+                    if (node.hasAttribute && node.hasAttribute('hidden')) return false;
+                    if (node.tagName === 'INPUT' && node.type === 'hidden') return false;
+                    var cs = null;
+                    try { cs = window.getComputedStyle(node); } catch (e1) { return true; }
+                    if (cs) {
+                      if (cs.display === 'none') return false;
+                      if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+                    }
+                    node = node.parentElement;
+                  }
+                  return true;
+                } catch (e) { return true; }
+              };
               var __rawMatchingElements = function(pick) {
 
 
@@ -502,6 +531,10 @@
 
 
                     if (closestSafe(x, '[aria-hidden="true"]')) continue;   // 对齐 getByRole 默认排除 aria-hidden
+                    // 【对齐 getByRole：只保留"在可访问性树中"的节点】使 JS 侧匹配集与运行期
+                    // locator 的集合一致 ⇒ index（nth 序号）与 count 才可信（见 __inAccessibilityTree 说明）。
+                    // 只作用于 role 策略：text/i18n 等策略的定位器运行期本就匹配隐藏节点，口径不变。
+                    if (!__inAccessibilityTree(x)) continue;
 
 
                     var nm = __normSafe(getNameInfo(x).name);

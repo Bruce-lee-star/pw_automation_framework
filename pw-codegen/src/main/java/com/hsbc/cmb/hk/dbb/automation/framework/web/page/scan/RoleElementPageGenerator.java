@@ -151,6 +151,11 @@ public final class RoleElementPageGenerator {
      * 「我没传 nls file，元素定位不应该有 key=」）。
      */
     public static List<GeneratedField> assignFields(List<RoleEntry> entries, boolean allowKey) {
+        // 【一组元素识别】先按"同签名 + 不同 index"把成组的拾取标记为 list —— 否则它们会共用同一个
+        // 字段名、各自又带不出 index，产物就退化成多行一模一样的 click()（现场：3 个 QR 图 →
+        // 3 行 setupSecondPwdPage.qrCodeToDownloadTheMobileApp.click()）。标记后由下方
+        // seenLocators 去重合成【一个】PageElementList 字段，步骤侧用 x.get(index) 取单项。
+        markListGroups(entries);
         List<GeneratedField> specs = new ArrayList<>();
         Set<String> usedNames = new HashSet<>();
         Set<String> seenLocators = new HashSet<>();
@@ -169,6 +174,104 @@ public final class RoleElementPageGenerator {
             specs.add(makeField(e, specs.size(), usedNames, allowKey));
         }
         return specs;
+    }
+
+    /**
+     * 【一组元素（list）识别】同一个定位器签名（去掉 {@code #index} 后缀后相同）且落在【不同 index】上的
+     * 多个拾取，语义上就是"该定位器匹配到的一组元素里取了多个"。
+     *
+     * <p>这类必须生成 {@code PageElementList} 字段并用 {@code x.get(index)} 取单项（语义等价 page.pause
+     * 的 {@code locator.nth(index)}）；否则多个条目共用同一字段名、各自的 index 又带不出来，产物退化为
+     * "多行一模一样的 click()" —— 现场：3 个 QR 图生成了
+     * 3 行 {@code setupSecondPwdPage.qrCodeToDownloadTheMobileApp.click()}。
+     *
+     * <p>判定要点：以【不同 index 的个数】为准，故"同一个元素被重复点击"（index 相同）不会误成组；
+     * 组内 index 必须都 {@code >= 0}（无序号的同签名条目不是"一组"，而是重复条目）。
+     *
+     * @return 应成组的「基础签名」集合
+     */
+    public static java.util.Set<String> listGroupBaseSigs(java.util.Collection<RoleEntry> entries) {
+        java.util.Set<String> bases = new java.util.HashSet<>();
+        if (entries == null || entries.isEmpty()) return bases;
+        java.util.Map<String, java.util.Set<Integer>> idxByBase = new java.util.LinkedHashMap<>();
+        for (RoleEntry e : entries) {
+            if (e == null) continue;
+            String id = groupIdentityOf(e);
+            if (id == null || id.isEmpty()) continue;
+            java.util.Set<Integer> s = idxByBase.get(id);
+            if (s == null) { s = new java.util.LinkedHashSet<>(); idxByBase.put(id, s); }
+            // 序号优先取 RoleEntry.index；回传链路常丢 index（现场全量条目 index=-1），
+            // 此时从浏览器固化签名末尾的 #N 还原（仅用于"是否成组"判定，不写回 RoleEntry）。
+            int ix = e.getIndex();
+            if (ix < 0) ix = RolePickerPickParser.parseIndexFromSig(e.getSigKey());
+            s.add(ix);
+        }
+        for (java.util.Map.Entry<String, java.util.Set<Integer>> en : idxByBase.entrySet()) {
+            java.util.Set<Integer> idxs = en.getValue();
+            if (idxs.size() < 2) continue;                 // 同一元素被重复点击 → 不成组
+            boolean usable = true;
+            for (Integer i : idxs) { if (i == null || i < 0) { usable = false; break; } }
+            if (usable) bases.add(en.getKey());
+        }
+        return bases;
+    }
+
+    /** 去掉签名末尾的 {@code #<数字>}（元素在"一组匹配"中的序号），得到「定位器级」的基础签名。 */
+    public static String baseSigOf(String sigKey) {
+        if (sigKey == null) return "";
+        String sigKeyTrim = sigKey.trim();
+        // 【兼容 JSON 数组形式】浏览器固化的 _sigKey 常是 JSON.stringify([_sig, pageClass])，
+        // 形如 ["role:img:QR code...#3","SetupSecondPwdPage"] —— 它以 "]" 结尾，直接找末尾 #N
+        // 会找不到 ⇒ 三个 QR（#3/#4/#5）被当成三个不同身份，一组元素永远不成组。先取数组首元素。
+        if (sigKeyTrim.startsWith("[")) {
+            try {
+                java.util.List<?> arr = RolePickerPickParser.GSON.fromJson(sigKeyTrim, java.util.List.class);
+                if (arr != null && !arr.isEmpty()) sigKeyTrim = String.valueOf(arr.get(0));
+            } catch (Exception ignore) { /* 保留原值 */ }
+        }
+        int h = sigKeyTrim.lastIndexOf('#');
+        if (h > 0 && h < sigKeyTrim.length() - 1) {
+            boolean digits = true;
+            for (int i = h + 1; i < sigKeyTrim.length(); i++) {
+                if (!Character.isDigit(sigKeyTrim.charAt(i))) { digits = false; break; }
+            }
+            if (digits) return sigKeyTrim.substring(0, h);
+        }
+        return sigKeyTrim;
+    }
+
+    /**
+     * 「分组身份」：判断多个拾取是否会落到【同一个字段】。
+     *
+     * <p>优先用 {@code sigKey}（浏览器固化、含 {@code #index}，取其去索引后的基础签名）；缺失时回退
+     * {@link #locatorKey(RoleEntry)} —— 后者正是 {@link #assignFields} 做字段去重的口径，
+     * 因此"会共用一个字段"的判定与实际建字段的口径完全一致。
+     *
+     * <p>【为何不能只认 sigKey】快照链路里的 pick 未必携带 {@code _sigKey}（现场：QR 三条成组不生效，
+     * 就是因为拿不到 sigKey 而整组被跳过）。
+     */
+    public static String groupIdentityOf(RoleEntry e) {
+        if (e == null) return "";
+        String sk = e.getSigKey();
+        if (sk != null && !sk.isEmpty()) return baseSigOf(sk);
+        String lk = locatorKey(e);
+        return (lk == null) ? "" : lk;
+    }
+
+    /** 把分组身份属于 {@code bases} 的拾取标记为「一组元素」（list=true）。 */
+    public static void markListGroups(java.util.Collection<RoleEntry> entries, java.util.Set<String> bases) {
+        if (entries == null || bases == null || bases.isEmpty()) return;
+        for (RoleEntry e : entries) {
+            if (e == null) continue;
+            String id = groupIdentityOf(e);
+            if (id == null || id.isEmpty()) continue;
+            if (bases.contains(id)) e.setList(true);
+        }
+    }
+
+    /** 自足版：仅在 {@code entries} 自身范围内识别并标记（供单一入口使用）。 */
+    public static void markListGroups(java.util.Collection<RoleEntry> entries) {
+        markListGroups(entries, listGroupBaseSigs(entries));
     }
 
     /** 计算单个元素的字段名 + 注解（与 appendField/appendRoleField/appendSelectorField 旧逻辑一致，仅改为返回结构化结果）。 */
