@@ -414,11 +414,15 @@
                 try { if (typeof window.__sigKey === 'function') inp._sigKey = window.__sigKey(inp); } catch (_) {}
                 try { if (window.__renderPicks) window.__renderPicks(); } catch (_) {}
               };
-              // 对齐 page.pause() 的键盘可达性：Tab 聚焦到元素后（focusin），在拾取/hover 模式下
-              // 记录一次"键盘拾取"，使纯键盘可达、hover 不出现的元素也能被捕获（如 hover 才显形/被遮挡的控件）。
-              // focusin 拾取（原仅扫描模式使用）已随扫描机制移除：手动态不通过 focusin 记录，
-              // 避免输入框获得焦点即逐次回传；保留空实现以兼容 picker-stop 的 removeEventListener 引用。
-              window.__rolePickFocus = function() {};
+              // 对齐 page.pause()：focusin 时记录一次键盘拾取，使纯键盘可达、hover 不出现的元素也能被捕获。
+              window.__rolePickFocus = function(event) {
+                if (!window.__rolePickEnsureManual()) return;
+                var t = (typeof event.composedPath === 'function' && event.composedPath().length)
+                  ? event.composedPath()[0] : (event.target || null);
+                if (!t || !t.tagName) return;
+                if (t.closest && t.closest('#__rolePanel, #__roleCodeOverlay')) return;
+                window.__recordPick(t, false);
+              };
               // 滚动时重定位 hover 高亮框（__hoverBox 为 position:fixed，否则滚动后高亮框会漂移残留）。
               window.__rolePickScroll = function() {
                 try { if (window.__lastHoverTarget) __showHoverBox(window.__lastHoverTarget); } catch (e) {}

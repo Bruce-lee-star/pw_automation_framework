@@ -88,7 +88,8 @@ public class MonitorFailureSectionTemplateTest {
         assertTrue("should contain summary row", html.contains("<summary>"));
         assertTrue("should contain deduped failure count", html.contains("3x"));
         assertTrue("should contain both deduped URLs", html.contains("api/v1/transfer?retry=1"));
-        assertTrue("should contain nested request/response details", html.contains("Request / response details"));
+        assertTrue("should contain request/response body details",
+                html.contains("Request body") && html.contains("Response body"));
         assertTrue("should contain response body", html.contains("{\"error\":\"internal\"}"));
         assertTrue("should contain scenario names", html.contains("Scenario A"));
         assertTrue("should contain data-loss warning title", html.contains("Data integrity warning"));

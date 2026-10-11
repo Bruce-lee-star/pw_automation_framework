@@ -124,10 +124,16 @@ public final class RoleElementPageGenerator {
         public final String fieldName;
         public final String annotation;
         public final RoleEntry entry;
+        /** P2：CJK 元素名自动翻译为字段名时，在产物里留一行 TODO 注释提醒人工复核（可空）。 */
+        public final String comment;
         public GeneratedField(String fieldName, String annotation, RoleEntry entry) {
+            this(fieldName, annotation, entry, null);
+        }
+        public GeneratedField(String fieldName, String annotation, RoleEntry entry, String comment) {
             this.fieldName = fieldName;
             this.annotation = annotation;
             this.entry = entry;
+            this.comment = comment;
         }
     }
 
@@ -302,7 +308,11 @@ public final class RoleElementPageGenerator {
             if (e.getExpanded() != null) ann.append(", expanded = RoleElement.State.").append(e.getExpanded().name());
             appendFrame(ann, e);
             ann.append(")");
-            return new GeneratedField(field, ann.toString(), e);
+            // P2：未命中 NLS key 且元素名含 CJK 时，字段名是拼音自动翻译结果，留 TODO 提醒人工复核。
+            String cjkComment = (!matched && containsCjk(name))
+                ? "    // TODO(review): field name auto-translated from CJK text \"" + escapeJava(name) + "\" — rename for clarity\n"
+                : null;
+            return new GeneratedField(field, ann.toString(), e, cjkComment);
         }
         String strategy = e.getStrategy();
         String resolvedKey = e.getResolvedKey();
@@ -350,7 +360,10 @@ public final class RoleElementPageGenerator {
                 break;
             }
         }
-        return new GeneratedField(field, annotation, e);
+        String cjkComment2 = (!matched && containsCjk(base))
+            ? "    // TODO(review): field name auto-translated from CJK text \"" + escapeJava(base) + "\" — rename for clarity\n"
+            : null;
+        return new GeneratedField(field, annotation, e, cjkComment2);
     }
 
     /**
@@ -538,11 +551,12 @@ public final class RoleElementPageGenerator {
             }
             // 【列表字段】被标记为「一组元素」的拾取生成 {@code PageElementList} 字段（一个定位器表达整组，
             // 业务 {@code x.get(i)} 取单项，语义等价 page.pause 的 locator.nth(i)）；否则仍是单个 {@code PageElement}。
+            String prefix = (s.comment != null) ? s.comment : "";
             if (e.isList()) {
                 hasList = true;
-                fields.append(s.annotation).append("\n    public PageElementList ").append(s.fieldName).append(";\n\n");
+                fields.append(prefix).append(s.annotation).append("\n    public PageElementList ").append(s.fieldName).append(";\n\n");
             } else {
-                fields.append(s.annotation).append("\n    public PageElement ").append(s.fieldName).append(";\n\n");
+                fields.append(prefix).append(s.annotation).append("\n    public PageElement ").append(s.fieldName).append(";\n\n");
             }
         }
 

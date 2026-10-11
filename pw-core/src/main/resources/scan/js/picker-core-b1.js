@@ -555,6 +555,12 @@
                     var nm = __normSafe(getNameInfo(x).name);
 
 
+                    // roleWithoutName 模式（pick.name 为空）：按 role 粗匹配，不要求可访问名——
+                    // 否则 <img> 无 alt、<div role="listitem"> 无文本这类元素永远解析不到，
+                    // P0-1 选优循环会把 role:img(510) 丢弃，退化为 css(900)。
+                    if (!pick.name) { out.push(x); continue; }
+
+
                     if (!nm) continue;
 
 
@@ -576,13 +582,21 @@
                   var t2 = __normSafe(pick.name);
 
 
+
+                  var exactText = !pick.cleaned;   // exact=!cleaned，与 done()/生成端一致
+
+
                   for (i = 0; i < all.length; i++) {
 
 
                     x = all[i];
 
 
-                    if (__normSafe(x.textContent) !== t2) continue;
+                    var xn = __normSafe(x.textContent);
+
+
+
+                    if (exactText ? xn !== t2 : xn.indexOf(t2) === -1) continue;
 
 
                     var childMatch = false;   // 仅保留最内层匹配，贴近 getByText 行为
@@ -591,7 +605,11 @@
                     for (var c = 0; c < x.children.length; c++) {
 
 
-                      if (__normSafe(x.children[c].textContent) === t2) { childMatch = true; break; }
+                      var cn = __normSafe(x.children[c].textContent);
+
+
+
+                      if (exactText ? cn === t2 : cn.indexOf(t2) !== -1) { childMatch = true; break; }
 
 
                     }
@@ -638,9 +656,12 @@
 
                   for (i = 0; i < nodes.length; i++) {
 
-
-                    if ((nodes[i].getAttribute(attr) || '').trim() === want) out.push(nodes[i]);
-
+                    var av = (nodes[i].getAttribute(attr) || '').trim();
+                    // exact=true 走全等；默认 substring 包含匹配（对齐官方非 exact 档）。
+                    // 关键：必须过滤隐藏元素，否则 DOM 里 display:none 的同 alt img 会被计入，
+                    // 导致"看似唯一"的 altText 变成 match=6，被 cssPath 唯一匹配抢走。
+                    var matched = pick.exact ? av === want : av.indexOf(want) >= 0;
+                    if (matched && __isVisibleForText(nodes[i])) out.push(nodes[i]);
 
                   }
 
@@ -666,7 +687,14 @@
                     var lbls = forms[i].labels;
 
 
-                    if (lbls && lbls.length && __normSafe(lbls[0].textContent).indexOf(t3) !== -1) out.push(forms[i]);
+                    if (!lbls || !lbls.length) continue;
+                    var lblMatched = false;
+                    for (var li = 0; li < lbls.length; li++) {
+                      var ln = __normSafe(lbls[li].textContent);
+                      var exactLabel = !pick.cleaned;
+                      if (exactLabel ? ln === t3 : ln.indexOf(t3) !== -1) { lblMatched = true; break; }
+                    }
+                    if (lblMatched) out.push(forms[i]);
 
 
                   }
@@ -1396,6 +1424,12 @@
                   o.tag = tag;
 
 
+                  // P1-4 upload：input[type=file] 打标，Java 侧据此生成 setInputFiles("<path>")。
+                  try {
+                    if (tag === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'file') o.fileInput = true;
+                  } catch (e) {}
+
+
                   o.text = ownVisibleText(el).slice(0, 120);
 
 
@@ -1515,12 +1549,8 @@
 
                   if (!tv || !tv.trim()) continue;
 
-                  // Same testid value on MULTIPLE elements => ambiguous. Drop testid and
-
-                  // fall through to role strategy (more stable per user request),
-
-                  // instead of emitting nth(index) like page.pause does by default.
-
+                  // Same testid value on MULTIPLE elements => 标记为 list（PageElementList），
+                  // 步骤代码用下标访问；不再丢弃 testid 降级到 role。
                   var __same = 0;
 
                   try {
@@ -1533,11 +1563,58 @@
 
                   } catch (e) { __same = 1; }
 
-                  if (__same <= 1) { __testidPick = { strategy:'testid', attr:testAttrs[i], value:tv.trim(), name:tv.trim() }; break; }
+                  __testidPick = { strategy:'testid', attr:testAttrs[i], value:tv.trim(), name:tv.trim(), list: __same > 1 };
+                  break;
 
                 }
 
                 if (__testidPick) cands.push({score:1, pick:__testidPick});
+
+                // ── 表内相对定位：tbody 的 td/tr（数据单元格/行）一律走 table 锚定的 CSS + nth-of-type 下标 ──
+                // 适用：纯文本/数据单元格与行——其内容（可见名）随时变化，role+name 不稳定，故改用相对表的位置定位：
+                //      表锚点 tbody:nth-of-type(tb) tr:nth-of-type(r) [> td:nth-of-type(c)]，row/col 均相对表，满足"一组 + 下标"遍历诉求。
+                // 不适用（交还下方通用流程 + 框架 PageElementList 分组）：单元格内的 IMG/LINK/BUTTON 等"有语义角色"的元素——
+                //      统一走 Role/altText 定位；同签名多个时框架自动归并为 PageElementList，业务用 x.get(i) 按下标操作。
+                //      这样 IMG/LINK 用语义 Role、纯文本 cell 用表内相对，各得其所（th 仍走 role=columnheader/rowheader）。
+                // 仅当单元格自身带 testid 时让位给 testid（更稳）。
+                if ((tag === 'td' || tag === 'tr') && el.closest && el.closest('tbody')) {
+                  var __ownTid = null;
+                  for (var __ti = 0; __ti < testAttrs.length; __ti++) {
+                    var __tv = el.getAttribute(testAttrs[__ti]);
+                    if (__tv && __tv.trim()) { __ownTid = __tv.trim(); break; }
+                  }
+                  if (!__ownTid) {
+                    var __tb = el.closest('tbody');
+                    var __tbl = el.closest('table');
+                    var __tr = (tag === 'tr') ? el : el.closest('tr');
+                    if (__tbl && __tr) {
+                      var __tbs = __tbl.querySelectorAll(':scope > tbody');
+                      var __tbIdx = 0;
+                      for (var __k = 0; __k < __tbs.length; __k++) { if (__tbs[__k] === __tb) { __tbIdx = __k; break; } }
+                      var __trs = __tb.querySelectorAll(':scope > tr');
+                      var __rIdx = 0;
+                      for (var __k2 = 0; __k2 < __trs.length; __k2++) { if (__trs[__k2] === __tr) { __rIdx = __k2; break; } }
+                      var __cIdx = 0;
+                      if (tag === 'td') {
+                        var __tds = __tr.querySelectorAll(':scope > td');
+                        for (var __k3 = 0; __k3 < __tds.length; __k3++) { if (__tds[__k3] === el) { __cIdx = __k3; break; } }
+                      }
+                      // 表锚点优先级：testid > id(稳定) > aria-label > 表的唯一 css 路径（兜底，确保嵌套表不歧义）
+                      var __anchor = 'table';
+                      var __tTid = null;
+                      for (var __ai = 0; __ai < testAttrs.length; __ai++) { var __av = __tbl.getAttribute(testAttrs[__ai]); if (__av && __av.trim()) { __tTid = __av.trim(); break; } }
+                      var __tId = __tbl.getAttribute('id');
+                      var __tAr = __tbl.getAttribute('aria-label');
+                      if (__tTid) __anchor = '[data-testid="' + escapeSelectorValue(__tTid) + '"]';
+                      else if (__tId && isStableId(__tId)) __anchor = 'table#' + escapeSelectorValue(__tId);
+                      else if (__tAr) __anchor = 'table[aria-label="' + escapeSelectorValue(__tAr) + '"]';
+                      else __anchor = cssPathOf(__tbl);
+                      var __css = __anchor + ' tbody:nth-of-type(' + (__tbIdx + 1) + ') tr:nth-of-type(' + (__rIdx + 1) + ')';
+                      if (tag === 'td') __css += ' > td:nth-of-type(' + (__cIdx + 1) + ')';
+                      return done({ strategy: 'css', css: __css });
+                    }
+                  }
+                }
 
                 // 2. 语义角色 + 可访问名（role+name，打分 100，先于 placeholder/label）
 
@@ -1725,7 +1802,11 @@
                   var alt = el.getAttribute('alt');
 
 
-                  if (alt && alt.trim()) cands.push({score:160, pick:{ strategy:'altText', attr:'alt', value:alt.trim(), name:alt.trim() }});
+                  if (alt && alt.trim()) {
+                    // 对齐官方行 49/56：altText substring=160, exact=165（penalty=+5）。
+                    cands.push({score:160, pick:{ strategy:'altText', attr:'alt', value:alt.trim(), name:alt.trim() }});
+                    cands.push({score:165, pick:{ strategy:'altText', attr:'alt', value:alt.trim(), name:alt.trim(), exact:true }});
+                  }
 
 
                 }
@@ -1793,6 +1874,12 @@
 
                   if (ot && ot.length <= 80) {
 
+                    // 对齐官方 suitableTextAlternatives：去前导序号/数字（"1. Back to" → "Back to"），容忍 UI 动态序号。
+                    var otStripped = ot.replace(/^\s*\d+[.\)]\s*/, '').trim();
+                    if (otStripped && otStripped !== ot) {
+                      cands.push({score:180, pick:{ strategy:'text', name:otStripped, matched:true }});
+                    }
+
 
                     // 6a. 非 exact 优先：归一化可见文本反查 nls（前缀/子串/模板命中即非精确），
 
@@ -1833,7 +1920,11 @@
                 var title = el.getAttribute('title');
 
 
-                if (title && title.trim()) cands.push({score:200, pick:{ strategy:'title', attr:'title', value:title.trim(), name:title.trim() }});
+                if (title && title.trim()) {
+                  // 对齐官方行 51/58：title=200, exact=205。
+                  cands.push({score:200, pick:{ strategy:'title', attr:'title', value:title.trim(), name:title.trim() }});
+                  cands.push({score:205, pick:{ strategy:'title', attr:'title', value:title.trim(), name:title.trim(), exact:true }});
+                }
                 // 8. stable id (500): placed AFTER text/title to align with page.pause scoring.
                 var id = el.getAttribute('id');
                 if (isStableId(id)) cands.push({score:500, pick:{ strategy:'id', id:id }});
@@ -1858,6 +1949,11 @@
 
                 if (r && !NON_ROLE[r]) cands.push({score:510, pick:{ strategy:'role', role:r }});
 
+                // 8.55 裸 tag 选择器（score 530，对齐官方 kCSSTagNameScore）：
+                // 无 id/name/alt/文本的元素（如无 alt 的装饰 img），官方在 cssPath 兜底前先试裸 tag。
+                // 配合 nth>5 拒绝：同 tag 元素 ≤6 个时产出 tag >> nth(N)，比长 cssPath 短且稳。
+                cands.push({score:530, pick:{ strategy:'css', css: tag }});
+
 
                 // 8.6 属性级 css 候选（对齐 page.pause 的 score 520/521 兜底层级，
 
@@ -1880,7 +1976,9 @@
                 var nmAttr = el.getAttribute('name');
 
 
-                if (nmAttr && nmAttr.trim()) cands.push({score:520, pick:{ strategy:'css', css: tag + '[name="' + escapeSelectorValue(nmAttr.trim()) + '"]', needsReview:false }});
+                // 对齐官方 selectorGenerator 行 296：[name=] 仅对特定 tag 生效。
+                var __NAME_TAGS = { button:1, form:1, fieldset:1, frame:1, iframe:1, input:1, keygen:1, object:1, output:1, select:1, textarea:1, map:1, meta:1, param:1 };
+                if (nmAttr && nmAttr.trim() && __NAME_TAGS[tag]) cands.push({score:520, pick:{ strategy:'css', css: tag + '[name="' + escapeSelectorValue(nmAttr.trim()) + '"]', needsReview:false }});
 
 
                 if (tag === 'input' || tag === 'textarea' || tag === 'select') {
@@ -1904,8 +2002,19 @@
                 // · id/css 选择器直接 querySelectorAll 验证唯一性（__rawMatchingElements 对 id/css 不重解析）；
                 // · role/text/i18n/placeholder/label/alt/title/testid 走 __matchingElements（带缓存 + a11y 过滤）；
                 // · 都不唯一时退化为"能解析到本元素的最低分"（done 内 __attachIndex 会补 nth(index)）。
+                // 对齐官方 selectorGenerator 行 463-469：score 在 50-300 之间的候选，按选择器字符串长度加罚。
+                // 避免长 alt/title 文本因 exact 命中而压过更短更稳的 id。
+                for (var ciLP = 0; ciLP < cands.length; ciLP++) {
+                  var lpScore = cands[ciLP].score;
+                  if (lpScore > 50 && lpScore < 300) {
+                    var lpLen = JSON.stringify(cands[ciLP].pick).length;
+                    cands[ciLP].score += Math.min(10, (lpLen / 10) | 0);
+                  }
+                }
                 cands.sort(function(a, b) { return a.score - b.score; });
                 var CHOSEN = null, CHOSEN_UNIQUE = null;
+                // DEBUG: 输出每个候选的匹配结果，用于诊断"为什么退化到 css"
+                var __dbg = [];
                 for (var ci = 0; ci < cands.length; ci++) {
                   var cp = cands[ci];
                   var ms = [];
@@ -1920,10 +2029,67 @@
                       ms = __matchingElements(cp.pick) || [];
                     }
                   } catch (e) { ms = []; }
+                  __dbg.push(cp.score + ':' + cp.pick.strategy + '(' + JSON.stringify(cp.pick.name || cp.pick.css || cp.pick.role || '').slice(0,40) + ') match=' + ms.length + ' hit=' + (ms.indexOf(el) >= 0));
                   if (ms.indexOf(el) < 0) continue;
                   if (ms.length === 1) { CHOSEN_UNIQUE = cp; break; }
+                  // 对齐官方 selectorGenerator 行 189：nth>5 不接受 locator（太脆弱），跳过试下一个候选。
+                  var __idx = ms.indexOf(el);
+                  if (__idx > 5) { __dbg.push('(skip nth=' + __idx + ')'); continue; }
+                  // 对齐官方行 200-228：非唯一时尝试父级上下文。
+                  // 方式 A：css tag/cssPath → 父级 id/testid `>>> chain`。
+                  // 方式 B：role+name 候选 → 父级 role+name 链式（CELL/ROW > IMG），与 pause 产出一致。
+                  if (cp.pick.css) {
+                    var __parent = el.parentElement, __lv = 0, __pEl = null, __pLabel = null;
+                    while (__parent && __lv++ < 5) {
+                      var __pid = __parent.getAttribute && __parent.getAttribute('id');
+                      var __ptid = __parent.getAttribute && (__parent.getAttribute('data-testid') || __parent.getAttribute('data-test') || __parent.getAttribute('data-test-id'));
+                      if (__ptid) { __pEl = __parent; __pLabel = '[data-testid="' + __ptid + '"]'; break; }
+                      if (__pid && isStableId(__pid)) { __pEl = __parent; __pLabel = '#' + __pid; break; }
+                      __parent = __parent.parentElement;
+                    }
+                    if (__pEl) {
+                      try {
+                        var __nn = __pEl.querySelectorAll(cp.pick.css);
+                        if (__nn.length === 1 && __nn[0] === el) {
+                          cp.pick = Object.assign({}, cp.pick, { css: __pLabel + ' >>> ' + cp.pick.css, nested: true });
+                          CHOSEN_UNIQUE = cp; break;
+                        }
+                      } catch (e) {}
+                    }
+                  }
+                  // 方式 B：role 候选非唯一 → 向上找 role+name 父级，产出链式 pick（CELL/ROW > 子元素，消歧）。
+                  // 【IMG/LINK 例外】IMG/LINK 这类"可定义为一组"的语义元素，即便同 alt/同名非唯一也【不】上浮到 CELL/ROW：
+                  // 上浮后三个元素名各不相同（如 td 内含 center 文本使名相异），反而无法成组；保留 IMG/LINK 自身
+                  // alt/语义名定位，交生成端 PageElementList 按 #index 分组、业务用 .get(i) 下标操作（对齐 page.pause 的 locator.nth(i)）。
+                  // 唯一匹配（ms.length===1）走上方 CHOSEN_UNIQUE 早退、不进本分支，故仅影响"同 alt/同名重复"场景，不破坏唯一元素行为。
+                  if (cp.pick.strategy === 'role' && cp.pick.name
+                      && cp.pick.role !== 'img' && cp.pick.role !== 'link') {
+                    var __p2 = el.parentElement, __lv2 = 0;
+                    while (__p2 && __lv2++ < 5) {
+                      var __p2Role = getRole(__p2);
+                      if (__p2Role && __p2Role !== 'generic' && __p2Role !== 'presentation' && __p2Role !== 'none') {
+                        var __p2Name = getNameInfo(__p2);
+                        if (__p2Name && __p2Name.name) {
+                          // 在整个文档里找 role=__p2Role, name=__p2Name.name 的元素
+                          var __p2Pick = { strategy:'role', role:__p2Role, name:__p2Name.name };
+                          var __p2Ms = __matchingElements(__p2Pick) || [];
+                          if (__p2Ms.length === 1 && __p2Ms[0] === __p2) {
+                            // 父级唯一 → 链式：父 role+name > 子 role（去掉 name，靠父级消歧）
+                            cp.pick = {
+                              strategy: 'role', role: __p2Role, name: __p2Name.name,
+                              child: { strategy: 'role', role: cp.pick.role }
+                            };
+                            CHOSEN_UNIQUE = cp; break;
+                          }
+                        }
+                      }
+                      __p2 = __p2.parentElement;
+                    }
+                    if (CHOSEN_UNIQUE) break;
+                  }
                   if (!CHOSEN) CHOSEN = cp;
                 }
+                try { console.log('[picker-dbg] el=<' + tag + '> alt="' + (el.getAttribute('alt')||'') + '" role=' + getRole(el) + ' | cands: ' + __dbg.join(' | ') + ' | CHOSEN=' + (CHOSEN_UNIQUE ? CHOSEN_UNIQUE.score + ':' + CHOSEN_UNIQUE.pick.strategy : 'NONE')); } catch(e) {}
                 if (!CHOSEN_UNIQUE) CHOSEN_UNIQUE = CHOSEN;
                 return done(CHOSEN_UNIQUE.pick);
 

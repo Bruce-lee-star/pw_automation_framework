@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
     </parent>
 
@@ -15,16 +15,16 @@
 
     <properties>
         <!--
-          D7-3「禁止静默吞异常」门禁：codegen 存量 79 处空 catch（交互式 picker 的 best-effort
-          UI 代码密集），尚未治理。为让门禁对其余模块真实生效且不误伤构建，此处显式跳过；
-          待 79 处治理完成后删除本属性，codegen 自动纳入门禁。
+          D7-3銆岀姝㈤潤榛樺悶寮傚父銆嶉棬绂侊細codegen 瀛橀噺 79 澶勭┖ catch锛堜氦浜掑紡 picker 鐨?best-effort
+          UI 浠ｇ爜瀵嗛泦锛夛紝灏氭湭娌荤悊銆備负璁╅棬绂佸鍏朵綑妯″潡鐪熷疄鐢熸晥涓斾笉璇激鏋勫缓锛屾澶勬樉寮忚烦杩囷紱
+          寰?79 澶勬不鐞嗗畬鎴愬悗鍒犻櫎鏈睘鎬э紝codegen 鑷姩绾冲叆闂ㄧ銆?
         -->
         <checkstyle.skip>true</checkstyle.skip>
     </properties>
     <description>Optional code-generator (role-element picker / page-object generator) extracted from
         framework-web. Depends on framework-web; injected into web at runtime via
         java.util.ServiceLoader (SPI). When absent from the classpath, web behaves exactly as before
-        (codegen disabled by default) — zero behavioural regression.</description>
+        (codegen disabled by default) 鈥?zero behavioural regression.</description>
 
     <dependencies>
         <dependency>
@@ -32,10 +32,10 @@
             <artifactId>pw-web-ui</artifactId>
             <version>${project.version}</version>
             <exclusions>
-                <!-- 依赖治理（内网隔离清单）：pw-web-ui 的框架级 glue **确实使用** Cucumber，故其三件套
-                     （cucumber-core / cucumber-java / datatable）为 compile 作用域并向下游传递；而本模块
-                     全量零 io.cucumber 引用、也不跑 Cucumber，继承整条 Cucumber 栈（十余个 formatter +
-                     gherkin 等）纯属污染且命中隔离清单，故在本模块逐一排除。 -->
+                <!-- 渚濊禆娌荤悊锛堝唴缃戦殧绂绘竻鍗曪級锛歱w-web-ui 鐨勬鏋剁骇 glue **纭疄浣跨敤** Cucumber锛屾晠鍏朵笁浠跺
+                     锛坈ucumber-core / cucumber-java / datatable锛変负 compile 浣滅敤鍩熷苟鍚戜笅娓镐紶閫掞紱鑰屾湰妯″潡
+                     鍏ㄩ噺闆?io.cucumber 寮曠敤銆佷篃涓嶈窇 Cucumber锛岀户鎵挎暣鏉?Cucumber 鏍堬紙鍗佷綑涓?formatter +
+                     gherkin 绛夛級绾睘姹℃煋涓斿懡涓殧绂绘竻鍗曪紝鏁呭湪鏈ā鍧楅€愪竴鎺掗櫎銆?-->
                 <exclusion>
                     <groupId>io.cucumber</groupId>
                     <artifactId>cucumber-core</artifactId>
@@ -51,7 +51,7 @@
             </exclusions>
         </dependency>
 
-        <!-- ENG-P0-2：codegen 实际用到的外部依赖（原由根 <dependencies> 继承，现显式声明） -->
+        <!-- ENG-P0-2锛歝odegen 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-model</artifactId>
@@ -60,9 +60,9 @@
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-core</artifactId>
         </dependency>
-        <!-- 依赖治理：原此处声明 serenity-cucumber，但本模块全量零 io.cucumber / net.serenitybdd.cucumber
-             引用（也不跑 Cucumber），属无用声明且其 cucumber-* 传递依赖命中内网隔离清单 —— 已移除。
-             若将来确需（如 codegen 自己要跑 Cucumber），请先给出真实调用点再恢复。 -->
+        <!-- 渚濊禆娌荤悊锛氬師姝ゅ澹版槑 serenity-cucumber锛屼絾鏈ā鍧楀叏閲忛浂 io.cucumber / net.serenitybdd.cucumber
+             寮曠敤锛堜篃涓嶈窇 Cucumber锛夛紝灞炴棤鐢ㄥ０鏄庝笖鍏?cucumber-* 浼犻€掍緷璧栧懡涓唴缃戦殧绂绘竻鍗?鈥斺€?宸茬Щ闄ゃ€?
+             鑻ュ皢鏉ョ‘闇€锛堝 codegen 鑷繁瑕佽窇 Cucumber锛夛紝璇峰厛缁欏嚭鐪熷疄璋冪敤鐐瑰啀鎭㈠銆?-->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-screenplay</artifactId>
@@ -79,12 +79,12 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
-        <!-- selenium-support：serenity 公开 API 引用 org.openqa.selenium.support.ui.*（如 ExpectedCondition） -->
+        <!-- selenium-support锛歴erenity 鍏紑 API 寮曠敤 org.openqa.selenium.support.ui.*锛堝 ExpectedCondition锛?-->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-support</artifactId>
         </dependency>
-        <!-- ENG-P0-2：NlsNameTranslator（中文→英文标识符）下沉至 codegen 后，jieba + pinyin4j 仅 codegen 依赖 -->
+        <!-- ENG-P0-2锛歂lsNameTranslator锛堜腑鏂団啋鑻辨枃鏍囪瘑绗︼級涓嬫矇鑷?codegen 鍚庯紝jieba + pinyin4j 浠?codegen 渚濊禆 -->
         <dependency>
             <groupId>com.huaban</groupId>
             <artifactId>jieba-analysis</artifactId>
@@ -94,8 +94,8 @@
             <artifactId>pinyin4j</artifactId>
         </dependency>
 
-        <!-- CT2-09 / CT2-20：codegen 首次引入模块内单测，守卫「按 Page/BrowserContext 的静态缓存
-             必须能被 cleanup* / clearAll 真正回收」这一契约（纯 JUnit 4，不依赖 Serenity）。 -->
+        <!-- CT2-09 / CT2-20锛歝odegen 棣栨寮曞叆妯″潡鍐呭崟娴嬶紝瀹堝崼銆屾寜 Page/BrowserContext 鐨勯潤鎬佺紦瀛?
+             蹇呴』鑳借 cleanup* / clearAll 鐪熸鍥炴敹銆嶈繖涓€濂戠害锛堢函 JUnit 4锛屼笉渚濊禆 Serenity锛夈€?-->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -103,3 +103,4 @@
         </dependency>
     </dependencies>
 </project>
+

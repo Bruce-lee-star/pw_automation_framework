@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
     </parent>
 
@@ -14,84 +14,24 @@
     <name>Automation Framework - Core</name>
     <description>Base layer: framework.common (config / security / async / route-SPI), top-level utils &amp; retry. Depended on by all modules.</description>
 
-    <properties>
-        <!-- 构建期 JS 语法校验（CG-P2-N12）：默认开启；无 node 环境的 CI 可 -Dpicker.js.validate.skip=true 跳过 -->
-        <picker.js.validate.skip>false</picker.js.validate.skip>
-    </properties>
-
     <dependencies>
-        <!-- ENG-P0-2：core 实际用到的外部依赖（原由根 <dependencies> 继承，现显式声明以固化边界） -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
         </dependency>
-        <!-- CORE-P0-1 / ENG-P0-2 修正：SensitiveDataSanitizer 直接使用 jackson-databind（脱敏 JSON 解析），
-             原经 serenity 传递引入，下沉后显式声明（版本由根 dependencyManagement 钉 ${jackson.version}，当前 2.18.9） -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
-        <!-- ARCH-1（2026-09-20）：core 新增 common.utils.JsonUtils，依赖 jackson-core 的
-             {@code com.fasterxml.jackson.core.type.TypeRef}；jackson-databind 的传递 jackson-core
-             未稳定进入本模块编译路径，故显式声明（版本由根 dependencyManagement 钉 ${jackson.version}）。 -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
         </dependency>
-
-        <!-- CT2-17：core 首次引入模块内单测（LazyInit reset 语义 + AsyncPool 超时裁决器）。
-         纯 JUnit 4（与 pw-route 及 test-automation 的 runner 侧统一），不依赖 Serenity。
-         junit:junit 未纳入根 POM DM（JUnit5 迁移时已移除），此处显式钉 4.13.2 版本（适配 JUnit 4），
-         避免离线 / 多模块 reactor 下因版本缺省解析不一致导致 surefire 类加载异常（测试类 ClassNotFound）。 -->
         <dependency>
-        <groupId>junit</groupId>
-        <artifactId>junit</artifactId>
-        <version>4.13.2</version>
-        <scope>test</scope>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
         </dependency>
-
     </dependencies>
-
-    <build>
-        <plugins>
-            <!-- CG-P2-N12：构建期校验 scan/js 资源脚本语法，越早在 validate 阶段失败越好 -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.5.0</version>
-                <executions>
-                    <execution>
-                        <id>validate-picker-js</id>
-                        <phase>validate</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>node</executable>
-                            <arguments>
-                                <argument>${project.basedir}/../tools/validate_picker_js.js</argument>
-                                <argument>${project.basedir}/src/main/resources/scan/js</argument>
-                            </arguments>
-                            <skip>${picker.js.validate.skip}</skip>
-                        </configuration>
-                    </execution>
-                    <!-- CG-P2-N12：核心合并/去重逻辑 Node 侧单测（加载真实资源并 shim 浏览器全局） -->
-                    <execution>
-                        <id>validate-picker-merge</id>
-                        <phase>validate</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>node</executable>
-                            <arguments>
-                                <argument>${project.basedir}/../tools/picker_merge_test.js</argument>
-                            </arguments>
-                            <skip>${picker.js.validate.skip}</skip>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
 </project>

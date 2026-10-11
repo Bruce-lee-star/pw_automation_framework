@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
     </parent>
 
@@ -26,14 +26,14 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- ⭐ SessionManager META 并发缓存：Guava LoadingCache（concurrencyLevel 分段锁，满足多线程读盘 IO 竞争）。
-             版本由根 dependencyManagement 统一钉 33.5.0-jre，此处无需重复声明 <version>。 -->
+        <!-- 猸?SessionManager META 骞跺彂缂撳瓨锛欸uava LoadingCache锛坈oncurrencyLevel 鍒嗘閿侊紝婊¤冻澶氱嚎绋嬭鐩?IO 绔炰簤锛夈€?
+             鐗堟湰鐢辨牴 dependencyManagement 缁熶竴閽?33.5.0-jre锛屾澶勬棤闇€閲嶅澹版槑 <version>銆?-->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
         </dependency>
 
-        <!-- ENG-P0-2：web 实际用到的外部依赖（原由根 <dependencies> 继承，现显式声明） -->
+        <!-- ENG-P0-2锛歸eb 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-model</artifactId>
@@ -50,21 +50,21 @@
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
         </dependency>
-        <!-- gson：AxeCoreScriptProvider 将 axe.run 结果 JSON 映射为框架自有结果模型（解耦 Deque axe-core 包装器后新增）。
-             版本由根 dependencyManagement 统一钉（${gson.version}）。 -->
+        <!-- gson锛欰xeCoreScriptProvider 灏?axe.run 缁撴灉 JSON 鏄犲皠涓烘鏋惰嚜鏈夌粨鏋滄ā鍨嬶紙瑙ｈ€?Deque axe-core 鍖呰鍣ㄥ悗鏂板锛夈€?
+             鐗堟湰鐢辨牴 dependencyManagement 缁熶竴閽夛紙${gson.version}锛夈€?-->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
-        <!-- selenium-support：serenity 公开 API 引用 org.openqa.selenium.support.ui.*（如 ExpectedCondition），
-             须随 serenity 一并显式声明，否则 javac 符号补全会 CompletionFailure（ENG-P0-2 下沉后原继承关系消失） -->
+        <!-- selenium-support锛歴erenity 鍏紑 API 寮曠敤 org.openqa.selenium.support.ui.*锛堝 ExpectedCondition锛夛紝
+             椤婚殢 serenity 涓€骞舵樉寮忓０鏄庯紝鍚﹀垯 javac 绗﹀彿琛ュ叏浼?CompletionFailure锛圗NG-P0-2 涓嬫矇鍚庡師缁ф壙鍏崇郴娑堝け锛?-->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-support</artifactId>
         </dependency>
 
-        <!-- 测试期依赖（JUnit 4：与 runner 侧统一；原先的 JUnit5 套件收尾设施
-             SuiteTeardownListener / junit-platform-launcher 已随之移除） -->
+        <!-- 娴嬭瘯鏈熶緷璧栵紙JUnit 4锛氫笌 runner 渚х粺涓€锛涘師鍏堢殑 JUnit5 濂椾欢鏀跺熬璁炬柦
+             SuiteTeardownListener / junit-platform-launcher 宸查殢涔嬬Щ闄わ級 -->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -77,17 +77,17 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- WEB-P1-5：web 模块单测补充基础依赖（PageWaits/PageNavigation 等需 mock BasePage/Page）。
-             版本与 test-automation 保持一致（4.5.1），避免 RequireUpperBoundDeps 校验冲突。 -->
+        <!-- WEB-P1-5锛歸eb 妯″潡鍗曟祴琛ュ厖鍩虹渚濊禆锛圥ageWaits/PageNavigation 绛夐渶 mock BasePage/Page锛夈€?
+             鐗堟湰涓?test-automation 淇濇寔涓€鑷达紙4.5.1锛夛紝閬垮厤 RequireUpperBoundDeps 鏍￠獙鍐茬獊銆?-->
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- A-9 对称修复：serenity-core 已排除 selenium-java，但 Serenity 运行期（SerenityTestExecutionListener
-             经 SupportedWebDriver 静态初始化）需加载各 driver 类，否则框架测试启动 NoClassDefFoundError。
-             与 test-automation 一致补 selenium-java（test scope）提供 driver 类；版本与全局钉 4.23.1 对齐。 -->
+        <!-- A-9 瀵圭О淇锛歴erenity-core 宸叉帓闄?selenium-java锛屼絾 Serenity 杩愯鏈燂紙SerenityTestExecutionListener
+             缁?SupportedWebDriver 闈欐€佸垵濮嬪寲锛夐渶鍔犺浇鍚?driver 绫伙紝鍚﹀垯妗嗘灦娴嬭瘯鍚姩 NoClassDefFoundError銆?
+             涓?test-automation 涓€鑷磋ˉ selenium-java锛坱est scope锛夋彁渚?driver 绫伙紱鐗堟湰涓庡叏灞€閽?4.23.1 瀵归綈銆?-->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
@@ -95,12 +95,12 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- 依赖治理：Cucumber 已从 serenity-model 的传递链路排除（见根 DM），而本模块**确实使用**它 ——
-             ① src/main 的框架级 glue（ConcurrentExecutionGlue）直接用 io.cucumber.java.en.* 注解（cucumber-java）
-                与 io.cucumber.datatable.DataTable（datatable），故必须为 compile 作用域；
-             ② Serenity 运行期（StepEventBus → Serenity 的 Cucumber 集成）需 cucumber-core 可加载 ——
-                这也是本模块单测加载 StepEventBus 时不再 NoClassDefFoundError 的前提。
-             三者在此显式声明，版本由根 DM 统一钉 ${cucumber.version}，不随 Serenity 传递漂移。 -->
+        <!-- 渚濊禆娌荤悊锛欳ucumber 宸蹭粠 serenity-model 鐨勪紶閫掗摼璺帓闄わ紙瑙佹牴 DM锛夛紝鑰屾湰妯″潡**纭疄浣跨敤**瀹?鈥斺€?
+             鈶?src/main 鐨勬鏋剁骇 glue锛圕oncurrentExecutionGlue锛夌洿鎺ョ敤 io.cucumber.java.en.* 娉ㄨВ锛坈ucumber-java锛?
+                涓?io.cucumber.datatable.DataTable锛坉atatable锛夛紝鏁呭繀椤讳负 compile 浣滅敤鍩燂紱
+             鈶?Serenity 杩愯鏈燂紙StepEventBus 鈫?Serenity 鐨?Cucumber 闆嗘垚锛夐渶 cucumber-core 鍙姞杞?鈥斺€?
+                杩欎篃鏄湰妯″潡鍗曟祴鍔犺浇 StepEventBus 鏃朵笉鍐?NoClassDefFoundError 鐨勫墠鎻愩€?
+             涓夎€呭湪姝ゆ樉寮忓０鏄庯紝鐗堟湰鐢辨牴 DM 缁熶竴閽?${cucumber.version}锛屼笉闅?Serenity 浼犻€掓紓绉汇€?-->
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-core</artifactId>
@@ -115,3 +115,4 @@
         </dependency>
     </dependencies>
 </project>
+

@@ -59,6 +59,11 @@ public final class RoleEntry {
         this.value = value;
     }
 
+    /** P1-4：是否为 &lt;input type=file&gt; 文件上传控件。为 true 时操作推断输出 setInputFiles("&lt;path&gt;")。 */
+    private boolean fileInput;
+    public void setFileInput(boolean v) { this.fileInput = v; }
+    public boolean isFileInput() { return fileInput; }
+
     /**
      * 该次点击是否弹出了新页面（target=_blank 链接等）。为 true 时生成 step 应包装为
      * {@code xxx.waitForNewPage(() -> element.click())}（框架原生 API，超时走框架默认），

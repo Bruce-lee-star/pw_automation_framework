@@ -496,10 +496,20 @@
               }
               // 返回 {name, cleaned}：name 为剔除装饰性伪元素/描述文本后的干净可见文本；
               // cleaned=true 表示原 name 含被剔除的提示性文本，生成 @RoleElement 时需用 exact=false 子串匹配。
+              // P0-2：getNameInfo 对同一元素一帧内只算一次（getElementAccessibleName 走 label/aria-labelledby
+              // 递归 DOM，5000 元素页每次点击重算多遍是主线程卡顿主因）。WeakMap 随元素 GC 自然失效，
+              // SPA 局部更新后旧元素引用被回收即自动淘汰；同一次拾取会话内元素身份稳定，安全。
+              var __nameInfoCache = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
               function getNameInfo(el) {
+                if (__nameInfoCache && el && el.nodeType === 1) {
+                  var hit = __nameInfoCache.get(el);
+                  if (hit) return hit;
+                }
                 var clean = getElementAccessibleName(el, false);
                 var raw = getElementAccessibleName(el, true);
-                return { name: clean, cleaned: (clean !== raw) };
+                var out = { name: clean, cleaned: (clean !== raw) };
+                if (__nameInfoCache && el && el.nodeType === 1) __nameInfoCache.set(el, out);
+                return out;
               }
 
               // 推导标题层级：优先 aria-level，否则 h1–h6 标签，无则 0（不限层级）。
@@ -625,7 +635,39 @@
                     anchor = anchor.parentElement;
                   }
                 }
-                return css;
+                // P0-3：拼完后真去 querySelectorAll 验证唯一性。不唯一则从当前祖先节点继续向上补层级，
+                // 直到选择器在本文档内唯一解析到 el（上限 10 层）。仍不唯一则原样返回（由调用方标 needsReview）。
+                return __verifyCssUnique(el, css, node);
+              }
+
+              // P0-3 辅助：验证 css 是否唯一命中 el；不唯一则逐级向上补祖先层级。
+              function __verifyCssUnique(el, baseCss, startNode) {
+                function __count(sel) {
+                  try {
+                    var n = document.querySelectorAll(sel);
+                    return { hits: n, ok: (n.length === 1 && n[0] === el) };
+                  } catch (e) { return { hits: [], ok: false }; }
+                }
+                var first = __count(baseCss);
+                if (first.ok) return baseCss;
+                var parts = baseCss.split(' > ');
+                var cur = startNode, d = 0;
+                while (cur && cur.nodeType === 1 && d++ < 10) {
+                  var sel = cur.tagName.toLowerCase();
+                  var parent = cur.parentElement;
+                  if (parent) {
+                    var same = [];
+                    for (var c = parent.firstElementChild; c; c = c.nextElementSibling) {
+                      if (c.tagName === cur.tagName) same.push(c);
+                    }
+                    if (same.length > 1) sel += ':nth-of-type(' + (same.indexOf(cur) + 1) + ')';
+                  }
+                  parts.unshift(sel);
+                  var trial = parts.join(' > ');
+                  if (__count(trial).ok) return trial;
+                  cur = parent;
+                }
+                return baseCss;
               }
               // 判断 css 兜底路径是否为"纯布局型"（无锚点路径）。
               // 典型垃圾形态：

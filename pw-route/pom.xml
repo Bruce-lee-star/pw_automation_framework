@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,30 +6,21 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
     </parent>
 
     <artifactId>pw-route</artifactId>
     <name>Automation Framework - Route (Concurrency-Safe)</name>
     <description>
-        Route 模块 V2（重建版，与 pw-route 并存，业务测试逐步迁移）。
-
-        设计目标（对照 playwright-java-1.62.0 源码机制）：
-        1. 单所有权：每个 Route 事件唯一 RouteClaim（CAS），杜绝并发终结 / 重放。
-        2. 线程边界：事件线程（Playwright 回调）只做无阻塞裁决；阻塞操作（fetch / pattern 重装）
-           只在有界 IO 线程池执行，受 BoundedOps 预算控制。
-        3. per-context 隔离：全部状态挂在 RouteRuntime（每 BrowserContext 一份），无全局 static 可变表。
-        4. 原子发布：规则以不可变 RuleGeneration 快照发布（AtomicReference CAS 切换），读侧无锁。
-        5. fail-open：任何异常 / 超时 / 预算耗尽 / 挂起超限 → fallback（continue），请求永不悬挂。
-        6. 有界并发：pending 上限 + IO 池有界 + 信号量限流。
-
-        仅依赖 playwright + slf4j + pw-core(SPI 接口)，不依赖任何兄弟实现模块（pw-route / pw-web-ui），
-        可独立演进、独立引入。
-    </description>
+        Route 妯″潡 V2锛堥噸寤虹増锛屼笌 pw-route 骞跺瓨锛屼笟鍔℃祴璇曢€愭杩佺Щ锛夈€?
+        璁捐鐩爣锛堝鐓?playwright-java-1.62.0 婧愮爜鏈哄埗锛夛細
+        1. 鍗曟墍鏈夋潈锛氭瘡涓?Route 浜嬩欢鍞竴 RouteClaim锛圕AS锛夛紝鏉滅粷骞跺彂缁堢粨 / 閲嶆斁銆?        2. 绾跨▼杈圭晫锛氫簨浠剁嚎绋嬶紙Playwright 鍥炶皟锛夊彧鍋氭棤闃诲瑁佸喅锛涢樆濉炴搷浣滐紙fetch / pattern 閲嶈锛?           鍙湪鏈夌晫 IO 绾跨▼姹犳墽琛岋紝鍙?BoundedOps 棰勭畻鎺у埗銆?        3. per-context 闅旂锛氬叏閮ㄧ姸鎬佹寕鍦?RouteRuntime锛堟瘡 BrowserContext 涓€浠斤級锛屾棤鍏ㄥ眬 static 鍙彉琛ㄣ€?        4. 鍘熷瓙鍙戝竷锛氳鍒欎互涓嶅彲鍙?RuleGeneration 蹇収鍙戝竷锛圓tomicReference CAS 鍒囨崲锛夛紝璇讳晶鏃犻攣銆?        5. fail-open锛氫换浣曞紓甯?/ 瓒呮椂 / 棰勭畻鑰楀敖 / 鎸傝捣瓒呴檺 鈫?fallback锛坈ontinue锛夛紝璇锋眰姘镐笉鎮寕銆?        6. 鏈夌晫骞跺彂锛歱ending 涓婇檺 + IO 姹犳湁鐣?+ 淇″彿閲忛檺娴併€?
+        浠呬緷璧?playwright + slf4j + pw-core(SPI 鎺ュ彛)锛屼笉渚濊禆浠讳綍鍏勫紵瀹炵幇妯″潡锛坧w-route / pw-web-ui锛夛紝
+        鍙嫭绔嬫紨杩涖€佺嫭绔嬪紩鍏ャ€?    </description>
 
     <dependencies>
-        <!-- 核心层 SPI（RouteLifecycle 生命周期挂点）；仅依赖接口，不依赖 route/web 实现模块 -->
+        <!-- 鏍稿績灞?SPI锛圧outeLifecycle 鐢熷懡鍛ㄦ湡鎸傜偣锛夛紱浠呬緷璧栨帴鍙ｏ紝涓嶄緷璧?route/web 瀹炵幇妯″潡 -->
         <dependency>
             <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
             <artifactId>pw-core</artifactId>
@@ -43,18 +34,18 @@
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
-        <!-- JSONPath 断言（MONITOR expectJsonPath）；版本钉于根 POM dependencyManagement -->
+        <!-- JSONPath 鏂█锛圡ONITOR expectJsonPath锛夛紱鐗堟湰閽変簬鏍?POM dependencyManagement -->
         <dependency>
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
         </dependency>
-        <!-- Gson：monitor 失败报告文件读回（跨进程：探针 JVM 落盘 → 报告 JVM 读回）；版本钉于根 POM dependencyManagement -->
+        <!-- Gson锛歮onitor 澶辫触鎶ュ憡鏂囦欢璇诲洖锛堣法杩涚▼锛氭帰閽?JVM 钀界洏 鈫?鎶ュ憡 JVM 璇诲洖锛夛紱鐗堟湰閽変簬鏍?POM dependencyManagement -->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
 
-        <!-- 测试：JUnit 4 + Mockito（暂不引入 JUnit 5；junit:junit 未纳入根 POM DM，此处显式钉版本） -->
+        <!-- 娴嬭瘯锛欽Unit 4 + Mockito锛堟殏涓嶅紩鍏?JUnit 5锛沯unit:junit 鏈撼鍏ユ牴 POM DM锛屾澶勬樉寮忛拤鐗堟湰锛?-->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -67,8 +58,8 @@
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- ArchUnit：架构分层门禁（T0-1 风格），仅测试期使用；archunit-junit4 提供 JUnit 4 runner
-             （archunit 核心 artifact 只含分析引擎，不含 junit runner）。版本与根 POM DM 的 archunit 1.3.0 对齐。 -->
+        <!-- ArchUnit锛氭灦鏋勫垎灞傞棬绂侊紙T0-1 椋庢牸锛夛紝浠呮祴璇曟湡浣跨敤锛沘rchunit-junit4 鎻愪緵 JUnit 4 runner
+             锛坅rchunit 鏍稿績 artifact 鍙惈鍒嗘瀽寮曟搸锛屼笉鍚?junit runner锛夈€傜増鏈笌鏍?POM DM 鐨?archunit 1.3.0 瀵归綈銆?-->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit-junit4</artifactId>
@@ -77,3 +68,4 @@
         </dependency>
     </dependencies>
 </project>
+

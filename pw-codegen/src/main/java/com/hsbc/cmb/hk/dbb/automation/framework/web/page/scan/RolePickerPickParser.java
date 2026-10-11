@@ -382,6 +382,7 @@ final class RolePickerPickParser {
             RoleEntry roleEntry = new RoleEntry(role, name, tag, text, "role", null, resolvedKey, cleaned, value, popup, index, download, asString(m.get("_pageClass")), hover, closeOp, level, dblClick, dialog, dialogType, dialogAction, select, optionText, optionValue, checked, setCheckedTarget, pressKey, dragDstKey, disabled, pressed, expanded);
             roleEntry.setSigKey(pickSigKey);
             roleEntry.setRightClick(rightClick);
+            roleEntry.setFileInput(Boolean.parseBoolean(asString(m.get("fileInput"))));
             int roleCount = parseCount(m.get("count"));
             roleEntry.setCount(roleCount);
             roleEntry.setFramePath(parseFramePath(m.get("framePath")));
@@ -419,6 +420,7 @@ final class RolePickerPickParser {
         RoleEntry entry = new RoleEntry(role, name, tag, text, strategy, selector, resolvedKey, cleaned, value, popup, index, download, asString(m.get("_pageClass")), hover, closeOp, level, dblClick, dialog, dialogType, dialogAction, select, optionText, optionValue, checked, setCheckedTarget, pressKey, dragDstKey, disabled, pressed, expanded);
         entry.setSigKey(pickSigKey);
         entry.setRightClick(rightClick);
+        entry.setFileInput(Boolean.parseBoolean(asString(m.get("fileInput"))));
         int nonRoleCount = parseCount(m.get("count"));
         entry.setCount(nonRoleCount);
         entry.setFramePath(parseFramePath(m.get("framePath")));

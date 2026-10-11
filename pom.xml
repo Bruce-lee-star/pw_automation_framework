@@ -1,28 +1,16 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-    <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+    <artifactId>pw_automation_framework</artifactId>
     <version>1.0.1</version>
     <packaging>pom</packaging>
     <name>Automation WebUI Framework (Parent)</name>
     <description>Enterprise multi-module automation framework: core / reporting / api / web / route (test-automation 为独立构建单元)</description>
 
-    <!-- T3-1: 物理多模块拆分。依赖方向（均收敛到 core，无环）：
-         core <- reporting / api <- web <- route。
-
-         CT2-01：test-automation 【不在本 reactor 中】——它是独立构建单元（源码已移出本仓库，
-         其 pom 的 parent 用 <relativePath/> 从 .m2 解析本 parent POM 与各框架 jar）。
-         构建/发布顺序（本地与 CI 一致，两段式）：
-           ① mvn -B install -Psca -DskipTests -DskipITs      # 本仓库：装 parent + 6 个框架模块到 .m2
-           ② mvn -B -f ../test-automation/pom.xml verify      # test-automation：跑单测 + Cucumber IT
-         CI 见 .github/workflows/build.yml 的 `e2e` job（两段式 + 「IT 数 > 0」可证伪断言）。
-
-         注：本仓库不再构建 Playwright 客户端补丁模块（原 `pw-playwright`），该构件改为外部提供 ——
-         详见下方 <playwright.version> 属性的说明。-->
     <modules>
         <module>pw-core</module>
         <module>pw-reports</module>
@@ -33,122 +21,50 @@
     </modules>
 
     <properties>
-        <!-- 统一用 release（而非 source/target 两属性）：按 21 的 API 边界校验，避免 source/target 与
-             实际运行 JDK 错配导致「用高版本 API 编译、低版本运行」。 -->
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <!-- D6-3：serenity 升级路径（摩擦点矩阵 + 回归清单 + SOP）—— CT2-22：原设计文档
-             （docs 下名为 serenity-upgrade-path 的 md）在本仓库不存在（全仓仅此一处引用），如需追溯请查 git 历史。
-             历史：CORE-P0-1 为适配 jackson 2.18.3 上界曾被动降到 4.2.0；版本已集中此处，升级只改本属性 + 同步配套覆盖项。 -->
         <serenity.version>4.3.4</serenity.version>
         <serenity.cucumber.version>4.3.4</serenity.cucumber.version>
-        <!-- 【Playwright Java 客户端 · 必读】
-             自 2026-09-30 起，框架直接依赖上游官方发行版（stock）playwright-java 1.62.0，来自 Maven Central，
-             不再使用自建补丁客户端。版本集中由下方 <playwright.version> 属性控制，升级只改该属性。 -->
         <playwright.version>1.62.0</playwright.version>
-        <!-- JUnit 4（唯一测试引擎）：全框架 + test-automation 统一。
-             历史：2026-09-11 曾迁到 JUnit 5，2026-10 回退 —— runner 侧（Serenity 的 CucumberWithSerenity）
-             本就是 JUnit 4，双引擎并存只增加 provider 抉择与 junit-platform 版本对齐成本。
-             版本在此显式钉定（junit:junit 不随 Serenity 可控传递）：4.13.2 含 assertThrows/assertDoesNotThrow。 -->
         <junit.version>4.13.2</junit.version>
-
         <typesafe.config.version>1.4.5</typesafe.config.version>
         <gson.version>2.14.0</gson.version>
         <json.path.version>2.9.0</json.path.version>
-        <cucumber.version>7.31.0</cucumber.version>
+        <cucumber.version>7.34.9</cucumber.version>
         <json.version>20240303</json.version>
-        <!-- T2-8：报告模板引擎。serenity 4.3.4 的 serenity-model 直接依赖 freemarker 2.3.34，RequireUpperBoundDeps 上界即 2.3.34，故锁定 2.3.34；SummaryReportGenerator 同步改用 Configuration.VERSION_2_3_33 常量与之匹配（2.3.34 向后兼容，常量仍有效）。 -->
         <freemarker.version>2.3.34</freemarker.version>
-        <!-- T2-8/方案A：汇总报告生成的绑定阶段（对齐 master 的同名配置：post-integration-test）。
-             ① 该阶段晚于 IT 执行、早于 failsafe:verify 的失败判定 ⇒ **用例报红也能产出
-                serenity-summary.html**（此前绑 verify：有失败时该 exec 被跳过，报告缺失）；
-             ② 与 serenity:aggregate 同阶段，且本 exec 在其后声明，保证「聚合完成后再生成」。
-             仅 test-automation（唯一含 framework-reporting 的业务测试模块）执行；
-             根聚合模块与框架模块无此 exec，天然不触发。 -->
         <summary.report.phase>post-integration-test</summary.report.phase>
-
-        <!-- 安全漏洞修复版本 -->
         <logback.version>1.5.34</logback.version>
-        <!-- 2.22.1：公司内网依赖治理（合规/漏洞扫描）要求的版本。高于 serenity 4.3.4 传递的 2.20.1，
-             故 RequireUpperBoundDeps 上界仍满足（无构件要求 >2.22.1）。
-             annotations 走独立版本线（jackson-bom:2.22.1 定 jackson.version.annotations=2.22），见下方 DM 单独钉 2.22。 -->
         <jackson.version>2.22.1</jackson.version>
         <json-smart.version>2.5.2</json-smart.version>
-        <!-- 构建期插件依赖（非应用依赖）：plexus-archiver 由 maven-jar-plugin 传递引入，内网治理要求 4.14.0
-             （原传递命中被隔离的 4.4.0）。dependencyManagement 覆盖**不到**插件依赖，
-             故在下方 maven-jar-plugin 的 <dependencies> 内钉版；并与 test-automation 的 serenity-maven-plugin
-             共用本属性，避免两处版本漂移。 -->
         <plexus.archiver.version>4.14.0</plexus.archiver.version>
-
-        <!-- 重复出现的第三方版本统一钉版（消除模块间硬编码版本漂移，ENG-T1-5 依赖收敛） -->
         <selenium.version>4.23.1</selenium.version>
         <mockito.version>4.5.1</mockito.version>
         <h2.version>2.2.224</h2.version>
         <flyway.version>9.22.3</flyway.version>
         <htmlunit3.driver.version>4.23.0</htmlunit3.driver.version>
-
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
-
-        <!-- 门禁（Phase 1 收尾）：JaCoCo 覆盖率 + Checkstyle 风格 -->
         <jacoco.version>0.8.12</jacoco.version>
         <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
-        <!-- 多模块下子模块 basedir 不是根，需用 multiModuleProjectDirectory 定位根级配置 -->
         <checkstyle.config.location>${maven.multiModuleProjectDirectory}/checkstyle.xml</checkstyle.config.location>
-
-        <!-- SpotBugs 门禁（T1-3）版本与排除过滤器 -->
         <spotbugs.plugin.version>4.9.8.5</spotbugs.plugin.version>
         <spotbugs.version>4.9.8</spotbugs.version>
-
-        <!-- CVE 门禁（T1-4）：OSV-Scanner 配置 -->
         <cve.gate.skip>false</cve.gate.skip>
-
-        <!-- CVE 门禁解释器（N-01① 修复）：默认 pwsh —— Linux/macOS/CI(ubuntu-latest) 上的 PowerShell 可执行名；
-             Windows 由下方 <profiles> 中 auto-activated 的 os-windows 覆盖为 powershell。
-             原实现硬编码 powershell（Windows-only 名）→ ubuntu-latest 上 "Cannot run program powershell"
-             → build job 恒红 → needs:build 的 e2e job 永不执行（CT2-01 的反假绿 Gate 从未真正运行过）。
-             注意：不能简单写死 pwsh —— 开发机（Windows）未必装了 PowerShell 7，会反过来打破本地 -Psca。 -->
         <cve.gate.executable>pwsh</cve.gate.executable>
-
-        <!-- 默认回归套件跑所有未显式跳过的场景（单一事实来源，由 test-automation failsafe 的 -Dcucumber.filter.tags=${tags} 驱动）。
-             Runner 不再写死标签（B-2）；环境依赖型 feature 若需默认跳过，打 @skip 即可。 -->
         <tags>not @skip</tags>
-
-        <!-- 重试（X-8）：默认 1（给 flaky 留一次缓冲），CI 可 -DrerunFailingTestsCount=N 覆盖。
-             注意：failsafe 不支持“按失败原因重试”，故断言失败也会被重试一次；失败分类
-             （仅环境/浏览器崩溃重试、断言失败不重试）见 doc10 E-4 与 FrameworkHooks 自定义逻辑，属后续项。
-             报告会标记 flaky，避免盲目重试掩盖真实缺陷。 -->
         <rerunFailingTestsCount>1</rerunFailingTestsCount>
-
-        <!-- N-22（2026-09-23，本地实测）：surefire 的 skipTests 必须【先声明为属性】再在插件配置里以
-             ${skipTests} 引用 —— 插件配置里写死字面量 false 会【覆盖】命令行 -DskipTests（surefire 的默认
-             参数表达式才是 ${skipTests}）。实测症状：`mvn install -DskipTests=true` 仍跑完全量单测
-             （4 份日志均含 103~112 个测试类，且无一条 "Tests are skipped"），使 CI stage 1
-             `mvn -B install -Psca -DskipTests -DskipITs`（注释写明"只装 parent + 6 模块到 .m2"）实际每次
-             全量跑单测：既拖慢，又把 stage 2 的 E2E 与单测稳定性绑在一起。
-             默认 false（保持"默认跑单测"），需要跳过时 -DskipTests=true 现在真正生效。 -->
         <skipTests>false</skipTests>
-
-        <!-- X-9：failsafe 单 JVM 整体超时（秒）。原硬编码 600s 对长套件偏紧（并行/大 feature 可能被整体掐断）；
-             提为可配置属性（默认 1800s），CI 按套件规模/并行度覆盖：-DforkedProcessTimeoutInSeconds=N。 -->
         <forkedProcessTimeoutInSeconds>1800</forkedProcessTimeoutInSeconds>
-
-        <!-- 环境切换（D-4）：默认空，由 sit1/sit2/sit3 profile 覆盖；test-automation failsafe 注入为系统属性。
-             铁律：不得注入名为 environment 的**标量**系统属性——业务侧 BDDUtils 以 environment.<ENV> 读取
-             环境 URL（Typesafe/Serenity 为对象键），标量 environment 会整体覆盖该对象导致登录 URL 失配。 -->
         <env/>
         <env.code/>
         <base.url/>
     </properties>
 
-    <!-- ENG-P0-2：依赖下沉。全部外部依赖改在 <dependencyManagement> 统一钉版本，
-         各模块在自身 <dependencies> 中显式声明所真正用到的依赖（见各模块 pom），
-         不再由父 POM <dependencies> 全量继承，模块边界与依赖来源可在 pom 直接辨识。 -->
     <dependencyManagement>
         <dependencies>
-        <!-- ==================== 离线中文→英文命名（代码生成器用，纯 Java、离线、无模型权重） ==================== -->
         <dependency>
             <groupId>com.huaban</groupId>
             <artifactId>jieba-analysis</artifactId>
@@ -160,7 +76,6 @@
             <version>2.5.1</version>
         </dependency>
 
-        <!-- ==================== Serenity BDD ==================== -->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-model</artifactId>
@@ -170,12 +85,6 @@
                     <groupId>commons-logging</groupId>
                     <artifactId>commons-logging</artifactId>
                 </exclusion>
-                <!-- 依赖治理（内网隔离清单）：serenity-model 直接依赖 cucumber-core / cucumber-java，
-                     把整条 Cucumber 运行栈（gherkin、十余个 formatter、datatable、cucumber-plugin…）
-                     以 compile 作用域灌进**每个**声明 serenity 的模块 —— 其中多数模块根本不跑 Cucumber。
-                     此处断掉该传递路径：真正使用 Cucumber 的模块（pw-web-ui 的 glue、test-automation、
-                     pw-codegen 经 serenity-cucumber）各自【显式声明】所用构件（见 DM 的 cucumber-* 条目）。
-                     版本仍统一由 ${cucumber.version} 治理，不产生版本漂移。 -->
                 <exclusion>
                     <groupId>io.cucumber</groupId>
                     <artifactId>cucumber-core</artifactId>
@@ -192,12 +101,6 @@
             <artifactId>serenity-core</artifactId>
             <version>${serenity.version}</version>
             <exclusions>
-                <!-- A-9：原通配 `<artifactId>selenium-*</artifactId>` 是**非法写法**（Maven 不支持 artifactId 通配，
-                     该排除从未生效），导致 serenity-core → selenium-java（含 chrome/firefox/edge/ie/safari、
-                     devtools-v85/125/126/127、htmlunit3-driver、selenium-manager 全套 driver）全部泄漏。
-                     本框架以 Playwright 驱动，Selenium driver 栈完全无用，故改为**显式排除 selenium-java**
-                     （其 driver 作为传递依赖一并移除）；selenium-api / selenium-support 因被 serenity 公开 API
-                     （org.openqa.selenium.support.ui.*）引用而保留。 -->
                 <exclusion>
                     <groupId>org.seleniumhq.selenium</groupId>
                     <artifactId>selenium-java</artifactId>
@@ -210,7 +113,6 @@
                     <groupId>org.seleniumhq.selenium</groupId>
                     <artifactId>selenium-support</artifactId>
                 </exclusion>
-                <!-- A-9：serenity-core 还**直接**依赖以下 driver（Playwright 框架无需），一并排除 -->
                 <exclusion>
                     <groupId>org.seleniumhq.selenium</groupId>
                     <artifactId>selenium-chrome-driver</artifactId>
@@ -231,12 +133,6 @@
                     <groupId>org.seleniumhq.selenium</groupId>
                     <artifactId>htmlunit3-driver</artifactId>
                 </exclusion>
-                <!-- 依赖治理（内网隔离清单）：serenity-core 还**直接**依赖 org.htmlunit:htmlunit，
-                     进而带入 htmlunit-core-js / neko-htmlunit / htmlunit-cssparser / htmlunit-websocket-client
-                     等（内网隔离清单命中 htmlunit-websocket-client）。本框架以 Playwright 驱动，
-                     HtmlUnit 栈完全不参与运行；需要 HtmlUnitDriver 类可加载的模块（test-automation 的
-                     Serenity SupportedWebDriver 静态初始化）已**自行显式声明** htmlunit3-driver（test），
-                     由其带回 htmlunit 本身，故此处断开对全框架的传递污染。 -->
                 <exclusion>
                     <groupId>org.htmlunit</groupId>
                     <artifactId>htmlunit</artifactId>
@@ -257,7 +153,6 @@
             <artifactId>serenity-cucumber</artifactId>
             <version>${serenity.cucumber.version}</version>
             <exclusions>
-                <!-- A-9：同上，非法通配 → 显式排除 selenium-java -->
                 <exclusion>
                     <groupId>org.seleniumhq.selenium</groupId>
                     <artifactId>selenium-java</artifactId>
@@ -266,11 +161,6 @@
                     <groupId>org.seleniumhq.selenium</groupId>
                     <artifactId>selenium-api</artifactId>
                 </exclusion>
-                <!-- 依赖治理（内网隔离清单）：serenity-cucumber 也**直接**声明 cucumber-core / cucumber-java /
-                     cucumber-junit（均为 compile 作用域 ⇒ 会流入每个声明它的模块）。声明它的模块里，
-                     pw-codegen 完全不使用 Cucumber（全模块零 io.cucumber 引用），test-automation 则已在
-                     pom 中**显式声明**所需构件 —— 故此处统一断开传递路径，使「Cucumber 只出现在真正声明它的模块」。
-                     至此两条引入路径（serenity-model、serenity-cucumber）均已收口。 -->
                 <exclusion>
                     <groupId>io.cucumber</groupId>
                     <artifactId>cucumber-core</artifactId>
@@ -286,7 +176,6 @@
             </exclusions>
         </dependency>
 
-        <!-- JUnit 4 执行器（2026-09-27 P0 回退 master 方案）：serenity-junit 提供 CucumberWithSerenity runner，Serenity 主体接管 Cucumber 生命周期 -->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-junit</artifactId>
@@ -294,11 +183,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- JUnit 4（唯一测试引擎）：全框架 + test-automation 统一。
-             原先的 JUnit 5（junit-jupiter-api/engine + junit-platform-launcher/engine/commons）已全量移除：
-             框架内没有任何 JUnit5 独有用法（@Nested / @ParameterizedTest / @ExtendWith / MockitoExtension 均为 0），
-             而 runner 侧（Serenity 的 CucumberWithSerenity）本就是 JUnit 4 —— 双引擎并存只带来
-             surefire provider 抉择与 junit-platform 版本对齐成本，没有收益。 -->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -306,7 +190,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- cucumber-junit：@RunWith(CucumberWithSerenity) 的 JUnit4 桥接（版本与 cucumber-core 统一） -->
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-junit</artifactId>
@@ -314,14 +197,12 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Serenity Screenplay -->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-screenplay</artifactId>
             <version>${serenity.version}</version>
         </dependency>
 
-        <!-- API Testing -->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-rest-assured</artifactId>
@@ -334,29 +215,23 @@
             </exclusions>
         </dependency>
 
-        <!-- RestAssured/HttpClient 运行时需要 commons-logging(LogFactory)，上方 serenity-* 将其全部 exclude 且未显式声明，
-             导致 RestPostJob 等 POST 实现类初始化时 NoClassDefFoundError。此处显式补回。 -->
         <dependency>
             <groupId>commons-logging</groupId>
             <artifactId>commons-logging</artifactId>
             <version>1.2</version>
         </dependency>
 
-        <!-- commons-lang3 原先未显式声明，仅靠传递依赖拉入且解析到 2014 年的 3.3.1（存在已知 CVE）。显式声明并升级到 3.17.0。 -->
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
             <version>3.19.0</version>
         </dependency>
 
-        <!-- Logging - Logback (SLF4J implementation) -->
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>${logback.version}</version>
         </dependency>
-        <!-- T2-8：报告模板引擎。serenity-model 传递 2.3.34，RequireUpperBoundDeps 上界即 2.3.34，故钉死；
-             原先只靠 ${freemarker.version} 属性在 pw-reports 内联，现登记进 DM 以便各模块统一引用。 -->
         <dependency>
             <groupId>org.freemarker</groupId>
             <artifactId>freemarker</artifactId>
@@ -373,24 +248,18 @@
             <version>${json.version}</version>
         </dependency>
 
-        <!-- Selenium support 跟随 Serenity 4.2.0 官方配套的 4.23.1（CORE-P0-1 降 serenity 以适配 jackson 2.18.3）。 -->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-support</artifactId>
             <version>4.23.1</version>
         </dependency>
 
-        <!-- Playwright -->
         <dependency>
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
             <version>${playwright.version}</version>
         </dependency>
 
-        <!-- Testing Frameworks：JUnit 4（junit:junit）已弃用（JUnit5 升级），不再纳入 DM；
-             各模块改用 junit-jupiter-*。hamcrest-core 仍由 Cucumber/AssertJ 传递消费，版本钉于下方 DM。 -->
-
-        <!-- ArchUnit：架构分层门禁（T0-1），仅测试期使用 -->
         <dependency>
             <groupId>com.tngtech.archunit</groupId>
             <artifactId>archunit</artifactId>
@@ -398,15 +267,12 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Hamcrest for assertions (used by Cucumber) -->
         <dependency>
             <groupId>org.hamcrest</groupId>
             <artifactId>hamcrest-core</artifactId>
             <version>2.2</version>
         </dependency>
 
-        <!-- AssertJ：测试断言库。各模块测试依赖统一由此钉版本，避免 pw-api-core 等
-             直接声明 assertj-core 却漏写 version 导致 reactor POM 解析失败。 -->
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
@@ -414,7 +280,6 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Utils -->
         <dependency>
             <groupId>com.typesafe</groupId>
             <artifactId>config</artifactId>
@@ -425,9 +290,6 @@
             <artifactId>gson</artifactId>
             <version>${gson.version}</version>
         </dependency>
-        <!-- commons-compress 上界钉（ENG-P0-2 Enforcer RequireUpperBoundDeps）：
-             由 htmlunit 传递引入，统一钉到上界 1.27.1 防止版本漂移。
-             原 axe-core 包装器（4.10.2）已移除，axe-core 改为自带 axe.min.js 注入，版本与 Playwright 解耦。 -->
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-compress</artifactId>
@@ -439,21 +301,16 @@
             <version>5.0.1</version>
         </dependency>
 
-            <!-- 覆盖传递性依赖版本，修复安全漏洞 -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
-            <!-- CVE-2024-47072 / GHSA-hfq9-hggm-c56q（HIGH，BinaryStreamDriver 栈溢出 DoS）：
-                 xstream ≤1.4.20 全系受影响，修复版 1.4.21。经 serenity-model:4.2.0 传递引入，此处钉版覆盖。 -->
             <dependency>
                 <groupId>com.thoughtworks.xstream</groupId>
                 <artifactId>xstream</artifactId>
                 <version>1.4.21</version>
             </dependency>
-            <!-- httpclient 经 serenity-rest-assured:4.2.0 传递引入（4.5.13）。4.5.13 本身无已知 CVE
-                 （CVE-2020-13956 恰在 4.5.13 修复），升级到 4.x 末版 4.5.14 消除 IDE/扫描器过期库标记，纯 bugfix 版本。 -->
             <dependency>
                 <groupId>org.apache.httpcomponents</groupId>
                 <artifactId>httpclient</artifactId>
@@ -464,11 +321,6 @@
                 <artifactId>json-smart</artifactId>
                 <version>${json-smart.version}</version>
             </dependency>
-            <!-- T1-5 依赖收敛：jackson core/databind 钉 ${jackson.version}(=2.22.1，公司内网治理要求)，
-                但 annotations 走独立版本线——jackson-bom:2.22.1 明确 jackson.version.annotations=2.22
-                （annotations 发版滞后，公共仓库无 2.22.1），故此处单独钉 2.22。三者均真实存在、满足 serenity 上界，RequireUpperBoundDeps 通过。
-                CORE-P0-1 / ENG-P0-2 修正：core 的 SensitiveDataSanitizer 直接使用 jackson-databind（脱敏 JSON 解析），
-                原经继承的 serenity 传递引入，下沉后须显式钉版本。 -->
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-annotations</artifactId>
@@ -479,9 +331,6 @@
                 <artifactId>jackson-databind</artifactId>
                 <version>${jackson.version}</version>
             </dependency>
-            <!-- P-7：响应契约校验（JSON Schema，支持 draft-07 / 2019-09 / 2020-12）。
-                 仅 JSON 用途；api 模块声明时排除其 YAML schema 传递依赖 jackson-dataformat-yaml，
-                 避免 dataformat(2.17.1) 与项目钉定的 jackson-core/databind(2.18.3) 产生版本偏斜与冗余。 -->
             <dependency>
                 <groupId>com.networknt</groupId>
                 <artifactId>json-schema-validator</artifactId>
@@ -492,16 +341,11 @@
                 <artifactId>slf4j-api</artifactId>
                 <version>2.0.17</version>
             </dependency>
-            <!-- CORE-P0-1 / 降 serenity 到 4.2.0：serenity 父 POM 在 DM 钉 byte-buddy 1.14.18，
-                 但 selenium-support 4.38.0 传递 byte-buddy 1.17.8，requireUpperBoundDeps 要求统一上限。
-                 此处显式钉 1.17.8 覆盖 serenity 父的 1.14.18，消除版本漂移。 -->
             <dependency>
                 <groupId>net.bytebuddy</groupId>
                 <artifactId>byte-buddy</artifactId>
                 <version>1.17.8</version>
             </dependency>
-            <!-- CORE-P0-1 / 降 serenity 到 4.2.0：serenity 父 POM 在 DM 钉 guava 33.2.1-jre，
-                 但 web 显式使用 33.5.0-jre，requireUpperBoundDeps 要求统一上限。钉 33.5.0-jre 覆盖 serenity 父。 -->
             <dependency>
                 <groupId>com.google.guava</groupId>
                 <artifactId>guava</artifactId>
@@ -517,12 +361,6 @@
                 <artifactId>htmlunit</artifactId>
                 <version>4.7.0</version>
             </dependency>
-            <!-- T4-4：将 Serenity 传递的 Cucumber 版本钉为显式属性，作为 README 技术栈表的单一事实来源（doc-drift 校验据此比对）。
-                 依赖治理：Cucumber 已从 Serenity 链路排除（见 serenity-model 的 exclusions），
-                 改由**使用方显式声明**。此处登记三个真正用到的构件，保证版本单一事实来源：
-                 cucumber-core（Cucumber API/运行时，Serenity 的 StepEventBus 与各 glue 运行期依赖）、
-                 cucumber-java（io.cucumber.java.en.* 注解，pw-web-ui 的框架级 glue 与各 step 定义）、
-                 datatable（io.cucumber.datatable.DataTable）。 -->
             <dependency>
                 <groupId>io.cucumber</groupId>
                 <artifactId>cucumber-core</artifactId>
@@ -562,21 +400,14 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven-surefire-plugin.version}</version>
                 <configuration>
-                    <!-- N-22：引用属性而非写死 false —— 后者会覆盖命令行 -DskipTests（详见 <properties> 中说明）。 -->
                     <skipTests>${skipTests}</skipTests>
                     <includes>
                         <include>**/*Test.java</include>
                     </includes>
                     <useModulePath>false</useModulePath>
-                    <!-- 与 failsafe 一致地引用属性，使命令行 -DforkedProcessTimeoutInSeconds 同样生效 -->
                     <forkedProcessTimeoutInSeconds>${forkedProcessTimeoutInSeconds}</forkedProcessTimeoutInSeconds>
                     <forkCount>1</forkCount>
                     <reuseForks>true</reuseForks>
-                    <!-- ⚠ JDK16+ 强封装：Serenity REST(RestSpecificationFactory) 在静态初始化时用 ByteBuddy
-                         反射注入类，需 java.base 打开 java.lang(ClassLoader.getPackage/defineClass)；
-                         java.lang.reflect 供 Mockito/Serenity 反射增强；java.util 供 RestAssured 的 Groovy 反射。 -->
-                    <!-- @{jacocoArgLine} 由 jacoco prepare-agent 在 initialize 阶段注入（覆盖率探针），
-                         未启用 jacoco 时该属性为空，不影响原 add-opens 强封装配置 -->
                     <argLine>@{jacocoArgLine} -Dfile.encoding=UTF-8 -XX:+EnableDynamicAgentLoading --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</argLine>
                 </configuration>
             </plugin>
@@ -587,10 +418,6 @@
                 <version>3.2.0</version>
             </plugin>
 
-            <!-- 打包插件显式钉版 + 插件级依赖覆盖（内网依赖治理）。
-                 maven-jar-plugin 3.3.0 传递引入被隔离的 plexus-archiver 4.4.0；
-                 dependencyManagement **无法**覆盖插件依赖，只能写进插件自身的 <dependencies>（与
-                 test-automation 中 serenity-maven-plugin 的处理同法）。版本经 ${plexus.archiver.version} 统一治理。 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -604,8 +431,6 @@
                 </dependencies>
             </plugin>
 
-            <!-- JaCoCo：覆盖率探针。prepare-agent 为所有模块注入 agent（jacocoArgLine），
-                 实际 report/check 仅在 test-automation（含测试）中执行，见该模块 pom。 -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -618,8 +443,6 @@
                         </goals>
                         <configuration>
                             <propertyName>jacocoArgLine</propertyName>
-                            <!-- 排除故意损坏的测试夹具（WEB-P1-3 坏类扫描用例），避免 JaCoCo 对其 instrumentation 报良性噪声。
-                                 JaCoCo excludes 用 * 通配（非 Ant 的 **），按内部类名（/ 分隔，无 .class 后缀）匹配 -->
                             <excludes>
                                 <exclude>com/hsbc/cmb/hk/dbb/automation/framework/web/listener/resiliencypkg/*</exclude>
                             </excludes>
@@ -628,23 +451,14 @@
                 </executions>
             </plugin>
 
-            <!-- Checkstyle：风格门禁（T1-2）。仅校验刚完成的重构包，failOnViolation 直接卡 verify。 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
                 <version>${checkstyle.plugin.version}</version>
                 <configuration>
                     <configLocation>${checkstyle.config.location}</configLocation>
-                    <!-- D7-3 规范约束框架生产代码：测试源（负向用例刻意触发/忽略异常）不纳入本门禁 -->
                     <includeTestSourceDirectory>false</includeTestSourceDirectory>
                     <violationSeverity>error</violationSeverity>
-                    <!-- A-1 门禁机制说明：
-                         规则已扩充至 8 条（EmptyCatchBlock/NeedBraces/EqualsHashCode/MissingOverride/
-                         UpperEll/ArrayTypeStyle/FileLength/UnusedImports），存量 1325 条违规经根
-                         checkstyle-baseline.xml 祖父化。
-                         maven-checkstyle-plugin:3.6.0 的 check 目标不支持 <baseline> 参数（离线 verify 也不产生 skin），
-                         故"只减不增"由 CI 计数比对实现（build.yml 对比各模块 target/checkstyle-result.xml 的
-                         <error> 总数与基线；新增即失败）。本地 verify 仅报告不卡构建，避免离线环境误伤。 -->
                     <failOnViolation>false</failOnViolation>
                     <outputFile>${project.build.directory}/checkstyle-result.xml</outputFile>
                     <includes>**/framework/**</includes>
@@ -660,10 +474,6 @@
                 </executions>
             </plugin>
 
-            <!-- Maven Enforcer：依赖治理门禁（T1-5）。
-                 requireUpperBoundDeps 防止传递依赖版本被低版本覆盖（如 selenium 4.15 vs 4.38 问题复发）；
-                 banDuplicatePomDependencyVersions 防止同一依赖在 dependencyManagement 多版本声明；
-                 requireJavaVersion/requireMavenVersion 锁定构建环境。存量违规通过渐进式启用治理，新代码零容忍。 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
@@ -690,11 +500,6 @@
                 </executions>
             </plugin>
 
-            <!-- SpotBugs：字节码静态缺陷门禁（T1-3）。
-                 策略（D6-2）：① 存量基线按包拆分 + 限期消除（见各模块 spotbugs-exclude.xml 头注释，含 owner/SLA/方式）；
-                 ② 新增违规硬门禁已生效——spotbugs-check 绑 verify 阶段、failOnError=true，excludeFilter 仅冻结已知基线项，
-                    任何未列入基线的新 SpotBugs 违规（Medium+）将导致 verify 失败，即「新增违规必须为 0」；
-                 ③ 消除后对应 <Match> 从基线移除，禁止「冻结式」留存。 -->
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
@@ -711,8 +516,6 @@
                     <threshold>Medium</threshold>
                     <failOnError>true</failOnError>
                     <includeTests>true</includeTests>
-                    <!-- 模块级排除过滤器：更新基线用 spotbugs:updateExcludeFilter 自动生成抑制项；
-                         各模块独立文件避免反应器内互相覆盖。 -->
                     <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
                 </configuration>
                 <executions>
@@ -725,20 +528,9 @@
                     </execution>
                 </executions>
             </plugin>
-
-            <!-- A-2（maven-install 污染 .m2 治理）：原 maven-install-plugin 在 package 阶段无条件
-                 install 兄弟模块到 .m2，每次 mvn verify/package/install 都污染本地仓库。
-                 已整体移入下方 <profiles> 的 sca profile：仅显式 -Psca 时才 install（供 OSV-Scanner 解析
-                 intra-project 兄弟模块）+ 跑 CVE 门禁；普通构建（mvn verify/test/package）不再污染 .m2，
-                 本地开发无需 -Psca。CI 的 Build & verify step 已加 -Psca 以启用安全门禁。 -->
         </plugins>
     </build>
 
-    <!-- A-2：SCA 安全扫描 profile。仅显式 -Psca 激活时：
-         ① maven-install-plugin 在 package 阶段 install 各兄弟模块到 .m2（供 OSV-Scanner 解析 intra-project 兄弟模块）；
-         ② exec-maven-plugin 在 verify 阶段跑 OSV-Scanner CVE 门禁（tools/cve-gate.ps1），新增漏洞即构建失败。
-         普通构建不激活本 profile，故不会污染 .m2，也不会跑 CVE 扫描（本地开发用；CI 用 -Psca 启用）。
-         install 执行继承至所有模块（各模块 install 自身），osv-exec 仅根模块执行一次（inherited=false）。 -->
     <profiles>
         <profile>
             <id>sca</id>
@@ -771,8 +563,6 @@
                                 </goals>
                                 <inherited>false</inherited>
                                 <configuration>
-                                    <!-- N-01①：解释器由 OS 自适应属性提供（见 <properties> / os-windows profile），
-                                         不再硬编码 Windows-only 的 powershell。 -->
                                     <executable>${cve.gate.executable}</executable>
                                     <arguments>
                                         <argument>-NoProfile</argument>
@@ -789,10 +579,6 @@
                 </plugins>
             </build>
         </profile>
-        <!-- N-01①：CVE 门禁解释器的 OS 自适应（配合 <properties> 的 cve.gate.executable）。
-             Windows 恒带 Windows PowerShell 5.1（powershell），但不保证有 PowerShell 7（pwsh）；
-             Linux/macOS/CI(ubuntu-latest) 只有 pwsh。按 OS 自动切换，杜绝"本地绿 / CI 红"的分叉。
-             本 profile 由 os.family=windows 自动激活，无需显式 -P。 -->
         <profile>
             <id>os-windows</id>
             <activation>
@@ -804,10 +590,6 @@
                 <cve.gate.executable>powershell</cve.gate.executable>
             </properties>
         </profile>
-
-        <!-- D-4：环境 profile——提供明确的环境切换入口，CI 用法：mvn verify -Psit1 -Dtags="@smoke"。
-             仅注入 env/env.code/base.url 三个属性（经 test-automation failsafe 做为系统属性下发），
-             不触碰 environment.* 对象键（见根 <properties> 铁律注释）。 -->
         <profile>
             <id>sit1</id>
             <properties>

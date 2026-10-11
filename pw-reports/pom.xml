@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
     </parent>
 
@@ -20,7 +20,7 @@
             <artifactId>pw-core</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- T2-8：迁移 SummaryReportGenerator 入本模块，需其依赖（ENG-P0-2：版本改由根 dependencyManagement 统一钉） -->
+        <!-- T2-8锛氳縼绉?SummaryReportGenerator 鍏ユ湰妯″潡锛岄渶鍏朵緷璧栵紙ENG-P0-2锛氱増鏈敼鐢辨牴 dependencyManagement 缁熶竴閽夛級 -->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
@@ -29,29 +29,29 @@
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-model</artifactId>
             <exclusions>
-                <!-- 与项目其余 serenity 构件一致：排除传递的 commons-logging，
-                     统一收敛到项目上界 1.2（由 slf4j 桥接提供 LogFactory） -->
+                <!-- 涓庨」鐩叾浣?serenity 鏋勪欢涓€鑷达細鎺掗櫎浼犻€掔殑 commons-logging锛?
+                     缁熶竴鏀舵暃鍒伴」鐩笂鐣?1.2锛堢敱 slf4j 妗ユ帴鎻愪緵 LogFactory锛?-->
                 <exclusion>
                     <groupId>commons-logging</groupId>
                     <artifactId>commons-logging</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- ENG-P0-2：reporting 实际用到的其余 serenity 构件 -->
+        <!-- ENG-P0-2锛歳eporting 瀹為檯鐢ㄥ埌鐨勫叾浣?serenity 鏋勪欢 -->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-core</artifactId>
         </dependency>
-        <!-- T2-8：报告模板引擎（把 2,184 行里的 HTML/CSS 硬编码拼接改为模板渲染）。
-             Freemarker 2.3.34 本就随 Serenity 传递进入本模块 classpath（零新增依赖）；
-             此处按「用到了就必须显式声明」提升为 direct —— 不把上游的传递依赖当作隐式契约，
-             否则上游一旦移除或降级，本模块会无征兆地编译失败。 -->
+        <!-- T2-8锛氭姤鍛婃ā鏉垮紩鎿庯紙鎶?2,184 琛岄噷鐨?HTML/CSS 纭紪鐮佹嫾鎺ユ敼涓烘ā鏉挎覆鏌擄級銆?
+             Freemarker 2.3.34 鏈氨闅?Serenity 浼犻€掕繘鍏ユ湰妯″潡 classpath锛堥浂鏂板渚濊禆锛夛紱
+             姝ゅ鎸夈€岀敤鍒颁簡灏卞繀椤绘樉寮忓０鏄庛€嶆彁鍗囦负 direct 鈥斺€?涓嶆妸涓婃父鐨勪紶閫掍緷璧栧綋浣滈殣寮忓绾︼紝
+             鍚﹀垯涓婃父涓€鏃︾Щ闄ゆ垨闄嶇骇锛屾湰妯″潡浼氭棤寰佸厗鍦扮紪璇戝け璐ャ€?-->
         <dependency>
             <groupId>org.freemarker</groupId>
             <artifactId>freemarker</artifactId>
         </dependency>
 
-        <!-- 测试期依赖（JUnit 4） -->
+        <!-- 娴嬭瘯鏈熶緷璧栵紙JUnit 4锛?-->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -63,7 +63,7 @@
             <artifactId>archunit</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- A-9 对称修复：同 pw-web-ui，框架测试经 Serenity 运行期需 selenium driver 类，补 test scope 依赖 -->
+        <!-- A-9 瀵圭О淇锛氬悓 pw-web-ui锛屾鏋舵祴璇曠粡 Serenity 杩愯鏈熼渶 selenium driver 绫伙紝琛?test scope 渚濊禆 -->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
@@ -72,3 +72,4 @@
         </dependency>
     </dependencies>
 </project>
+

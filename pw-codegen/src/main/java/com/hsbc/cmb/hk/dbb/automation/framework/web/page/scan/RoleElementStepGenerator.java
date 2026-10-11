@@ -120,6 +120,11 @@ public final class RoleElementStepGenerator {
         if (e.isRightClick()) {
             return "rightClick()";
         }
+        // P1-4 upload：<input type=file> 点击实际打开系统文件选择器，录制时应生成 setInputFiles，
+        // 而非 click()（对隐藏 file input click 会报错/无业务意义）。路径占位由人工补全。
+        if (e.isFileInput()) {
+            return "setInputFiles(\"<path-to-upload-file>\")";
+        }
         // 勾选类元素（checkbox/radio）优先于 hover：用户点击 checkbox/radio 的语义是「设置勾选状态」，
         // 而 focusin 聚焦可能把点击误标为 hover（__rolePickFocus 以 isHover=true 记录、时序先于 click），
         // 若 hover 优先会让点击 checkbox 误生成 locator.hover() 而非 setChecked()。故先判定勾选角色。

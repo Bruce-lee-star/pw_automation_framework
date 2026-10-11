@@ -149,6 +149,10 @@
 </#list>
             </td></tr>
             <tr><td class="label">Failure reason</td><td>${item.reason!}</td></tr>
+<#if item.scenarios?? && item.scenarios?has_content>
+            <tr><td class="label">Scenarios</td><td>
+<#list item.scenarios as s><span class="scenario">${s}</span><#sep>, </#list></td></tr>
+</#if>
           </table>
 
           <div class="body-block">

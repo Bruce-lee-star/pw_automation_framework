@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -6,7 +6,7 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>Automation_WebUI_Framework_BDD</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
     </parent>
 
@@ -26,7 +26,7 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- ENG-P0-2：api 实际用到的外部依赖（原由根 <dependencies> 继承，现显式声明） -->
+        <!-- ENG-P0-2锛歛pi 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
         <dependency>
             <groupId>net.serenity-bdd</groupId>
             <artifactId>serenity-model</artifactId>
@@ -47,8 +47,8 @@
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
         </dependency>
-        <!-- P-7：响应契约校验（JSON Schema）。仅用 JSON 校验，故排除 YAML schema 传递依赖
-             jackson-dataformat-yaml，避免其 2.17.1 与项目钉定的 jackson-core/databind 2.18.3 版本偏斜。 -->
+        <!-- P-7锛氬搷搴斿绾︽牎楠岋紙JSON Schema锛夈€備粎鐢?JSON 鏍￠獙锛屾晠鎺掗櫎 YAML schema 浼犻€掍緷璧?
+             jackson-dataformat-yaml锛岄伩鍏嶅叾 2.17.1 涓庨」鐩拤瀹氱殑 jackson-core/databind 2.18.3 鐗堟湰鍋忔枩銆?-->
         <dependency>
             <groupId>com.networknt</groupId>
             <artifactId>json-schema-validator</artifactId>
@@ -63,19 +63,19 @@
             <groupId>com.typesafe</groupId>
             <artifactId>config</artifactId>
         </dependency>
-        <!-- RestAssured POST 运行期需要 commons-logging(LogFactory)；serenity-* 已将其排除，此处显式补回 -->
+        <!-- RestAssured POST 杩愯鏈熼渶瑕?commons-logging(LogFactory)锛泂erenity-* 宸插皢鍏舵帓闄わ紝姝ゅ鏄惧紡琛ュ洖 -->
         <dependency>
             <groupId>commons-logging</groupId>
             <artifactId>commons-logging</artifactId>
         </dependency>
-        <!-- selenium-support：serenity 公开 API 引用 org.openqa.selenium.support.ui.*（如 ExpectedCondition）。
-             保留显式声明：与 web 同策略，防 ENG-P0-2 下沉后 javac 符号补全 CompletionFailure。 -->
+        <!-- selenium-support锛歴erenity 鍏紑 API 寮曠敤 org.openqa.selenium.support.ui.*锛堝 ExpectedCondition锛夈€?
+             淇濈暀鏄惧紡澹版槑锛氫笌 web 鍚岀瓥鐣ワ紝闃?ENG-P0-2 涓嬫矇鍚?javac 绗﹀彿琛ュ叏 CompletionFailure銆?-->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-support</artifactId>
         </dependency>
 
-        <!-- 评审08类-6 / A-4：api 模块首个单测基座（JUnit 4，全框架统一） -->
+        <!-- 璇勫08绫?6 / A-4锛歛pi 妯″潡棣栦釜鍗曟祴鍩哄骇锛圝Unit 4锛屽叏妗嗘灦缁熶竴锛?-->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -86,8 +86,8 @@
             <artifactId>assertj-core</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- 评审08类-6 / A-4：api 模块单测基座（Mockito 驱动 executeWithRetry 重试内核，
-             绕开 SerenityRest 在纯 JUnit 下的 classloader 约束） -->
+        <!-- 璇勫08绫?6 / A-4锛歛pi 妯″潡鍗曟祴鍩哄骇锛圡ockito 椹卞姩 executeWithRetry 閲嶈瘯鍐呮牳锛?
+             缁曞紑 SerenityRest 鍦ㄧ函 JUnit 涓嬬殑 classloader 绾︽潫锛?-->
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
@@ -98,25 +98,25 @@
 
     <properties>
         <!--
-          PAR-7 JaCoCo 行覆盖率下限（2026-09-17 首次落地，2026-09-20 上调至目标位）。
-          口径：doc05 §5.2 建议「先设低门槛并只允许上升」。
-          首版实测 = 23.5%（427/1818），下限取 0.23 以启动「只升不降」门禁。
-          2026-09-20 补测：新增 HttpStatusTest / JsonUtilsTest / ApiLogSanitizerTest / FileReaderTest /
-          EnvironmentUtilsTest / ConfigProviderTest（+2 测试资材），实测 LINE 覆盖率 = 43.1%（792/1836），
-          故下限上调至 **0.40**（doc 中既定目标位），仍保留约 3pp 余量以防环境差异。
-          若某次提交将 api 行覆盖率拉到 0.40 以下，verify 即失败（提示删测试 / 退化）。
+          PAR-7 JaCoCo 琛岃鐩栫巼涓嬮檺锛?026-09-17 棣栨钀藉湴锛?026-09-20 涓婅皟鑷崇洰鏍囦綅锛夈€?
+          鍙ｅ緞锛歞oc05 搂5.2 寤鸿銆屽厛璁句綆闂ㄦ骞跺彧鍏佽涓婂崌銆嶃€?
+          棣栫増瀹炴祴 = 23.5%锛?27/1818锛夛紝涓嬮檺鍙?0.23 浠ュ惎鍔ㄣ€屽彧鍗囦笉闄嶃€嶉棬绂併€?
+          2026-09-20 琛ユ祴锛氭柊澧?HttpStatusTest / JsonUtilsTest / ApiLogSanitizerTest / FileReaderTest /
+          EnvironmentUtilsTest / ConfigProviderTest锛?2 娴嬭瘯璧勬潗锛夛紝瀹炴祴 LINE 瑕嗙洊鐜?= 43.1%锛?92/1836锛夛紝
+          鏁呬笅闄愪笂璋冭嚦 **0.40**锛坉oc 涓棦瀹氱洰鏍囦綅锛夛紝浠嶄繚鐣欑害 3pp 浣欓噺浠ラ槻鐜宸紓銆?
+          鑻ユ煇娆℃彁浜ゅ皢 api 琛岃鐩栫巼鎷夊埌 0.40 浠ヤ笅锛寁erify 鍗冲け璐ワ紙鎻愮ず鍒犳祴璇?/ 閫€鍖栵級銆?
         -->
         <api.line.coverage.floor>0.40</api.line.coverage.floor>
     </properties>
 
     <build>
         <plugins>
-            <!-- PAR-7：api 模块自身覆盖率报告 + 门禁（prepare-agent 由父 POM 为所有模块注入） -->
+            <!-- PAR-7锛歛pi 妯″潡鑷韩瑕嗙洊鐜囨姤鍛?+ 闂ㄧ锛坧repare-agent 鐢辩埗 POM 涓烘墍鏈夋ā鍧楁敞鍏ワ級 -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>
-                    <!-- 在 test 阶段产出 api 模块自身的 XML 报告（此前仅在 test-automation 出报告） -->
+                    <!-- 鍦?test 闃舵浜у嚭 api 妯″潡鑷韩鐨?XML 鎶ュ憡锛堟鍓嶄粎鍦?test-automation 鍑烘姤鍛婏級 -->
                     <execution>
                         <id>api-report</id>
                         <phase>test</phase>
@@ -129,7 +129,7 @@
                             </formats>
                         </configuration>
                     </execution>
-                    <!-- 门禁：BUNDLE 行覆盖率不得低于下限，否则 verify 失败（仅升不降） -->
+                    <!-- 闂ㄧ锛欱UNDLE 琛岃鐩栫巼涓嶅緱浣庝簬涓嬮檺锛屽惁鍒?verify 澶辫触锛堜粎鍗囦笉闄嶏級 -->
                     <execution>
                         <id>api-check</id>
                         <phase>verify</phase>
@@ -156,3 +156,4 @@
         </plugins>
     </build>
 </project>
+
