@@ -780,48 +780,31 @@
                     // 【列表开关】每条拾取可标记为「一组元素（列表）」：为真时页面类生成 {@code PageElementList} 字段、
                     // step 用 {@code x.get(index)} 取单项（语义等价 page.pause 的 locator.nth(index)）；否则为单个元素。
                     // 状态经 __rolePickerCmd 对象命令 {type:'markList', list, pick} 回传 Java 权威态，并由回灌刷新。
-                    let _listBtn = document.createElement('a');
-                    _listBtn.href = 'javascript:void(0)';
+                    // 【元素类型标签：仅展示、不交互】列表/单表示元素的类型（由框架判定），
+                    // 面板只静态显示，不再响应点击切换，也不发送 markList 命令。
+                    let _listBtn = document.createElement('button');
+                    _listBtn.type = 'button';
                     _listBtn.textContent = p._list ? '[列表]' : '[单]';
-                    _listBtn.title = p._list ? '已标记为一组元素（列表）。点击改为单个元素。' : '点击标记为一组元素（列表）。';
-                    _listBtn.style.cssText = 'flex:0 0 auto;text-decoration:none;cursor:pointer;font-size:11px;' +
-                      'padding:2px 4px;border-radius:4px;transition:all .15s;color:' + (p._list ? '#1677ff' : '#888') + ';';
-                    _listBtn.addEventListener('mouseenter', function() { _listBtn.style.background = 'rgba(22,119,255,.12)'; });
-                    _listBtn.addEventListener('mouseleave', function() { _listBtn.style.background = 'transparent'; });
-                    _listBtn.addEventListener('click', function(ev) {
-                      ev.preventDefault();
-                      ev.stopPropagation();
-                      var nv = !p._list;
-                      p._list = nv;
-                      _listBtn.textContent = nv ? '[列表]' : '[单]';
-                      _listBtn.title = nv ? '已标记为一组元素（列表）。点击改为单个元素。' : '点击标记为一组元素（列表）。';
-                      _listBtn.style.color = nv ? '#1677ff' : '#888';
-                      try {
-                        window.__rolePickerCmd({ type: 'markList', list: nv, pick: {
-                          strategy: p.strategy, _sig: p._sig, _sigKey: p._sigKey, _pageClass: p._pageClass,
-                          role: p.role, key: (p.key != null ? p.key : p.resolvedKey), name: p.name, index: p.index,
-                          selector: p.selector, css: p.css, id: p.id, tag: p.tag, text: p.text, value: p.value
-                        } });
-                      } catch (e) { /* 绑定未就绪：忽略（标记仅影响生成形态，不阻断拾取） */ }
-                      return false;
-                    });
+                    _listBtn.title = p._list ? '该元素被判定为一组元素（列表）' : '该元素为单个元素';
+                    _listBtn.disabled = true;
+                    _listBtn.style.cssText = 'flex:0 0 auto;font-size:11px;padding:2px 4px;border-radius:4px;' +
+                      'border:1px solid ' + (p._list ? 'rgba(22,119,255,.4)' : 'transparent') + ';' +
+                      'color:' + (p._list ? '#1677ff' : '#888') + ';background:transparent;cursor:default;opacity:1;';
                     row.appendChild(_listBtn);
-                    let _trash = document.createElement('a');
+                    let _trash = document.createElement('button');
+                    _trash.type = 'button';
                     _trash.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" ' +
                       'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
                       '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>' +
                       '<path d="M10 11v5M14 11v5"/></svg>';
-                    _trash.href = 'javascript:void(0)';
                     _trash.title = '删除该元素（从所有拾取、步骤和代码中移除）';
-                    _trash.style.cssText = 'flex:0 0 auto;color:#888;text-decoration:none;cursor:pointer;' +
-                      'padding:2px 4px;margin-left:auto;border-radius:4px;transition:all .15s;';
+                    _trash.style.cssText = 'flex:0 0 auto;color:#888;cursor:pointer;' +
+                      'padding:2px 4px;margin-left:auto;border:none;background:transparent;border-radius:4px;transition:all .15s;';
                     _trash.addEventListener('mouseenter', function() { _trash.style.color = '#ff4d4f'; _trash.style.background = 'rgba(244,67,58,.12)'; });
                     _trash.addEventListener('mouseleave', function() { _trash.style.color = '#888'; _trash.style.background = 'transparent'; });
                     _trash.addEventListener('click', function(ev) {
-                      ev.preventDefault();
                       ev.stopPropagation();
                       window.__deleteSinglePick(p);
-                      return false;
                     });
                     row.appendChild(_trash);
                     // 记录复选框与签名引用，供 __applySelection 增量刷新（不重建列表）。
