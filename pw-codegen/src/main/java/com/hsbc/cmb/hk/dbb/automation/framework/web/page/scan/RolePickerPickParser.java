@@ -59,6 +59,9 @@ final class RolePickerPickParser {
         // 同一元素两次回传的 key 形式不一致会导致 mergePickIntoMap 命中不同条目，重复点击的序号
         // 数组（_pickNos）被存到数组键下、而展示/生成沿用首次字符串键的残缺值 → 序号混乱。
         // 此处把数组形式统一归一为 "pageClass|sig" 字符串，与首次拾取键对齐，确保累积命中同一 entry。
+        // 策略先算：下面"是否剥掉 #index"依赖它（旧实现无条件剥离，导致 role 策略的多个同名元素塌成一条）。
+        String strategy = (e != null) ? e.getStrategy() : asString(m.get("strategy"));
+        boolean locatorIdentity = strategy != null && RoleElementPicker.LOCATOR_IDENTITY_STRATEGIES.contains(strategy);
         String sigKey = asString(sigKeyRaw);
         if (sigKey != null && sigKey.startsWith("[")) {
             try {
@@ -67,16 +70,20 @@ final class RolePickerPickParser {
                     String s0 = asString(arr.get(0));
                     String s1 = asString(arr.get(1));
                     if (s1 != null && s0 != null) {
-                        // 去掉 sig 末尾的 #index 后缀（如 "i18n:user_name#0" → "i18n:user_name"），
-                        // 对齐首次拾取字符串键（LogonPage|i18n:user_name 不含 #0），保证同元素不同形式键命中同一 entry。
-                        s0 = s0.replaceAll("#\\d+$", "");
+                        // 仅对【定位器唯一型策略】去掉 #index：这类策略靠 locator 唯一确定元素，
+                        // 而 #index 会随区域重扫/勾选顺序重新分配，带着它做 key 会让删除命中失败
+                        // （旧 bug："data-i18n 元素删了又复活"）。
+                        //
+                        // 但 role 策略【必须保留 #index】：role 的 sig 形如 "role:img:QR code...#3"，
+                        // 页面上同 role+name 可以有多个不同元素（现场：3 个 QR 图 #3 / #4 / #5）。
+                        // 无条件剥索引会把它们塌成同一条 entry —— 用户只看到一个元素，
+                        // 三个序号却堆在同一 entry 上（pickNos=[16,17,18]）。
+                        if (locatorIdentity) s0 = s0.replaceAll("#\\d+$", "");
                         sigKey = s1 + "|" + s0;
                     }
                 }
             } catch (Exception ignore) { /* 保留原值 */ }
         }
-        String strategy = (e != null) ? e.getStrategy() : null;
-        boolean locatorIdentity = strategy != null && RoleElementPicker.LOCATOR_IDENTITY_STRATEGIES.contains(strategy);
         // 【方案 B：页面级隔离】内存态去重键一律绑定所属 pageClass，使不同页面上 role/name 完全相同
         // 的「共用元素」（如各页页脚链接、Close/Next、HSBC App tab）彻底按页分桶，互不干扰：
         // 删除某页元素时不再波及其它页同名元素（此前 i18n/定位器型策略的 locatorKey 不含 pageClass，

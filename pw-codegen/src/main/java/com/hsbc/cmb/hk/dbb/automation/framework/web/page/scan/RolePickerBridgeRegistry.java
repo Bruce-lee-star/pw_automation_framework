@@ -345,6 +345,24 @@ final class RolePickerBridgeRegistry {
                     // 该页最终要靠慢兜底链补回，表现为"十几秒后才出现元素"）。
                     log.info("[picker][bootstrap] merged authoritative state into {} ({} pick(s), {}ms)",
                             targetUrl, map.size(), (System.currentTimeMillis() - t0));
+                    // 【新页面板就地挂载】数据已在 66ms 内合并完，但面板本身此前只能等迟到的
+                    // onFrameNavigated → followPage → injectPanelAndLib（现场：新页出现 11s 后面板才注入，
+                    // 用户观感即"已拾取元素回灌很慢"）。根因是新文档的门控脚本常在 about:blank 阶段执行
+                    // （gateInit.switchOn=false）⇒ 面板不自启，而跨源页又读不到原 origin 的 localStorage 标记。
+                    // 自举能触发即证明"会话在、且有权威数据"，故这里在合并后立刻补挂：已挂载则零成本。
+                    try {
+                        Object has = RoleElementPicker.pickerEvalSoft(target,
+                                "!!(document.getElementById('__rolePanel') && window.__renderPicks)");
+                        if (!Boolean.TRUE.equals(has)) {
+                            RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.PANEL_SCRIPT);
+                            RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.RENDER_PICKS_JS);
+                            log.info("[picker][bootstrap] panel mounted into {} ({}ms)",
+                                    targetUrl, (System.currentTimeMillis() - t0));
+                        }
+                    } catch (Exception panelEx) {
+                        log.debug("[picker][bootstrap] panel auto-mount skipped for {}: {}", targetUrl, panelEx.getMessage());
+                        RolePickerQuiet.ignore("RolePickerBridgeRegistry#bootstrapPanel", panelEx);
+                    }
                 } catch (Exception ex) {
                     log.warn("[picker][bootstrap] merge failed for {} after {}ms (fallback restore will retry): {}",
                             targetUrl, (System.currentTimeMillis() - t0), ex.getMessage());
