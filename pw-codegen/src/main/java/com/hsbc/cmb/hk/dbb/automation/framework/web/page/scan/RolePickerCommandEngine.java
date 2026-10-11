@@ -252,6 +252,34 @@ public final class RolePickerCommandEngine {
                 snap = new PickSnapshot(snap.pageClass, memEntries, snap.steps, snap.ops);
             }
         }
+        // 【用 Java 侧本轮累积重建当前轮 step】浏览器的 __currentStep 只装"当前文档"的拾取，
+        // 一轮内每次导航 / 弹出新页都会换文档 ⇒ 停止时浏览器 __steps 里只剩最后一个文档的那几条，
+        // 本轮其余操作全部丢失（现场：一轮内跨 3 个文档拾了 32 个操作，产物 step1 只剩最后 4 行）。
+        // ctx.roundPicks 由 __roleOnPick 逐次累积（跨文档 / 跨弹窗，元素带各自 pageClass 与 nos），
+        // 才是"本轮"的权威来源 —— 用它整体替换 snap.steps（一个 step = 一轮，生成器按各元素 nos 展开）。
+        try {
+            java.util.List<RoleEntry> roundList;
+            synchronized (ctx.roundPicks) { roundList = new ArrayList<>(ctx.roundPicks.values()); }
+            if (!roundList.isEmpty()) {
+                java.util.List<RoleEntry> ordered = new ArrayList<>(roundList);
+                ordered.sort(java.util.Comparator.comparingInt(e -> {
+                    java.util.List<Integer> nos = e.getPickNos();
+                    return (nos != null && !nos.isEmpty() && nos.get(0) != null) ? nos.get(0) : Integer.MAX_VALUE;
+                }));
+                String roundCls = (snap != null && snap.pageClass != null && !snap.pageClass.isEmpty())
+                        ? snap.pageClass
+                        : (ordered.get(0).getPageClass() != null ? ordered.get(0).getPageClass() : "");
+                java.util.List<StepRec> oneRound = new ArrayList<>();
+                oneRound.add(new StepRec(roundCls, ordered));
+                snap = new PickSnapshot(
+                        (snap != null && snap.pageClass != null) ? snap.pageClass : "",
+                        (snap != null && snap.entries != null) ? snap.entries : ordered,
+                        oneRound,
+                        (snap != null && snap.ops != null) ? snap.ops : new ArrayList<>());
+            }
+        } catch (Exception re) {
+            log.warn("[picker][stop] rebuild current-round step from roundPicks failed: {}", re.getMessage());
+        }
         // manual-mode (not packaged) fallback: start->stop whole session = one step.
         snap = RolePickerCodeAssembler.snapWithAutoStep(snap);
         // 合入已关闭页的步骤/操作（含其补登记的 closeCurrentPage），避免关闭步骤在停止时被跳过而丢失。
