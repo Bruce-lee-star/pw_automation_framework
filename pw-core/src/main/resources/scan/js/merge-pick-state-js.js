@@ -33,6 +33,14 @@
     var __incoming = (s.picks || []).filter(function (p) { return !!p && !!p._pageClass; });
     window.__rolePicks = __mergeByKey(window.__rolePicks || [], __incoming);
     window.__steps = window.__steps || [];
+    // 【已封存 step 清单随自举下发】__steps 只活在页面文档里，新文档（尤其跨源新页）天然是空的；
+    // 旧实现于是把此前封存的 step1/step2…整体丢掉，面板表现为"跳到新页面后步骤不见了"。
+    // 这里【仅当本页没有任何已封存 step 时】才采用载荷：既把会话已封存的步骤带到新页，
+    // 又不会覆盖本页自己刚封存的（本页优先，避免把别页进度回退）。
+    if (window.__steps.length === 0 && Array.isArray(s.steps) && s.steps.length > 0) {
+      window.__steps = s.steps.slice();
+    }
+    // __currentStep 保持"只认本页本轮"：搬别页本轮会让别页元素混进本页 step（既有契约，不动）。
     window.__currentStep = window.__currentStep || [];
     (function () {
       var mx = 0;

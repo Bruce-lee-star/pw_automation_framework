@@ -124,6 +124,38 @@ final class RolePickerBridgeRegistry {
         registerFrameAttachListener(ctx);
     }
 
+    /**
+     * 【页类纠偏】按【回传来源页】当场修正 pick 携带的旧页类（详见上方 binding 通道内的根因说明）。
+     *
+     * <p>必须在 {@code parsePick} 之前改【原始回传字段】：{@code RoleEntry.pageClass} 为 final 且无 setter，
+     * 而去重键 {@code pickDedupKey} 也读该字段，故统一在源头纠正。
+     *
+     * <p>【为何抽成公共方法】此前只有 binding 通道做了纠偏，console 兜底通道没有 ⇒ 跨源 iframe /
+     * 绑定失效时经 console 到达的 pick 仍带旧页类（现场：QR #3 在页类已纠正为 SetupSecondPwdPage
+     * 之后仍以 LogonPage 落库，同一元素在 Java 侧变成两条、分属两个页面类，产物出现
+     * {@code logonPage.qrCodeToDownloadTheMobileApp.click()}）。两条通道必须同口径。
+     */
+    private static void retagPickPageClass(java.util.Map<Object, Object> m, Page srcPage, String channel) {
+        if (m == null) return;
+        try {
+            String pickCls = (m.get("_pageClass") == null) ? null : String.valueOf(m.get("_pageClass"));
+            String fixedCls = RolePickerPageTracker.retagStalePickClass(srcPage, pickCls);
+            if (fixedCls == null) return;
+            m.put("_pageClass", fixedCls);
+            // 【必须同时修正去重键 _sigKey】浏览器侧 __sigKey 格式是 JSON 数组 [sig, pageClass]，且是在
+            // 【纠正之前】算出来的：只改 _pageClass 会让 pickDedupKey 仍按带旧页类的 _sigKey 去重，
+            // 于是同一元素在 Java 侧落成【两条】条目。故用同一 sig + 新页类重建 _sigKey。
+            Object sigObj = m.get("_sig");
+            if (sigObj != null) {
+                m.put("_sigKey", GSON.toJson(java.util.Arrays.asList(String.valueOf(sigObj), fixedCls)));
+            }
+            log.info("[picker][nav] pick page class corrected at callback time ({}): {} -> {} (url={})",
+                    channel, pickCls, fixedCls, (srcPage == null ? "" : srcPage.url()));
+        } catch (Exception ignoreRetag) {
+            RolePickerQuiet.ignore("RolePickerBridgeRegistry#retag", ignoreRetag);
+        }
+    }
+
     /** 命令桥：浏览器侧经 window.__rolePickerCmd 投递，零往返把命令入队；BindingCallback 的 Source 自带来源 Page，天然区分命令来自哪个页面。 */
     private static void registerCmdBridge(BrowserContext ctx) {
         ctx.exposeBinding("__rolePickerCmd", (source, args) -> {
@@ -174,26 +206,7 @@ final class RolePickerBridgeRegistry {
                 // 必须在 parsePick 之前改【原始回传字段】：RoleEntry.pageClass 为 final 且无 setter（实体不可变），
                 // 而下方 pickDedupKey 也读该字段，故统一在源头纠正。
                 // 仅作用于"来源页自身的类名漂移"；跨页搬运的 pick 走 syncPanelToBrowser / merge 等其它路径，不受影响。
-                try {
-                    String __pickCls = (m.get("_pageClass") == null) ? null : String.valueOf(m.get("_pageClass"));
-                    Page __srcPage = source.page();
-                    String __fixedCls = RolePickerPageTracker.retagStalePickClass(__srcPage, __pickCls);
-                    if (__fixedCls != null) {
-                        m.put("_pageClass", __fixedCls);
-                        // 【必须同时修正去重键 _sigKey】浏览器侧 __sigKey 的格式是 JSON 数组 [sig, pageClass]，
-                        // 且是在【纠正之前】算出来的：只改 _pageClass 会让 pickDedupKey 仍按带旧页类的 _sigKey
-                        // 去重，于是同一元素在 Java 侧落成【两条】条目（现场 diag-stop 实证：
-                        // ["role:heading:title_username_page#0","LogonPage"] 与 [...,"SetupSecondPwdPage"]
-                        // 同时存在，号还分别是 [1,2] 与 [1,3,4]）。故用同一 sig + 新页类重建 _sigKey，
-                        // 使该 pick 与既有 LogonPage 条目并到一处（格式与 JS 的 JSON.stringify([sig, cls]) 一致）。
-                        Object __sigObj = m.get("_sig");
-                        if (__sigObj != null) {
-                            m.put("_sigKey", GSON.toJson(java.util.Arrays.asList(String.valueOf(__sigObj), __fixedCls)));
-                        }
-                        log.info("[picker][nav] pick page class corrected at callback time: {} -> {} (url={})",
-                                __pickCls, __fixedCls, (__srcPage == null ? "" : __srcPage.url()));
-                    }
-                } catch (Exception ignoreRetag) { RolePickerQuiet.ignore("RolePickerBridgeRegistry#retag", ignoreRetag); }
+                retagPickPageClass(m, source.page(), "binding");
                 RoleEntry e = RolePickerPickParser.parsePick(m);
                 if (e == null) return null;
                 // 【关键修复"iframe 元素丢失所属框架上下文 / 监听器好像没起作用"】
@@ -315,6 +328,27 @@ final class RolePickerBridgeRegistry {
                 try {
                     RolePickerContext pc = RolePickerPageTracker.contextFor(ctx);
                     if (pc != null) {
+                        // 【已封存 step 清单随自举下发】修复"跳转到新页面后，已生成的 step 清单不见了"：
+                        // __steps 只存在于页面文档里（window.__steps），而自举载荷此前只有 picks，新文档
+                        // 无从得知此前封存过哪些 step ⇒ 面板的 step 计数与 step1/step2…清单在新页整体消失。
+                        // 各跟踪页窗口持有的是【并集】（跟随新页 / 关页时都会合并），故取快照中 step 最多的
+                        // 一份即可；不做跨页合并 —— 否则同一 step 会被多页各计一次。
+                        try {
+                            java.util.List<Object> best = null;
+                            for (String sj : pc.snapshots.values()) {
+                                if (sj == null || sj.isEmpty()) continue;
+                                java.util.Map<String, Object> sm =
+                                        GSON.fromJson(sj, RoleElementPicker.MAP_STRING_OBJECT_TYPE);
+                                Object st = (sm == null) ? null : sm.get("steps");
+                                if (st instanceof java.util.List && !((java.util.List<?>) st).isEmpty()
+                                        && (best == null || ((java.util.List<?>) st).size() > best.size())) {
+                                    best = new java.util.ArrayList<Object>((java.util.List<?>) st);
+                                }
+                            }
+                            if (best != null && !best.isEmpty()) payload.put("steps", best);
+                        } catch (Exception ignore) {
+                            RolePickerQuiet.ignore("RolePickerBridgeRegistry#stepsPayload", ignore);
+                        }
                         if (!pc.lastPageByPage.isEmpty()) payload.put("pageByPage", pc.lastPageByPage);
                         if (!pc.lastStepByPage.isEmpty()) payload.put("stepByPage", pc.lastStepByPage);
                         if (!pc.lastAssertByPage.isEmpty()) payload.put("assertByPage", pc.lastAssertByPage);
@@ -526,6 +560,10 @@ final class RolePickerBridgeRegistry {
                 try {
                     @SuppressWarnings("unchecked")
                     Map<Object, Object> m = GSON.fromJson(t.substring("__roleOnPick::".length()), Map.class);
+                    // 【与 binding 通道同口径的页类纠偏】console 兜底常正是"绑定失效 / 跨源 iframe"时的唯一通路，
+                    // 若不纠偏，这类 pick 会带着旧页类落库 ⇒ 同一元素在 Java 侧变成两条、分属两个页面类
+                    //（现场：QR #3 同时以 LogonPage 与 SetupSecondPwdPage 存在）。来源页取 msg.page()。
+                    retagPickPageClass(m, msg.page(), "console");
                     RoleEntry e = RolePickerPickParser.parsePick(m);
                     if (e == null) return;
                     // 【关键修复"iframe 元素丢失所属框架上下文"——console 通道对称回补】
