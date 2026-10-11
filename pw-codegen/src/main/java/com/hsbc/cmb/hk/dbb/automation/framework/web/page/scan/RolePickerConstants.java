@@ -69,6 +69,15 @@ final class RolePickerConstants {
     static final String STRATEGY_TEST_ID = "testid";
     static final String STRATEGY_ID = "id";
     static final String STRATEGY_CSS = "css";
+
+    /**
+     * 生成的【步骤类】固定名：不再由页面类 / URL 派生（LogonSteps / SetupSecondPwdSteps …）。
+     * 多页面（含弹窗 / 新页面）的步骤统一落在这个类里，类名稳定、便于用例引用。
+     */
+    static final String STEP_CLASS_NAME = "SampleSteps";
+
+    /** 生成的【断言类】固定名（与 {@link #STEP_CLASS_NAME} 同前缀，语义为"步骤的断言"）。 */
+    static final String ASSERT_CLASS_NAME = "SampleAssertions";
     static final String STRATEGY_I18N = "i18n";
 
     // ───────────────────────── TIMEOUT_* : 超时/去抖（毫秒） ─────────────────────────

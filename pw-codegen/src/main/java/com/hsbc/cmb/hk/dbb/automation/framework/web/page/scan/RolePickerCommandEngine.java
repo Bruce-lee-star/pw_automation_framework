@@ -300,10 +300,25 @@ public final class RolePickerCommandEngine {
         if (droppedDirty > 0) {
             log.info("[picker][stop] dropped {} dirty entry/entries without sigKey (cannot be deduped or located)", droppedDirty);
         }
+        // 【每轮号表】必须在下方"清空 pickNos"之前收集：元素实例跨轮共享，本轮号一旦清空/被下一轮覆盖，
+        // step1 就无号可展开（现场：第二轮停止后第一轮的操作整段消失）。号随 step 走 ⇒ 彻底按轮隔离。
+        LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage =
+                new LinkedHashMap<>();
         for (StepRec st : snap.steps) {
             String pc = (st.pageClass == null || st.pageClass.isEmpty()) ? curClass : st.pageClass;
             stepsByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(st.picks);
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>());   // 保证 steps 的页在 entries 中也有类
+            java.util.Map<String, java.util.List<Integer>> roundNos = new java.util.LinkedHashMap<>();
+            if (st.picks != null) {
+                for (RoleEntry e : st.picks) {
+                    if (e == null) continue;
+                    String k = RoleElementPageGenerator.groupIdentityOf(e);
+                    if (k == null || k.isEmpty()) continue;
+                    java.util.List<Integer> nos = e.getPickNos();
+                    if (nos != null && !nos.isEmpty()) roundNos.put(k, new java.util.ArrayList<>(nos));
+                }
+            }
+            stepRoundNosByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(roundNos);
             totalSteps++;
         }
         // 页面级操作（如关闭页面）按所属页归类，生成 closeCurrentPage() 等步骤。
@@ -331,7 +346,9 @@ public final class RolePickerCommandEngine {
         for (Map.Entry<String, List<RoleEntry>> e : entriesByPage.entrySet()) {
             codePage.put(e.getKey(), RoleElementPageGenerator.generate(e.getValue(), packageName, e.getKey(), nlsFiles));
         }
-        LinkedHashMap<String, String> codeStep = RolePickerCodeAssembler.buildStepCode(snap, packageName, stepClassName);
+        // 传入【每轮号表】：step k 只认第 k 轮的序号，彻底避免跨轮覆盖（第一轮操作不再丢失）。
+        LinkedHashMap<String, String> codeStep =
+                RolePickerCodeAssembler.buildStepCode(snap, packageName, stepClassName, stepRoundNosByPage);
         // 【修复"停止后「断言」Tab 为空（没有生成断言代码）」】本路径原先只生成 page/step，且用 PickerResult 的
         // 兼容构造（assertByPage=null）⇒ 面板「断言」Tab 被渲染成"（暂无生成）"，用户表现为"没生成断言"。
         // 断言与步骤同源（都由 snap.steps 派生），此处一并生成并回填。
@@ -339,13 +356,30 @@ public final class RolePickerCommandEngine {
         // 【diag-stop】停止并生成代码前，列印全部 entry 的最终 pickNos（生成器即据此按号展开 click）。
         log.info("[picker][diag-stop] ===== before buildStepCode: {} entries =====", allEntries.size());
         for (RoleEntry e : allEntries) {
-            log.info("[picker][diag-stop] entry sigKey={} strategy={} pageClass={} pickNos={}", e.getSigKey(), e.getStrategy(), e.getPageClass(), e.getPickNos());
+            // 【诊断】带上 index/count/list：成组（list）元素的 .get(index) 依赖 index 是"定位器匹配集内的序号"、
+            // count 是该匹配集总数（口径 = page.pause 的 locator.nth）。若这里 index=-1 或 count=1，
+            // 说明 index/count 在合并链路上被丢了（旧路径正是因此拼不出 .nth(i)、退化成多行重复 click）。
+            log.info("[picker][diag-stop] entry sigKey={} strategy={} pageClass={} pickNos={} index={} count={} list={}",
+                    e.getSigKey(), e.getStrategy(), e.getPageClass(), e.getPickNos(), e.getIndex(), e.getCount(), e.isList());
+            if (e.isList() && e.getCount() > 1 && e.getIndex() >= e.getCount()) {
+                log.warn("[picker][diag-stop] list index {} out of range (count={}) for {} — 该拾取的 index/count 口径可能不一致，运行期 get() 会越界",
+                        e.getIndex(), e.getCount(), e.getSigKey());
+            }
         }
         // 停止拾取后重置（必须在 buildStepCode 之后，生成已基于累积 pickNos 完成）：
         // 清空 Java 权威内存态每个 entry 的 pickNos，并让浏览器侧 window.__rolePicks 的
         // _pickNos/_pickSeq 归零，使面板干净回退到 [-]，且下一次 start 时全局动作序号从 1 重新计数。
         synchronized (javaPickBySig) {
-            for (RoleEntry e : javaPickBySig.values()) e.setPickNos(new java.util.ArrayList<>());
+            // 【必须先快照再清空】本轮序号清空后，历史 step（step1/step2…）将无号可展开操作，
+            // 产物里会整段丢失上一轮的 click/fill —— 现场实证：第二轮停止时前 20 条 pickNos=[]。
+            // 故清空前把本轮序号存进 committedPickNos，生成历史 step 时由 pickNosOf 回退取用。
+            for (RoleEntry e : javaPickBySig.values()) {
+                java.util.List<Integer> roundNos = e.getPickNos();
+                if (roundNos != null && !roundNos.isEmpty()) {
+                    e.setCommittedPickNos(new java.util.ArrayList<>(roundNos));
+                }
+                e.setPickNos(new java.util.ArrayList<>());
+            }
         }
         try {
             // 【修复"stop→start 第二轮序号错乱（如 user_name 拿到旧号而非从续接点递增）】
@@ -383,7 +417,11 @@ public final class RolePickerCommandEngine {
         // （cmdUnknown）被安全忽略，会话不中断。
         // 【JSON 对象命令】面板「列表」开关等对象命令（{...}）经 __rolePickerCmd 投递、桥侧 GSON 规范化为
         // JSON 字符串，先于纯字符串 switch 拦截；未识别的 type 返回 null，交回既有 switch/default，行为不变。
-        if (cmd != null && cmd.startsWith("{")) {
+        if (cmd == null) {
+            // 防御（spotbugs NP_NULL_ON_SOME_PATH）：空命令走 cmdUnknown（安全忽略），绝不落入 switch NPE。
+            return cmdUnknown(ctx, page);
+        }
+        if (cmd.startsWith("{")) {
             PickerResult jsonResult = tryHandleJsonCommand(ctx, page, cmd);
             if (jsonResult != null) return jsonResult;
         }

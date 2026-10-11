@@ -80,18 +80,17 @@ public final class RoleElementAssertionGenerator {
     }
 
     /**
-     * 断言类名派生（与步骤类同一规则：{@code XxxPage} → {@code XxxAssertions}）。
+     * 断言类名：与步骤类对称，统一为【固定名】{@code SampleAssertions}（{@link RolePickerConstants#ASSERT_CLASS_NAME}），
+     * 不再由页面类 / URL 派生（LoginPageAssertions / SetupSecondPwdAssertions …）。
      *
-     * @param pageClassName 页面类名（如 {@code LoginPage}）
-     * @return 断言类名（如 {@code LoginPageAssertions}）
+     * <p>理由：步骤类已合并为单个 {@code SampleSteps}（各页面、弹窗、新页面的 step 都在里面），
+     * 断言与步骤同源同序，自然也只应有一个断言类；多页面各自派生只会产生一堆同名同构的类。
+     *
+     * @param pageClassName 页面类名（保留参数以兼容既有调用点；当前不使用）
+     * @return 固定断言类名 {@code SampleAssertions}
      */
     public static String assertionsClassNameOf(String pageClassName) {
-        if (pageClassName == null || pageClassName.isEmpty()) {
-            return "PageAssertions";
-        }
-        return pageClassName.endsWith("Page")
-                ? pageClassName.substring(0, pageClassName.length() - 4) + "Assertions"
-                : pageClassName + "Assertions";
+        return RolePickerConstants.ASSERT_CLASS_NAME;
     }
 
     /** 页面对象变量名（首字母小写，与步骤类一致）。 */

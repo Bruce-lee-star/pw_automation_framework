@@ -97,8 +97,36 @@ final class RolePickerCodeAssembler {
     }
 
     static LinkedHashMap<String, String> buildStepCode(PickSnapshot snap, String packageName, String stepClassName) {
+        return buildStepCode(snap, packageName, stepClassName, null);
+    }
+
+    /**
+     * @param stepRoundNosByPage 【每轮号表】页 → 各 step → 元素身份键 → 该轮序号（可为 null）。
+     *                           由停止流程在清空 pickNos 之前收集，用于彻底按轮隔离序号；
+     *                           为 null 时步骤生成回退到元素身上的 pickNos / committedPickNos。
+     */
+    static LinkedHashMap<String, String> buildStepCode(PickSnapshot snap, String packageName, String stepClassName,
+            LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage) {
         LinkedHashMap<String, String> out = new LinkedHashMap<>();
         if (snap == null) return out;
+        // 【一组元素（list）识别 · 步骤侧】分组依据取自【全部条目】snap.entries，再回写到每个 step 的 picks
+        // ——单个 step 可能只含组内部分元素（例如 3 个 QR 图被拆进不同轮次），只在 step 内部识别会漏标。
+        // 标记后步骤用 x.get(index) 取单项，而不是多行一模一样的 click()。
+        try {
+            java.util.Set<String> listBases = RoleElementPageGenerator.listGroupBaseSigs(snap.entries);
+            if (!listBases.isEmpty()) {
+                RoleElementPageGenerator.markListGroups(snap.entries, listBases);
+                if (snap.steps != null) {
+                    for (StepRec st : snap.steps) {
+                        if (st != null && st.picks != null) {
+                            RoleElementPageGenerator.markListGroups(st.picks, listBases);
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+            RolePickerQuiet.ignore("RolePickerCodeAssembler#markListGroups", ignore);
+        }
         // 【关键修复"iframe 内元素生成 step 缺 switchToFrame"】
         // snap.steps 来自浏览器侧 window.__steps 读取，其 pick 的 framePath/dialog/popup 等增强字段
         // 是浏览器侧 __enrichState / 点击 handler 在拾取瞬间写入的——但 iframe 内：
@@ -215,7 +243,7 @@ final class RolePickerCodeAssembler {
         }
         if (stepsByPage.isEmpty() && opsByPage.isEmpty()) return out;
         return RoleElementStepGenerator.generatePerPage(stepsByPage, entriesByPage, opsByPage,
-                new RoleElementStepGenerator.ViewNotes(panelStepIndexByPage, droppedByPage),
+                new RoleElementStepGenerator.ViewNotes(panelStepIndexByPage, droppedByPage, stepRoundNosByPage),
                 packageName, stepClassName);
     }
 

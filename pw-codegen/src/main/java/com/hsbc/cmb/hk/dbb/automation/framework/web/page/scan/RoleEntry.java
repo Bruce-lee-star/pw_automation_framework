@@ -231,6 +231,21 @@ public final class RoleEntry {
     private int count = 1;
 
     /**
+     * 【已封存轮次的操作序号快照】停止拾取时会清空 {@code pickNos}（并让浏览器侧重新从 1 编号），
+     * 但历史 step（如 step1）仍要按它自己那一轮的序号展开操作 ⇒ 清空前先把序号快照到这里。
+     * 生成历史 step 时 {@code pickNos} 为空即回退用本字段（见 RoleElementStepGenerator#pickNosOf）。
+     */
+    private java.util.List<Integer> committedPickNos = null;
+
+    public java.util.List<Integer> getCommittedPickNos() {
+        return committedPickNos;
+    }
+
+    public void setCommittedPickNos(java.util.List<Integer> committedPickNos) {
+        this.committedPickNos = committedPickNos;
+    }
+
+    /**
      * 该拾取是否被用户标记为「一组元素（列表）」：为 true 时页面类生成 {@code public PageElementList xxx;}
      * （一个共享定位器表达"一组"），step 用 {@code xxx.get(index)} 取第几个，语义等价 Playwright
      * {@code locator.nth(index)}；为 false（默认）仍生成单个 {@code PageElement} + 必要时 {@code .nth(index)}。

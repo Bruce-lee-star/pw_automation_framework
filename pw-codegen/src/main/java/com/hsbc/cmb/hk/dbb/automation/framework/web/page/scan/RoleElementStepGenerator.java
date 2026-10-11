@@ -21,6 +21,44 @@ import java.util.regex.Matcher;
  */
 public final class RoleElementStepGenerator {
 
+    /**
+     * 元素的【操作序号】：优先用本轮实时序号 {@code pickNos}；为空则回退【已封存轮次快照】
+     * {@code committedPickNos}。
+     *
+     * <p>根因：停止拾取时会清空每个 entry 的 pickNos（并让浏览器侧重新从 1 编号，使新一轮序号从 1
+     * 开始）。但历史 step（step1/step2…）仍要按【它自己那一轮】的序号展开操作；字段一空 ⇒ 该 step
+     * 一行操作都生成不出来（现场实证：第二轮停止时前 20 条 pickNos=[]，产物里第一轮的操作整体消失）。
+     */
+    /** 取第 si 个 step 所属那一轮的号表（无则为 null → 调用方回退到元素身上的序号）。 */
+    private static java.util.Map<String, java.util.List<Integer>> roundNosOfStep(ViewNotes notes, String pc, int si) {
+        if (notes == null || notes.stepRoundNosByPage == null || pc == null) return null;
+        java.util.List<java.util.Map<String, java.util.List<Integer>>> list = notes.stepRoundNosByPage.get(pc);
+        if (list == null || si < 0 || si >= list.size()) return null;
+        return list.get(si);
+    }
+
+    /** 在【某一轮的号表】里取元素序号；表里没有（如该元素本轮未被拾取）则返回 null。 */
+    private static java.util.List<Integer> nosInRound(RoleEntry e,
+                                                      java.util.Map<String, java.util.List<Integer>> roundNos) {
+        if (e == null) return null;
+        if (roundNos == null || roundNos.isEmpty()) return pickNosOf(e);
+        String k = RoleElementPageGenerator.groupIdentityOf(e);
+        if (k != null && !k.isEmpty()) {
+            java.util.List<Integer> v = roundNos.get(k);
+            if (v != null && !v.isEmpty()) return v;
+        }
+        // 身份键取不到（如无 sigKey 且 locatorKey 为空）时，退化为元素身上的序号。
+        return pickNosOf(e);
+    }
+
+    private static java.util.List<Integer> pickNosOf(RoleEntry e) {
+        if (e == null) return java.util.Collections.emptyList();
+        java.util.List<Integer> live = e.getPickNos();
+        if (live != null && !live.isEmpty()) return live;
+        java.util.List<Integer> committed = e.getCommittedPickNos();
+        return (committed != null) ? committed : java.util.Collections.emptyList();
+    }
+
     private RoleElementStepGenerator() {}
 
     /**
@@ -42,10 +80,26 @@ public final class RoleElementStepGenerator {
         /** 页面类名 → 生成前对账丢弃的已删除元素引用（可读标签，可为 null）。 */
         public final LinkedHashMap<String, List<String>> droppedByPage;
 
+        /**
+         * 【每轮号表】页面类名 → 该页各 step（与 stepsByPage 同序同长）→ 该轮内「元素身份键 → 本轮操作序号」。
+         *
+         * <p>用途：彻底按轮隔离序号。元素对象是跨轮共享的同一批实例，序号挂在元素上（pickNos）会在
+         * 新一轮被覆盖；改为由【每个 step 自带该轮的号表】，生成 step k 时只取第 k 轮的号 ——
+         * 同一元素在 step1 / step2 各自按自己那一轮的序号展开，互不干扰。
+         */
+        public final LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage;
+
         public ViewNotes(LinkedHashMap<String, List<Integer>> panelStepIndexByPage,
                          LinkedHashMap<String, List<String>> droppedByPage) {
+            this(panelStepIndexByPage, droppedByPage, null);
+        }
+
+        public ViewNotes(LinkedHashMap<String, List<Integer>> panelStepIndexByPage,
+                         LinkedHashMap<String, List<String>> droppedByPage,
+                         LinkedHashMap<String, List<java.util.Map<String, java.util.List<Integer>>>> stepRoundNosByPage) {
             this.panelStepIndexByPage = panelStepIndexByPage;
             this.droppedByPage = droppedByPage;
+            this.stepRoundNosByPage = stepRoundNosByPage;
         }
     }
 
@@ -194,7 +248,7 @@ public final class RoleElementStepGenerator {
                 List<java.util.Map.Entry<Integer, RoleEntry>> seqEntries = new java.util.ArrayList<>();
                 for (RoleEntry e : rawStep) {
                     if (e == null) continue;
-                    java.util.List<Integer> nos = e.getPickNos();
+                    java.util.List<Integer> nos = pickNosOf(e);
                     if (nos != null && !nos.isEmpty()) {
                         // 按 pickNos 中的每个序号展开，每个序号对应一次操作
                         for (int no : nos) {
@@ -277,8 +331,11 @@ public final class RoleElementStepGenerator {
                         // 【列表字段】被标记为「一组元素」时字段是 PageElementList，用 {@code x.get(index)} 取单项
                         // （语义等价 page.pause 的 locator.nth(index)）；普通字段仍用 {@code x.nth(index)}。
                         String target = pageVar + "." + field;
-                        if (e.getIndex() >= 0) {
-                            target += e.isList() ? ".get(" + e.getIndex() + ")" : ".nth(" + e.getIndex() + ")";
+                        // 一组元素的序号：RoleEntry.index 常因回传丢失而为 -1，此时从签名末尾 #N 就地还原
+                        // （只用于本次拼串，不写回 RoleEntry，避免影响其它判据）。
+                        int __ix1 = (e.getIndex() >= 0) ? e.getIndex() : RolePickerPickParser.parseIndexFromSig(e.getSigKey());
+                        if (__ix1 >= 0) {
+                            target += e.isList() ? ".get(" + __ix1 + ")" : ".nth(" + __ix1 + ")";
                         }
                         // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
                         // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
@@ -290,7 +347,7 @@ public final class RoleElementStepGenerator {
                         // 按拾取序号数量展开：同一元素被拾取 N 次（pickNos.size()==N），
                         // 生成的 step 应在对应位置重复 N 次基础动作（对齐 page.pause 多次点击同一元素的录制）。
                         int __repeat = 1;
-                        java.util.List<Integer> __pnos = e.getPickNos();
+                        java.util.List<Integer> __pnos = pickNosOf(e);
                         if (__pnos != null && __pnos.size() > 1) __repeat = __pnos.size();
                         // 拖拽源：operationFor 返回 __DRAGTO__ 占位，展开为 dragTo(目标字段)（对齐 page.pause 的 source.dragTo）。
                         // 目标元素定位签名经 keyToField 反查为字段名，拼成 pageVar.fieldName。
@@ -521,7 +578,7 @@ public final class RoleElementStepGenerator {
                 // 避免 ArrayList.sort 在相等键上的不稳定重排导致 closeCurrentPage 顺序错乱。
                 step.sort(java.util.Comparator.comparingInt((RoleEntry e) -> {
                     if (e == null) return Integer.MAX_VALUE;
-                    java.util.List<Integer> nos = e.getPickNos();
+                    java.util.List<Integer> nos = pickNosOf(e);
                     if (nos != null && !nos.isEmpty() && nos.get(0) != null && nos.get(0) > 0) {
                         return nos.get(0);
                     }
@@ -635,8 +692,10 @@ public final class RoleElementStepGenerator {
                             }
                         }
                         String target = var + "." + field;
-                        if (e.isList()) { if (e.getIndex() >= 0) target += ".get(" + e.getIndex() + ")"; }
-                        else if (e.getCount() > 1 && e.getIndex() >= 0) target += ".nth(" + e.getIndex() + ")";
+                        // 同上：一组元素的序号优先取 RoleEntry.index，丢失则从签名 #N 就地还原。
+                        int __ix2 = (e.getIndex() >= 0) ? e.getIndex() : RolePickerPickParser.parseIndexFromSig(e.getSigKey());
+                        if (e.isList()) { if (__ix2 >= 0) target += ".get(" + __ix2 + ")"; }
+                        else if (e.getCount() > 1 && __ix2 >= 0) target += ".nth(" + __ix2 + ")";
                         // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
                         // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
                         // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的
@@ -647,7 +706,7 @@ public final class RoleElementStepGenerator {
                         // 按拾取序号数量展开：同一元素被拾取 N 次（pickNos.size()==N），
                         // 生成的 step 应在对应位置重复 N 次基础动作（对齐 page.pause 多次点击同一元素的录制）。
                         int __repeat = 1;
-                        java.util.List<Integer> __pnos = e.getPickNos();
+                        java.util.List<Integer> __pnos = pickNosOf(e);
                         if (__pnos != null && __pnos.size() > 1) __repeat = __pnos.size();
                         // 拖拽源：operationFor 返回 __DRAGTO__ 占位，展开为 dragTo(目标字段)（对齐 page.pause 的 source.dragTo）。
                         // 目标元素定位签名在所有页字段中反查（支持跨页拖拽），拼成 <页变量>.<字段名>。
@@ -1019,19 +1078,27 @@ public final class RoleElementStepGenerator {
         // 修复：按 pageClass 派生出各自的步骤类名，如 LogonPage → LogonSteps、SetupSecondPwdPage → SetupSecondPwdSteps。
         // 派生规则：pageClass 以 "Page" 结尾则去掉 "Page" 再拼 "Steps"，否则直接拼 "Steps"。
         // 包装成函数，供每页视图生成时调用。
+        // 【临时保持按页派生】目标是把各页合并成单个固定名 SampleSteps（RolePickerConstants.STEP_CLASS_NAME），
+        // 但在 generatePerPage 改为"单类输出"之前，若此处直接用固定名会导致【每个页都生成同名类】
+        // （LogonPage/SetupSecondPwdPage/… 各一个 SampleSteps）⇒ 产物重名冲突。合并改造完成后启用：
+        //   java.util.function.Function<String, String> stepClassNameOf = (pc) -> RolePickerConstants.STEP_CLASS_NAME;
         java.util.function.Function<String, String> stepClassNameOf = (pc) -> {
             return pc.endsWith("Page") ? pc.substring(0, pc.length() - 4) + "Steps" : pc + "Steps";
         };
 
-        // 每页一份视图：类外壳 + 字段/import 共享 + 仅该页的 step/ops 方法
+        // 【合并为单个步骤类】用户要求：步骤类不再按页面/URL 派生，统一为固定名 SampleSteps，
+        // 各页面（含弹窗 / 新页面）的 step 全部落在【同一个类】里；页面类仍按页各自生成。
+        // 故类外壳只发一份，methods / stepIdx / npIdx 提到循环外，使 step 序号【跨页连续】
+        // （否则 logon 页有 step1、setup 页也有 step1，合并进同一类会方法重名）。
+        String mergedStepClassName = RolePickerConstants.STEP_CLASS_NAME;
+        String clsHeader = "package " + packageName + ".steps;\n\n" + imports
+                + "public class " + mergedStepClassName + " {\n\n" + fields;
+        StringBuilder methods = new StringBuilder();
+        int[] npIdx = {0};
+        int stepIdx = 0;
+        boolean any = false;
+        StringBuilder dropNotes = new StringBuilder();
         for (String pc : allPages) {
-            String perPageStepClassName = stepClassNameOf.apply(pc);
-            String clsHeader = "package " + packageName + ".steps;\n\n" + imports
-                    + "public class " + perPageStepClassName + " {\n\n" + fields;
-            StringBuilder methods = new StringBuilder();
-            int[] npIdx = {0};
-            int stepIdx = 0;
-            boolean any = false;
             // 该页各 step 的面板全局封装序号（null = 调用方未提供，则不作任何标注）
             List<Integer> panelNos = panelIdxByPage.get(pc);
             if (stepsByPage.containsKey(pc)) {
@@ -1053,7 +1120,12 @@ public final class RoleElementStepGenerator {
                             seqEntries.add(java.util.Map.entry(seq > 0 ? seq : Integer.MAX_VALUE, e));
                             continue;
                         }
-                        java.util.List<Integer> nos = e.getPickNos();
+                        // 【按轮取号】优先用【本 step 自带的那轮号表】（step k 只认第 k 轮的序号），
+                        // 取不到再回退元素身上的 pickNos / committedPickNos。这样同一元素在
+                        // step1/step2 各按自己轮次的号展开，不会被后一轮覆盖。
+                        java.util.Map<String, java.util.List<Integer>> curRoundNos =
+                                roundNosOfStep(notes, pc, si);
+                        java.util.List<Integer> nos = nosInRound(e, curRoundNos);
                         if (nos != null && !nos.isEmpty()) {
                             // 按 pickNos 中的每个序号展开，每个序号对应一次操作
                             for (int no : nos) {
@@ -1243,13 +1315,17 @@ public final class RoleElementStepGenerator {
                     }
                 }
             }
-            if (!any) methods.append("    // 该页面暂无 step\n");
-            StringBuilder dropNotes = new StringBuilder();
             if (notes != null && notes.droppedByPage != null) {
                 appendDroppedNote(dropNotes, notes.droppedByPage.get(pc));
             }
-            out.put(pc, clsHeader + dropNotes + methods + "}\n");
         }
+        if (!any) methods.append("    // 暂无 step\n");
+        // 单类输出：所有页共用【同一份】SampleSteps 源码。
+        // 键仍按页面类保留（面板「步骤代码」Tab、既有消费方都按页键取值，故不改为类名键），
+        // 内容是合并后的单个步骤类 —— 每个页签看到的都是同一个 SampleSteps。
+        String merged = clsHeader + dropNotes + methods + "}\n";
+        for (String pc : allPages) out.put(pc, merged);
+        if (allPages.isEmpty()) out.put(mergedStepClassName, merged);
         return out;
     }
 
