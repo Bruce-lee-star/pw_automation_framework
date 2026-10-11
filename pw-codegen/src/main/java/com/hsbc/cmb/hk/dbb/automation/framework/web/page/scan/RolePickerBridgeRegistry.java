@@ -301,6 +301,11 @@ final class RolePickerBridgeRegistry {
             if (json == null || json.isEmpty()) return null;
             final Page target = pg;
             final String stateJson = json;
+            // 可见性：自举是"新页面回灌慢"的根治手段，必须能观测到它何时、合并了多少元素。
+            String targetUrl = null;
+            try { targetUrl = target.url(); } catch (Exception ignore) { targetUrl = null; }
+            log.info("[picker][bootstrap] new document pulled authoritative state: {} pick(s) -> {}",
+                    map.size(), targetUrl);
             PICK_SYNC_POOL.execute(() -> {
                 try {
                     RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.MERGE_PICK_STATE_JS,

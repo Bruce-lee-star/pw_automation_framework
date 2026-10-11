@@ -285,10 +285,20 @@ public final class RolePickerCommandEngine {
         LinkedHashMap<String, List<List<RoleEntry>>> stepsByPage = new LinkedHashMap<>();
         List<RoleEntry> allEntries = new ArrayList<>();
         int totalSteps = 0;
+        int droppedDirty = 0;
         for (RoleEntry e : snap.entries) {
+            if (e == null) continue;
+            // 【过滤脏条目】sigKey 为空的条目既不能去重也不能定位（现场：停止清单里出现
+            // sigKey=null / pageClass=null 的重复条目，与 i18n:user_name / i18n:password 重复且无号可依）。
+            // 留着会在生成物里产生无名字段与 role:: 悬空引用（进而触发"生成前对账丢弃引用"的告警），
+            // 故在生成前直接剔除 —— 与对账同一意图，只是更早、更干净。
+            if (e.getSigKey() == null || e.getSigKey().isEmpty()) { droppedDirty++; continue; }
             String pc = (e.getPageClass() == null || e.getPageClass().isEmpty()) ? curClass : e.getPageClass();
             entriesByPage.computeIfAbsent(pc, k -> new ArrayList<>()).add(e);
             allEntries.add(e);
+        }
+        if (droppedDirty > 0) {
+            log.info("[picker][stop] dropped {} dirty entry/entries without sigKey (cannot be deduped or located)", droppedDirty);
         }
         for (StepRec st : snap.steps) {
             String pc = (st.pageClass == null || st.pageClass.isEmpty()) ? curClass : st.pageClass;

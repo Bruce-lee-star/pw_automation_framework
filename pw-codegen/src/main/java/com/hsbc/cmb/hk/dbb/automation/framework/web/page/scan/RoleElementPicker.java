@@ -970,14 +970,36 @@ public final class RoleElementPicker {
      * 同时注入 nls 反向表（供弹窗页点击时反查 key）。active 统一置 false，由调用方按需用 START 重启。
      */
     static void applyPickState(Page target, String stateJson, String nlsReverseJson, String[] nlsFiles) {
+        applyPickState(target, stateJson, nlsReverseJson, nlsFiles, false);
+    }
+
+    /**
+     * 软超时（2s）版 {@link #applyPickState}：用于 <b>followPage 等跑在事件线程上</b>的路径。
+     *
+     * <p>状态搬运已由【文档起始自举】承担（新文档自己把权威态拉回去），此处只是补 nls 与整态兜底；
+     * 失败/超时无损（下一轮与自举都会兜底），因此绝不能像旧实现那样用 <b>10s 级</b> evaluate 占住
+     * 事件线程与页级锁 —— 现场：新页出现后 9.7s 才出现 applyPickState，观感就是"回灌非常慢"。
+     */
+    static void applyPickStateSoft(Page target, String stateJson, String nlsReverseJson, String[] nlsFiles) {
+        applyPickState(target, stateJson, nlsReverseJson, nlsFiles, true);
+    }
+
+    private static void applyPickState(Page target, String stateJson, String nlsReverseJson, String[] nlsFiles,
+                                       boolean soft) {
         // 诊断：applyPickState 用快照恢复数据时会把 __rolePickActive 置 false，
         // 必须依赖 onFrameNavigated 末尾的 start() 重激活才能恢复拾取。若此步后无重激活，
         // 刷新后点击将彻底失效（监听存在但 active=false，__recordPick 直接 return）。
-        log.info("[picker][applyPickState] restoring data from Java snapshot (picks={} / steps={} / currentStep={}); "
+        log.info("[picker][applyPickState{}] restoring data from Java snapshot (picks={} / steps={} / currentStep={}); "
                         + "__rolePickActive will be set to false, waiting for onFrameNavigated to reactivate; target={}",
-                pickCountOf(stateJson), stepCountOf(stateJson), currentStepCountOf(stateJson), target.url());
-        pickerEval(target, RolePickerScripts.APPLY_PICK_STATE_JS, RolePickerScripts.args(
-                "nlsFiles", nlsFiles, "nlsReverseJson", nlsReverseJson, "stateJson", stateJson));
+                (soft ? "(soft)" : ""), pickCountOf(stateJson), stepCountOf(stateJson),
+                currentStepCountOf(stateJson), target.url());
+        if (soft) {
+            pickerEvalSoft(target, RolePickerScripts.APPLY_PICK_STATE_JS, RolePickerScripts.args(
+                    "nlsFiles", nlsFiles, "nlsReverseJson", nlsReverseJson, "stateJson", stateJson));
+        } else {
+            pickerEval(target, RolePickerScripts.APPLY_PICK_STATE_JS, RolePickerScripts.args(
+                    "nlsFiles", nlsFiles, "nlsReverseJson", nlsReverseJson, "stateJson", stateJson));
+        }
     }
 
     // 诊断辅助：从快照 JSON 里安全解析各类计数，避免 applyPickState 日志打印整段 state（可能很大）。

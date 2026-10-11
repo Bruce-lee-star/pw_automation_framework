@@ -454,7 +454,13 @@ public final class RolePickerPanelController {
             // ③ 页类刷新兜底（事件驱动为主：__roleOnUrlChanged:: / onFrameNavigated 主帧已即时刷新；
             //    这里仅兜底"URL 变化信号未到达"的极端情形，幂等、页类不变时零写入）。
             for (Page pg : pageNames.keySet()) {
-                if (!pg.isClosed()) refreshPageClass(pc, pg);
+                if (pg.isClosed()) continue;
+                // 【合并重复刷新】自愈（scheduleSelfHeal → selfHealPage）刚刚跑过页类刷新时，
+                // 主循环这次兜底就是重复劳动（现场：同一 URL 的 page class refreshed 连出两条）。
+                // 页类未变时刷新本身幂等，但仍是一次 evaluate，故按"自愈刚跑过"跳过。
+                Long lastHeal = pc.lastSelfHealAt.get(pg);
+                if (lastHeal != null && (System.currentTimeMillis() - lastHeal) < SELF_HEAL_MIN_GAP_MS) continue;
+                refreshPageClass(pc, pg);
             }
         }
         // auto-generate step while picking (no need to click stop): each change in javaPickBySig

@@ -400,7 +400,9 @@ final class RolePickerPageTracker {
                     } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#liveOpenerState", ignore); }
                 }
                 if (openerState != null && !openerState.isEmpty()) {
-                    RoleElementPicker.applyPickState(newPage, openerState, nlsReverseJson, nlsFiles);
+                    // 【必须用软超时】本方法跑在 Playwright 事件线程上，而状态搬运已由【文档起始自举】承担；
+                    // 这里只补 nls 与整态兜底，超时即放弃（下一轮与自举都会兜底），绝不占住事件线程 10s。
+                    RoleElementPicker.applyPickStateSoft(newPage, openerState, nlsReverseJson, nlsFiles);
                 }
             } catch (Exception applyEx) {
                 log.warn("[picker] applyPickState into the followed page failed (continuing with library/panel injection): {}", applyEx.getMessage());
