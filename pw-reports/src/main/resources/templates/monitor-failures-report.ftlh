@@ -95,30 +95,15 @@
     table.detail td .url { word-break: break-all; padding: 2px 0; color: #007bff; }
     table.detail td .url + .url { border-top: 1px dashed #e9ecef; margin-top: 4px; padding-top: 6px; }
 
-    /* Nested sub-detail */
-    details.sub-detail { border-top: 1px solid #f1f3f5; }
-    details.sub-detail > summary {
-        cursor: pointer; padding: 8px 16px; font-size: 12px; font-weight: 600;
-        color: #6c757d; background: #fafbfc; list-style: none;
-        display: flex; align-items: center; gap: 6px; user-select: none;
-        text-transform: uppercase; letter-spacing: 0.3px;
-    }
-    details.sub-detail > summary::-webkit-details-marker { display: none; }
-    details.sub-detail > summary > span.arrow {
-        display: inline-block; transition: transform 0.15s; color: #adb5bd; font-size: 10px;
-    }
-    details.sub-detail[open] > summary > span.arrow { transform: rotate(90deg); }
-    details.sub-detail > summary:hover { background: #f1f3f5; }
-    .sub-body { padding: 4px 16px 8px 32px; background: #fcfcfd; }
-    .sub-row { padding: 6px 0; border-top: 1px solid #f1f3f5; }
-    .sub-row:first-child { border-top: none; }
-    .sub-label { font-size: 11px; font-weight: 600; color: #adb5bd; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
-    .sub-val pre {
+    /* Body blocks (always visible) */
+    .body-block { padding: 8px 16px 12px 16px; background: #fcfcfd; border-top: 1px solid #f1f3f5; }
+    .body-label { font-size: 12px; font-weight: 600; color: #495057; margin-bottom: 4px; }
+    .body-block pre {
         margin: 0; padding: 8px 10px; background: #f6f8fa; border: 1px solid #e9ecef;
         border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
         font-family: "SFMono-Regular", Consolas, monospace;
     }
-    .sub-val .none { color: #ced4da; font-size: 12px; }
+    .body-block .none { color: #ced4da; font-size: 12px; }
 
     /* Data loss warning */
     .data-loss {
@@ -126,16 +111,10 @@
         padding: 16px 20px; background: #fef5f5; margin-bottom: 20px;
     }
     .data-loss h3 { margin: 0 0 8px 0; color: #f44336; font-size: 15px; }
-    .data-loss p { margin: 4px 0; font-size: 13px; color: #c62828; }
     .data-loss table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    .data-loss td { border: 1px solid #f44336; padding: 6px 12px; font-size: 13px; }
-    .data-loss td.num { text-align: right; white-space: nowrap; }
-
-    .footer {
-        clear: both; padding: 16px 24px; text-align: center;
-        background-color: #f8f9fa; border-top: 1px solid #e9ecef;
-        color: #6c757d; font-size: 13px;
-    }
+    .data-loss table td { padding: 4px 8px; border-bottom: 1px solid #f5c6c6; font-size: 13px; }
+    .data-loss table td.num { text-align: right; font-weight: 600; color: #f44336; }
+    .footer { text-align: center; color: #adb5bd; font-size: 12px; padding: 16px; }
 </style>
 </head>
 <body>
@@ -170,52 +149,24 @@
 </#list>
             </td></tr>
             <tr><td class="label">Failure reason</td><td>${item.reason!}</td></tr>
-            <tr><td class="label">Scenarios</td><td>
-<#if item.scenarios?? && item.scenarios?has_content>
-<#list item.scenarios as sc>${sc}</#list>
-<#else>
-              <span class="none">(none)</span>
-</#if>
-            </td></tr>
           </table>
 
-          <#-- Nested collapsible: full request/response payload -->
-          <details class="sub-detail">
-            <summary>
-              <span class="arrow">▸</span>
-              Request / response details
-            </summary>
-            <div class="sub-body">
-              <div class="sub-row"><div class="sub-label">Request headers</div><div class="sub-val">
-<#if item.requestHeaders?? && item.requestHeaders?length &gt; 0>
-                <pre>${item.requestHeaders?no_esc}</pre>
-<#else>
-                <span class="none">(none)</span>
-</#if>
-              </div></div>
-              <div class="sub-row"><div class="sub-label">Request body</div><div class="sub-val">
+          <div class="body-block">
+            <div class="body-label">Request body</div>
 <#if item.requestBody?? && item.requestBody?length &gt; 0>
-                <pre>${item.requestBody?no_esc}</pre>
+            <pre>${item.requestBody?no_esc}</pre>
 <#else>
-                <span class="none">(none)</span>
+            <span class="none">(none)</span>
 </#if>
-              </div></div>
-              <div class="sub-row"><div class="sub-label">Response body</div><div class="sub-val">
+          </div>
+          <div class="body-block">
+            <div class="body-label">Response body</div>
 <#if item.responseBody?? && item.responseBody?length &gt; 0>
-                <pre>${item.responseBody?no_esc}</pre>
+            <pre>${item.responseBody?no_esc}</pre>
 <#else>
-                <span class="none">(none)</span>
+            <span class="none">(none)</span>
 </#if>
-              </div></div>
-              <div class="sub-row"><div class="sub-label">Response headers</div><div class="sub-val">
-<#if item.responseHeaders?? && item.responseHeaders?length &gt; 0>
-                <pre>${item.responseHeaders?no_esc}</pre>
-<#else>
-                <span class="none">(none)</span>
-</#if>
-              </div></div>
-            </div>
-          </details>
+          </div>
         </details>
 </#list>
       </div>

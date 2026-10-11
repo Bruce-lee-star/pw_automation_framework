@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.pickerEval;
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker.safeOrigin;
 
 /**
  * 面板同步引擎：把 Java 权威拾取内存态（javaPickBySig）合并 iframe 拾取、回灌浏览器面板，
@@ -97,6 +98,13 @@ final class RolePickerPanelSync {
     static void mergeFramePicksToMain(Page page, LinkedHashMap<String, RoleEntry> javaPickBySig) {
         if (page == null || page.isClosed()) return;
         final long deadline = System.currentTimeMillis() + FRAME_MERGE_BUDGET_MS;
+        // 【优化-降噪/去卡顿】跨域 iframe（第三方追踪/广告/反欺诈，如 h.online-metrix.net/fp/tags）内几乎不存在
+        // 用户要拾取的 role 元素，且其 evaluate 常因脚本阻塞而挂起（实测 WARN "failed to merge iframe picks
+        // ... pickerEval timed out after 300ms"）。默认跳过跨域 frame 的合并：既消除 300ms 卡顿与 WARN 噪声，
+        // 也避免对第三方 frame 做无谓读回。同域 iframe（如 SetupSecondPwdPage 内的二维码图）仍正常合并。
+        // 用 -Dcodegen.picker.iframe.merge.skipCrossOrigin=false 可退回逐帧读回（保留对真正跨域可拾取 frame 的兼容）。
+        final boolean skipCrossOrigin = Boolean.getBoolean("codegen.picker.iframe.merge.skipCrossOrigin");
+        final String mainOrigin = skipCrossOrigin ? safeOrigin(page.url()) : "";
         for (Frame f : page.frames()) {
             if (f == null || f.equals(page.mainFrame())) continue;
             // 【整轮预算】读回只是兜底（拾取本身走 __roleOnPick 事件上行），故必须封顶：
@@ -110,6 +118,15 @@ final class RolePickerPanelSync {
             try { fu = f.url(); } catch (Exception ignore) { fu = null; }
             // about:blank / about:srcdoc 从不承载业务拾取（且常因跨源或已被销毁而 evaluate 失败），直接跳过。
             if (fu == null || fu.isEmpty() || fu.startsWith("about:")) continue;
+            // 【优化-跨域早退】跨域 frame 直接跳过，不再发起 300ms 的 pickerEvalSoft（省卡顿、去 WARN）。
+            if (skipCrossOrigin) {
+                String fOrigin = safeOrigin(fu);
+                if (!fOrigin.isEmpty() && !mainOrigin.isEmpty() && !fOrigin.equals(mainOrigin)) {
+                    log.debug("[picker] skipping cross-origin iframe merge (frame origin={}, page origin={}): {}",
+                            fOrigin, mainOrigin, fu);
+                    continue;
+                }
+            }
             java.util.concurrent.atomic.AtomicInteger fails = FRAME_MERGE_FAILS.get(fu);
             if (fails != null && fails.get() >= FRAME_MERGE_DEAD_AFTER) continue;
             try {

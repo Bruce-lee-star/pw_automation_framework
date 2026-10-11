@@ -112,4 +112,38 @@ public class RoleElementListFieldTest {
         assertTrue("列表元素的 step 应用 list.get(index) 取单项：" + src, src.contains(".get(2)"));
         assertFalse("列表元素的 step 不应使用 .nth(index)：" + src, src.contains(".nth(2)"));
     }
+
+    /** 现场回归：一组元素（list）已被识别，但 step pick 的 index 因回传链路丢失（恒为 -1）、sigKey 仍在。
+     *  生成时须用 sigKey 内的 #N 还原下标，渲染成 list.get(index)。 */
+    @Test
+    public void listStepIndexRecoveredFromSigKeyWhenIndexLost() {
+        java.util.List<RoleEntry> es = new ArrayList<>();
+        es.add(qr(3)); es.add(qr(4)); es.add(qr(5));
+        RoleEntry clicked = new RoleEntry("QR code to download the mobile app", "QR code to download the mobile app",
+                null, null, "role", "img", "k_qr", false, null, false, -1, false);
+        clicked.setSigKey("role:img:QR code to download the mobile app#3");
+        clicked.setPickNos(java.util.Arrays.asList(1, 2, 3));
+        PickSnapshot snap = new PickSnapshot(PAGE, es,
+                Collections.singletonList(new StepRec(PAGE, Collections.singletonList(clicked))), new ArrayList<>());
+        String src = RolePickerCodeAssembler.buildStepCode(snap, PKG, "DemoSteps").get(PAGE);
+        assertTrue("list 元素点 3 次应生成带下标的 list.get(index)：" + src, src.contains(".get(3)"));
+    }
+
+    /** 现场回归：step pick 完全贫化（sigKey 与 index 均缺失，等同浏览器侧只读回传的 step）。
+     *  须从权威内存态 entries 回补下标与 list 标记，避免退化成无下标重复 click()。 */
+    @Test
+    public void impoverishedStepPickRecoversIndexFromEntries() {
+        java.util.List<RoleEntry> es = new ArrayList<>();
+        es.add(qr(3)); es.add(qr(4)); es.add(qr(5));
+        RoleEntry clicked = new RoleEntry("QR code to download the mobile app", "QR code to download the mobile app",
+                null, null, "role", "img", "k_qr", false, null, false, -1, false);
+        clicked.setSigKey(null);
+        clicked.setPickNos(java.util.Arrays.asList(1, 2, 3));
+        PickSnapshot snap = new PickSnapshot(PAGE, es,
+                Collections.singletonList(new StepRec(PAGE, Collections.singletonList(clicked))), new ArrayList<>());
+        String src = RolePickerCodeAssembler.buildStepCode(snap, PKG, "DemoSteps").get(PAGE);
+        assertTrue("贫化 step pick 也应从 entries 回补下标，生成 list.get(index)：" + src, src.contains(".get("));
+        assertFalse("不应再退化成无下标重复 click()：" + src,
+                src.contains("qrCodeToDownloadTheMobileApp.click()"));
+    }
 }

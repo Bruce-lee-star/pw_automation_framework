@@ -1227,8 +1227,15 @@ public final class RoleElementStepGenerator {
                                 lastFp = (fp == null) ? null : new ArrayList<>(fp);
                             }
                             String target = var + "." + field;
-                            if (e.isList()) { if (e.getIndex() >= 0) target += ".get(" + e.getIndex() + ")"; }
-                            else if (e.getCount() > 1 && e.getIndex() >= 0) target += ".nth(" + e.getIndex() + ")";
+                            // 一组元素 / 多匹配元素：下标优先取 RoleEntry.index；浏览器回传链路常把 index 丢成 -1，
+                            // 此时从浏览器固化签名 sigKey 末尾的 #N 还原（仅用于拼串，不写回 RoleEntry）。
+                            // 与 4 参 generate 的回退口径保持一致，避免"list 元素在 step 里退化成无下标重复 click()"。
+                            int __ix = (e.getIndex() >= 0) ? e.getIndex()
+                                    : RolePickerPickParser.parseIndexFromSig(e.getSigKey());
+                            if (__ix >= 0) {
+                                if (e.isList()) target += ".get(" + __ix + ")";
+                                else if (e.getCount() > 1) target += ".nth(" + __ix + ")";
+                            }
                             // 原生对话框（alert/confirm/prompt）：对齐 page.pause() 的 onDialog 录制——监听
                             // 必须在"触发它的动作闭包内"同步注册，否则 confirm 在注册前已被浏览器默认 dismiss，
                             // 且多元素连续点击时前置的 onceDialog 会误作用到后续元素。框架封装的

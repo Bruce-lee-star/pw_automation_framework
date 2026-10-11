@@ -81,8 +81,20 @@ public final class RolePickerCommandEngine {
         setPickMode(anyLivePage(pageNames), PickMode.MANUAL, pageNames);
         // 反向查表只构建一次（避免对每个被跟踪页面重复读 nls 文件），减少点击"开始"的延迟。
         String startNls = RolePickerNlsCache.buildNlsReverseJson(Arrays.asList(nlsFiles));
+        // 【优化-去重】pageNames 可能因"导航后旧页残留 / 重复登记"而含同一 URL 的多个 Page 对象，
+        // 导致同一页面被 start 两次（重复注入脚本与监听、浪费 eval、面板状态被重复初始化）。
+        // 按 URL 去重，每个 URL 只 start 一次；同一 URL 的后续重复项仅记 DEBUG，便于排查重复登记根因。
+        Set<String> startedUrls = new java.util.LinkedHashSet<>();
         for (Page p : pageNames.keySet()) {
-            if (!p.isClosed()) { log.info("[picker][start] calling start for page {}", p.url()); start(p, startNls); }
+            if (p.isClosed()) continue;
+            String u;
+            try { u = p.url(); } catch (Exception ignore) { u = null; }
+            if (u != null && !startedUrls.add(u)) {
+                log.debug("[picker][start] skipping duplicate start for already-started url {}", u);
+                continue;
+            }
+            log.info("[picker][start] calling start for page {}", (u == null ? p : u));
+            start(p, startNls);
         }
         // 注意：开始拾取不做自动避开导航——用户有时也需要拾取 leftmenu/topbar 等全局区域；
         // 手动拾取全页可点（不再有录制根容器/区域扫描的限定——见 RoleElementPicker.start 的 javadoc）。

@@ -550,8 +550,11 @@ final class RolePickerBridgeRegistry {
             // 【诊断通道】把浏览器侧以 [picker-diag] 开头的 console 输出原样转发进 Java 日志。
             // 此前只捕获 __roleOnPick:: 前缀，页面侧诊断（如 [picker-diag][mint-stack] 铸号调用栈探针）
             // 在 Java 日志里完全看不到，排查时被误判为"探针未触发"。带前缀即可被转发，便于一份日志定位。
+            // 【优化-降噪】[picker-diag]* 是每次点击都会触发的探针行（record/mint/seq-baseline 等），
+            // 长会话下会刷屏；默认级别降到 DEBUG，需要复现拾取/序号问题再开 DEBUG 查看，INFO 只保留
+            // start/stop/nav 等生命周期事件。
             if (t.startsWith("[picker-diag]")) {
-                log.info("[browser] {}", t);
+                log.debug("[browser] {}", t);
                 return;
             }
             if (t.startsWith("__roleOnPick::")) {

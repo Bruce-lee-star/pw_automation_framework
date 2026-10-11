@@ -68,8 +68,10 @@ public final class RoleEntry {
     /**
      * 该定位器在页面上匹配「一组元素」时的序号（0-based），对齐 Playwright 的
      * {@code locator.nth(index)}。为 {@code -1} 表示唯一匹配、无需索引。
+     * <p>非 final：浏览器侧 step pick 经回传链路常丢失此序号，生成前由
+     * {@code RolePickerCodeAssembler} 从权威内存态（snap.entries）回补，见 {@link #setIndex(int)}。</p>
      */
-    private final int index;
+    private int index;
     /**
      * 该次点击是否触发了下载（anchor 带 download 属性 / 指向文件 URL，或 JS 触发的下载）。
      * 为 true 时生成 step 应包装为 {@code xxx.waitForDownload(() -> element.click())}
@@ -520,6 +522,16 @@ public final class RoleEntry {
     /** 一组同定位器元素中的序号（0-based）；-1 表示唯一匹配、无需 {@code nth(index)}。 */
     public int getIndex() {
         return index;
+    }
+
+    /**
+     * 回写一组元素中的序号（0-based）。
+     * 仅用于「权威内存态（snap.entries）经 {@code sigKey} 携带的序号，在浏览器侧 step pick 回传时丢失」时，
+     * 由 {@code RolePickerCodeAssembler} 在生成前从 {@code mem} 补齐——保证 list 元素在 step 里仍按
+     * {@code x.get(index)} 取单项，而不是退化成无下标重复 {@code click()}。
+     */
+    public void setIndex(int index) {
+        this.index = index;
     }
 
     /** 该次点击是否触发下载；是则生成 step 时包装为 {@code waitForDownload(...)}（可与弹窗嵌套）。 */

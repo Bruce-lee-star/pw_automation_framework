@@ -157,7 +157,22 @@ final class RolePickerCodeAssembler {
                                 // dialog/popup 双保险。RoleEntry 的 checked/setCheckedTarget 为 final 不可变，
                                 // 无法 merge，故有增强差异时直接用 mem 替换 pick（保证 setCheckedTarget 是点击后状态，
                                 // 否则点击"未勾选"checkbox 会因浏览器侧点击前状态生成 setChecked(false) 导致"没选择上"）。
-                                if (needsReplaceByMemory(p, mem)) { p = mem; }
+                                if (needsReplaceByMemory(p, mem)) {
+                                    p = mem;
+                                } else {
+                                    // 回补身份字段（序号 / 列表标记）：浏览器侧 step pick 常为贫化对象——
+                                    // 即便已被 markListGroups 标记为「一组元素」，其 index 也常因回传链路丢失（恒为 -1），
+                                    // 且 sigKey 可能缺失，导致 step 渲染时 parseIndexFromSig 取不到 #N，
+                                    // 于是 list 元素只能退化成无下标的重复 click()（现场：3 个 QR 图 →
+                                    // 3 行 setupSecondPwdPage.qrCodeToDownloadTheMobileApp.click()）。
+                                    // 这些属元素身份，与 framePath/dialog 同理应从权威内存态 mem 补齐。
+                                    // 守卫：仅当本 pick 自身无法还原下标（无 index 且无可用 #N 的 sigKey）时才借用
+                                    // mem 的下标，避免覆盖那些 sigKey 完整、可自还原下标的元素（列表多成员场景）。
+                                    int recovered = (p.getIndex() >= 0) ? p.getIndex()
+                                            : RolePickerPickParser.parseIndexFromSig(p.getSigKey());
+                                    if (recovered < 0 && mem.getIndex() >= 0) p.setIndex(mem.getIndex());
+                                    if (!p.isList() && mem.isList()) p.setList(true);
+                                }
                             }
                             enrichedPicks.add(p);
                         }

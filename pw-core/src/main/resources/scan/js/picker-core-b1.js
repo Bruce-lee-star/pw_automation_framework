@@ -1504,6 +1504,7 @@
                 // 1. testId（打分 1，最优；本项目扩展 data-testid/-test-id/-test/-qa 同权）
 
 
+                var cands = [];
                 var testAttrs = ['data-testid','data-test-id','data-test','data-qa'];
 
                 var __testidPick = null;
@@ -1536,7 +1537,7 @@
 
                 }
 
-                if (__testidPick) return done(__testidPick);
+                if (__testidPick) cands.push({score:1, pick:__testidPick});
 
                 // 2. 语义角色 + 可访问名（role+name，打分 100，先于 placeholder/label）
 
@@ -1580,13 +1581,13 @@
                     if (i18nAttr && i18nAttr.trim()) {
 
 
-                      return __attachIndex({ strategy:'role', role:r, name:nm, key:i18nAttr.trim(), matched:true,
+                      cands.push({score:100, pick:{ strategy:'role', role:r, name:nm, key:i18nAttr.trim(), matched:true,
 
 
                         cleaned:false, level:lvl,
 
 
-                        tag:tag, text: ownVisibleText(el).slice(0, 120) }, el);
+                        tag:tag, text: ownVisibleText(el).slice(0, 120) }});
 
 
                     }
@@ -1607,13 +1608,13 @@
                     var nls = nlsKeyInfo(nm);
 
 
-                    return __attachIndex({ strategy:'role', role:r, name:nm, key:nls.key, matched: !!nls.key,
+                    cands.push({score:100, pick:{ strategy:'role', role:r, name:nm, key:nls.key, matched: !!nls.key,
 
 
                       cleaned: nameInfo.cleaned || !nls.exact, level:lvl,
 
 
-                      tag:tag, text: ownVisibleText(el).slice(0, 120) }, el);
+                      tag:tag, text: ownVisibleText(el).slice(0, 120) }});
 
 
                   }
@@ -1646,7 +1647,7 @@
                 var i18n = el.getAttribute('data-i18n');
 
 
-                if (i18n && i18n.trim()) return done({ strategy:'i18n', value:i18n.trim(), name:i18n.trim() });
+                if (i18n && i18n.trim()) cands.push({score:110, pick:{ strategy:'i18n', value:i18n.trim(), name:i18n.trim() }});
 
 
                 // 3. placeholder（120；pause 仅对 INPUT/TEXTAREA）
@@ -1658,7 +1659,7 @@
                   var ph = el.getAttribute('placeholder');
 
 
-                  if (ph && ph.trim()) return done({ strategy:'placeholder', attr:'placeholder', value:ph.trim(), name:ph.trim() });
+                  if (ph && ph.trim()) cands.push({score:120, pick:{ strategy:'placeholder', attr:'placeholder', value:ph.trim(), name:ph.trim() }});
 
 
                 }
@@ -1700,7 +1701,7 @@
                     var __cb = getNameInfo(el);
 
 
-                    if (__cb && __cb.name) return done({ strategy:'role', role:__ctrlRole, name:__cb.name, nlsKey:__cb.nlsKey, resolvedKey:__cb.resolvedKey });
+                    if (__cb && __cb.name) cands.push({score:140, pick:{ strategy:'role', role:__ctrlRole, name:__cb.name, nlsKey:__cb.nlsKey, resolvedKey:__cb.resolvedKey }});
 
 
                   }
@@ -1709,7 +1710,7 @@
                   var lbl = labelTextOf(el);
 
 
-                  if (lbl) return done({ strategy:'label', name:lbl });
+                  if (lbl) cands.push({score:140, pick:{ strategy:'label', name:lbl }});
 
 
                 }
@@ -1724,7 +1725,7 @@
                   var alt = el.getAttribute('alt');
 
 
-                  if (alt && alt.trim()) return done({ strategy:'altText', attr:'alt', value:alt.trim(), name:alt.trim() });
+                  if (alt && alt.trim()) cands.push({score:160, pick:{ strategy:'altText', attr:'alt', value:alt.trim(), name:alt.trim() }});
 
 
                 }
@@ -1808,7 +1809,7 @@
                     if (otNls.key && !otNls.exact) {
 
 
-                      return done({ strategy:'text', name:ot, key:otNls.key, matched:true });
+                      cands.push({score:180, pick:{ strategy:'text', name:ot, key:otNls.key, matched:true }});
 
 
                     }
@@ -1817,7 +1818,7 @@
                     // 6b. 精确匹配：直接用可见文本（done 内 KEY_ONLY 精确命中 → cleaned=false → exact 默认）。
 
 
-                    return done({ strategy:'text', name:ot });
+                    cands.push({score:185, pick:{ strategy:'text', name:ot }});
 
 
                   }
@@ -1832,10 +1833,10 @@
                 var title = el.getAttribute('title');
 
 
-                if (title && title.trim()) return done({ strategy:'title', attr:'title', value:title.trim(), name:title.trim() });
+                if (title && title.trim()) cands.push({score:200, pick:{ strategy:'title', attr:'title', value:title.trim(), name:title.trim() }});
                 // 8. stable id (500): placed AFTER text/title to align with page.pause scoring.
                 var id = el.getAttribute('id');
-                if (isStableId(id)) return done({ strategy:'id', id:id });
+                if (isStableId(id)) cands.push({score:500, pick:{ strategy:'id', id:id }});
 
 
 
@@ -1855,7 +1856,7 @@
                 //     排在 #id(500) 之后、[name=](520) 之前，与 pause 一致。生成 @RoleElement(role=...) 无 name。
 
 
-                if (r && !NON_ROLE[r]) return done({ strategy:'role', role:r });
+                if (r && !NON_ROLE[r]) cands.push({score:510, pick:{ strategy:'role', role:r }});
 
 
                 // 8.6 属性级 css 候选（对齐 page.pause 的 score 520/521 兜底层级，
@@ -1879,7 +1880,7 @@
                 var nmAttr = el.getAttribute('name');
 
 
-                if (nmAttr && nmAttr.trim()) return done({ strategy:'css', css: tag + '[name="' + escapeSelectorValue(nmAttr.trim()) + '"]', needsReview:false });
+                if (nmAttr && nmAttr.trim()) cands.push({score:520, pick:{ strategy:'css', css: tag + '[name="' + escapeSelectorValue(nmAttr.trim()) + '"]', needsReview:false }});
 
 
                 if (tag === 'input' || tag === 'textarea' || tag === 'select') {
@@ -1888,7 +1889,7 @@
                   var ty = el.getAttribute('type');
 
 
-                  if (ty && ty.trim()) return done({ strategy:'css', css: tag + '[type="' + escapeSelectorValue(ty.trim()) + '"]', needsReview:false });
+                  if (ty && ty.trim()) cands.push({score:521, pick:{ strategy:'css', css: tag + '[type="' + escapeSelectorValue(ty.trim()) + '"]', needsReview:false }});
 
 
                 }
@@ -1897,7 +1898,34 @@
                 // 9. 完整 css 路径兜底（needsReview=true）。
 
 
-                return done({ strategy:'css', css: cssPathOf(el), needsReview:true });
+                cands.push({score:900, pick:{ strategy:'css', css: cssPathOf(el), needsReview:true }});
+
+                // P0-1 选优闭环：按 score 升序遍历，选"第一个能唯一解析到本元素"的候选。
+                // · id/css 选择器直接 querySelectorAll 验证唯一性（__rawMatchingElements 对 id/css 不重解析）；
+                // · role/text/i18n/placeholder/label/alt/title/testid 走 __matchingElements（带缓存 + a11y 过滤）；
+                // · 都不唯一时退化为"能解析到本元素的最低分"（done 内 __attachIndex 会补 nth(index)）。
+                cands.sort(function(a, b) { return a.score - b.score; });
+                var CHOSEN = null, CHOSEN_UNIQUE = null;
+                for (var ci = 0; ci < cands.length; ci++) {
+                  var cp = cands[ci];
+                  var ms = [];
+                  try {
+                    if (cp.pick.strategy === 'css' && cp.pick.css) {
+                      var cn = document.querySelectorAll(cp.pick.css);
+                      for (var qi = 0; qi < cn.length; qi++) ms.push(cn[qi]);
+                    } else if (cp.pick.strategy === 'id' && cp.pick.id) {
+                      var cb = document.getElementById(cp.pick.id);
+                      if (cb) ms.push(cb);
+                    } else {
+                      ms = __matchingElements(cp.pick) || [];
+                    }
+                  } catch (e) { ms = []; }
+                  if (ms.indexOf(el) < 0) continue;
+                  if (ms.length === 1) { CHOSEN_UNIQUE = cp; break; }
+                  if (!CHOSEN) CHOSEN = cp;
+                }
+                if (!CHOSEN_UNIQUE) CHOSEN_UNIQUE = CHOSEN;
+                return done(CHOSEN_UNIQUE.pick);
 
 
               };

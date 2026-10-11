@@ -622,6 +622,21 @@ public final class MonitorSink {
      */
     private void settleFailure(CapturedExchange exchange) {
         if (exchange.tryMarkSettled()) {
+            // 失败结算时补读响应体供报告展示（status-only 规则无 body 断言路径，
+            // 轮询线程已 holdResponse 但未读 body；此时在 main 线程串行安全读取）。
+            if (exchange.responseBodyPreview() == null) {
+                try {
+                    Response held = exchange.takeHeldResponse();
+                    if (held != null && !isStreamingContentType(held.headers().get("content-type"))) {
+                        BodySnapshot snap = takeBodySnapshot(held);
+                        if (snap.preview() != null) {
+                            exchange.markResponseBody(snap.preview());
+                        }
+                    }
+                } catch (Throwable t) {
+                    LOGGER.debug("[Route] failed to read body for failure evidence: {}", t.toString());
+                }
+            }
             settledFailures.add(exchange);
             reportOutcome(exchange); // 失败结果进报告（CAS 保证只上报一次）
         }
