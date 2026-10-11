@@ -20,10 +20,13 @@ public class MonitorFailureItem {
     private final List<String> scenarios;
     private final String requestBody;
     private final String responseBody;
+    private final String requestHeaders;
+    private final String responseHeaders;
 
     public MonitorFailureItem(String owner, String feature, String pattern, String status,
                              String method, String requestUrl, String reason,
-                             List<String> scenarios, String requestBody, String responseBody) {
+                             List<String> scenarios, String requestBody, String responseBody,
+                             String requestHeaders, String responseHeaders) {
         this.owner = owner;
         this.feature = feature;
         this.pattern = pattern;
@@ -31,10 +34,11 @@ public class MonitorFailureItem {
         this.method = method;
         this.requestUrl = requestUrl;
         this.reason = reason;
-        // 防御性拷贝为不可变集合，避免返回内部可变引用（EI_EXPOSE_REP2）
         this.scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
         this.requestBody = requestBody;
         this.responseBody = responseBody;
+        this.requestHeaders = requestHeaders == null ? "" : requestHeaders;
+        this.responseHeaders = responseHeaders == null ? "" : responseHeaders;
     }
 
     public String getOwner() {
@@ -75,5 +79,13 @@ public class MonitorFailureItem {
 
     public String getResponseBody() {
         return responseBody;
+    }
+
+    public String getRequestHeaders() {
+        return requestHeaders;
+    }
+
+    public String getResponseHeaders() {
+        return responseHeaders;
     }
 }

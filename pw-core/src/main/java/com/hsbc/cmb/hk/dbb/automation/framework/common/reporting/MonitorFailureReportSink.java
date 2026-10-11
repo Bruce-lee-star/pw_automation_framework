@@ -1,5 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.reporting;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
+
+import java.util.List;
+
 /**
  * API 监控失败报告的写出契约（依赖倒置点）。
  *
@@ -9,11 +13,25 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.reporting;
  *
  * <p>契约：
  * <ul>
+ *   <li>{@link #record(List)} — 归集断言失败（默认 no-op；route 生产实现覆盖）</li>
  *   <li>{@link #write()} — 写出失败报告，返回失败 owner 数（&gt;0 表示需通知）</li>
  *   <li>{@link #clear()} — 写出后清空归集器，防止多套件同 JVM 运行时的跨套件累积</li>
  * </ul>
  */
 public interface MonitorFailureReportSink {
+
+    /**
+     * 归集一批已定案的 route 断言失败（探针喂入点；默认 no-op，reporting 测试桩无需改动）。
+     *
+     * <p>设计意图：断言失败是<b>消费式</b>的（web 侧经探针 drain 后即清空、用于抛错/标记），
+     * 归集发生在「失败被取走的同时」——一份失败两用：即时抛错 + 套件收尾聚合报告，
+     * 不引入第二次消费，也就不存在与既有消费路径的时序竞争。
+     *
+     * @param failures 已定案断言失败（可为空；实现必须容忍跨线程调用）
+     */
+    default void record(List<RouteAssertionFailure> failures) {
+        // no-op：不强制 sink 实现提供归集能力
+    }
 
     /**
      * 写出 API 监控失败报告（如 {@code target/monitor-failures-by-owner.json}）。

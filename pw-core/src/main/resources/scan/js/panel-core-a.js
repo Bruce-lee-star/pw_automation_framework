@@ -348,7 +348,21 @@
                       // pick.key/resolvedKey 仍保留在状态与回传里，生成侧据"是否传 NLS"决定定位方式。
                       if (p.id) s += ' id=' + p.id;
                       if (p.css) s += ' css=' + p.css;
-                      if (p.index != null && p.index >= 0) s += ' #' + p.index;
+                      // 下标优先用回传的 p.index；回传链路常丢 index（RoleEntry.index 为 -1，Java 端刻意不从签名回填，
+                      // 以免大量 ...#0 签名改变产物形态），此时从 p._sigKey 末尾的 #N 还原（与 list 判定 / step 生成同源）。
+                      // 这样即便 index 回传丢失，面板仍稳定展示"列表元素的局部序号"，与后续步骤 .get(N) 对齐。
+                      var _ix = p.index;
+                      if (_ix == null || _ix < 0) {
+                        _ix = -1;
+                        var _sk = p._sigKey;
+                        if (_sk) {
+                          var _t = String(_sk).trim();
+                          if (_t.charAt(0) === '[') { try { var _a = JSON.parse(_t); if (_a && _a.length) _t = String(_a[0]); } catch (e) {} }
+                          var _h = _t.lastIndexOf('#');
+                          if (_h > 0 && _h < _t.length - 1) { var _n = parseInt(_t.substring(_h + 1), 10); if (!isNaN(_n)) _ix = _n; }
+                        }
+                      }
+                      if (_ix >= 0) s += ' #' + _ix;
                       if (p.popup) s += ' [popup]';
                       if (p.download) s += ' [download]';
                       if (p.hover) s += ' [hover]';

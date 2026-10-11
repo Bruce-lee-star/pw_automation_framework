@@ -19,11 +19,17 @@ import java.util.List;
  * @param actualStatus 实际响应状态码（未等到响应为 null）
  * @param bodyFailures body 断言失败明细（不可变，空列表=无 body 失败）
  * @param timedOut     是否在 monitor 超时窗口内未等到响应
- * @param timeoutMs    该规则配置的 monitor 超时（毫秒；0=永不超时）
+ * @param timeoutMs      该规则配置的 monitor 超时（毫秒；0=永不超时）
+ * @param responseBody    响应体预览（已脱敏+截断；无 body 断言时为空字符串）
+ * @param requestBody     请求体预览（已截断；无请求体时为空字符串）
+ * @param requestHeaders  请求头（每行 key: value，已脱敏；无则空字符串）
+ * @param responseHeaders  响应头（每行 key: value；无则空字符串）
  */
 public record RouteAssertionFailure(String pattern, String method, String url,
                                       Integer expectStatus, Integer actualStatus,
-                                      List<String> bodyFailures, boolean timedOut, long timeoutMs) {
+                                      List<String> bodyFailures, boolean timedOut, long timeoutMs,
+                                      String responseBody, String requestBody,
+                                      String requestHeaders, String responseHeaders) {
 
     /**
      * 防御性拷贝构造：bodyFailures 不可变快照，杜绝调用方（IO 线程产物）与报告方（业务线程）

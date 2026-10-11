@@ -758,8 +758,8 @@ public enum ConfigKeys {
     ),
     WEB_PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK(
         "playwright.browser.close.after.concurrent.task",
-        "true",
-        "并发执行器（ConcurrentContextExecutor）模式下，每个并发任务（case）收口后是否立即关闭本线程浏览器；默认 true 及时释放浏览器进程（不等全部 case 跑完才关），false 保持线程池跨任务复用浏览器语义（浏览器挂到 suite 收尾才关）"
+        "false",
+        "方案 A（2026-10-10）：Browser 为 worker 级重对象默认跨任务复用（对齐 Playwright 官方模型），浏览器进程挂到套件收尾统一回收；true 时并发执行器（ConcurrentContextExecutor）模式下每个并发任务收口后立即关闭本线程浏览器（headed 多线程及时回收窗口，牺牲启动成本）"
     ),
     WEB_PLAYWRIGHT_ELEMENT_WAIT_TIMEOUT(
         "playwright.element.wait.timeout",
@@ -1038,6 +1038,12 @@ public enum ConfigKeys {
     /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
     ROUTE_CAPTURE_GZIP_MAX_BYTES("route.capture.gzip.max.bytes", "8388608",
             "路由采集响应体文本型 gzip 上限（字节）",
+            ConfigSource.ENV_FIRST_PRECEDENCE),
+
+    /** MONITOR 响应体断言上限（字节，默认 2 MB）：超限自动降级为仅 status/headers 断言
+     *  （记 inconclusive，不误判、不假绿）。与采集留存无关（capture 侧仍整存不截断）。 */
+    ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES("route.monitor.assert.body.max.bytes", "2097152",
+            "路由 monitor 响应体断言上限（字节）；超限自动降级为仅 status/headers 断言",
             ConfigSource.ENV_FIRST_PRECEDENCE),
 
     /** Monitor API 响应是否持久化到数据库。 */

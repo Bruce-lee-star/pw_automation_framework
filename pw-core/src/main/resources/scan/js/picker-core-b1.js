@@ -485,15 +485,30 @@
               var __inAccessibilityTree = function(el) {
                 try {
                   if (!el || el.nodeType !== 1) return false;
+                  // Playwright 不渲染 <template> 内容，其内的"双份 DOM"副本一律不可见。
+                  // 典型场景：响应式页面把桌面版/移动版都塞进 <template> 仅按需克隆，或直接用
+                  // <template> 存放屏幕阅读器冗余节点 —— 这些节点虽在 DOM 但从不渲染。原实现只检查
+                  // display:none/visibility:hidden/hidden 属性，漏掉 template 内节点（getComputedStyle
+                  // 在其上常抛异常走 catch→return true 被误判为可见），导致隐藏副本混入匹配集、挤占
+                  // nth 序号（见上文"3 个可见 QR 却得到 #3/#4/#5"）。
+                  if (el.closest && typeof el.closest === 'function') {
+                    if (el.closest('template, [hidden]')) return false;
+                  }
                   var node = el;
                   while (node && node.nodeType === 1) {
+                    if (node.tagName === 'TEMPLATE') return false;
                     if (node.hasAttribute && node.hasAttribute('hidden')) return false;
                     if (node.tagName === 'INPUT' && node.type === 'hidden') return false;
                     var cs = null;
-                    try { cs = window.getComputedStyle(node); } catch (e1) { return true; }
+                    try { cs = window.getComputedStyle(node); } catch (e1) {
+                      // 取不到样式（跨源 frame 等）保守视为可见；但 template 已在上一步拦截，
+                      // 这里不再对"不可判定"节点误杀，与 Playwright 不可判定即视为可见一致。
+                      return true;
+                    }
                     if (cs) {
                       if (cs.display === 'none') return false;
                       if (cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+                      if (cs.contentVisibility === 'hidden') return false;
                     }
                     node = node.parentElement;
                   }
