@@ -89,7 +89,8 @@
         word-wrap: break-word; overflow-wrap: break-word;
     }
     table.detail td.label {
-        width: 20%; font-weight: 500; background: #fafbfc; color: #6c757d;
+        width: 160px; font-weight: 500; background: #fafbfc; color: #6c757d;
+        white-space: nowrap;
     }
     table.detail td .url { word-break: break-all; padding: 2px 0; color: #007bff; }
     table.detail td .url + .url { border-top: 1px dashed #e9ecef; margin-top: 4px; padding-top: 6px; }
@@ -169,6 +170,13 @@
 </#list>
             </td></tr>
             <tr><td class="label">Failure reason</td><td>${item.reason!}</td></tr>
+            <tr><td class="label">Scenarios</td><td>
+<#if item.scenarios?? && item.scenarios?has_content>
+<#list item.scenarios as sc>${sc}</#list>
+<#else>
+              <span class="none">(none)</span>
+</#if>
+            </td></tr>
           </table>
 
           <#-- Nested collapsible: full request/response payload -->
