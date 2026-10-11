@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DBB 自动化测试框架 · 使用指南</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1f2329; --ink-soft:#4e5969;
+    --line:#e5e6eb; --line-soft:#f0f1f3;
+    --brand:#2563eb; --brand-soft:#eff4ff;
+    --green:#0f9d58; --amber:#b45309; --red:#d93025;
+    --code-bg:#f6f8fa; --code-ink:#24292f; --code-line:#e1e4e8;
+    --shadow:0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05);
+    --mono:"JetBrains Mono","Cascadia Code",Consolas,"SFMono-Regular",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  a{color:var(--brand);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.88em;background:var(--code-bg);
+       border:1px solid var(--code-line);border-radius:4px;padding:.1em .38em;color:var(--code-ink);white-space:nowrap}
+  pre{position:relative;background:var(--code-bg);border:1px solid var(--code-line);border-radius:8px;
+      padding:14px 16px;overflow:auto;margin:12px 0}
+  pre code{background:none;border:none;padding:0;white-space:pre;font-size:13px;line-height:1.6}
+  .copy{position:absolute;top:8px;right:8px;font:12px/1 var(--mono);border:1px solid var(--code-line);
+        background:#fff;color:var(--ink-soft);border-radius:6px;padding:5px 8px;cursor:pointer;opacity:0;transition:.15s}
+  pre:hover .copy{opacity:1}
+  .copy:hover{color:var(--brand);border-color:var(--brand)}
+
+  /* layout */
+  .wrap{display:flex;max-width:1240px;margin:0 auto;gap:28px;padding:0 24px}
+  nav.side{position:sticky;top:0;align-self:flex-start;height:100vh;overflow:auto;
+           width:250px;flex:0 0 250px;padding:26px 8px 60px 0;font-size:13.5px}
+  nav.side h1{font-size:15px;margin:0 0 4px}
+  nav.side .sub{color:var(--ink-soft);font-size:12px;margin-bottom:16px}
+  nav.side a{display:block;color:var(--ink-soft);padding:5px 10px;border-radius:6px;border-left:2px solid transparent}
+  nav.side a:hover{background:#eef1f5;color:var(--ink);text-decoration:none}
+  nav.side a.active{background:var(--brand-soft);color:var(--brand);border-left-color:var(--brand);font-weight:600}
+  nav.side .grp{margin:14px 0 4px;padding:0 10px;color:#86909c;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+  main{flex:1 1 auto;min-width:0;padding:30px 0 100px}
+  header.hero{background:linear-gradient(135deg,#eef4ff,#f7f9ff);border:1px solid var(--line);
+              border-radius:14px;padding:26px 28px;margin-bottom:8px;box-shadow:var(--shadow)}
+  header.hero h1{margin:0 0 8px;font-size:26px;letter-spacing:-.01em}
+  header.hero p{margin:6px 0 0;color:var(--ink-soft)}
+  .badges{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px}
+  .badge{font-size:12px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 11px;color:var(--ink-soft)}
+
+  section{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+          padding:22px 24px;margin:16px 0;box-shadow:var(--shadow);scroll-margin-top:16px}
+  section h2{margin:0 0 6px;font-size:20px;letter-spacing:-.01em;padding-bottom:10px;border-bottom:1px solid var(--line-soft)}
+  section h2 .n{color:var(--brand);font-weight:700;margin-right:8px}
+  section h3{margin:22px 0 6px;font-size:15.5px}
+  section h3:first-of-type{margin-top:14px}
+  section p{margin:8px 0;color:var(--ink)}
+  .lead{color:var(--ink-soft)}
+  ul,ol{margin:8px 0;padding-left:22px}
+  li{margin:4px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f2f4f7;font-weight:600;color:var(--ink)}
+  tbody tr:nth-child(even){background:#fafbfc}
+  td code,p code,li code,th code{white-space:nowrap}
+
+  .note,.warn,.tip{border-radius:8px;padding:12px 14px;margin:12px 0;font-size:13.5px;border:1px solid}
+  .note{background:#f2f7ff;border-color:#d6e4ff}
+  .warn{background:#fff8ec;border-color:#ffe0b2}
+  .tip{background:#f1fbf5;border-color:#c9eede}
+  .note b,.warn b,.tip b{color:var(--ink)}
+  .tag{display:inline-block;font-size:11px;border-radius:5px;padding:1px 7px;margin-right:6px;font-weight:600;vertical-align:middle}
+  .t-mock{background:#e8f1ff;color:#1d4ed8}
+  .t-mon{background:#e7f7ee;color:#0f7a43}
+  .t-mod{background:#fff2e0;color:#a85b00}
+  .t-del{background:#f3e8ff;color:#7c3aed}
+  details{background:#fafbfc;border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:0}
+  details summary{cursor:pointer;padding:11px 14px;font-weight:600;font-size:14px;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"＋";color:var(--brand);margin-right:9px;font-weight:700}
+  details[open] summary::before{content:"－"}
+  details .body{padding:0 14px 14px 34px;color:var(--ink-soft);font-size:13.5px}
+  .kbd{font-family:var(--mono);font-size:12px;background:#fff;border:1px solid var(--line);
+       border-bottom-width:2px;border-radius:5px;padding:1px 6px}
+  footer{color:#86909c;font-size:12.5px;text-align:center;padding:24px 0}
+  @media(max-width:900px){nav.side{display:none}.wrap{padding:0 16px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="side">
+  <h1>DBB 自动化框架</h1>
+  <div class="sub">使用指南 · Playwright + Serenity + Cucumber</div>
+  <div class="grp">入门</div>
+  <a href="#overview">1 · 框架概览</a>
+  <a href="#structure">2 · 工程结构</a>
+  <a href="#quickstart">3 · 快速开始</a>
+  <div class="grp">用例</div>
+  <a href="#write-case">4 · 如何写用例</a>
+  <a href="#page-object">5 · 页面对象与元素定位</a>
+  <div class="grp">网络拦截</div>
+  <a href="#route">6 · Route 怎么用</a>
+  <a href="#route-recipes">7 · Route 实战配方</a>
+  <div class="grp">配置与运维</div>
+  <a href="#config">8 · 配置属性</a>
+  <a href="#security">9 · 安全基线</a>
+  <a href="#faq">10 · FAQ</a>
+</nav>
+<main>
+
+<header class="hero">
+  <h1>DBB 自动化测试框架 · 使用指南</h1>
+  <p>基于 <b>Playwright</b> 驱动浏览器、<b>Serenity BDD + Cucumber</b> 组织用例与报告，内置<b>声明式网络拦截</b>（monitor / mock / modify / delay）、日志脱敏与并发执行的企业级多模块测试框架。</p>
+  <div class="badges">
+    <span class="badge">JDK 21</span><span class="badge">Maven 多模块</span>
+    <span class="badge">Playwright 1.62</span><span class="badge">Serenity 4.3.4</span>
+    <span class="badge">Cucumber 7.34</span><span class="badge">JUnit 4</span>
+  </div>
+  <div class="note" style="margin-top:16px">
+    本指南只讲<b>怎么用</b>（不含实现原理）。示例中的接口路径（<code>/api/users</code>、<code>/api/login</code> 等）对应仓库内
+    <code>route-demo-service</code> 演示后端，可直接拿来练手。
+  </div>
+</header>
+
+<!-- ============ 1 概览 ============ -->
+<section id="overview">
+  <h2><span class="n">1</span>框架概览</h2>
+  <p class="lead">这是一套「UI + 接口」一体的自动化测试框架。你用 Cucumber 写业务用例（Gherkin），用 Playwright 操作页面，用框架自带的 Route DSL 拦截/伪造网络请求，Serenity 自动生成图文报告。</p>
+
+  <h3>技术栈（以根 <code>pom.xml</code> 为准）</h3>
+  <table>
+    <thead><tr><th>组件</th><th>版本</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td>JDK</td><td>21</td><td>编译与运行</td></tr>
+      <tr><td>Maven</td><td>多模块</td><td>构建与校验</td></tr>
+      <tr><td>Playwright for Java</td><td>1.62.0</td><td>浏览器驱动</td></tr>
+      <tr><td>Serenity BDD</td><td>4.3.4</td><td>用例编排 + 报告</td></tr>
+      <tr><td>Cucumber</td><td>7.34.9</td><td>Gherkin 用例引擎</td></tr>
+      <tr><td>JUnit</td><td>4.13.2</td><td>Runner 基座</td></tr>
+      <tr><td>Typesafe Config</td><td>1.4.5</td><td>配置读取</td></tr>
+      <tr><td>JsonPath (Jayway)</td><td>2.9.0</td><td>响应体断言 / 字段替换</td></tr>
+      <tr><td>Logback / Jackson / Gson / FreeMarker</td><td>1.5.34 / 2.22.1 / 2.14.0 / 2.3.34</td><td>日志、JSON、报告模板</td></tr>
+    </tbody>
+  </table>
+
+  <h3>六种能力（对应模块）</h3>
+  <table>
+    <thead><tr><th>模块</th><th>能力</th><th>你会用到的入口</th></tr></thead>
+    <tbody>
+      <tr><td><code>pw-core</code></td><td>基础层：配置 / 脱敏 / 异步池 / 关闭协调 / Route SPI</td><td><code>ConfigKeys</code>、<code>framework.verbose.logging</code> 等开关</td></tr>
+      <tr><td><code>pw-reports</code></td><td>汇总报告、趋势、trace 索引、ZIP 打包</td><td>报告产物（<code>target/site/serenity</code>）</td></tr>
+      <tr><td><code>pw-api-core</code></td><td>接口测试：连接池、幂等重试、JSONPath / JSON Schema 校验</td><td>接口直连测试（RestJob 体系）</td></tr>
+      <tr><td><code>pw-web-ui</code></td><td>页面引擎：PageObject、RoleElement、并发 Context、浏览器生命周期、截图 / trace</td><td><code>BasePage</code>、<code>@RoleElement</code>、<code>PlaywrightManager</code></td></tr>
+      <tr><td><code>pw-codegen</code></td><td>元素拾取与页面对象代码生成</td><td>交互式拾取器（生成 <code>@RoleElement</code> 草稿）</td></tr>
+      <tr><td><code>pw-route</code></td><td>网络拦截：monitor / mock / modifyRequest / delay</td><td><code>RouteDsl</code>、<code>RouteEngine</code></td></tr>
+    </tbody>
+  </table>
+  <p class="lead">依赖方向：<code>pw-core</code> ← <code>pw-reports</code> / <code>pw-api-core</code> ← <code>pw-web-ui</code>；<code>pw-codegen</code> / <code>pw-route</code> 为独立模块。业务用例工程 <code>test-automation</code> 聚合以上全部模块（独立构建单元）。</p>
+</section>
+
+<!-- ============ 2 结构 ============ -->
+<section id="structure">
+  <h2><span class="n">2</span>工程结构（用例工程约定的目录）</h2>
+  <p class="lead">框架仓库只放「能力模块」；你的业务用例放在测试工程里。约定目录如下：</p>
+<pre><code>test-automation/
+├─ src/test/resources/
+│  ├─ features/                 # Gherkin 用例（.feature）
+│  │  └─ users/user-list.feature
+│  ├─ nls/                      # 多语言元素名（@RoleFile 指向）
+│  │  └─ users.nls.json
+│  ├─ mocks/                    # Route / Mock 规则配置（可选）
+│  └─ serenity.conf             # 框架配置（见第 8 节）
+└─ src/test/java/…/
+   ├─ runners/                  # Cucumber 启动类（CucumberTestRunnerIT）
+   ├─ steps/                    # Step Definitions（@Given/@When/@Then）
+   └─ pages/                    # Page Object（继承 BasePage）</code></pre>
+  <div class="tip"><b>约定优于配置</b>：feature 放 <code>src/test/resources/features</code>；Step 与 Page 放 <code>src/test/java</code> 下同包结构；Runner 通过标签（<code>tags</code>）决定跑哪些用例。</div>
+</section>
+
+<!-- ============ 3 快速开始 ============ -->
+<section id="quickstart">
+  <h2><span class="n">3</span>快速开始</h2>
+  <p class="lead">前置：JDK 21、Maven 3.9+、可联网装浏览器。</p>
+<pre><code># 1) 首次：安装 Playwright 浏览器（chromium）
+mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"
+
+# 2) 构建 + 全量校验（含 SpotBugs / Checkstyle / 汇总报告）
+mvn -B verify -DskipITs
+
+# 3) 只跑测试工程（自动带上各框架模块）
+mvn -pl test-automation -am test</code></pre>
+
+  <h3>常用开关</h3>
+  <table>
+    <thead><tr><th>场景</th><th>用法</th></tr></thead>
+    <tbody>
+      <tr><td>引擎级并行（默认串行）</td><td><code>-Pparallel -Dparallelism=4 -DmaxPoolSize=8</code></td></tr>
+      <tr><td>环境切换</td><td><code>-Psit1</code> / <code>-Psit2</code> / <code>-Psit3</code>（注入 <code>env</code> / <code>env.code</code> / <code>base.url</code>）</td></tr>
+      <tr><td>标签过滤</td><td><code>-Dtags="@smoke"</code>（默认 <code>not @skip</code>）</td></tr>
+      <tr><td>跳过单测</td><td><code>-DskipTests=true</code></td></tr>
+      <tr><td>依赖漏洞门禁</td><td><code>-Psca</code>（OSV CVE 门禁）</td></tr>
+      <tr><td>快速覆盖某配置</td><td><code>-Dplaywright.browser.headless=true</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 4 写用例 ============ -->
+<section id="write-case">
+  <h2><span class="n">4</span>如何写用例</h2>
+  <p class="lead">一个用例由三层组成：<b>Feature（做什么）→ Step（怎么做）→ Page（在哪个页面做）</b>。三层各司其职，业务可读、代码可维护。</p>
+
+  <h3>① Feature 文件（Gherkin）</h3>
+  <p>用业务语言描述场景，<b>不写任何实现细节</b>。中文/英文皆可，团队统一即可。</p>
+<pre><code>@smoke
+Feature: 用户管理
+
+  Background: 打开用户列表
+    Given 打开用户列表页
+
+  Scenario: 查询用户列表
+    Then 用户列表应包含 3 条记录
+
+  Scenario: 查询不存在的用户
+    When 查询用户 ID 999
+    Then 结果应为空
+
+  @route
+  Scenario: 列表接口异常时页面给出提示
+    Given 列表接口返回 500
+    When 刷新用户列表页
+    Then 页面应显示"加载失败"提示</code></pre>
+
+  <h3>② Step Definition（把中文步骤接到代码）</h3>
+  <p>放在 <code>steps/</code> 包。一个 Step 只做「调用页面对象 + 断言」，不写选择器。</p>
+<pre><code>package steps;
+
+import org.assertj.core.api.Assertions;
+import io.cucumber.java.en.*;
+import pages.UserListPage;
+
+public class UserSteps {
+
+    // 页面对象按需创建；框架自动注入当前线程的 Page/Context
+    private final UserListPage userListPage = new UserListPage();
+
+    @Given("打开用户列表页")
+    public void openUserList() {
+        userListPage.navigateTo("/demo/users");
+    }
+
+    @Then("用户列表应包含 {int} 条记录")
+    public void shouldContain(int count) {
+        userListPage.waitForRows(count);
+        Assertions.assertThat(userListPage.userRows.size()).isEqualTo(count);
+    }
+
+    @When("查询用户 ID {int}")
+    public void queryUser(long id) {
+        userListPage.queryById(id);
+    }
+}</code></pre>
+  <div class="tip"><b>参数化步骤</b>：Cucumber 内置 <code>{int}</code>、<code>{string}</code>、<code>{word}</code> 等占位符，直接映射为方法参数，无需手工解析。</div>
+
+  <h3>③ 在 Step 里做接口拦截（Route）</h3>
+  <p>需要"让接口返回 500 看页面表现"时，在该步骤里用 <code>RouteDsl</code> 注册规则（详见第 6 节）：</p>
+<pre><code>@Given("列表接口返回 {int}")
+public void listApiReturns(int status) {
+    // getPage() 取当前线程的 Page；完整 DSL 见第 6 节
+    RouteDsl.on(getPage())
+        .api("/api/users")
+        .mock().status(status).body("{\"error\":\"boom\"}").contentType("application/json")
+        .register();
+}</code></pre>
+</section>
+
+<!-- ============ 5 页面对象 ============ -->
+<section id="page-object">
+  <h2><span class="n">5</span>页面对象与元素定位</h2>
+  <p class="lead">页面对象继承 <code>BasePage</code>，把"元素"声明成字段。运行期框架自动绑定当前线程的 Page/Context，Step 直接点字段操作，<b>不接触 Playwright 原生选择器</b>。</p>
+
+  <h3>最小页面对象</h3>
+<pre><code>package pages;
+
+import com.microsoft.playwright.options.AriaRole;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.*;
+
+@RoleFile("nls/users.nls.json")          // 该页面的多语言元素名文件（声明一次）
+public class UserListPage extends BasePage {
+
+    @RoleElement(role = AriaRole.HEADING, level = 1, key = "title")
+    public PageElement title;
+
+    @RoleElement(role = AriaRole.LISTITEM)
+    public PageElementList userRows;       // 一组元素
+
+    @RoleElement(role = AriaRole.BUTTON, key = "refresh")
+    public PageElement refreshButton;
+
+    public void waitForRows(int expected) {
+        userRows.waitUntilCount(expected); // 带重试/诊断的等待
+    }
+
+    public void queryById(long id) {
+        // 语义定位：CSS 属性选择器（数字 ID 无 NLS key 时直接表达）
+        element("[data-user-id='" + id + "']").click();
+    }
+}</code></pre>
+
+  <h3>BasePage 常用 API（Tier-1 用户接口）</h3>
+  <table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>element(String selector)</code></td><td>定位单个元素，返回 <code>PageElement</code>（含重试/诊断/截图）</td></tr>
+      <tr><td><code>elements(String selector)</code></td><td>定位一组元素，返回 <code>PageElementList</code></td></tr>
+      <tr><td><code>locator(String selector)</code></td><td>定位原始 Locator（仅在需要框架未封装能力时用）</td></tr>
+      <tr><td><code>navigateTo(String url)</code></td><td>导航到相对/绝对地址（自动等页面加载）</td></tr>
+      <tr><td><code>refresh() / back() / forward()</code></td><td>页面刷新 / 后退 / 前进</td></tr>
+      <tr><td><code>getPage() / getContext()</code></td><td>取当前线程的 Page / BrowserContext</td></tr>
+      <tr><td><code>switchToPage(...) / waitForNewPage(...)</code></td><td>多页（新标签页）切换与等待</td></tr>
+      <tr><td><code>waitForDownload(...)</code></td><td>等待并获取下载文件</td></tr>
+    </tbody>
+  </table>
+
+  <h3>定位策略：优先「角色 / 语义」，不要写 CSS/XPath</h3>
+  <p><code>@RoleElement</code> 支持两类策略，二选一（设置语义属性后 <code>role</code> 被忽略）：</p>
+  <table>
+    <thead><tr><th>策略</th><th>写法</th><th>等价于</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="2">角色 + 多语言</td><td><code>@RoleElement(role = AriaRole.BUTTON, key = "signIn")</code></td><td>按角色 + NLS 名称，<b>支持多语言</b></td></tr>
+      <tr><td><code>@RoleElement(role = AriaRole.BUTTON, name = "Sign in")</code></td><td>按角色 + 字面名称（NLS 无 key 时用）</td></tr>
+      <tr><td rowspan="6">语义定位</td><td><code>@RoleElement(text = "Submit")</code></td><td><code>getByText</code></td></tr>
+      <tr><td><code>@RoleElement(label = "Username")</code></td><td><code>getByLabel</code>（定位关联 input 控件）</td></tr>
+      <tr><td><code>@RoleElement(placeholder = "搜索")</code></td><td><code>getByPlaceholder</code></td></tr>
+      <tr><td><code>@RoleElement(testId = "user-row")</code></td><td><code>getByTestId</code></td></tr>
+      <tr><td><code>@RoleElement(altText = "Company logo")</code></td><td><code>getByAltText</code></td></tr>
+      <tr><td><code>@RoleElement(title = "帮助")</code></td><td><code>getByTitle</code></td></tr>
+    </tbody>
+  </table>
+  <p class="lead">进阶属性：<code>level</code>（标题层级）、<code>exact</code>（精确/子串）、<code>disabled/pressed/expanded</code>（三态：ANY/YES/NO）、<code>frame = {"iframe[name=\"x\"]"}</code>（iframe 内元素）。</p>
+  <div class="tip"><b>推荐</b>：优先用 <code>pw-codegen</code> 的交互式拾取器点选元素，自动生成 <code>@RoleElement</code> 草稿（含 NLS key），人工 review 后合入。</div>
+</section>
+
+<!-- ============ 6 Route ============ -->
+<section id="route">
+  <h2><span class="n">6</span>Route 网络拦截怎么用</h2>
+  <p class="lead">Route 让你在不改后端的前提下，声明式地<b>观测、伪造、改写、延迟</b>浏览器发出的 HTTP 请求。它挂在 <code>BrowserContext</code> 上，按 context 隔离，天然并发安全。</p>
+
+  <h3>四种能力（一规则一能力）</h3>
+  <table>
+    <thead><tr><th>能力</th><th>作用</th><th>会不会影响请求</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag t-mon">MONITOR</span></td><td>观测：记录请求/响应，做状态码 / JSONPath / 体 / 表单断言</td><td>否（fail-open，放行）</td></tr>
+      <tr><td><span class="tag t-mock">MOCK</span></td><td>伪造响应：静态 body/status，或取真实响应后改字段</td><td>是（交付你给的内容）</td></tr>
+      <tr><td><span class="tag t-mod">MODIFY_REQUEST</span></td><td>改写请求：请求头 / method / 请求体字段</td><td>是（后端看到的是改后的）</td></tr>
+      <tr><td><span class="tag t-del">DELAY</span></td><td>延迟放行：模拟慢网络 / 超时</td><td>否（只是晚点放行）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>基本骨架</h3>
+<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
+
+AutoCloseable handle = RouteDsl.on(page)     // 也可 RouteDsl.on(context)
+    .api("/api/users/**")                    // URL 通配 pattern
+    .monitor()                               // 选择能力：monitor / mock / modifyRequest / delay
+        .expectStatus(200)
+        .expectJsonPath("$.length()", 3)
+    .register();                             // 提交注册，返回可精确注销的句柄
+// ... 执行业务步骤 ...
+handle.close();                              // 精确注销（幂等）；场景结束框架也会自动清理</code></pre>
+  <div class="note">
+    <b>两种收尾写法等价</b>：<code>.register()</code> 立即注册；级联写法 <code>…done().start()</code> 效果相同（<code>start()</code> 也返回句柄）。<br>
+    <b>DELAY 段没有 <code>register()</code></b>，请用 <code>.api(p).delay(3).done().start();</code>。
+  </div>
+
+  <h3>匹配条件（收窄规则命中范围）</h3>
+  <p>在 <code>api(pattern)</code> 之后、能力之前或之后链式声明，<b>多个条件同时满足才命中</b>：</p>
+<pre><code>RouteDsl.on(page)
+    .api("/api/login")
+        .onlyApi()                    // 只匹配 xhr/fetch
+        .matchMethod("POST")          // 精确 method
+        .matchHeader("X-Env", "sit")  // 请求头精确
+        .matchQuery("locale", "zh_CN")// query 精确
+        .matchContentType("json")     // content-type 包含
+        .matchBodyRegex(".*username.*")// 请求体正则
+        .onlyMainFrame(true)          // 只主框架（默认）
+    .mock()…</code></pre>
+  <p class="lead">条件不满足的请求自动 <b>fallback</b> 到下一个匹配的规则，不会"吞掉"请求。</p>
+</section>
+
+<!-- ============ 7 配方 ============ -->
+<section id="route-recipes">
+  <h2><span class="n">7</span>Route 实战配方</h2>
+
+  <h3><span class="tag t-mon">MONITOR</span>观测并断言真实响应</h3>
+<pre><code>RouteDsl.on(page)
+    .api("/api/users/**")
+    .monitor()
+        .expectStatus(200)
+        .expectJsonPath("$[0].role", "USER")
+        .expectBodyContains("Alice")     // 文本/XML/HTML 均可
+        .timeout(10)                     // 断言等待窗口（秒，0=不超时）
+    .register();</code></pre>
+  <div class="tip"><b>默认即采集</b>：<code>.monitor()</code> 段默认记录请求/响应（响应体按 64 KiB 截断）。要关闭用 <code>.capture(false)</code> / <code>.captureBody(false)</code>。</div>
+
+  <h3><span class="tag t-mock">MOCK</span>静态伪造响应</h3>
+<pre><code>RouteDsl.on(page)
+    .api("/api/auth/login").onlyApi().matchMethod("POST")
+    .mock()
+        .status(200)
+        .body("{\"token\":\"mock-token\",\"message\":\"ok\"}")
+        .contentType("application/json")
+        .header("X-Mocked", "true")
+    .register();</code></pre>
+  <p class="lead">也支持从 classpath 读模板、对象转 JSON、二进制保真：</p>
+<pre><code>// 读 classpath 模板 + 覆盖字段
+.mock().mockBodyFromFile("mocks/login-template.json", Map.of("token", "t-x"));
+// 对象自动转 JSON
+.mock().mockBody(Map.of("code", 0, "msg", "ok"));
+// 二进制（图片 / protobuf / gzip）——逐字节保真，不走字符串往返
+.mock().mockBody(new byte[]{1,2,3}).contentType("application/octet-stream");</code></pre>
+
+  <h3><span class="tag t-mock">MOCK</span>拦截真实响应后改写</h3>
+<pre><code>// 取上游真实响应，改字段后再交给前端
+RouteDsl.on(page)
+    .api("/api/users")
+    .mock().interceptResponse()
+        .replaceField("$[0].name", "MOCKED")
+        .replaceFields(Map.of("$[1].role", "ADMIN"))
+    .register();
+
+// 条件改写：仅当 status 为 PENDING 时才把 status 改成 SHIPPED
+RouteDsl.on(page)
+    .api("/api/users/**")
+    .mock().interceptResponse()
+        .when("$.status", "EQUALS", "PENDING").thenSet("$.status", "SHIPPED")
+    .register();</code></pre>
+  <div class="warn"><b>互斥规则</b>：<code>interceptResponse()</code>（取真实响应）与静态 <code>status/body/header</code> <b>不能同时用</b>，配置期即报错。</div>
+
+  <h3><span class="tag t-mod">MODIFY_REQUEST</span>改写请求</h3>
+<pre><code>RouteDsl.on(page)
+    .api("/api/users")
+    .modifyRequest()
+        .setRequestHeader("X-Env", "mock")
+        .removeRequestHeader("X-Debug")
+        .modifyRequestBody("$.role", "ADMIN")        // JSONPath：存在即改，缺失即建
+        .addRequestBodyField("$.tags[]", "vip")
+        .modifyFormField("channel", "app")           // 表单（urlencoded）
+    .register();
+
+// 改 method（内部走 fetch+fulfill）
+.modifyRequest().modifyMethod("PUT")</code></pre>
+
+  <h3><span class="tag t-del">DELAY</span>模拟慢网络</h3>
+<pre><code>// 固定延迟 3 秒后放行（单位：秒）
+RouteDsl.on(page).api("/api/slow/**").delay(3).done().start();
+
+// 随机延迟：每次请求在 [1,5] 秒内随机
+RouteDsl.on(page).api("/api/pay/**").delay(1).randomDelay(1, 5).done().start();</code></pre>
+  <div class="note">DELAY 用 <code>.done().start()</code> 收尾（它没有 <code>register()</code>）。单请求延迟上限 30 秒。</div>
+
+  <h3>采集数据：查看与消费</h3>
+<pre><code>// 非消费式：随时看该 context 采集到了什么（幂等）
+List&lt;CapturedApiCall&gt; peeked = RouteDsl.peekCaptured(page);
+
+// 消费式：取走后清空（第二次返回空）
+List&lt;CapturedApiCall&gt; dumped = RouteDsl.dumpCaptured(page);</code></pre>
+
+  <h3>采集 → 回放（把真实响应变成 Mock）</h3>
+<pre><code>// 先采集（MONITOR 默认采集），再把某条记录直接作为 Mock 规则
+CapturedApiCall captured = RouteDsl.peekCaptured(page).get(0);
+
+RouteDsl.on(page)
+    .api("/api/users")
+    .mock().fromCaptured(captured)      // 注册期即时快照，不怕采集器清理
+    .register();</code></pre>
+
+  <h3>停止 / 清理</h3>
+  <table>
+    <thead><tr><th>需求</th><th>用法</th><th>影响范围</th></tr></thead>
+    <tbody>
+      <tr><td>只停某个 pattern 的某能力</td><td><code>RouteDsl.stopMonitor(page, "/api/users")</code>（或 stopMock/stopModify/stopDelay/stopApi）</td><td>该 pattern 该能力</td></tr>
+      <tr><td>注销自己注册的规则</td><td>持有 <code>register()</code> 返回的 <code>AutoCloseable</code> 调 <code>close()</code></td><td>该句柄覆盖的规则</td></tr>
+      <tr><td>清空该 context 全部规则，<b>保留</b> context 与登录态</td><td><code>RouteDsl.clearRules(page)</code>（返回退役条数）</td><td>该 context 规则</td></tr>
+      <tr><td>清空全部 context 的规则</td><td><code>RouteDsl.clearRulesAll()</code></td><td>所有 context</td></tr>
+      <tr><td>关闭并释放某 context 的 Route 运行时</td><td><code>RouteDsl.clear(page)</code></td><td>该 context 整个 runtime</td></tr>
+    </tbody>
+  </table>
+
+  <h3>能力组合矩阵（能不能一起用）</h3>
+  <table>
+    <thead><tr><th>MONITOR</th><th>MODIFY</th><th>DELAY</th><th>MOCK</th><th>业务场景</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td>✓</td><td></td><td></td><td></td><td>观测/断言真实响应</td><td>✓</td></tr>
+      <tr><td>✓</td><td>✓</td><td></td><td></td><td>强制请求头后断言真实响应</td><td>✓</td></tr>
+      <tr><td>✓</td><td></td><td>✓</td><td>static</td><td>慢交付夹具</td><td>✓</td></tr>
+      <tr><td>✓</td><td></td><td></td><td>intercept</td><td>真实响应改字段后断言</td><td>✓</td></tr>
+      <tr><td></td><td>✓</td><td></td><td>any</td><td>改请求 + 决定响应</td><td>✓</td></tr>
+      <tr><td></td><td>✓</td><td>✓</td><td></td><td>延迟释放改写后的请求</td><td>✓</td></tr>
+      <tr><td></td><td></td><td>✓</td><td>intercept</td><td>慢交付"真实+改写"</td><td>⚠ 已知限制</td></tr>
+    </tbody>
+  </table>
+
+  <div class="warn"><b>feature 模式语义（重要）</b>：web 层在每个 scenario 结束（<code>testFinished</code>）会对 Context 调 <code>clearContext</code>，而 Route 的该挂点会<b>关闭整个 per-context 运行时</b>——所以<b>默认 Route 规则不跨 scenario 保留</b>（每个 scenario 起点 runtime 重建、规则为空），feature 模式也一样。需要"复用 Context、只清规则"时用 <code>RouteDsl.clearRules(page)</code>。</div>
+  <div class="warn"><b>两条最易误用点</b>：① <code>MONITOR 断言 + static MOCK</code> 时，断言对象是<b>你伪造的夹具</b>而非真实响应（合法，但易误判为"没生效"）；② <code>interceptResponse()</code> 与静态 <code>status/body/headers</code> 互斥。</div>
+</section>
+
+<!-- ============ 8 配置 ============ -->
+<section id="config">
+  <h2><span class="n">8</span>配置属性</h2>
+  <p class="lead">全部配置键的唯一事实来源是 <code>pw-core</code> 的 <code>ConfigKeys</code>（当前 200+ 个键）。新增键必须在此登记。</p>
+
+  <h3>取值优先级</h3>
+  <table>
+    <thead><tr><th>优先级</th><th>来源</th><th>示例</th></tr></thead>
+    <tbody>
+      <tr><td>1（最高）</td><td>系统属性 <code>-D</code></td><td><code>-Dplaywright.browser.headless=true</code></td></tr>
+      <tr><td>2</td><td>环境变量（点/连字符转下划线大写）</td><td><code>PLAYWRIGHT_BROWSER_HEADLESS=true</code></td></tr>
+      <tr><td>3</td><td>配置文件 <code>serenity.conf</code> / <code>serenity.properties</code></td><td><code>playwright.browser.headless = true</code></td></tr>
+      <tr><td>4（兜底）</td><td>代码默认值</td><td>见下表「默认」列</td></tr>
+    </tbody>
+  </table>
+  <div class="note">例外：route 采集三键（<code>route.capture.all.type</code> / <code>route.capture.inline.max.bytes</code> / <code>route.capture.gzip.max.bytes</code>）为 <b>环境变量优先</b>；其余键均为系统属性优先。</div>
+  <div class="warn"><b>注意</b>：用 <code>System.clearProperty</code> 清属性<b>不保证回落到文件/默认值</b>（配置源为启动期快照）。要改回某值请用 <code>-D</code> 显式覆盖。</div>
+
+  <h3>常用键速查</h3>
+  <table>
+    <thead><tr><th>分类</th><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="6">浏览器 / 上下文</td><td><code>playwright.browser.type</code></td><td>chromium</td><td>浏览器类型</td></tr>
+      <tr><td><code>playwright.browser.headless</code></td><td>false</td><td>是否无头</td></tr>
+      <tr><td><code>playwright.browser.channel</code></td><td>(空)</td><td>浏览器 channel（如 chrome / msedge）</td></tr>
+      <tr><td><code>playwright.context.locale</code></td><td>en-US</td><td>上下文语言</td></tr>
+      <tr><td><code>playwright.context.isMobile</code></td><td>false</td><td>移动设备模拟</td></tr>
+      <tr><td><code>serenity.playwright.window.maximize</code></td><td>true</td><td>窗口最大化</td></tr>
+      <tr><td rowspan="4">并发</td><td><code>serenity.playwright.concurrent.parallelism</code></td><td>4</td><td>并发 context 并行度</td></tr>
+      <tr><td><code>serenity.playwright.concurrent.max</code></td><td>核数/2，[2,32]</td><td>并发硬上限（自适应）</td></tr>
+      <tr><td><code>serenity.playwright.concurrent.partition.enabled</code></td><td>auto</td><td>按身份分区互斥（防 SSO 互踢）</td></tr>
+      <tr><td><code>serenity.playwright.concurrent.partition.fail.closed</code></td><td>true</td><td>闸门超时即判失败（避免随机 401）</td></tr>
+      <tr><td rowspan="4">超时 / 等待</td><td><code>playwright.page.timeout</code></td><td>15000</td><td>页面操作超时（ms）</td></tr>
+      <tr><td><code>playwright.page.navigationTimeout</code></td><td>15000</td><td>导航超时（ms）</td></tr>
+      <tr><td><code>playwright.element.wait.timeout</code></td><td>15000</td><td>元素等待/操作超时（ms）</td></tr>
+      <tr><td><code>playwright.waits.retry.count</code></td><td>3</td><td>等待重试次数</td></tr>
+      <tr><td rowspan="4">截图 / trace / 产物</td><td><code>serenity.screenshot.strategy</code></td><td>AFTER_EACH_STEP</td><td>截图策略</td></tr>
+      <tr><td><code>playwright.screenshot.fullpage</code></td><td>true</td><td>是否全页截图</td></tr>
+      <tr><td><code>playwright.context.trace.enabled</code></td><td>true</td><td>是否开 trace</td></tr>
+      <tr><td><code>playwright.artifacts.retention.max.age.days</code></td><td>14</td><td>产物保留天数</td></tr>
+      <tr><td rowspan="4">报告</td><td><code>serenity.outputDirectory</code></td><td>target/site/serenity</td><td>报告输出目录</td></tr>
+      <tr><td><code>serenity.project.name</code></td><td>Serenity Playwright Demo</td><td>报告项目名</td></tr>
+      <tr><td><code>serenity.features.root</code></td><td>src/test/resources/features</td><td>feature 根目录</td></tr>
+      <tr><td><code>framework.verbose.logging</code></td><td>false</td><td>框架详细日志</td></tr>
+      <tr><td rowspan="3">接口 / HTTP</td><td><code>http.connection.timeout</code></td><td>30000</td><td>连接超时（ms）</td></tr>
+      <tr><td><code>http.connection.pool.max-total</code></td><td>200</td><td>连接池最大连接</td></tr>
+      <tr><td><code>api.request.response.logging.enabled</code></td><td>false</td><td>API 请求/响应日志（默认关，防明文泄露）</td></tr>
+      <tr><td rowspan="4">Route 采集</td><td><code>route.capture.all.type</code></td><td>false</td><td>只采 MONITOR；true 连 DELAY/MODIFY/MOCK 一起采</td></tr>
+      <tr><td><code>route.capture.inline.max.bytes</code></td><td>262144</td><td>响应体内联阈值（字节）</td></tr>
+      <tr><td><code>route.capture.gzip.max.bytes</code></td><td>8388608</td><td>文本体 gzip 上限（超出落盘）</td></tr>
+      <tr><td><code>route.monitor.assert.body.max.bytes</code></td><td>2097152</td><td>MONITOR 断言体上限（超出降级为仅 status/headers）</td></tr>
+      <tr><td rowspan="3">Monitor 落库</td><td><code>monitor.db.store.enabled</code></td><td>false</td><td>响应是否写库</td></tr>
+      <tr><td><code>monitor.db.url</code> / <code>monitor.db.user</code> / <code>monitor.db.password</code></td><td>(空)</td><td>JDBC 连接（密码支持 <code>ENC()</code> 加密）</td></tr>
+      <tr><td><code>monitor.file.store.enabled</code></td><td>false</td><td>响应是否落文件</td></tr>
+      <tr><td rowspan="2">脱敏</td><td><code>sensitive.data.extra.header.keys</code></td><td>(空)</td><td>追加敏感头名（逗号分隔）</td></tr>
+      <tr><td><code>sensitive.data.extra.body.keys</code> / <code>…query.keys</code></td><td>(空)</td><td>追加敏感体字段 / query 键</td></tr>
+      <tr><td>可访问性</td><td><code>axe.scan.enabled</code></td><td>false</td><td>是否启用 axe-core 扫描</td></tr>
+      <tr><td>拾取器</td><td><code>picker.wait.timeout.ms</code></td><td>1800000</td><td>交互拾取等待人工操作超时（ms）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>配置文件示例（<code>serenity.conf</code>）</h3>
+<pre><code>playwright.browser.type = chromium
+playwright.browser.headless = true
+playwright.page.timeout = 20000
+
+serenity.playwright.concurrent.parallelism = 4
+serenity.screenshot.strategy = AFTER_EACH_STEP
+
+framework.verbose.logging = false
+route.capture.all.type = false</code></pre>
+</section>
+
+<!-- ============ 9 安全 ============ -->
+<section id="security">
+  <h2><span class="n">9</span>安全基线</h2>
+  <ul>
+    <li><b>凭据一律环境变量注入</b>（如 <code>DBB_TEST_PASSWORD</code>、<code>CONFIG_MASTER_KEY</code>），<b>禁止入库</b>。</li>
+    <li>配置里的敏感值支持 <code>ENC(&lt;base64&gt;)</code> 透明解密（如 <code>monitor.db.password</code>）。</li>
+    <li>日志出口强制脱敏；API 请求/响应日志默认<b>关闭</b>。</li>
+    <li>截图默认「仅失败步、非全页」；报告推送前有凭据扫描门禁。</li>
+  </ul>
+</section>
+
+<!-- ============ 10 FAQ ============ -->
+<section id="faq">
+  <h2><span class="n">10</span>FAQ</h2>
+
+  <details><summary>跑用例报浏览器找不到 / 起不来？</summary>
+    <div class="body">先安装浏览器：<code>mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"</code>。若公司有代理，配置 <code>playwright.browser.download.http.proxy</code> / <code>https.proxy</code>，或预置到 <code>playwright.browsers.path</code>。</div>
+  </details>
+
+  <details><summary>Route 规则这个 scenario 生效，下个 scenario 就没了？</summary>
+    <div class="body">这是<b>设计如此</b>。每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时，下个 scenario 重建、规则为空——feature 模式同样不跨 scenario 保留。需要"复用 Context、只清规则"用 <code>RouteDsl.clearRules(page)</code>；只想跑完某段就撤，用 <code>register()</code> 返回的句柄 <code>close()</code>。</div>
+  </details>
+
+  <details><summary>Mock 没生效，页面还是走了真实接口？</summary>
+    <div class="body">逐条排查：① pattern 是否与实际 URL 匹配（注意通配 <code>**</code>）；② 匹配条件（method/header/query）是否过严；③ 是否用了 <code>interceptResponse()</code> 又同时设了静态 body（互斥，配置期应报错）；④ 规则是否已被 <code>stop*</code> / <code>close()</code> / scenario 收尾清掉。</div>
+  </details>
+
+  <details><summary>MONITOR 断言"失败"了，但接口明明正常？</summary>
+    <div class="body">若同一 pattern 同时有 <b>static MOCK</b>，MONITOR 断言的对象是<b>你伪造的夹具</b>，不是真实响应。要么改断言期望（对齐夹具），要么改用 <code>interceptResponse()</code> 保留真实响应。</div>
+  </details>
+
+  <details><summary>并行跑时随机 401 / 被踢登录？</summary>
+    <div class="body">这是同身份并发被 SSO 互踢。保持 <code>serenity.playwright.concurrent.partition.enabled=auto</code>（按身份分区互斥）与 <code>…partition.fail.closed=true</code>（闸门超时即判失败，不静默串行）。</div>
+  </details>
+
+  <details><summary>日志太吵 / 想定位卡在哪一步？</summary>
+    <div class="body">默认 <code>framework.verbose.logging=false</code> 只留关键日志；排查时打开它，或调 <code>serenity.playwright.hang.watchdog.interval.ms</code>（用例跑太久时周期性打印线程栈，定位无日志的阻塞点）。</div>
+  </details>
+
+  <details><summary>报告在哪？怎么只跑某几个用例？</summary>
+    <div class="body">报告默认输出到 <code>target/site/serenity</code>。选择性执行用标签：在 feature 打 <code>@smoke</code>，然后 <code>mvn verify -Dtags="@smoke"</code>；默认跑 <code>not @skip</code>。</div>
+  </details>
+
+  <details><summary>改了配置不生效？</summary>
+    <div class="body">记住优先级：<code>-D</code> &gt; 环境变量 &gt; 配置文件 &gt; 默认值。别用 <code>clearProperty</code> 期望回落（不保证）；要用 <code>-D</code> 显式覆盖。route 采集三键是环境变量优先，别搞反。</div>
+  </details>
+
+  <details><summary>DELAY 怎么写？</summary>
+    <div class="body">DELAY 段没有 <code>register()</code>，用 <code>RouteDsl.on(page).api("/api/slow/**").delay(3).done().start();</code>（单位是<b>秒</b>）。随机延迟：<code>.delay(1).randomDelay(1,5)</code>。单请求上限 30 秒。</div>
+  </details>
+
+  <details><summary>Mock 二进制响应时文件损坏？</summary>
+    <div class="body">用 <code>mockBody(byte[])</code>（字节保真通道），不要用 <code>mockBody(String)</code> 走文本往返。<code>fromCaptured(...)</code> 对非文本体会自动走字节保真通道。</div>
+  </details>
+
+  <details><summary>元素定位该用什么？</summary>
+    <div class="body">优先 <code>@RoleElement</code>（角色 + NLS，或 text/label/testId 等语义），比 CSS/XPath 更抗重构、可访问性更友好。<b>不要在 Step 里直接持有 Playwright Locator</b>（框架架构门禁禁止类型泄漏）。</div>
+  </details>
+
+  <details><summary>怎么快速生成页面对象代码？</summary>
+    <div class="body">用 <code>pw-codegen</code> 的交互式拾取器点选页面元素，自动抓取 a11y role/name 并生成带 <code>@RoleFile</code> + <code>@RoleElement</code> 的 Page 类草稿（含 NLS key），人工 review 后合入。</div>
+  </details>
+</section>
+
+<footer>
+  DBB 自动化测试框架 · 使用指南 &nbsp;|&nbsp; 配置键以 <code>pw-core/…/config/ConfigKeys.java</code> 为唯一事实来源，Route API 以 <code>pw-route/…/dsl/RouteDsl.java</code> 为准。
+</footer>
+
+</main>
+</div>
+
+<script>
+// 复制按钮
+document.querySelectorAll('pre').forEach(function(pre){
+  var btn=document.createElement('button');
+  btn.className='copy'; btn.textContent='复制';
+  btn.addEventListener('click',function(){
+    var code=pre.querySelector('code');
+    navigator.clipboard.writeText(code?code.innerText:pre.innerText).then(function(){
+      btn.textContent='已复制'; setTimeout(function(){btn.textContent='复制';},1200);
+    });
+  });
+  pre.appendChild(btn);
+});
+// 侧栏高亮
+var links=[].slice.call(document.querySelectorAll('nav.side a'));
+var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));});
+function onScroll(){
+  var y=window.scrollY+120, idx=0;
+  secs.forEach(function(s,i){ if(s && s.offsetTop<=y) idx=i; });
+  links.forEach(function(a,i){ a.classList.toggle('active', i===idx); });
+}
+window.addEventListener('scroll',onScroll,{passive:true});
+onScroll();
+</script>
+</body>
+</html>
