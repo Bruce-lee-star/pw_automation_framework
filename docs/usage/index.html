@@ -685,7 +685,7 @@ RouteDsl.on(page)
   <p class="lead"><code>pw-api-core</code> 基于 <b>REST Assured</b> 封装，提供「声明式配置 + 语义化断言」的接口测试能力，与 Web 用例共用同一套 Serenity + Cucumber 基建。适合纯接口用例，或 Web 用例里需要直连后端做数据准备 / 结果校验的场景。</p>
 
   <h3>测试分层</h3>
-  <p>与 Web 用例一致的四层：<b>Feature（Gherkin）→ Glue（步骤绑定）→ Steps（extends UIInteractionSteps，持有 BaseStep）→（接口用例不写 Page）</b>。接口用例直接操作 <code>BaseStep</code>，不需要页面对象。</p>
+  <p>与 Web 用例一致的四层：<b>Feature（Gherkin）→ Glue（步骤绑定）→ Steps（持有 <code>BaseStep</code> 的步骤类）→（接口用例不写 Page）</b>。接口用例直接操作 <code>BaseStep</code>，不需要页面对象；框架不要求 Steps 继承任何基类。</p>
 <pre><code>Feature: 用户接口
   Scenario: 查询用户列表
     Given an entity with "petstore"           # 创建并持有 BaseStep
@@ -809,12 +809,13 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
 
   <h3>增删改查（CRUD）全要素示例</h3>
   <p>以「用户资源」为例，覆盖 <b>method / header / query 参数 / 请求体</b> 的组合。要点：</p>
+  <div class="note"><b>Steps 类不需要继承任何基类</b>：框架只要求你拿到 <code>BaseStep</code> 实例（通过 <code>TestServices.initialize()…baseStep()</code>），示例里都是普通类。若你的业务工程自带 Steps 基类，按需继承即可，框架本身不强求。</div>
   <ul>
     <li><b>method 由你调用的发送方法决定</b>——框架没有 <code>setMethod(...)</code>，而是 <code>getResource()</code>(GET) / <code>postPayload()</code>(POST) / <code>putPayload()</code>(PUT) / <code>patchPayload()</code>(PATCH，部分更新) / <code>deleteResource()</code>(DELETE) 各自一个方法。</li>
     <li><b>POST / PUT / PATCH 发前先设请求体</b>（<code>setRequestPayload</code> 内联或 <code>loadPayload</code> 读文件）；GET / DELETE 通常不带 body。</li>
     <li>header / query / body 都在「发送方法之前」调用，且<b>每次发送都是当前实例的瞬时状态</b>——换请求记得按需重设或清理（<code>clearHeader()</code> / <code>clearQueryParams()</code>）。</li>
   </ul>
-<pre><code>public class UserCrudSteps extends UIInteractionSteps {
+<pre><code>public class UserCrudSteps {
     private final BaseStep step =
             TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
 
@@ -884,7 +885,7 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.BaseStep;
 import com.jayway.jsonpath.JsonPath;
 
-public class OrderApiSteps extends UIInteractionSteps {
+public class OrderApiSteps {
     // 同一实例串起整条链路；withEnv 见多环境切换
     private final BaseStep step =
             TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
