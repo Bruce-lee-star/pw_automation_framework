@@ -152,6 +152,19 @@ public final class RouteLifecycleComposite implements RouteLifecycle {
         forEach(r -> r.stopCaptureFor(context));
     }
 
+    // ── 动作型（方案 B 新增）：primary 异常上抛（契约不变），additions 逐项 fail-safe ──
+    // 注：drainMainThreadActions 是接口 default 方法（no-op），本组合代理必须显式转发，
+    // 否则 web 侧经 get() 调用时永远走 default no-op ⇒ main 业务线程的 DELAY 交付 seam 空转
+    // （与 hasActiveDelayRoutes 同源缺陷，见下方 override）。
+
+    @Override
+    public void drainMainThreadActions(Object context) {
+        if (primary != null) {
+            primary.drainMainThreadActions(context);
+        }
+        forEach(r -> r.drainMainThreadActions(context));
+    }
+
     @Override
     public void drainForSuiteTeardown() {
         if (primary != null) {
@@ -214,6 +227,28 @@ public final class RouteLifecycleComposite implements RouteLifecycle {
             }
         }
         return null;
+    }
+
+    // ── 查询型（§8.4 运行期 guard 信号）：primary 优先（异常上抛）；否则 additions OR；全空返回 false ──
+    // 注：hasActiveDelayRoutes 是接口 default 方法（返回 false），本组合代理必须显式转发，
+    // 否则 web 侧经 get() 调用时永远走 default false ⇒ RecordingPageProxy / DelayGuardPageProxy 的
+    // 运行期 guard 永远不触发（no-op），与 drainMainThreadActions 同源缺陷。
+
+    @Override
+    public boolean hasActiveDelayRoutes(Object context) {
+        if (primary != null) {
+            return primary.hasActiveDelayRoutes(context);
+        }
+        for (RouteLifecycle addition : additions) {
+            try {
+                if (addition.hasActiveDelayRoutes(context)) {
+                    return true;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug("[RouteLifecycle] additional hasActiveDelayRoutes failed (isolated): {}", e.toString());
+            }
+        }
+        return false;
     }
 
     /** additions 逐项 fail-safe 调用。 */

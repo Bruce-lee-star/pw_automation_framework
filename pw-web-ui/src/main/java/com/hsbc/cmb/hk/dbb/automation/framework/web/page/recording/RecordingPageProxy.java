@@ -88,6 +88,29 @@ public final class RecordingPageProxy {
     }
 
     /**
+     * 业务 Page 统一包装 seam（§8.4）：按录制状态二选一，使 DELAY guard 在两条路径一致生效。
+     *
+     * <ul>
+     *   <li>测试替身（mock）/ null → 裸 Page（零开销，D6）；</li>
+     *   <li>录制开启 → {@link #wrap}（录制装饰 + DELAY guard）；</li>
+     *   <li>录制关闭 → {@link DelayGuardPageProxy#wrap}（仅 DELAY guard，零录制）。</li>
+     * </ul>
+     *
+     * <p>真实受管 Page 仍由 {@code PlaywrightManager.getPage()} 返回并存于 {@code PAGE_KEY}，
+     * 本 seam 只在业务取页边界加一层薄代理，不改变框架内部收尾 / 页面身份逻辑
+     * （{@code PageRefs.unwrap} 经两个代理的 {@code target()} 访问器正确归一）。</p>
+     */
+    public static Page wrapForBusiness(Page real) {
+        if (real == null || PlaywrightManager.getProvider().isTestDouble()) {
+            return real;
+        }
+        if (SerenityRecorder.isEnabled()) {
+            return wrap(real);
+        }
+        return DelayGuardPageProxy.wrap(real);
+    }
+
+    /**
      * 对可录制返回值递归包装（R2）：null / 非已知接口 / 已是本代理 / 录制关闭 → 原样返回。
      */
     @SuppressWarnings("unchecked")

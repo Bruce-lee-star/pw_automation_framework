@@ -421,7 +421,7 @@ public class PageObjectFactory {
         //  导致文档推荐的 register()/customSupplier() 路径反而漏注入（AbstractManagedPage.getPage() 直接 NPE）。
         if (instance instanceof ManagedPageAware) {
             ((ManagedPageAware) instance).setManagedPage(
-                    () -> RecordingPageProxy.wrap(PlaywrightManager.getPage()));
+                    () -> RecordingPageProxy.wrapForBusiness(PlaywrightManager.getPage()));
         }
 
         // 执行创建后钩子（仅创建路径执行一次）
