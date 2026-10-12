@@ -1,0 +1,796 @@
+# SSO 并发与会话隔离设计方案
+
+> 适用版本：Playwright Java 1.62 / Serenity BDD 4.3.4 / Cucumber JVM 7.34 / JDK 21
+> 适用仓库：`pw_automation_framework`
+> 状态：PoC 设计稿
+
+
+
+***
+
+## 1. 背景与目标
+
+### 1.1 现状
+
+
+
+* 框架已具备：JVM 级 `Playwright` / `Browser`，scenario 级 `BrowserContext` / `Page`，Route v2 随 Context 销毁。
+
+* 登录是 Given 步骤（`LogonGlue` → `LoginSteps.performLogin` → `SessionManager.restoreSession` → `SessionStore.wrapLeaderAction`）。
+
+* `SessionStore` 当前在 JVM 内按 `env+user` 缓存登录会话。
+
+* 未做多 JVM fork 并发；未做同 user 并发保护。
+
+### 1.2 问题
+
+DBB / SSO 是**账户级服务端单会话**：同一账号在第二个 Context 登录会把第一个 Context 的 token 踢掉，表现为随机 401、跳登录页、失败不可复现。
+
+### 1.3 目标
+
+
+
+1. 同一 user 在同一时刻只有一个 Context 持有其有效 SSO 会话。
+
+2. 不同 user 的 scenario 完全并行，互不阻塞。
+
+3. 跨 Surefire fork 不撞 user。
+
+4. 协议层异常（`Object doesn't exist` / 导航中断）不得误删 SSO 缓存。
+
+5. 连续 20 次稳定运行：零互踢、零残留浏览器进程。
+
+
+
+***
+
+## 2. 线程安全边界（统一约束）
+
+### 2.1 对象矩阵
+
+
+
+| 对象                                               | 拥有者                       | 是否可跨线程        |
+| ------------------------------------------------ | ------------------------- | ------------- |
+| `Playwright`                                     | worker JVM 单例             | 否             |
+| `Browser`                                        | worker JVM 持有，由串行协调入口发起调用 | 不允许业务线程直接并发调  |
+| `BrowserContext`                                 | 单 scenario                | 否             |
+| `Page`                                           | 单 scenario                | 否             |
+| `Request` / `Response` / `Route` / `APIResponse` | 调用期                       | **不得逃逸到其他线程** |
+
+### 2.2 铁律
+
+
+
+* 每个 Browser 由 worker 生命周期拥有，`newContext()` 走唯一协调入口。
+
+* 每个 Context / Page / 调用期对象，只由持有它的 scenario 线程访问。
+
+* Route handler 不回调 Page 写方法、不缓存 Request/Response。
+
+* 不写 "Playwright 已串行化所以对象随便传" 这种推断。
+
+
+
+***
+
+## 3. 核心模型：SsoUserSessionGate
+
+### 3.1 语义
+
+> 同一
+> `(entity, env, user)`
+> 在同一 JVM 内，同一时刻只允许一个线程进入其
+> **完整会话生命周期**
+> 。
+
+不是 "借一个账号名"，是 "独占该账号从登录到 Context 关闭的整段生命周期"。
+
+> 三维键：
+> `entity`
+> \= Given 里
+> `logon <entity> ...`
+> 的实体名（如 DBB，沿用现有概念，不新造 "厂" 抽象），
+> `env`
+> \= 环境（如 O63_SIT1），
+> `user`
+> \= 该环境下账号。
+
+### 3.2 生命周期（lease 持有范围）
+
+
+
+```
+gate.acquire(env, user)
+  │
+  ├─ restore / 校验 storageState
+  ├─ browser.newContext()            ← 每次新建，不复用旧 Context
+  ├─ context.newPage()
+  ├─ （可选）SSO 刷新 / 有效性校验
+  ├─ 跑 scenario（业务步骤、Route、断言）
+  ├─ 导出新 storageState（原子写）
+  ├─ page.close()
+  ├─ context.close()
+  └─ gate.release()
+```
+
+**禁止**：
+
+
+
+* `acquire` → `restore context` → `release` → 业务线程继续用 context。
+
+* 跨 scenario 复用同一个 `BrowserContext`。
+
+### 3.3 类骨架
+
+
+
+```
+public final class SsoUserSessionGate {
+
+    private static final Map<String, UserGate> GATES = new ConcurrentHashMap<>();
+
+    public static AutoCloseable acquire(String entity, String env, String user, Duration timeout) {
+        String key = entity + ":" + env + ":" + user;
+        UserGate gate = GATES.computeIfAbsent(key, UserGate::new);
+        String leaseId = gate.acquire(timeout);
+        return () -> gate.release(leaseId);
+    }
+
+    private static final class UserGate {
+        private final String key;
+        private final Semaphore sem = new Semaphore(1, true);
+        private final AtomicReference<String> activeLease = new AtomicReference<>();
+        private final AtomicLong seq = new AtomicLong();
+
+        UserGate(String key) { this.key = key; }
+
+        String acquire(Duration timeout) {
+            try {
+                if (!sem.tryAcquire(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                    throw new IllegalStateException("user " + key + " 被占用超时");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted waiting " + key, e);
+            }
+            String leaseId = key + "-" + seq.incrementAndGet();
+            activeLease.set(leaseId);
+            return leaseId;
+        }
+
+        boolean release(String leaseId) {
+            if (leaseId == null || !leaseId.equals(activeLease.getAndSet(null))) {
+                return false;
+            }
+            sem.release();
+            return true;
+        }
+    }
+}
+```
+
+要点：
+
+
+
+* 公平信号量（FIFO），避免同 user 长时饥饿。
+
+* leaseId 版本化，避免误释放别人的 permit。
+
+* `GATES` 是 JVM 内 Map，**跨 fork 不共享**—— 跨 fork 靠 §5 分区。
+
+
+
+***
+
+## 4. SessionStore 只缓存认证材料
+
+### 4.1 存储对象
+
+
+
+```
+public final class SsoSessionEntry {
+    String env;
+    String user;
+    Path storageState;
+    String issuer;
+    Instant authenticatedAt;
+    Instant accessTokenExpiresAt;
+    Instant refreshTokenExpiresAt;
+    String sessionVersion;
+}
+```
+
+**禁止**缓存：`BrowserContext` / `Page` / `Route` / `Request` / `Response` / `APIResponse`。
+
+### 4.2 目录与命名
+
+
+
+```
+target/auth/
+├─ uat__wp7uat2_1.json
+├─ uat__wp7uat2_1.prev.json
+├─ uat__wp7uat2_2.json
+└─ uat__wp7uat2_2.prev.json
+```
+
+
+
+* 文件名 = `<env>__<user>.json`，唯一映射账号。
+
+* **禁止** `current.json` 这种多线程多 fork 共享名。
+
+### 4.3 原子写入
+
+
+
+```
+// 1. 先把当前主文件（如果存在）备份成 prev —— prev 永远是"上一次成功的登录态"
+if (Files.exists(base)) {
+    Files.copy(base, prevBackup, StandardCopyOption.REPLACE_EXISTING);
+}
+
+// 2. 原子写入新内容
+Path tmp = base.resolveSibling(base.getFileName() + ".tmp-" + UUID.randomUUID());
+Files.write(tmp, json.getBytes(StandardCharsets.UTF_8));
+Files.move(tmp, base,
+        StandardCopyOption.ATOMIC_MOVE,
+        StandardCopyOption.REPLACE_EXISTING);
+```
+
+
+
+* 备份必须在覆盖主文件**之前**，否则 prev 备份的是新内容，失去回滚价值。
+
+* 写完才可见，避免读到一半的 JSON。
+
+* 保留 `.prev.json` 回滚位。
+
+
+
+***
+
+## 5. 跨 fork 账号分区（框架自动识别）
+
+### 5.1 配置
+
+
+
+```
+# 登录环境
+environment.O63_SIT1=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon
+environment.O38_SIT2=https://qualityassurance-amh-gbb-sit2.p2g.netd2.hsbc.com.hk/portalserver/logon
+environment.O88_SIT3=https://qualityassurance-amh-gbb-sit11.p2g.netd2.hsbc.com.hk/portalserver/logon
+
+# 账号凭证（两种写法任选，框架自动探测）
+# 写法 A：按厂分组（多厂时推荐）
+userinfo_O63.WP7UAT2_2.password=b2g3ifd
+userinfo_O63.WP7UAT2_2.profile=W1-HKHBAP001060698838PUSER1
+userinfo_O63.WP7UAT2_2.token.security.url=https://.../getotp.htm?username=9900196198&type=1&key=...
+
+# 写法 B：扁平（单厂或不分组时直接用）
+amhb2g0677_3.password=b2g3ifd
+amhb2g0677_3.token.security.url=https://.../getotp.htm?username=9912644750&type=1&key=...
+ABCDEW.password=123456
+ABCDEW.profile=AABBCCDD
+ABCDEW.token.security.url=http://localhost:8080/api/v1/token/security
+
+# fork 切分
+sso.fork.user.stride=4
+```
+
+**凭证查找顺序**（Given `logon DBB "O63_SIT1" as user "WP7UAT2_2"`）：
+
+| 优先级 | 查找键 | 说明 |
+|---|---|---|
+| 1 | `userinfo_O63.WP7UAT2_2.password` | env 前缀推导出厂，先找厂分组下的凭证 |
+| 2 | `WP7UAT2_2.password` | 厂分组没找到，退化为扁平按 user 名直接查 |
+| 3 | 都没有 | fail fast，报"账号凭证未配置" |
+
+> 框架不写死 `userinfo_<厂>.<user>.<字段>` 前缀。配了厂分组就走分组，没配就按 user 名直接查。厂（O63/O38/O88）由 env 名前缀推导，仅用于 gate key 隔离，不强制配置键结构。
+
+### 5.2 框架自动解析
+
+Surefire 启动 fork 时自动往 JVM 注入系统属性 `surefire.forkNumber`（1-based）。框架读取并转 0-based：
+
+
+
+```
+public final class ForkAwareAccountResolver {
+
+    /** Surefire 自动注入；非 Surefire（IDE 单跑）缺省为 1 → 0 */
+    public static int currentForkIndex() {
+        String override = System.getProperty("fork.index");   // 显式覆盖优先
+        if (override != null && !override.isBlank()) {
+            return Integer.parseInt(override.trim());
+        }
+        String raw = System.getProperty("surefire.forkNumber");
+        int n = (raw == null || raw.isBlank()) ? 1 : Integer.parseInt(raw.trim());
+        return n - 1;
+    }
+
+    public static List<String> myUsers(String entity, String env) {
+        List<String> all = resolveList("sso.accounts." + entity + "." + env);
+        int stride = config.getInt("sso.fork.user.stride", 4);
+        int idx = currentForkIndex();
+        int end = Math.min(all.size(), (idx + 1) * stride);
+        return all.subList(idx * stride, end);
+    }
+}
+```
+
+### 5.3 兼容性
+
+
+
+* **Surefire 多 fork**：自动按 `forkNumber` 切分，CI 只需配 `forkCount`，不用再传 `-Dfork.index`。
+
+* **IDE 右键单跑**：`surefire.forkNumber` 不存在 → 缺省 `idx=0` → 用第 1 段账号。
+
+* **显式覆盖**：需要时仍可 `-Dfork.index=2` 强制指定，调试方便。
+
+### 5.4 两层防线
+
+
+
+| 层                        | 解决                                   |
+| ------------------------ | ------------------------------------ |
+| stride 分区（§5）            | JVM **之间**不撞 user（框架自动识别 forkNumber） |
+| `SsoUserSessionGate`（§3） | JVM **之内**同 user 串行                  |
+
+两者不可互相替代。
+
+### 5.5 为什么是静态 stride，不是动态账号池
+
+本框架的 Given 是钉死具体 user 的：
+
+
+
+```
+Given logon DBB "O63_SIT1" as user "WP7UAT2_2"
+```
+
+每个 user 的权限、角色、租户、测试数据都不一样 ——scenario 不能 "随便拿个空闲账号顶替"。因此：
+
+
+
+* 动态账号池 / 文件锁跨进程抢占**不适用**：它解决的是 "谁抢到空闲账号"，而本场景下 user5 再空闲也不能顶替 user2（权限不同）。
+
+* 静态 stride 分区可预测、零跨进程锁、无 stale lock 恢复问题，故障面小。
+
+* 同 user 串行由 `SsoUserSessionGate`（§3）保证，与分区方式正交。
+
+**未来若出现 "scenario 只声明&#x20;**`@Role("OPERATOR")`**、账号可互换 " 的用例，再评估引入动态池**；当前钉死 user 的模型下不做。
+
+### 5.6 运行前静态账号扫描（企业级增强）
+
+stride 是 "盲切"—— 不管 feature 实际用了哪些账号，按固定步长分。更好的做法是**开跑前先扫一遍所有 feature，摸清账号清单再分配**。
+
+#### 5.6.1 账号清单来源
+
+账号清单**由配置文件显式声明**（见 §5.1），不靠扫 feature 文件。框架启动时读 `sso.accounts.*`，构建内存中的账号清单：
+
+
+
+```
+public final record AccountRequirement(String entity, String env, String user) {}
+
+public final class AccountManifest {
+    // 启动时从 sso.accounts.<entity>.<env>=user1,user2,... 加载
+    public Set<AccountRequirement> allAccounts() { ... }
+    public List<String> usersOf(String entity, String env) { ... }
+}
+```
+
+#### 5.6.2 校验（fail fast，开跑前就报错）
+
+
+
+| 检查                                                                         | 失败动作                           |
+| -------------------------------------------------------------------------- | ------------------------------ |
+| scenario 用了 `entity/env/userX`，但 `sso.accounts.<entity>.<env>` 配置里没有该 user | **直接 fail**，列出缺失账号和所属 scenario |
+| 配置里有账号但没任何 scenario 用                                                      | WARN（提示清理），不 fail              |
+| 同一 `(entity, env, user)` 被 N 个 scenario 引用                                 | 记录，同 user 由 gate 串行            |
+| 跨 entity 同名 user（如 dbb/wp7uat2\_1 和 otherbrand/wp7uat2\_1）                 | 视为不同账号，独立 gate，不报错             |
+
+#### 5.6.3 分配策略
+
+账号清单加载后，按 `sso.fork.user.stride` 切分给当前 fork（见 §5.2）。后续若需按 scenario 引用次数加权，再扩展为读取 scenario 元数据做负载均衡；当前 stride 已满足需求。
+
+#### 5.6.4 Dry-run 报告
+
+开跑前打印：
+
+
+
+```
+[SsoPlan] Scanned 12 feature files, 27 scenarios
+[SsoPlan] Accounts used: 4
+[SsoPlan]   uat/wp7uat2_1 (3 scenarios) → fork 1
+[SsoPlan]   uat/wp7uat2_2 (8 scenarios) → fork 1
+[SsoPlan]   uat/wp7uat2_5 (2 scenarios) → fork 2
+[SsoPlan]   uat/wp7uat2_8 (1 scenarios) → fork 2
+[SsoPlan] WARNING: configured account wp7uat2_3 is unused
+[SsoPlan] Ready.
+```
+
+#### 5.6.5 与 stride 的关系
+
+
+
+| 维度              | stride 盲切 | 静态扫描分配            |
+| --------------- | --------- | ----------------- |
+| 开跑前发现缺账号        | ❌ 跑到才报错   | ✅ 构建期 fail        |
+| 热点 user 均衡      | ❌ 不感知     | ✅ 加权分配            |
+| 同 user 跨 fork 撞 | ❌ 可能撞     | ✅ 保证同 user 同 fork |
+| 实现成本            | 低         | 中（一个扫描器 + 一个分配器）  |
+
+**落地顺序**：先上 stride（§5.1，零成本），PoC 跑通后再加静态扫描（§5.6）作为质量增强。
+
+### 5.7 只跑某个厂时的并发
+
+配置里有 O63/O38/O88 三个厂的账号，但本次只跑 O63 的 case—— 此时 O38/O88 的账号不应参与分区，fork 数也只受 O63 可用账号数约束。
+
+**做法：框架定义 SPI，业务层决定本次账号池**
+
+框架不读 `-Dsso.run.factory` 这种业务参数，而是暴露一个 SPI 让业务项目自己实现：
+
+
+
+```
+// 框架侧定义
+public interface RunScopeAccountProvider {
+    /**
+     * 本次运行涉及哪些账号。
+     * 返回空 = 全量（业务层不限制）。
+     */
+    List<String> activeUsers(String env);
+}
+
+// 框架默认实现：返回全量（不裁剪）
+public final class DefaultRunScopeProvider implements RunScopeAccountProvider { ... }
+```
+
+
+
+```
+// 业务层（test-automation）自己实现，决定跑哪个厂
+public class O63RunScopeProvider implements RunScopeAccountProvider {
+    @Override
+    public List<String> activeUsers(String env) {
+        // 业务层自己决定：读 tag / 读环境变量 / 读 Cucumber filter
+        String factory = System.getProperty("sso.run.factory", "O63");
+        return config.keysWithPrefix("userinfo_" + factory + "." + env + ".")
+                     .map(this::extractUser)
+                     .toList();
+    }
+}
+```
+
+通过 SPI（`ServiceLoader`）或配置项 `sso.run.scope.provider=com.xxx.O63RunScopeProvider` 注入。
+
+**关键约束**：
+
+
+
+| 场景                | 行为                                             |
+| ----------------- | ---------------------------------------------- |
+| 业务层只跑 O63         | 账号池 = `userinfo_O63.*`，fork 在这池子里切；O38/O88 不参与 |
+| 跑 O63 + O38（跨厂混合） | 账号池 = 两厂并集，stride 跨厂切；同一 user 仍 gate 串行        |
+| 业务层不指定（SPI 返回空）   | 全量账号池，按 env 分组各自 stride                        |
+| forkCount > 本次账号数 | 多出的 fork 无账号可用 → WARN 并降并发，不报错                 |
+
+**并发上限自动收敛**：
+
+
+
+```
+本次有效并发 = min(
+    forkCount × 每 fork 线程,
+    本次运行涉及厂的可用账号数,
+    SSO 服务端单会话限制
+)
+```
+
+例：O63 只有 4 个 user，配 `forkCount=4`，则实际有效并发 = 4（不是 4×2=8），多余 scenario 在 gate 排队。
+
+
+
+***
+
+## 6. SSO 失败三态
+
+
+
+```
+public enum SsoSessionState { VALID, SUSPECT, INVALID }
+```
+
+
+
+| 错误                                             | 状态          | 动作                                           |
+| ---------------------------------------------- | ----------- | -------------------------------------------- |
+| storageState 不存在 / 格式错                         | INVALID     | 重新登录                                         |
+| access/refresh token 过期                        | INVALID     | 重新登录                                         |
+| SSO 302 跳登录页 / 主动踢                             | INVALID     | 重新登录                                         |
+| `Object doesn't exist: response@...`           | **SUSPECT** | 保留 storageState，标 scenario 失败，**不删缓存、不自动重登** |
+| 导航 protocol exception / 网络中断 /response GUID 回收 | **SUSPECT** | 同上                                           |
+
+**铁律**：协议层异常 ≠ SSO 会话失效。禁止在 `Object doesn't exist` 时 `authCache.delete()` + `reLogin()`。
+
+
+
+***
+
+## 7. Refresh Token Rotation 专项
+
+若 SSO 是 refresh token rotation 模式：
+
+
+
+1. 刷新 token 后**立即**导出 storageState，不等 scenario 结束。
+
+2. 刷新期间 gate 不释放，禁止其他线程 restore。
+
+3. 刷新失败 → SUSPECT，不用旧 token 重试。
+
+4. 一个 user 在跑时，后续请求**等待**，不新建第二个 Context。
+
+5. 与 SSO 团队确认是否可给测试环境申请 rotation 豁免 / 专用测试客户端。
+
+gate 只解决 "登录 /restore 串行"，**解决不了轮换窗口期**，必须配套上述策略。
+
+
+
+***
+
+## 8. Route Handler 规则
+
+### 8.1 允许
+
+
+
+* 同步读 `request().url() / method() / headers() / postData()`。
+
+* `route.fetch()` 后立即复制 body 快照。
+
+* 不可变快照 offer 给 scenario 的 recorder 队列。
+
+* 立即 `fulfill / continue / abort / fallback` 之一。
+
+### 8.2 禁止
+
+
+
+* `Page.click / fill / navigate`。
+
+* `context.newPage()`。
+
+* 等业务线程锁 / 等 scenario 步骤完成。
+
+* 把 `Request / Response / Route` 发布到其他线程。
+
+* 把 `APIResponse` 缓存到静态字段。
+
+* 在 handler 里访问 Serenity 当前 scenario /assert。
+
+### 8.3 门禁
+
+
+
+* ArchUnit 静态门禁：`route..` 包不得依赖 `..playwright.Page..` 的写方法。
+
+* 运行时检测：handler 入口打印线程名 /threadId；CI 加故意慢 handler 用例，验证不阻塞页面；验证 handler 抛错不污染其他 scenario。
+
+
+
+***
+
+## 9. 与现有代码的接线
+
+### 9.1 gate 提升到 scenario 级 `@Before/@After`
+
+不能把 gate 只包在 `LoginSteps.performLogin` 里 —— 业务步骤跑在 performLogin 之后，gate 已释放，Context 失去保护。正确做法是把 gate 提到 scenario 生命周期：
+
+
+
+```
+public class SsoScenarioHooks {
+
+    @Before(order = 5)
+    public void acquireGate(Scenario scenario) {
+        // 从 Given 文本解析: logon DBB "O63_SIT1" as user "WP7UAT2_2"
+        String tenant = resolveTenant(scenario);   // DBB
+        String env = resolveEnv(scenario);       // O63_SIT1
+        String user = resolveUser(scenario);      // WP7UAT2_2
+        AutoCloseable gate = SsoUserSessionGate.acquire(tenant, env, user, Duration.ofMinutes(5));
+        scenarioContext.attach("gate", gate);
+    }
+
+    @Before(order = 10)
+    public void createContextAndLogin(Scenario scenario) {
+        // 在 gate 内: restore storageState → browser.newContext() → newPage() → 登录校验
+    }
+
+    @After(order = 10)
+    public void exportAndCloseContext(Scenario scenario) {
+        // 导出新 storageState → page.close() → context.close()
+    }
+
+    @After(order = 5)
+    public void releaseGate(Scenario scenario) {
+        scenarioContext.<AutoCloseable>get("gate").close();   // gate 最后释放
+    }
+}
+```
+
+顺序：gate 第一个 acquire、最后一个 release，覆盖整个 scenario。`performLogin` 只负责 order=10 那段登录逻辑，不再自己 acquire gate。
+
+**关键**：gate 的 try-with-resources 范围必须覆盖到 Context close，不能只包登录方法。
+
+### 9.2 `SessionStore`
+
+
+
+* 移除对 `BrowserContext` / `Page` 的缓存。
+
+* 保留 `SsoSessionEntry`（storageState 路径 + token 元数据）。
+
+* 落盘写走 §4.3 原子写。
+
+### 9.3 `BDDUtils.getDbbLoginInfo`
+
+
+
+* 增加 `resolveUsername(env, base, forkIndex)`：从 `-Dfork.index` 和 `sso.fork.user.stride` 拼出当前 fork 可用 user 列表。
+
+* `@User("WP7UAT2_2")` 或 `Given` 里写死的 user 必须在当前 fork 的 `mine` 列表里，否则 fail fast。
+
+### 9.4 `FailureScreenshotHandler`
+
+
+
+* 当前 URL 命中 `/logon` 时跳过截图或对密码框坐标打码（位图脱敏，文本脱敏器管不到）。
+
+### 9.5 Surefire pom
+
+
+
+```
+<forkCount>2</forkCount>
+<reuseForks>true</reuseForks>
+<argLine>... -Dfork.index=${fork.index} -Dsso.fork.user.stride=4 ...</argLine>
+```
+
+CI matrix 注入 `fork.index=0 / 1`。
+
+
+
+***
+
+## 10. 分阶段上线
+
+每阶段连续 20 次稳定运行，失败回退上一档，**不跳档**。
+
+
+
+| 阶段 | fork | 每 fork 线程 | 总并发 | 验证重点                      |
+| -- | ---- | --------- | --- | ------------------------- |
+| 0  | 1    | 1         | 1   | 单线程回归全绿，确认 gate 改造无行为变化   |
+| 1  | 1    | 1         | 1   | gate / 原子写 / 三态基础         |
+| 2  | 1    | 2         | 2   | 同 user gate 排队、不同 user 并行 |
+| 3  | 2    | 1         | 2   | stride 分区不撞 user          |
+| 4  | 2    | 2         | 4   | 跨 JVM + 跨线程               |
+| 5  | 4    | 4         | 16  | 容量压测（需 ≥16 个独立账号）         |
+
+> 前置约束：总并发上限 =
+> `min(fork × 每 fork 线程, 可用 SSO 账号数)`
+> 。账号不足时，多出的 scenario 在 gate 排队而非并行。
+
+并发自检：
+
+
+
+```
+int active = COUNTER.incrementAndGet();
+if (active > expectedMax) throw new IllegalStateException(
+    "actual concurrency " + active + " > expected " + expectedMax);
+// 每条日志打: pid / fork.index / threadName / scenarioId / user / browserGuid / contextGuid
+```
+
+
+
+***
+
+## 11. 验收标准
+
+
+
+| #  | 场景                     | 预期                          |
+| -- | ---------------------- | --------------------------- |
+| 1  | 同 user 两 scenario 并发   | 第二个在 gate 等待                |
+| 2  | 同 user 顺序执行            | 每次新 Context，复用 storageState |
+| 3  | 不同 user 并发             | 完全并行                        |
+| 4  | 单 JVM 同 user 双 Context | 不允许出现                       |
+| 5  | 跨 fork 同 user          | stride 分区，零冲突               |
+| 6  | protocol exception     | 不删 SSO 缓存                   |
+| 7  | SSO 主动踢                | 仅独立证据触发重登                   |
+| 8  | token rotation         | 刷新即导出；旧 token 不再用           |
+| 9  | scenario 失败            | gate 释放、Context 关闭          |
+| 10 | handler 抛错             | 不影响其他 scenario              |
+| 11 | `Object doesn't exist` | 不重登、不污染                     |
+| 12 | 连续 20 次                | 零互踢、零误重登、零残留进程              |
+| 13 | 线程数提升                  | 逐档验证                        |
+| 14 | handler 访问 Page        | ArchUnit + 运行时检测双失败         |
+| 15 | storageState 写         | 原子 move + prev 备份           |
+
+
+
+***
+
+## 12. 不做的事
+
+
+
+* 不为 Browser 加 owner 线程（当前版本无证据需要）。
+
+* 不在多线程间共享 `BrowserContext` / `Page` / 调用期对象。
+
+* 不让 "未声明 user" 的 scenario 绕过 gate。
+
+* 不用全局数据库锁跨 fork 协调账号。
+
+* 不在 `current.json` 这种共享文件名上写 storageState。
+
+* 不在协议异常时自动重登。
+
+
+
+***
+
+## 13. 一句话总结
+
+> 同一账号的整个会话生命周期（gate acquire → newContext → scenario → storageState 导出 → context.close → release）完全互斥；不同账号并行；跨 fork 靠 stride 分区；协议异常不得触发 SSO 缓存失效；每 scenario 新建 Context，只复用认证材料。
+
+
+
+***
+
+## 14. 并发上限公式
+
+
+
+```
+最大有效并发 = min(
+    Surefire forkCount × 每 fork scenario 线程数,
+    可用 SSO 账号数,
+    SSO 服务端允许的单用户并发会话数（单会话模式下 = 可用账号数）,
+    浏览器进程可承载的 Context 数,
+    CI 机器 CPU / 内存容量
+)
+```
+
+账号不足时，多出的 scenario 在 gate 排队，不会并行 —— 这是设计行为，不是 bug。
+
+
+
+***
+
+## 15. 故障诊断速查表
+
+
+
+| 现象                            | 排查方向                                                 |
+| ----------------------------- | ---------------------------------------------------- |
+| 测试卡住不动                        | 是否所有账号都被别的 fork 占用，排队死等                              |
+| 偶发 `Object doesn't exist`     | protocol exception，标 SUSPECT，不重登                     |
+| 两个同 user 同时登录                 | gate 未生效 / 跨 fork 未分区                                |
+| 一个 user 被踢后反复重登               | 三态判定未生效，SUSPECT 被当成 INVALID                          |
+| storageState 读到旧 token        | 原子写顺序错误（应先备份再覆盖主文件）                                  |
+| 单线程正常、多线程 401                 | 同 user 两个 Context 同时持有 SSO 会话                        |
+| `.prev.json` 备份的是新内容          | 备份顺序写反                                               |
+| scenario 失败后下一个 user 拿不到 gate | `@After` 未兜底 release（应在 finally /try-with-resources） |

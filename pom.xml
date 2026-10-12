@@ -8,7 +8,7 @@
     <artifactId>pw_automation_framework</artifactId>
     <version>1.0.1</version>
     <packaging>pom</packaging>
-    <name>Automation WebUI Framework (Parent)</name>
+    <name>pw_automation_framework</name>
     <description>Enterprise multi-module automation framework: core / reporting / api / web / route (test-automation 为独立构建单元)</description>
 
     <modules>
