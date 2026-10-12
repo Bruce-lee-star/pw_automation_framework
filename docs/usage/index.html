@@ -98,13 +98,15 @@
   <div class="grp">用例</div>
   <a href="#write-case">4 · 如何写用例</a>
   <a href="#page-object">5 · 页面对象与元素定位</a>
+  <div class="grp">页面对象</div>
+  <a href="#picker">6 · 拾取元素（交互式拾取器）</a>
   <div class="grp">网络拦截</div>
-  <a href="#route">6 · Route 怎么用</a>
-  <a href="#route-recipes">7 · Route 实战配方</a>
+  <a href="#route">7 · Route 怎么用</a>
+  <a href="#route-recipes">8 · Route 实战配方</a>
   <div class="grp">配置与运维</div>
-  <a href="#config">8 · 配置属性</a>
-  <a href="#security">9 · 安全基线</a>
-  <a href="#faq">10 · FAQ</a>
+  <a href="#config">9 · 配置属性</a>
+  <a href="#security">10 · 安全基线</a>
+  <a href="#faq">11 · FAQ</a>
 </nav>
 <main>
 
@@ -160,7 +162,7 @@
    │  ├─ mocks/                     # Mock 夹具模板（mockBodyFromFile 读 classpath）
    │  ├─ payload/                   # 接口测试请求体
    │  ├─ config/                    # application.conf / *.conf
-   │  └─ serenity.conf              # 框架配置（见第 8 节）
+   │  └─ serenity.conf              # 框架配置（见第 9 节）
    └─ java/…/tests/
       ├─ CucumberTestRunnerIT.java  # 运行入口（@RunWith(CucumberWithSerenity)）
       ├─ glue/                      # Glue 层：步骤绑定（@Given/@When/@Then）+ 钩子（@Before/@After）
@@ -289,7 +291,7 @@ public class UserListSteps {
     @Step
     public void listApiReturns(int status) {
         RouteDsl.on(userListPage.getPage())      // 绑当前页面所在 context
-            .api("/api/users")                   // 端点即可，无需通配符（见第 6 节）
+            .api("/api/users")                   // 端点即可，无需通配符（见第 7 节）
             .mock().status(status).body("{\"error\":\"boom\"}").contentType("application/json")
             .done().start();
     }
@@ -297,7 +299,7 @@ public class UserListSteps {
   <div class="tip"><b>参数化步骤</b>：Cucumber 内置 <code>{int}</code>、<code>{string}</code>、<code>{word}</code> 等占位符，直接映射为 Glue 方法参数，无需手工解析。</div>
 
   <h3>④ 在 Steps 里做接口拦截（Route）</h3>
-  <p>需要「让接口返回 500 看页面表现」时，就在对应 Steps 方法里用 <code>RouteDsl</code> 注册规则（完整 DSL 见第 6 节）——上面的 <code>listApiReturns(int)</code> 即是示例。原则：<b>Glue 只绑定步骤文本，Route（以及页面操作）写在 Steps 里</b>；若场景需要，也可直接写在 Glue（同一场景/线程内同样生效）。</p>
+  <p>需要「让接口返回 500 看页面表现」时，就在对应 Steps 方法里用 <code>RouteDsl</code> 注册规则（完整 DSL 见第 7 节）——上面的 <code>listApiReturns(int)</code> 即是示例。原则：<b>Glue 只绑定步骤文本，Route（以及页面操作）写在 Steps 里</b>；若场景需要，也可直接写在 Glue（同一场景/线程内同样生效）。</p>
 </section>
 
 <!-- ============ 5 页面对象 ============ -->
@@ -404,9 +406,105 @@ public class UserListPage extends AbstractManagedPage {
   <div class="tip"><b>推荐</b>：优先用 <code>pw-codegen</code> 的交互式拾取器点选元素，自动生成 <code>@RoleElement</code> 草稿（含 NLS key），人工 review 后合入。</div>
 </section>
 
-<!-- ============ 6 Route ============ -->
+<!-- ============ 6 拾取元素 ============ -->
+<section id="picker">
+  <h2><span class="n">6</span>拾取元素（交互式拾取器）</h2>
+  <p class="lead">框架提供 <code>pw-codegen</code> 模块的交互式拾取器（<code>RoleElementPicker</code>）。它的使用体验类似 Playwright 的 <code>page.pause()</code>：在<b>有头浏览器</b>里点选你想操作的元素，它自动抓取被点元素的 a11y role / name，并生成带 <code>@RoleFile</code> + <code>@RoleElement</code> 的页面对象草稿——覆盖手写 selector 的繁琐。</p>
+
+  <h3>前置条件（必须满足，否则拾取不会生效）</h3>
+  <table>
+    <thead><tr><th>条件</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>有头浏览器</td><td>必须在 <b>headed</b> 模式下运行（能看到浏览器窗口）；无头模式无法人工点选。</td></tr>
+      <tr><td>开启开关</td><td>启动 JVM 时加 <code>-Ddbb.codegen.enabled=true</code>。该开关默认 <b>false</b>——关闭时框架热路径不触碰 codegen，避免给自动化测试引入无关开销。</td></tr>
+      <tr><td>页面已导航</td><td>调用前页面须已 <code>navigateTo</code> 到目标页（拾取的是"当前可见"的元素）。</td></tr>
+      <tr><td>本地使用</td><td>拾取器是<b>本地开发辅助工具</b>；它会自动探测 CI 环境变量（Jenkins / GitHub Actions / GitLab CI / TeamCity 等），在 CI 中<b>自动跳过</b>并直接返回空列表，不会卡住等待人工交互。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>两种用法</h3>
+  <p><b>① 打开常驻控制面板（最贴近 <code>page.pause()</code> 的体验，推荐）</b></p>
+  <pre><code>// 在 Steps / 调试代码里调用；page 为当前线程的 Page
+RoleElementPicker.openPanel(page, "nls/login.nls.json");</code></pre>
+  <p>调用后浏览器侧浮出一个 inspector 面板，控件含义：</p>
+  <table>
+    <thead><tr><th>控件</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td><b>▶ 开始拾取 / ⏹ 停止并生成</b></td><td>空闲时显示「开始拾取」（绿），点后进入点选模式，在页面点击目标元素；拾取中变「停止并生成」（橙），再点即退出点选、按已点元素生成代码填入面板。</td></tr>
+      <tr><td><b>📋 复制代码</b></td><td>一键复制面板中的代码。</td></tr>
+      <tr><td><b>⏻ 终止运行</b></td><td>抛出 <code>PickerAbortedException</code>，中断调用方后续代码（如自动登录）。</td></tr>
+      <tr><td><b>✕ 关闭面板</b></td><td>退出面板，结束阻塞。</td></tr>
+    </tbody>
+  </table>
+  <p>点「开始拾取」→ 在页面上点选元素（可跨弹窗 / 新标签页，拾取器会跟随）→ 点「停止并生成」→ 在面板里复制代码。生成物含 <b>页面类 + 步骤类 + 断言类</b>，跨页（弹窗等）会各自生成对应的页面类。</p>
+
+  <p><b>② 代码内直接调用（程序化）</b></p>
+  <pre><code>// 阻塞式拾取：开启 → 等待你点选（按 ESC 或超时结束）→ 关闭 → 返回列表
+List&lt;RoleEntry&gt; picks = RoleElementPicker.pick(page);
+
+// 拾取并直接写入源码文件（outputDir 为源码根，如 src/test/java）
+RoleElementPicker.pickAndWrite(page, "src/test/java",
+        "com.xxx.tests.pages", "LoginPage", "nls/login.nls.json");
+
+// 拾取并弹出可复制代码面板（拾取完直接弹框，复制即用）
+RoleElementPicker.pickAndShow(page, "com.xxx.tests.pages", "LoginPage", "nls/login.nls.json");</code></pre>
+  <div class="tip"><b>拾取模式</b>：当前只有<b>手动模式</b>（点哪个元素拾哪个）。整页扫描 / 区域扫描已从框架移除，故拾取器只采集你主动点选的少数控件——非常适合页面冗杂、只需其中几个元素的场景。</div>
+
+  <h3>NLS 反查（让生成的 key 直接用真实多语言名）</h3>
+  <p>传入 nls 文件路径后，拾取时会用被点元素的 a11y name <b>反查</b>该表；命中则生成的 <code>@RoleElement</code> 直接复用真实 key，未命中回退为 slug。nls 文件格式（按语言分组，<b>文本值 → key</b>）：</p>
+  <pre><code>// nls/login.nls.json
+{
+  "en-US": { "signIn": "Sign in", "welcomeHeader": "Welcome to Business" },
+  "zh-CN": { "signIn": "登入",  "welcomeHeader": "欢迎使用商务理财" }
+}</code></pre>
+  <p>把该路径作为 <code>openPanel</code> / <code>pickAndWrite</code> 的最后一个（可变）参数传入即可，多个 nls 文件会合并反查。</p>
+
+  <h3>生成的产物长什么样</h3>
+  <ul>
+    <li><b>页面类</b>：带类级 <code>@RoleFile("nls/login.nls.json")</code>，字段为 <code>@RoleElement(...)</code>，字段名按 a11y role 自动加语义后缀（<code>button→Btn</code>、<code>link→Link</code>、<code>textbox→Input</code>、<code>checkbox→Chk</code> 等）。</li>
+    <li><b>步骤类</b>：命名规则为页面类去掉 <code>Page</code> 后缀 + <code>Steps</code>（如 <code>LoginPage</code> → <code>LoginSteps</code>），默认包名 <code>com.hsbc.cmb.hk.dbb.automation.tests</code>。</li>
+    <li><b>断言类</b>：与步骤同源（由拾取元素派生），按页分组。</li>
+    <li><b>多轮累积</b>：一次「开始→停止」算一轮；多轮拾取的 step 按轮叠加，不会互相覆盖。</li>
+  </ul>
+  <pre><code>@RoleFile("nls/login.nls.json")
+public class LoginPage extends AbstractManagedPage {
+    @RoleElement(role = AriaRole.BUTTON, key = "signIn")
+    public PageElement signInBtn;
+
+    @RoleElement(role = AriaRole.TEXTBOX, name = "User ID")
+    public PageElement userInput;
+}</code></pre>
+
+  <h3>产物约定（落库前请知悉）</h3>
+  <table>
+    <thead><tr><th>约定</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>草稿需 review</td><td>生成物是<b>草稿</b>，人工 review 后再合入主干；建议落在独立目录，与手写 Page 分开，便于 diff。</td></tr>
+      <tr><td>生成标记</td><td>文件首行含 <code>GENERATED BY RoleElementPageGenerator</code> 标记；无标记的文件视为手写，工具拒绝静默覆盖（除非 <code>-Dcodegen.overwrite.force=true</code>）。</td></tr>
+      <tr><td>增量合并</td><td>再生成时只替换 <code>// &lt;generated:fields&gt;</code> 块内内容、并集补齐 import，<b>块外的手写字段 / 方法 / 类注解原样保留</b>。故人工补充请写在标记块<b>之外</b>。</td></tr>
+      <tr><td>CI 漂移校验</td><td>CI 可对生成目录重新生成并比对无 diff；有 diff 说明有人手改了生成物，应改模板 / 生成器而非直接编辑产物。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>配套配置键</h3>
+  <table>
+    <thead><tr><th>配置键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>dbb.codegen.enabled</code></td><td><code>false</code></td><td>系统属性。是否激活 codegen 运行时协作（拾取注入 / 清理钩子）。</td></tr>
+      <tr><td><code>picker.wait.timeout.ms</code></td><td><code>1800000</code>（30 分钟）</td><td>拾取 / 面板等待人工操作的<b>上界</b>。超时降级为「生成已拾取子集」，不再永久阻塞。<code>≤0</code> 表示不超时（本地调试逃生门）。</td></tr>
+      <tr><td><code>codegen.picker.eval.timeout.ms</code></td><td><code>10000</code></td><td>用户显式命令（开始 / 停止并生成）的 <code>page.evaluate</code> 超时。</td></tr>
+      <tr><td><code>codegen.picker.eval.softTimeout.ms</code></td><td><code>2000</code></td><td>每轮重做的幂等动作（面板回灌等）短超时。</td></tr>
+      <tr><td><code>rolePicker.panelSessionMaxMs</code></td><td><code>1800000</code>（30 分钟）</td><td>面板会话最长存活；事件丢失时兜底结束，避免无限阻塞调用线程。</td></tr>
+      <tr><td><code>rolePicker.nlsCacheTtlMs</code></td><td><code>300000</code>（5 分钟）</td><td>NLS 反向映射缓存 TTL。</td></tr>
+    </tbody>
+  </table>
+
+  <div class="warn"><b>注意</b>：① 跨源 iframe 内的元素因浏览器安全限制不经主框架拾取，会被跳过；② 拾取只采集"你点选"的元素，不会整页枚举；③ 生成的代码务必人工 review 后再合入——不要直接手改 <code>&lt;generated:fields&gt;</code> 块内（再生成会被覆盖）。</div>
+</section>
+
+<!-- ============ 7 Route ============ -->
 <section id="route">
-  <h2><span class="n">6</span>Route 网络拦截怎么用</h2>
+  <h2><span class="n">7</span>Route 网络拦截怎么用</h2>
   <p class="lead">Route 让你在不改后端的前提下，声明式地<b>观测、伪造、改写、延迟</b>浏览器发出的 HTTP 请求。它挂在 <code>BrowserContext</code> 上，按 context 隔离。</p>
 
   <h3>四种能力（一规则一能力）</h3>
@@ -456,7 +554,7 @@ handle.close();                              // 精确注销（幂等）；场�
 
 <!-- ============ 7 配方 ============ -->
 <section id="route-recipes">
-  <h2><span class="n">7</span>Route 实战配方</h2>
+  <h2><span class="n">8</span>Route 实战配方</h2>
 
   <h3><span class="tag t-mon">MONITOR</span>观测并断言真实响应</h3>
 <pre><code>RouteDsl.on(page)
@@ -573,7 +671,7 @@ RouteDsl.on(page)
 
 <!-- ============ 8 配置 ============ -->
 <section id="config">
-  <h2><span class="n">8</span>配置属性</h2>
+  <h2><span class="n">9</span>配置属性</h2>
   <p class="lead">框架配置支持多层覆盖，优先级从高到低如下（越靠前越先命中）。</p>
 
   <h3>取值优先级</h3>
@@ -642,7 +740,7 @@ route.capture.all.type = false</code></pre>
 
 <!-- ============ 9 安全 ============ -->
 <section id="security">
-  <h2><span class="n">9</span>安全基线</h2>
+  <h2><span class="n">10</span>安全基线</h2>
   <ul>
     <li><b>凭据一律环境变量注入</b>（如 <code>DBB_TEST_PASSWORD</code>、<code>CONFIG_MASTER_KEY</code>），<b>禁止入库</b>。</li>
     <li>配置里的敏感值支持 <code>ENC(&lt;base64&gt;)</code> 透明解密（如 <code>monitor.db.password</code>）。</li>
@@ -653,7 +751,7 @@ route.capture.all.type = false</code></pre>
 
 <!-- ============ 10 FAQ ============ -->
 <section id="faq">
-  <h2><span class="n">10</span>FAQ</h2>
+  <h2><span class="n">11</span>FAQ</h2>
 
   <details><summary>跑用例报浏览器找不到 / 起不来？</summary>
     <div class="body">先安装浏览器：<code>mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"</code>。若公司有代理，配置 <code>playwright.browser.download.http.proxy</code> / <code>https.proxy</code>，或预置到 <code>playwright.browsers.path</code>。</div>
