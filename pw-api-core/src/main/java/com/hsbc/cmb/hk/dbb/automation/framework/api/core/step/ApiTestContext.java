@@ -4,6 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.api.core.services.TestServices;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.cleanstate.CleanStateRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ScenarioContext;
+import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
 /**
@@ -95,8 +96,18 @@ public final class ApiTestContext {
     }
 
     private static BaseStep set(BaseStep step) {
-        TestContextHolder.get().set(BASE_STEP_KEY, step);
-        TestContextHolder.get().set(BASE_STEP_SCENARIO_KEY, ScenarioContext.currentScenarioId());
+        TestContext ctx = TestContextHolder.get();
+        ctx.set(BASE_STEP_KEY, step);
+        //  场景戳按「运行环境」分支处理：
+        //   - Cucumber 场景：FrameworkHooks@Before 已 begin(id)，此处记录当前场景 id，供 isDirty() 判定跨场景残留；
+        //   - 纯 JUnit / 未绑定用例：currentScenarioId() 为 null，而 TestContext 底层 ConcurrentHashMap
+        //     不接受 null 值，直接写入会 NPE，故此时改为移除场景戳（等价「非用例作用域」，isDirty() 恒 false）。
+        String scenarioId = ScenarioContext.currentScenarioId();
+        if (scenarioId != null) {
+            ctx.set(BASE_STEP_SCENARIO_KEY, scenarioId);
+        } else {
+            ctx.remove(BASE_STEP_SCENARIO_KEY);
+        }
         return step;
     }
 }

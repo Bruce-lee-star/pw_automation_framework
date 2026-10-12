@@ -13,8 +13,9 @@ import static org.junit.Assert.*;
  * <p>覆盖 init/baseStep/clear/场景戳,以及 resolver 的 name/reset/isDirty 各分支,
  * 保证 pw-api-core 覆盖率门禁(0.40)不被本次新增类拉低。
  *
- * <p>注意:{@link ApiTestContext#init()} 依赖当前线程已绑定用例({@link ScenarioContext#begin(String)}),
- * 否则场景戳写入 null 会触发 NPE;生产路径下步骤均在 {@code @Before} 绑定用例后执行,故测试需显式绑定。
+ * <p>运行环境兼容:Cucumber 场景下 {@code FrameworkHooks@Before} 已绑定用例,
+ * {@link ApiTestContext#init()} 记录场景戳;纯 JUnit(未绑定用例)下不再 NPE,场景戳为空且 {@code isDirty()} 恒 false。
+ * 两条路径均有用例覆盖。
  */
 public class ApiTestContextLifecycleTest {
 
@@ -79,6 +80,16 @@ public class ApiTestContextLifecycleTest {
         } finally {
             ScenarioContext.end("s-null-env");
         }
+    }
+
+    @Test
+    public void init_withoutScenarioBinding_junitPath_doesNotThrow() {
+        // 纯 JUnit（无 Cucumber 用例绑定）路径：修复前场景戳写入 null 会 NPE，修复后应正常且 isDirty=false。
+        BaseStep created = ApiTestContext.init();
+        assertNotNull(created);
+        assertSame(created, ApiTestContext.baseStep());
+        assertNull(ApiTestContext.baseStepScenarioId());
+        assertFalse(new ApiTestContextResolver().isDirty());
     }
 
     @Test
