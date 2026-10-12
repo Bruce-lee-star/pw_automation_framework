@@ -807,6 +807,70 @@ String body = baseStep().getResponseJson();        // 响应体字符串
 // 衔接 REST Assured 原生断言（返回 ValidatableResponse）
 baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(3));</code></pre>
 
+  <h3>增删改查（CRUD）全要素示例</h3>
+  <p>以「用户资源」为例，覆盖 <b>method / header / query 参数 / 请求体</b> 的组合。要点：</p>
+  <ul>
+    <li><b>method 由你调用的发送方法决定</b>——框架没有 <code>setMethod(...)</code>，而是 <code>getResource()</code>(GET) / <code>postPayload()</code>(POST) / <code>putPayload()</code>(PUT) / <code>patchPayload()</code>(PATCH，部分更新) / <code>deleteResource()</code>(DELETE) 各自一个方法。</li>
+    <li><b>POST / PUT / PATCH 发前先设请求体</b>（<code>setRequestPayload</code> 内联或 <code>loadPayload</code> 读文件）；GET / DELETE 通常不带 body。</li>
+    <li>header / query / body 都在「发送方法之前」调用，且<b>每次发送都是当前实例的瞬时状态</b>——换请求记得按需重设或清理（<code>clearHeader()</code> / <code>clearQueryParams()</code>）。</li>
+  </ul>
+<pre><code>public class UserCrudSteps extends UIInteractionSteps {
+    private final BaseStep step =
+            TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
+
+    // 增：POST + 自定义 header + query 参数 + 请求体
+    @When("创建用户")
+    public void createUser() {
+        step.setEndpoint("/users");
+        step.addRequestHeader("Content-Type", "application/json");
+        step.addQueryParam("async", "true");                 // → ?async=true
+        step.setRequestPayload("{ \"name\":\"tom\", \"age\":20 }");
+        // 也可从文件加载请求体：step.loadPayload("payloads/user-create.json");
+        step.postPayload();                                  // method = POST（带 body）
+        step.verifyResponseStatusCode(201);
+        step.verifyResponseJsonPath("$.name", "tom");
+    }
+
+    // 查：GET + query 参数（无 body）
+    @When("查询用户列表")
+    public void listUsers() {
+        step.setEndpoint("/users");
+        step.addQueryParam("role", "admin");                 // → ?role=admin
+        step.getResource();                                  // method = GET
+        step.verifyResponseStatusCode(200);
+        step.verifyJsonArrayLength("$.items", 3);
+    }
+
+    // 改：PUT + 路径里的 id + 请求体（用 JSONPath 改字段）
+    @When("修改用户 {int}")
+    public void updateUser(int id) {
+        step.setEndpoint("/users/" + id);
+        step.addRequestHeader("Content-Type", "application/json");
+        step.setRequestPayload("{ \"name\":\"tom\", \"age\":20 }");
+        step.modifyFieldsInRequestPayload("$.age", 21);      // 改请求体里的 age 字段
+        step.putPayload();                                   // method = PUT（带 body）
+        step.verifyResponseStatusCode(200);
+    }
+
+    // 局部改：PATCH（同上，仅更新部分字段）
+    @When("局部修改用户 {int}")
+    public void patchUser(int id) {
+        step.setEndpoint("/users/" + id);
+        step.setRequestPayload("{ \"age\":22 }");
+        step.patchPayload();                                 // method = PATCH
+        step.verifyResponseStatusCode(200);
+    }
+
+    // 删：DELETE + 路径里的 id（通常无 body）
+    @When("删除用户 {int}")
+    public void deleteUser(int id) {
+        step.setEndpoint("/users/" + id);
+        step.deleteResource();                              // method = DELETE
+        step.verifyResponseStatusCode(204);
+    }
+}</code></pre>
+  <div class="tip"><b>已有完整 URL 时</b>：直接用 <code>getFullUrl(url)</code> / <code>postFullUrl(url)</code> / <code>putFullUrl(url)</code> / <code>patchFullUrl(url)</code> / <code>deleteFullUrl(url)</code>，会按 URL 自动解析 baseUri / endpoint / query 后发送，省去分步 setEndpoint / addQueryParam。</div>
+
   <h3>链路串联：提取返回值 + token 注入</h3>
   <p>一条业务链路（登录 → 取 token → 调目标 API → 取信息 → 再调）放在<b>同一个 <code>BaseStep</code> 实例</b>上：它持有 <code>baseUri</code> / <code>headers</code> / 上一次响应，所以登录后提取的 token 注入实例，后续请求自动带上；某响应里要被下一步用到的值，提取出来存到 Steps 字段，下一步直接用。</p>
   <div class="tip"><b>提取返回值两种方式</b>：
