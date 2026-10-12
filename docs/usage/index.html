@@ -103,10 +103,11 @@
   <div class="grp">网络拦截</div>
   <a href="#route">7 · Route 怎么用</a>
   <a href="#route-recipes">8 · Route 实战配方</a>
+  <a href="#api-test">9 · 接口测试（REST Assured）</a>
   <div class="grp">配置与运维</div>
-  <a href="#config">9 · 配置属性</a>
-  <a href="#security">10 · 安全基线</a>
-  <a href="#faq">11 · FAQ</a>
+  <a href="#config">10 · 配置属性</a>
+  <a href="#security">11 · 安全基线</a>
+  <a href="#faq">12 · FAQ</a>
 </nav>
 <main>
 
@@ -162,7 +163,7 @@
    │  ├─ mocks/                     # Mock 夹具模板（mockBodyFromFile 读 classpath）
    │  ├─ payload/                   # 接口测试请求体
    │  ├─ config/                    # application.conf / *.conf
-   │  └─ serenity.conf              # 框架配置（见第 9 节）
+   │  └─ serenity.conf              # 框架配置（见第 10 节）
    └─ java/…/tests/
       ├─ CucumberTestRunnerIT.java  # 运行入口（@RunWith(CucumberWithSerenity)）
       ├─ glue/                      # Glue 层：步骤绑定（@Given/@When/@Then）+ 钩子（@Before/@After）
@@ -397,6 +398,7 @@ public class UserListPage extends AbstractManagedPage {
       <tr><td><code>description</code></td><td>文本</td><td>仅用于日志与报错信息，不影响定位</td></tr>
     </tbody>
   </table>
+  <div class="warn"><b>跨源 iframe 限制</b>：<code>frame</code> 路径只能定位<b>同源</b> iframe 内的元素。跨源（不同域名 / 协议 / 端口）iframe 受浏览器安全策略限制，框架无法跨边界定位其内部元素——这类元素需改用其他方式（如单独驱动该 iframe 对应的页面 / 直接走接口校验）。拾取元素时跨源 iframe 内的元素也会被自动跳过（见第 6 节注意事项）。</div>
   <div class="note"><b>三态怎么理解</b>：Playwright 的 <code>setXxx()</code> 只有 true / false 两态（不调用 = 不限定），框架用三态表达得更明确 ——
     <code>ANY</code> = 不限定（匹配任意状态）；<code>YES</code> = 只匹配「处于该状态」的元素；<code>NO</code> = 只匹配「不处于该状态」的元素。
     例：<code>@RoleElement(role = AriaRole.BUTTON, name = "Submit", disabled = RoleElement.State.NO)</code> 只定位可用按钮。</div>
@@ -407,6 +409,8 @@ public class UserListPage extends AbstractManagedPage {
 <section id="picker">
   <h2><span class="n">6</span>拾取元素（交互式拾取器）</h2>
   <p class="lead">框架提供 <code>pw-codegen</code> 模块的交互式拾取器（<code>RoleElementPicker</code>）。它的使用体验类似 Playwright 的 <code>page.pause()</code>：在<b>有头浏览器</b>里点选你想操作的元素，它自动抓取被点元素的 a11y role / name，并生成带 <code>@RoleFile</code> + <code>@RoleElement</code> 的页面对象草稿——覆盖手写 selector 的繁琐。</p>
+
+  <div class="warn"><b>跨源 iframe 限制（重点）</b>：拾取器<b>无法拾取跨源 iframe</b> 内的元素——跨源（不同域名 / 协议 / 端口）iframe 受浏览器安全策略限制，不经主框架，会被直接跳过。若需操作跨源 iframe 内的控件，请改用其他方式（单独驱动该 iframe 对应的页面 / 直接接口校验）。同源 iframe 不受影响（用 <code>frame</code> 属性声明嵌套路径即可，见第 5 节）。</div>
 
   <h3>前置条件（必须满足，否则拾取不会生效）</h3>
   <table>
@@ -505,7 +509,7 @@ public class LoginPage extends AbstractManagedPage {
     </tbody>
   </table>
 
-  <div class="warn"><b>注意</b>：① 跨源 iframe 内的元素因浏览器安全限制不经主框架拾取，会被跳过；② 拾取只采集"你点选"的元素，不会整页枚举；③ 生成的代码务必人工 review 后再合入——不要直接手改 <code>&lt;generated:fields&gt;</code> 块内（再生成会被覆盖）。</div>
+  <div class="warn"><b>注意</b>：② 拾取只采集"你点选"的元素，不会整页枚举；③ 生成的代码务必人工 review 后再合入——不要直接手改 <code>&lt;generated:fields&gt;</code> 块内（再生成会被覆盖）。</div>
 </section>
 
 <!-- ============ 7 Route ============ -->
@@ -675,9 +679,126 @@ RouteDsl.on(page)
   <div class="warn"><b>两条最易误用点</b>：① <code>MONITOR 断言 + static MOCK</code> 时，断言对象是<b>你伪造的夹具</b>而非真实响应（合法，但易误判为"没生效"）；② <code>interceptResponse()</code> 与静态 <code>status/body/headers</code> 互斥。</div>
 </section>
 
-<!-- ============ 8 配置 ============ -->
+<!-- ============ 9 接口测试（REST Assured） ============ -->
+<section id="api-test">
+  <h2><span class="n">9</span>接口测试（REST Assured）</h2>
+  <p class="lead"><code>pw-api-core</code> 基于 <b>REST Assured</b> 封装，提供「声明式配置 + 语义化断言」的接口测试能力，与 Web 用例共用同一套 Serenity + Cucumber 基建。适合纯接口用例，或 Web 用例里需要直连后端做数据准备 / 结果校验的场景。</p>
+
+  <h3>测试分层</h3>
+  <p>与 Web 用例一致的四层：<b>Feature（Gherkin）→ Glue（步骤绑定）→ Steps（extends UIInteractionSteps，持有 BaseStep）→（接口用例不写 Page）</b>。接口用例直接操作 <code>BaseStep</code>，不需要页面对象。</p>
+<pre><code>Feature: 用户接口
+  Scenario: 查询用户列表
+    Given an entity with "petstore"           # 创建并持有 BaseStep
+    When I set endpoint to "/api/users"
+    And I send GET request
+    Then response field "$.length()" should be 3
+    And response body should match JSON schema "schemas/users.json"</code></pre>
+
+  <h3>创建 BaseStep（唯一入口）</h3>
+  <p><code>BaseStep</code> 的构造器是包私有的，<b>唯一创建方式</b>是通过 <code>TestServices</code> 工厂（返回当前线程 / scenario 级单例，天然支持并行）：</p>
+<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.services.TestServices;
+import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.BaseStep;
+
+// 带实体配置（从 {entityName}.conf 加载 baseUri / 端点 / 默认头）
+BaseStep step = TestServices.initialize().withEntity("petstore").baseStep();
+
+// 带环境（dev / test / prod 各自的 baseUri 覆盖）
+BaseStep step = TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
+
+// 动态配置（不带实体，手动 setBaseUri / setEndpoint）
+BaseStep step = TestServices.initialize().baseStep();</code></pre>
+  <div class="tip"><b>真实工程写法</b>：用 <code>ApiTestContext.init("petstore")</code> 创建并持有，其余 Steps 通过 <code>ApiTestContext.baseStep()</code> 取<b>同一个</b>实例（entity 配置、请求参数、响应状态靠它串起来）。scenario 结束务必 <code>ApiTestContext.clear()</code>（见结尾），否则线程复用会跨场景串扰。</div>
+
+  <h3>实体配置文件（{entityName}.conf）</h3>
+  <p>把各接口的 path / 默认头 / 参数 / 请求体集中声明在 classpath 下的 <code>{entityName}.conf</code>（或 <code>.properties</code>），运行时用 <code>loadEndpointConfig(name, method)</code> 一键加载：</p>
+<pre><code># petstore.conf（HOCON）
+end-points {
+  user {
+    get {
+      path = "/api/users"
+      headers { Accept = "application/json" }
+      query.params { page = 1, size = 20 }
+    }
+    post {
+      path = "/api/users"
+      payload = "payloads/create-user.json"
+    }
+  }
+}
+
+# Steps 里加载：把 user.get 的全部配置一次性灌到 BaseStep
+baseStep().loadEndpointConfig("user", "get");
+baseStep().getResource();</code></pre>
+  <div class="note">配置按 <code>end-points.&lt;name&gt;.&lt;method&gt;</code> 组织；<code>name</code> 支持点号分层（如 <code>user.findById</code>）。也支持动态配置（不声明实体，直接 <code>setBaseUri</code> / <code>setEndpoint</code>）。</div>
+
+  <h3>发请求</h3>
+  <table>
+    <thead><tr><th>方法</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td><code>getResource()</code></td><td>发送 GET（已设 endpoint）</td></tr>
+      <tr><td><code>postPayload()</code> / <code>putPayload()</code> / <code>patchPayload()</code></td><td>发送 POST / PUT / PATCH（带 body）</td></tr>
+      <tr><td><code>deleteResource()</code></td><td>发送 DELETE</td></tr>
+      <tr><td><code>getFullUrl(url)</code> / <code>postFullUrl(url)</code> / …</td><td>直接传完整 URL，<b>自动解析 baseUri / endpoint / query 参数</b>后发请求</td></tr>
+    </tbody>
+  </table>
+
+  <h3>设置请求（发请求前调用）</h3>
+  <table>
+    <thead><tr><th>方法</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td><code>setBaseUri(url)</code> / <code>setBasePath(p)</code> / <code>setEndpoint(path)</code></td><td>设置目标地址</td></tr>
+      <tr><td><code>addRequestHeader(k, v)</code> / <code>updateHeader(k, v)</code> / <code>clearHeader()</code></td><td>请求头</td></tr>
+      <tr><td><code>addQueryParam(k, v)</code> / <code>addPathParam(k, v)</code> / <code>addFormParam(k, v)</code> / <code>addCookie(k, v)</code></td><td>各类参数</td></tr>
+      <tr><td><code>setRequestPayload(json)</code> / <code>loadPayload("file.json")</code></td><td>请求体（字符串 / 文件）</td></tr>
+      <tr><td><code>modifyFieldsInRequestPayload("$.name", "tom")</code></td><td>基于 JSONPath 改请求体字段</td></tr>
+      <tr><td><code>switchBaseUri(key)</code> / <code>switchBasePath(key)</code></td><td>按配置键切换 baseUri / basePath</td></tr>
+    </tbody>
+  </table>
+
+  <h3>校验响应（语义化断言）</h3>
+  <table>
+    <thead><tr><th>方法</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td><code>verifyResponseStatusCode(200)</code></td><td>断言状态码</td></tr>
+      <tr><td><code>verifyResponseJsonPath("$.data.id", 123)</code></td><td>断言 JSONPath 字段值（类型自动推断：int / String / boolean …）</td></tr>
+      <tr><td><code>verifyJsonArrayLength("$.items", 3)</code></td><td>断言数组长度</td></tr>
+      <tr><td><code>verifyResponseBodyContains("success")</code></td><td>断言响应体含子串</td></tr>
+      <tr><td><code>verifyResponseHeader("Content-Type", "application/json")</code></td><td>断言响应头</td></tr>
+      <tr><td><code>verifyResponseMatchesSchema("schemas/demo.json")</code></td><td>整份响应体符合 JSON Schema（契约守护）</td></tr>
+      <tr><td><code>verifyResponseJsonPathMatchesSchema("$.data", "schemas/data.json")</code></td><td>子文档符合 JSON Schema</td></tr>
+    </tbody>
+  </table>
+  <div class="note">断言失败时，响应体内可能含 token / 卡号等敏感值——框架会<b>先脱敏再输出</b>到日志与报告，可直接信任失败信息，无需担心泄漏。</div>
+
+  <h3>读取返回值</h3>
+<pre><code>int code = baseStep().getResponseCode();          // 状态码
+String body = baseStep().getResponseJson();        // 响应体字符串
+// 衔接 REST Assured 原生断言（返回 ValidatableResponse）
+baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(3));</code></pre>
+
+  <h3>完整示例（Steps 片段）</h3>
+<pre><code>public class UserApiSteps extends UIInteractionSteps {
+    private BaseStep baseStep() { return ApiTestContext.baseStep(); }
+
+    @Given("an entity with {string}")
+    public void initEntity(String name) { ApiTestContext.init(name); }
+
+    @When("I set endpoint to {string}")
+    public void setEndpoint(String ep) { baseStep().setEndpoint(ep); }
+
+    @When("I send GET request")
+    public void get() { baseStep().getResource(); }
+
+    @Then("response field {string} should be {int}")
+    public void check(String path, int v) { baseStep().verifyResponseJsonPath(path, v); }
+}</code></pre>
+
+  <div class="warn"><b>收尾（重要）</b>：<code>ApiTestContext</code> 是线程（scenario）级共享。scenario 结束必须 <code>ApiTestContext.clear()</code>（可用 <code>@After</code> 钩子统一调用），否则 Cucumber 复用线程时下一个场景会读到上一个场景遗留的 BaseStep，导致配置 / 参数 / 响应<b>跨场景串扰</b>——表现为随机失败，极难定位。</div>
+</section>
+
+<!-- ============ 10 配置 ============ -->
 <section id="config">
-  <h2><span class="n">9</span>配置属性</h2>
+  <h2><span class="n">10</span>配置属性</h2>
   <p class="lead">框架配置支持多层覆盖，优先级从高到低如下（越靠前越先命中）。</p>
 
   <h3>取值优先级</h3>
@@ -745,7 +866,7 @@ route.capture.all.type = false</code></pre>
 
 <!-- ============ 9 安全 ============ -->
 <section id="security">
-  <h2><span class="n">10</span>安全基线</h2>
+  <h2><span class="n">11</span>安全基线</h2>
   <ul>
     <li><b>凭据一律环境变量注入</b>（如 <code>DBB_TEST_PASSWORD</code>、<code>CONFIG_MASTER_KEY</code>），<b>禁止入库</b>。</li>
     <li>配置里的敏感值支持 <code>ENC(&lt;base64&gt;)</code> 透明解密（如 <code>monitor.db.password</code>）。</li>
@@ -756,7 +877,7 @@ route.capture.all.type = false</code></pre>
 
 <!-- ============ 10 FAQ ============ -->
 <section id="faq">
-  <h2><span class="n">11</span>FAQ</h2>
+  <h2><span class="n">12</span>FAQ</h2>
 
   <details><summary>跑用例报浏览器找不到 / 起不来？</summary>
     <div class="body">先安装浏览器：<code>mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"</code>。若公司有代理，配置 <code>playwright.browser.download.http.proxy</code> / <code>https.proxy</code>，或预置到 <code>playwright.browsers.path</code>。</div>
