@@ -732,23 +732,34 @@ baseStep().getResource();</code></pre>
   <div class="note">配置按 <code>end-points.&lt;name&gt;.&lt;method&gt;</code> 组织；<code>name</code> 支持点号分层（如 <code>user.findById</code>）。也支持动态配置（不声明实体，直接 <code>setBaseUri</code> / <code>setEndpoint</code>）。</div>
 
   <h3>多环境切换（dev / test / prod）</h3>
-  <p>环境通过 <code>withEnv("dev")</code> 显式传入（线程级、并行安全），对应配置文件里的同名节点会被合并到基础配置之上。优先级：<b>环境节点 &gt; 实体 conf &gt; application.conf</b>。环境节点里可覆盖<b>任意</b>节点（baseUri、headers、timeout 等）。</p>
+  <p>环境通过 <code>withEnv("dev")</code> 显式传入（线程级、并行安全），对应配置文件里的同名节点会<b>合并</b>到基础配置之上。合并规则是 HOCON <b>按 key 深合并</b>：<b>环境节点 &gt; 实体 conf &gt; application.conf</b>，且粒度是<b>单个配置项 / 单个 header</b>——冲突的 key 由环境胜出，<b>不冲突的通用 key 自动保留</b>。所以你只需在环境节点里写「与通用不同的那些项」，其余继承。</p>
 <pre><code># petstore.conf（HOCON）
+# —— 通用配置（所有环境共享）——
 api.base.uri.default = "https://api.example.com"   # 默认 http://localhost
-headers.Accept = "application/json"
+headers.Accept       = "application/json"          # 每个环境都带，不用重复写
+headers.Content-Type = "application/json"
 
 end-points {
   login   { post { path = "/auth/login"  payload = "payloads/login.json" } }
   profile { get  { path = "/api/profile" } }
 }
 
-# 环境覆盖节点：withEnv("dev") 时生效
+# —— 环境节点：只写「与通用不同的项」——
+# dev：baseUri 改成测试地址；Authorization 用固定 dev token
+#      Accept / Content-Type 不在 dev 里，自动继承通用的
 dev {
   api.base.uri.default = "https://api.dev.example.com"
-  headers.Authorization = "Bearer dev-fixed-token"   # 静态 token 可直接写（支持 ENC(...) 加密）
+  headers.Authorization = "Bearer dev-fixed-token"   # 支持 ENC(...) 加密
 }
-test  { api.base.uri.default = "https://api.test.example.com" }
-prod  { api.base.uri.default = "https://api.prod.example.com" }</code></pre>
+# test：baseUri 改测试地址，且不设固定 token（靠用例里 login 动态注入）
+test { api.base.uri.default = "https://api.test.example.com" }
+# prod：baseUri 改生产地址，Authorization 设为生产 token
+prod {
+  api.base.uri.default = "https://api.prod.example.com"
+  headers.Authorization = "Bearer prod-fixed-token"
+}</code></pre>
+  <div class="tip"><b>合并结果示意（以 <code>withEnv("dev")</code> 为例）</b>：<code>api.base.uri.default = https://api.dev.example.com</code>（环境覆盖）｜<code>headers.Accept = application/json</code>（继承通用）｜<code>headers.Content-Type = application/json</code>（继承通用）｜<code>headers.Authorization = Bearer dev-fixed-token</code>（环境覆盖）。可见 <b>dev 只改了 baseUri 和 Authorization，其余通用 header 原样保留</b>。</div>
+  <div class="warn"><b>一个坑：环境节点只能「覆盖」不能「删除」通用项。</b>HOCON 的合并只填缺失 key，<b>不会移除</b>通用配置里已有的 key。若通用已经写了 <code>headers.X = "A"</code>，想让某个环境「不带 X」，<b>不能靠省略</b>（省略会继承 A），只能把它<b>覆盖成一个空值</b>：<code>headers.X = ""</code>。需要彻底剔除时，建议把该 header 从通用区挪到各环境节点分别声明。</div>
   <div class="note">也支持运行参数 <code>-Denv=dev</code> 或环境变量 <code>env=dev</code>（由 <code>EnvironmentUtils</code> 解析）；但 <code>withEnv</code> 语义更明确、且不会污染 JVM 全局，并行下互不串环境。务必在 <code>@After</code> 调用 <code>TestServices.clear()</code>。</div>
 
   <h3>发请求</h3>
