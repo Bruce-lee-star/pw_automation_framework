@@ -68,6 +68,11 @@ public final class StubRouteRuntime implements RouteRuntime {
         return false;
     }
 
+    @Override
+    public boolean hasActiveDelay() {
+        return false;
+    }
+
     /** T2+ 契约：替身无绑定可撤 ⇒ 等价"无需撤销"。 */
     @Override
     public boolean retireByPurpose(String pattern) {

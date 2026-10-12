@@ -317,6 +317,20 @@ public final class RouteEngine {
     }
 
     /**
+     * 该 context 是否仍有<b>生效的 DELAY 规则</b>（运行期 guard 用，§8.4 零容忍）。
+     *
+     * <p>原生 {@code page.waitForFunction} 会阻塞 main 线程，使已入队 main 的 DELAY 交付无法 drain。
+     * 该值为 true 时业务必须走 {@code RouteDsl.waitForUiFunction}。context 无 runtime 时返回 false。</p>
+     */
+    public static boolean hasActiveDelayRoutes(BrowserContext context) {
+        if (context == null) {
+            return false;
+        }
+        RouteRuntime rt = RUNTIMES.get(context);
+        return rt != null && rt.hasActiveDelay();
+    }
+
+    /**
      * 取走指定 context 已采集的 API 快照（消费式；幂等）。
      *
      * <p>CAPTURE 采集的业务消费出口（诊断 / 报告）；runtime 不存在时返回空列表。

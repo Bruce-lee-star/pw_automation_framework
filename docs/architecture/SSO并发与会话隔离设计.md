@@ -399,7 +399,8 @@ gate 只解决 "登录 /restore 串行"，**解决不了轮换窗口期**，必�
 2. **DELAY 交付一律重入拥有线程**：入队的 `deliver` 由 **main 业务线程** `drainMainThreadActions()` 串行执行（`ResumeOptions/fulfillWithBody` 均为 sendMessageAsync，零泵连接）。drain 触发点已覆盖：step 边界（`PlaywrightListener` 每步后）、断言/采集查询、注册前、context 收尾 close——协议调用 100% 收敛到 main，与 `RouteRuntimeImpl` 既定原则一致。
 3. **移除"直发"模式**：`delayDeliveryMainQueue` 开关（及其"在调度线程直接 resume"的默认分支）是多余且违规的**第三写入面**，与零容忍矛盾，永久删除；DELAY 交付不再有"落在调度线程"的路径。
 4. **非-DELAY 路径（本项范围外）**：`fulfill/resume` 仍落在 Playwright 事件/pump 线程（其天然拥有者——`route` 由该线程送达，属合法单一拥有者），本项不动。其与 main 线程的"理论双写入面"作为**后续统一项**单列（全量 main 拥有线程需配套 `RouteDsl.waitForUiFunction` 迁移，风险大，不随本项实施）。
-5. **前提契约（硬约束）**：使用 DELAY 的 scenario，其 UI 等待**必须**走 `RouteDsl.waitForUiFunction`（内部循环 drain + 短窗 `page.waitForFunction`），**禁止**原生 `page.waitForFunction`——否则 main 阻塞在等待中无人 drain，延迟交付卡到 15s 超时（run-b 实证）。框架可加 ArchUnit / 运行期 guard 拦截原生 `waitForFunction` + 活跃 route 的组合。
+5. **前提契约（硬约束）**：使用 DELAY 的 scenario，其 UI 等待**必须**走 `RouteDsl.waitForUiFunction`（内部循环 drain + 短窗 `page.waitForFunction`），**禁止**原生 `page.waitForFunction`——否则 main 阻塞在等待中无人 drain，延迟交付卡到 15s 超时（run-b 实证）。
+   **运行期 guard 已实现**：`RecordingPageProxy`（`Page` 动态代理的唯一拦截点）拦截 `waitForFunction`，当 `RouteEngine.hasActiveDelayRoutes(ctx)` 为真时直接抛 `BrowserException` 强制改用 `RouteDsl.waitForUiFunction`；`RouteDsl.waitForUiFunction` 内部经 `PageRefs.unwrap` 对**真实 Page** 调用 `waitForFunction`，故被授权通道不会被自身 guard 误伤。消费方项目可再补 ArchUnit 静态门禁（禁业务源码直接调用 `Page/Frame.waitForFunction`）作构建期兜底。
 
 **验证**：§6.3 torture 已含 DELAY 路径；`DelayAppliesWaitTest#mainQueueModeDeliversOnlyAfterMainDrain` 已验证"交付只在 main drain 后发生"。
 

@@ -2,12 +2,15 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.recording;
 
 import com.microsoft.playwright.APIRequest;
 import com.microsoft.playwright.APIResponse;
+import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.ElementHandle;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycle;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 
 import java.lang.reflect.InvocationHandler;
@@ -159,6 +162,24 @@ public final class RecordingPageProxy {
             if (method.getName().startsWith("on")) {
                 return method.invoke(target, args);
             }
+            // 运行期 guard（§8.4 零容忍）：原生 waitForFunction 阻塞 main 业务线程，使已入队 main 的
+            // DELAY 交付（resume/fulfill）无法被 drain ⇒ 延迟响应卡死（E2E run-b 实证 15s 超时）。
+            // 当前 context 仍有生效 DELAY 规则时，原生 waitForFunction 一律拒绝，强制走
+            // RouteDsl.waitForUiFunction（内部循环 drain + 短窗等待）。框架自身的 waitForUiFunction
+            // 已对真实 Page 调用 waitForFunction（绕过本代理），不会被本 guard 误伤。
+            if ("waitForFunction".equals(method.getName())) {
+                BrowserContext ctx = contextOf(target);
+                if (ctx != null) {
+                    RouteLifecycle lc = RouteLifecycleRegistry.get();
+                    if (lc != null && lc.hasActiveDelayRoutes(ctx)) {
+                        throw new BrowserException(
+                                "Native page.waitForFunction is forbidden while DELAY routes are armed for this context "
+                                        + "(it blocks the main thread so delayed resume/fulfill can never drain -> 15s timeout, "
+                                        + "violating SSO/route design S8.4 zero-tolerance). Use RouteDsl.waitForUiFunction(...) instead, "
+                                        + "which drains the main action queue in a loop before each short wait window.");
+                    }
+                }
+            }
             // Layer A 录制：刷新待报告 API 数据 + 录制动作，再委托真实对象（flush 在 op 前，与 SerenityRecorder.record 一致）
             SerenityRecorder.recordNative(method.getName(), summarize(args), null);
             Object result;
@@ -171,6 +192,27 @@ public final class RecordingPageProxy {
             }
             // 递归包装可录制的返回值
             return wrapIfRecordable(result, method.getReturnType());
+        }
+
+        /**
+         * 从被包装的真实对象取回其 {@link BrowserContext}（运行期 guard 用）。
+         *
+         * <p>waitForFunction 仅存在于 {@link Page} / {@link Frame} 上：Page 直接取 context；Frame 经
+         * {@code page().context()} 取。取不到（测试替身 / 非受管对象）返回 null ⇒ guard 跳过（fail-open），
+         * 不干扰正常路径。</p>
+         */
+        private static BrowserContext contextOf(Object target) {
+            try {
+                if (target instanceof Page p) {
+                    return p.context();
+                }
+                if (target instanceof Frame f) {
+                    return f.page().context();
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debug("[RecordingPageProxy] cannot resolve context for waitForFunction guard: {}", e.toString());
+            }
+            return null;
         }
 
         private static Object summarize(Object[] args) {

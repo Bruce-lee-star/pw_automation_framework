@@ -102,6 +102,18 @@ public interface RouteRuntime extends AutoCloseable {
     boolean isDegraded();
 
     /**
+     * 当前 context 是否仍有<b>已武装且生效</b>的 DELAY 规则（delay>0 且未被 stop）。
+     *
+     * <p>运行期 guard 判定信号：原生 {@code page.waitForFunction} 会阻塞 main 业务线程，
+     * 使已入队 main 的 DELAY 交付（resume/fulfill）无法被 drain ⇒ 延迟响应卡死（§8.4 零容忍）。
+     * 该值为 true 时业务必须走 {@code RouteDsl.waitForUiFunction}（内部循环 drain）。</p>
+     *
+     * @return true=存在生效的 DELAY 规则
+     * @apiNote framework-internal
+     */
+    boolean hasActiveDelay();
+
+    /**
      * 目的达成即撤销该 pattern 的绑定（T2+：<b>规则随目的生灭</b>取代"随用例生灭"）。
      *
      * <p>调用方（目的定案路径，如 MONITOR 断言结算）只需提交 pattern；实现必须<b>不在调用线程同步撤销</b>

@@ -74,4 +74,19 @@ public interface RouteLifecycle extends CaptureControl, RegistryControl, EngineC
     default void drainMainThreadActions(Object context) {
         // 未实现时 no-op（兼容既有实现与测试替身）
     }
+
+    /**
+     * 运行期 guard 信号（§8.4 零容忍）：指定 context 是否仍有<b>生效的 DELAY 规则</b>。
+     *
+     * <p>原生 {@code page.waitForFunction} 会阻塞 main 业务线程，使已入队 main 的 DELAY 交付
+     * （resume/fulfill）无法被 drain ⇒ 延迟响应卡死（E2E run-b 实证 15s 超时）。该值为 true 时
+     * 业务必须走 {@code RouteDsl.waitForUiFunction}（内部循环 drain）。</p>
+     *
+     * @param context 目标 BrowserContext（非 BrowserContext / null 一律返回 false）
+     * @return true=存在生效的 DELAY 规则
+     */
+    default boolean hasActiveDelayRoutes(Object context) {
+        // 未实现时 no-op（兼容既有实现与测试替身）
+        return false;
+    }
 }

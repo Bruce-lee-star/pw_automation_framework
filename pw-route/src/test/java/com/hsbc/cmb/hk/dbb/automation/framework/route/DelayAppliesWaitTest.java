@@ -203,4 +203,22 @@ public class DelayAppliesWaitTest {
         assertTrue("DELAY 交付真实时延不足: " + elapsedMs + "ms（要求 delay=1000ms）",
                 elapsedMs >= 800);
     }
+
+    /**
+     * 运行期 guard 信号（§8.4）：DELAY 规则武装后 {@code hasActiveDelayRoutes} 为真，
+     * {@code stopDelay} 后归假——RecordingPageProxy 据此拒绝原生 waitForFunction。
+     */
+    @Test
+    public void activeDelayRoutesSignalTogglesWithArming() {
+        mockContext();
+        RouteDsl.on(ctx)
+                .api("/api/signal/**")
+                .delay(1)
+                .done()
+                .start();
+        assertTrue("DELAY 武装后 hasActiveDelayRoutes 必须为真", RouteEngine.hasActiveDelayRoutes(ctx));
+        RouteEngine.stopDelay(ctx, "/api/signal/**");
+        assertTrue("stopDelay 后 DELAY 已停，hasActiveDelayRoutes 必须归假",
+                !RouteEngine.hasActiveDelayRoutes(ctx));
+    }
 }

@@ -276,6 +276,22 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         return degraded.get();
     }
 
+    @Override
+    public boolean hasActiveDelay() {
+        if (closed.get()) {
+            return false;
+        }
+        // 只读快照（无锁）；任一未停止且 delay>0 的 DELAY 能力位即视为"生效"。
+        for (Map<RouteCapability, ApiSpec> byCap : ruleSnapshot().rules().values()) {
+            ApiSpec spec = byCap.get(RouteCapability.DELAY);
+            if (spec != null && !spec.isStopped(RouteCapability.DELAY)
+                    && (spec.delayMs() > 0 || spec.delayMinMs() > 0 || spec.delayMaxMs() > 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 标记路由设施降级（注册失败，或撤销自愈后仍不可确证）。
      *

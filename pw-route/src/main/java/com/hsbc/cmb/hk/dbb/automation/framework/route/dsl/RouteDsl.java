@@ -160,7 +160,11 @@ public final class RouteDsl {
                         "waitForUiFunction timed out after " + timeoutMs + "ms: " + pageFunction);
             }
             try {
-                page.waitForFunction(pageFunction, arg,
+                // 对真实 Page 调用 waitForFunction（绕过 RecordingPageProxy 的 waitForFunction guard）：
+                // 本方法本身是经框架授权的等待通道，内部已循环 drain 入队 DELAY 交付，不应被 guard 误伤。
+                Page realPage = (Page) com.hsbc.cmb.hk.dbb.automation.framework.common.route.PageRefs
+                        .unwrap(page);
+                realPage.waitForFunction(pageFunction, arg,
                         new Page.WaitForFunctionOptions().setTimeout(Math.min(UI_WAIT_SLICE_MS, remainingMs)));
                 return; // 条件满足
             } catch (com.microsoft.playwright.TimeoutError e) {

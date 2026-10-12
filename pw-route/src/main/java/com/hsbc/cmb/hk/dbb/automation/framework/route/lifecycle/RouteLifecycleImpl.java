@@ -180,4 +180,12 @@ public class RouteLifecycleImpl implements RouteLifecycle {
             com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine.drainMainThreadActions(bc);
         }
     }
+
+    @Override
+    public boolean hasActiveDelayRoutes(Object context) {
+        if (context instanceof com.microsoft.playwright.BrowserContext bc) {
+            return com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine.hasActiveDelayRoutes(bc);
+        }
+        return false;
+    }
 }
