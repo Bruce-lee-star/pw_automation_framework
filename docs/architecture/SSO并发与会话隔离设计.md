@@ -351,7 +351,7 @@ public enum SsoSessionState { VALID, SUSPECT, INVALID }
 **铁律**：协议层异常 ≠ SSO 会话失效。禁止在 `Object doesn't exist` / 导航中断时 `authCache.delete()` + `reLogin()`。
 
 ### 6.3 验证门禁（CI 通道压测）
-- CI 加入"故意高并行 + 故意慢 handler + 故意中断导航"的 torture 用例集，断言**运行期协议异常计数 == 0**；非零则**构建失败（fail-closed）**，并输出诊断定位所有权违规。
+- CI 加入"故意高并行 + 故意慢 handler + 故意中断导航 + **故意启用 DELAY 能力（触发调度线程重入路径）**"的 torture 用例集，断言**运行期协议异常计数 == 0**；非零则**构建失败（fail-closed）**，并输出诊断（线程 / context GUID / 对象 GUID / 栈）定位所有权违规。DELAY 路径必须覆盖，因跨线程 `route` 驱动调用只在该路径暴露。
 - SUSPECT 仅作为兜底安全网：即便发生，也不破坏 SSO 缓存、不重登，并计入框架质量信号推动治理收敛到零。
 
 ***
@@ -387,7 +387,9 @@ gate 只解决 "登录 /restore 串行"，**解决不了轮换窗口期**，必�
 ### 8.3 门禁
 - ArchUnit 静态门禁：`route..` 包不得依赖 `..playwright.Page..` 的写方法（L6）。
 - 运行时检测：handler 入口打印线程名 /threadId；CI 加故意慢 handler 用例，验证不阻塞页面；验证 handler 抛错不污染其他 scenario。
-- 并发安全已由 `RouteClaim`（CAS 单所有者状态机，解决 `RouteImpl.handled` 非原子 TOCTOU）+ `BoundedOps`（有界 IO）+ `RouteIoExecutor`（独立 IO 线程）在 route 模块内独立保证，**与 SSO gate 正交**。
+- **并发护栏（有效）**：`RouteClaim`（CAS 单所有者状态机，解决 `RouteImpl.handled` 非原子 TOCTOU——同一 `Route` 仅一个终结者）+ `BoundedOps`（有界同步 `fetch` 预算，防浏览器侧连接耗尽）。二者是 route 模块真实有效的并发护栏。
+- **独立 IO / 调度线程不是安全保证，反而是风险源**：`RouteIoExecutor` 仅用于提交 DELAY 调度任务（随即返回），本身不操作 `route`；但 Playwright `Route`/`Request`/`Response` 与底层 `Connection` 的回调/对象表（HashMap）**非线程安全**，协议调用（`route.fulfill`/`resume`/`fetch`）必须落在**单一拥有线程**。`RouteDelayScheduler` 的延迟回调在默认"直发"模式下落在**调度线程**（非拥有线程），构成跨线程驱动连接的竞态窗口——正是 §2 铁律与 §6 零容忍要杜绝的协议异常来源。**修复（强制）**：DELAY 到点回调必须经拥有线程重入（`setDelayDeliveryMainQueue(true)`，把 `fulfill/resume` 入队由拥有线程 `drainMainThreadActions` 执行），**禁止**在独立 IO / 调度线程上直接操作 `route`；启用该模式的前提是用 DELAY 的 scenario 改用 `RouteDsl.waitForUiFunction`（不能用原生 `page.waitForFunction`，否则 main 阻塞无人 drain → 15s 超时）。
+- route 并发隔离与 SSO 登录并发隔离**正交**（互不重叠）。
 
 ***
 
