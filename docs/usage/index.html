@@ -174,14 +174,11 @@
 <!-- ============ 3 快速开始 ============ -->
 <section id="quickstart">
   <h2><span class="n">3</span>快速开始</h2>
-  <p class="lead">前置：JDK 21、Maven 3.9+、可联网装浏览器。</p>
-<pre><code># 1) 首次：安装 Playwright 浏览器（chromium）
-mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"
-
-# 2) 构建 + 全量校验（含 SpotBugs / Checkstyle / 汇总报告）
+  <p class="lead">前置：JDK 21、Maven 3.9+、浏览器已就绪（首次需联网拉取一次，见 FAQ）。</p>
+<pre><code># 1) 构建 + 全量校验（含 SpotBugs / Checkstyle / 汇总报告）
 mvn -B verify -DskipITs
 
-# 3) 只跑测试工程（自动带上各框架模块）
+# 2) 只跑测试工程（自动带上各框架模块）
 mvn -pl test-automation -am test</code></pre>
 
   <h3>常用开关</h3>
@@ -448,7 +445,29 @@ RoleElementPicker.pickAndWrite(page, "src/test/java",
 
 // 拾取并弹出可复制代码面板（拾取完直接弹框，复制即用）
 RoleElementPicker.pickAndShow(page, "com.xxx.tests.pages", "LoginPage", "nls/login.nls.json");</code></pre>
-  <div class="tip"><b>拾取模式</b>：当前只有<b>手动模式</b>（点哪个元素拾哪个）。整页扫描 / 区域扫描已从框架移除，故拾取器只采集你主动点选的少数控件——非常适合页面冗杂、只需其中几个元素的场景。</div>
+  <div class="tip"><b>拾取模式</b>：当前只有<b>手动模式</b>（点哪个元素拾哪个），拾取器只采集你主动点选的少数控件——非常适合页面冗杂、只需其中几个元素的场景。</div>
+
+  <h3>常用 API（方法签名速查）</h3>
+  <p>所有方法都在 <code>com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker</code> 下，静态调用。先拿到当前线程的 <code>Page</code>：在 Page 对象里调用 <code>getPage()</code>，或在 Steps 里用 <code>getPage()</code>。</p>
+  <table>
+    <thead><tr><th>方法</th><th>作用</th><th>返回 / 说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>openPanel(Page, String... nlsFiles)</code></td><td>打开常驻面板；类名由当前 URL 自动派生（如 <code>/login</code> → <code>LoginPage</code>）。阻塞直到面板关闭或点击「终止运行」。</td><td>无；用户点「终止运行」抛 <code>PickerAbortedException</code></td></tr>
+      <tr><td><code>openPanel(Page, String packageName, String pageClassName, String stepClassName, String... nlsFiles)</code></td><td>完整重载：自定义包名 / 页面类 / 步骤类名。</td><td>无</td></tr>
+      <tr><td><code>pick(Page)</code></td><td>阻塞式拾取（无 nls 反查）。开启 → 等你点选（ESC 或超时结束）→ 关闭。</td><td><code>List&lt;RoleEntry&gt;</code>（可能为空草稿）</td></tr>
+      <tr><td><code>pick(Page, String... nlsFiles)</code></td><td>拾取并预加载 nls 反向查表，命中即用真实 key。</td><td><code>List&lt;RoleEntry&gt;</code></td></tr>
+      <tr><td><code>pickAndWrite(Page, String outputDir, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并写入源码文件（<code>outputDir</code> 如 <code>src/test/java</code>）。</td><td>无（写磁盘）</td></tr>
+      <tr><td><code>pickAndShow(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并弹出可复制代码面板（最贴近 <code>page.pause()</code>）。</td><td>无</td></tr>
+      <tr><td><code>pickAndGenerate(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并生成源码字符串（不落盘）。</td><td><code>String</code></td></tr>
+      <tr><td><code>pickAndDump(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并打印生成源码到日志。</td><td>无</td></tr>
+      <tr><td><code>showCode(Page, String code)</code></td><td>弹出一个可复制代码面板（展示任意已有代码）。</td><td>无</td></tr>
+      <tr><td><code>start(Page)</code> / <code>start(Page, String nlsReverseJson)</code></td><td>底层：仅开启拾取模式（不预生成）。</td><td>无</td></tr>
+      <tr><td><code>stop(Page)</code></td><td>底层：关闭拾取模式、清监听。</td><td>无</td></tr>
+      <tr><td><code>getEntries(Page)</code> / <code>getSteps(Page)</code></td><td>底层：不阻塞读取当前已拾元素 / 已拾 step 序列。</td><td><code>List&lt;RoleEntry&gt;</code> / <code>List&lt;List&lt;RoleEntry&gt;&gt;</code></td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>关于状态读取</b>：面板里的「已拾列表 / 生成代码」是<b>显式读回</b>的——没有可订阅的「重载事件」。需要程序化拿到最新结果，直接调用 <code>getEntries(page)</code> / <code>getSteps(page)</code> / <code>pickAndGenerate(...)</code>，它们返回的是当前内存态的快照。</div>
+  <div class="note"><b>CI 自动跳过</b>：以上所有入口在检测到 CI 环境变量（Jenkins / GitHub Actions / GitLab CI / TeamCity 等）时会<b>直接跳过或返回空</b>，不会卡住等待人工交互——本地有头浏览器 + <code>-Ddbb.codegen.enabled=true</code> 才真正生效。</div>
 
   <h3>NLS 反查（让生成的 key 直接用真实多语言名）</h3>
   <p>传入 nls 文件路径后，拾取时会用被点元素的 a11y name <b>反查</b>该表；命中则生成的 <code>@RoleElement</code> 直接复用真实 key，未命中回退为 slug。nls 文件格式（按语言分组，<b>文本值 → key</b>）：</p>
