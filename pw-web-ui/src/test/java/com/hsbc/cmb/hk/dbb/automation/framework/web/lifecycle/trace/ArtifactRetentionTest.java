@@ -17,7 +17,8 @@ import static org.junit.Assert.assertTrue;
  * 产物保留治理守卫（2026-09-17 企业级落盘治理）。
  *
  * <p>核心不变量：<b>本次 run 的产物永不删除</b>（只清理 mtime 早于本次 run 起点的遗留物）——
- * trace 已按用例切分为独立文件，误删即等于删掉用例证据。其余按"保留期 → 总量/条数上限（最旧优先）"收敛。
+ * trace 已按用例切分为独立文件，误删即等于删掉用例证据。其余仅按"总量/条数上限（最旧优先）"收敛；
+ * "按天保留"交由 CI artifact 过期策略，不在框架内盲删。
  */
 public class ArtifactRetentionTest {
 
@@ -59,7 +60,7 @@ public class ArtifactRetentionTest {
 
         // 上限压到 1 字节/1 个文件（`<=0` 语义是"不限制"，故此处用 1 而非 0）：
         // 遗留文件应被删以满足上限，而本次 run 的文件必须保留（即使因此无法满足上限）
-        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 0, 1, 1);
+        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 1, 1);
 
         assertEquals("只应删除早于 run 起点的遗留文件", 1, r.deleted);
         assertTrue("本次 run 的产物绝不能被删除", Files.exists(dir.resolve("current-b.zip")));
@@ -74,7 +75,7 @@ public class ArtifactRetentionTest {
         Path middle = file("t-2.zip", 10, runStart - 2_000);
         Path newest = file("t-3.zip", 10, runStart - 1_000);
 
-        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 0, 0, 2);
+        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 0, 2);
 
         assertEquals(1, r.deleted);
         assertEquals(1, r.deletedByCap);
@@ -90,7 +91,7 @@ public class ArtifactRetentionTest {
         Path big = file("big-old.zip", 4_000, runStart - 5_000);
         Path small = file("small-new.zip", 1_000, runStart - 1_000);
 
-        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 0, 2_000, 0);
+        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 2_000, 0);
 
         assertEquals("需删到总字节 <= 2000", 1, r.deleted);
         assertTrue("最旧（也是最大）的文件应被删以满足容量上限", !Files.exists(big));
@@ -98,30 +99,13 @@ public class ArtifactRetentionTest {
         assertTrue("剩余字节应在上限内：" + r.remainingBytes, r.remainingBytes <= 2_000);
     }
 
-    /** 保留期：候选龄超过阈值即删（与容量无关）。 */
-    @Test
-    public void prunesByAge() throws IOException {
-        long now = System.currentTimeMillis();
-        long runStart = now;
-        Path ancient = file("ancient.zip", 10, now - 30L * 24 * 3600_000L); // 30 天前
-        Path recentOld = file("recent-old.zip", 10, now - 1_000);           // 1 秒前（仍早于 runStart）
-
-        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(
-                dir, runStart, 7L * 24 * 3600_000L, 0, 0);
-
-        assertEquals(1, r.deleted);
-        assertEquals(1, r.deletedByAge);
-        assertTrue("超龄文件应被删", !Files.exists(ancient));
-        assertTrue("未超龄的遗留文件应保留", Files.exists(recentOld));
-    }
-
     /** 目录缺失 / 非目录：no-op，绝不抛异常（治理不得影响主流程）。 */
     @Test
     public void missingDirectoryIsNoop() {
         ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(
-                dir.resolve("not-exists"), 1L, 1L, 1L, 1);
+                dir.resolve("not-exists"), 1L, 1L, 1);
         assertEquals(0, r.deleted);
-        ArtifactRetention.PruneResult r2 = ArtifactRetention.pruneDirectory(null, 1L, 1L, 1L, 1);
+        ArtifactRetention.PruneResult r2 = ArtifactRetention.pruneDirectory(null, 1L, 1L, 1);
         assertEquals(0, r2.deleted);
     }
 
@@ -130,7 +114,7 @@ public class ArtifactRetentionTest {
     public void noCapsMeansNoDeletion() throws IOException {
         long runStart = 10_000_000L;
         file("k.zip", 100, runStart - 1_000);
-        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 0, 0, 0);
+        ArtifactRetention.PruneResult r = ArtifactRetention.pruneDirectory(dir, runStart, 0, 0);
         assertEquals(0, r.deleted);
         assertEquals(1, r.remainingFiles);
     }

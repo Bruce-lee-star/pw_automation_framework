@@ -520,8 +520,6 @@ public enum WebFrameworkConfig {
     /** 目标目录文件数上限。 */
     PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_FILES(ConfigKeys.WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_FILES),
 
-    /** 保留期（天）：超过此龄的文件在下次治理时删除。 */
-    PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_AGE_DAYS(ConfigKeys.WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_AGE_DAYS),
 
     /**
      * 需治理的目录列表（逗号分隔）。注意：<b>本次 run 产出的文件永不删除</b>

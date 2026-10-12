@@ -273,7 +273,10 @@ public class PageElement {
      */
     public PageElement jsClick() {
         executeWithRetry(() -> {
-            locatorInternal().evaluate("el => el.click()",
+            // 注意：Locator.evaluate 只有 (String,Object) / (String) / (String,Object,Options) 三种重载，
+            // 没有 (String,Options)。把 Options 当第 2 参会退化成 (String,Object)，使超时设定被静默丢弃，
+            // 故此处显式用 3 参重载，arg 传 null（函数体 "el => el.click()" 只接收元素这一实参）。
+            locatorInternal().evaluate("el => el.click()", (Object) null,
                     new Locator.EvaluateOptions().setTimeout(opTimeout()));
             return true;
         }, "jsClick");
@@ -852,7 +855,8 @@ public class PageElement {
      */
     public Object evaluate(String expression) {
         try {
-            return locatorInternal().evaluate(expression,
+            // 同 jsClick：必须用 3 参重载，arg 传 null，否则 Options 会被当 arg 静默丢弃。
+            return locatorInternal().evaluate(expression, (Object) null,
                     new Locator.EvaluateOptions().setTimeout(opTimeout()));
         } catch (PlaywrightException e) {
             throw new ElementOperationException("evaluate", selector,

@@ -481,11 +481,6 @@ public enum ConfigKeys {
         "500",
         "产物目录文件数上限"
     ),
-    WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_AGE_DAYS(
-        "playwright.artifacts.retention.max.age.days",
-        "14",
-        "产物保留期（天）"
-    ),
     WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_DIRS(
         "playwright.artifacts.retention.dirs",
         "target/site/serenity/traces,target/screenshots,target/screenshots-webp",
