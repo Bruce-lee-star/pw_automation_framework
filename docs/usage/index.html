@@ -731,6 +731,26 @@ baseStep().loadEndpointConfig("user", "get");
 baseStep().getResource();</code></pre>
   <div class="note">配置按 <code>end-points.&lt;name&gt;.&lt;method&gt;</code> 组织；<code>name</code> 支持点号分层（如 <code>user.findById</code>）。也支持动态配置（不声明实体，直接 <code>setBaseUri</code> / <code>setEndpoint</code>）。</div>
 
+  <h3>多环境切换（dev / test / prod）</h3>
+  <p>环境通过 <code>withEnv("dev")</code> 显式传入（线程级、并行安全），对应配置文件里的同名节点会被合并到基础配置之上。优先级：<b>环境节点 &gt; 实体 conf &gt; application.conf</b>。环境节点里可覆盖<b>任意</b>节点（baseUri、headers、timeout 等）。</p>
+<pre><code># petstore.conf（HOCON）
+api.base.uri.default = "https://api.example.com"   # 默认 http://localhost
+headers.Accept = "application/json"
+
+end-points {
+  login   { post { path = "/auth/login"  payload = "payloads/login.json" } }
+  profile { get  { path = "/api/profile" } }
+}
+
+# 环境覆盖节点：withEnv("dev") 时生效
+dev {
+  api.base.uri.default = "https://api.dev.example.com"
+  headers.Authorization = "Bearer dev-fixed-token"   # 静态 token 可直接写（支持 ENC(...) 加密）
+}
+test  { api.base.uri.default = "https://api.test.example.com" }
+prod  { api.base.uri.default = "https://api.prod.example.com" }</code></pre>
+  <div class="note">也支持运行参数 <code>-Denv=dev</code> 或环境变量 <code>env=dev</code>（由 <code>EnvironmentUtils</code> 解析）；但 <code>withEnv</code> 语义更明确、且不会污染 JVM 全局，并行下互不串环境。务必在 <code>@After</code> 调用 <code>TestServices.clear()</code>。</div>
+
   <h3>发请求</h3>
   <table>
     <thead><tr><th>方法</th><th>含义</th></tr></thead>
@@ -776,26 +796,59 @@ String body = baseStep().getResponseJson();        // 响应体字符串
 // 衔接 REST Assured 原生断言（返回 ValidatableResponse）
 baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(3));</code></pre>
 
-  <h3>完整示例（Steps 片段）</h3>
+  <h3>链路串联：提取返回值 + token 注入</h3>
+  <p>一条业务链路（登录 → 取 token → 调目标 API → 取信息 → 再调）放在<b>同一个 <code>BaseStep</code> 实例</b>上：它持有 <code>baseUri</code> / <code>headers</code> / 上一次响应，所以登录后提取的 token 注入实例，后续请求自动带上；某响应里要被下一步用到的值，提取出来存到 Steps 字段，下一步直接用。</p>
+  <div class="tip"><b>提取返回值两种方式</b>：
+    ① 推荐——<code>JsonPath.read(step.getResponseJson(), "$.data.id")</code>（用响应体字符串，类型无关、最稳）；
+    ② 快捷——<code>step.getValidatableResponse().extract().path("$.token")</code>（REST Assured 原生）。
+    JSONPath 支持 <code>$.data.id</code>、<code>data.items[0].name</code>。</div>
+  <div class="warn"><b>注意</b>：每次发请求都会<b>覆盖</b>实例里的响应，提取要在「下一次请求之前」完成；跨 step 传递的业务值请存在 Steps 类字段（<code>BaseStep</code> 不自动存业务值）。</div>
+
+  <h3>完整示例（链路串联 Steps 片段）</h3>
 <pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.services.TestServices;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.BaseStep;
+import com.jayway.jsonpath.JsonPath;
 
-public class UserApiSteps extends UIInteractionSteps {
-    // 取当前线程的 BaseStep（entity/env 已在 init 时设定）
-    private BaseStep baseStep() { return TestServices.initialize().baseStep(); }
+public class OrderApiSteps extends UIInteractionSteps {
+    // 同一实例串起整条链路；withEnv 见多环境切换
+    private final BaseStep step =
+            TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
 
-    @Given("an entity with {string}")
-    public void initEntity(String name) { TestServices.initialize().withEntity(name); }
+    private String userId;   // 提取出来、给后续 step 用的信息
 
-    @When("I set endpoint to {string}")
-    public void setEndpoint(String ep) { baseStep().setEndpoint(ep); }
+    @Given("登录并拿到 token")
+    public void login() {
+        step.setEndpoint("/auth/login");
+        step.addRequestHeader("Content-Type", "application/json");
+        step.setRequestPayload("{ \"user\":\"alice\", \"pwd\":\"secret\" }");
+        step.postPayload();                                              // ① 发登录
 
-    @When("I send GET request")
-    public void get() { baseStep().getResource(); }
+        String token = JsonPath.read(step.getResponseJson(), "$.token"); // ② 提取 token
+        step.addRequestHeader("Authorization", "Bearer " + token);       // ③ 注入，后续自动带
+    }
 
-    @Then("response field {string} should be {int}")
-    public void check(String path, int v) { baseStep().verifyResponseJsonPath(path, v); }
+    @When("查询我的资料")
+    public void getProfile() {
+        step.setEndpoint("/api/profile");
+        step.getResource();                                             // ④ 已带 Authorization
+
+        userId = JsonPath.read(step.getResponseJson(), "$.data.id");    // ⑤ 提取依赖信息
+    }
+
+    @When("用该 id 下单")
+    public void createOrder() {
+        step.setEndpoint("/api/orders");
+        step.setRequestPayload("{ \"userId\":\"" + userId + "\", \"item\":\"book\" }");
+        step.postPayload();                                             // ⑥ 依赖第二步的 userId
+    }
+
+    @Then("下单成功")
+    public void assertOrder() {
+        step.verifyResponseStatusCode(201);
+        step.verifyResponseJsonPath("$.status", "CREATED");
+    }
 }</code></pre>
+  <div class="note">更省事：把 <code>login</code> / <code>profile</code> 的 <code>path</code> / <code>payload</code> / 固定 <code>headers</code> 声明在 conf 的 <code>end-points</code> 里，用 <code>step.loadEndpointConfig("login", "post")</code> 一次性灌好，再 <code>postPayload()</code>。动态 token 仍走 <code>addRequestHeader</code>。</div>
 
   <div class="warn"><b>收尾（重要）</b>：<code>TestServices</code> 的实例按线程隔离，但线程复用（Cucumber 复跑 scenario、线程池复用）时若不清理，下一个场景会读到上一个场景遗留的 entity / env / BaseStep 配置，导致<b>跨场景串扰</b>——表现为随机失败、极难定位。请在 <code>@After</code> 钩子里统一调用 <code>TestServices.clear()</code> 释放当前线程的状态。</div>
 </section>
