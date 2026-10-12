@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.microsoft.playwright.Page;
@@ -215,8 +214,7 @@ public class PlaywrightScreenshotManager {
      * </ul>
      *
      * @apiNote 落盘目录固定为 {@code target/site/serenity}（Serenity 报告目录），后缀 {@code .png}。
-     *          <b>切勿</b>在此链路改用 WebP——Serenity 4.2.0 对截图后缀/格式有内部假设，改用 WebP 会破坏
-     *          报告渲染。WebP 合规截图请走 {@link #takeScreenshotWebp(String)}（独立归档目录）。
+     *          Serenity 4.2.0 对截图后缀/格式有内部假设，必须保持 PNG。
      */
     public static String takeScreenshot(String title) {
         Page page = PlaywrightManager.getPageThreadLocal();
@@ -244,50 +242,6 @@ public class PlaywrightScreenshotManager {
             // 全页模式下注入了高度裁切样式，截图完成后还原，避免影响后续操作。
             //  修复问题1（加固）：以实际传入的 fullPage 参数为准（与 stabilizeBeforeScreenshot 的注入条件一致），
             // 而非 PlaywrightManager.config().isFullPageScreenshot()，避免参数与配置不一致时漏恢复导致页面被永久裁剪。
-            if (!page.isClosed() && fullPage) {
-                restorePageHeightStyle(page);
-            }
-        }
-    }
-
-    /**
-     * WebP 合规截图（仅落<b>自建归档目录</b>，绝不影响 Serenity 报告 PNG）。
-     *
-     * <p>对应 Playwright 1.62 升级评估报 §3.1：WebP 较 PNG 体积降 60–80%，用于 CI 制品与合规证据瘦身。
-     * <b>刻意不写入 {@code target/site/serenity}</b>（Serenity 4.2.0 对截图后缀/格式有内部假设），只落独立
-     * 归档目录（{@code playwright.screenshot.webp.archiveDir}），避免破坏 Serenity 报告渲染。
-     *
-     * <p>行为与主 PNG 截图完全一致（稳定化/字体绕过/全页上限/降级重试），仅格式与落盘目录不同；
-     * 由开关 {@code playwright.screenshot.webp.enabled} 控制，禁用或任何异常时静默返回 null。
-     *
-     * @param title 截图标题
-     * @return WebP 截图文件路径（字符串）；禁用或失败返回 null
-     */
-    public static String takeScreenshotWebp(String title) {
-        if (!WebFrameworkConfig.PLAYWRIGHT_WEBP_SCREENSHOT_ENABLED.getBooleanValue()) {
-            return null;
-        }
-        Page page = PlaywrightManager.getPageThreadLocal();
-        if (page == null || page.isClosed()) {
-            return null;
-        }
-        Path screenshotDir = Paths.get(WebFrameworkConfig.PLAYWRIGHT_WEBP_SCREENSHOT_ARCHIVE_DIR.getValue());
-        try {
-            Files.createDirectories(screenshotDir);
-        } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to create WebP archive dir {}: {}",
-                    screenshotDir, e.getMessage());
-            return null;
-        }
-        boolean fullPage = PlaywrightManager.config().isFullPageScreenshot();
-        long timeoutMs = (long) PlaywrightManager.config().getScreenshotTimeout();
-        int quality = WebFrameworkConfig.PLAYWRIGHT_WEBP_SCREENSHOT_QUALITY.getIntValue();
-        VerboseLogging.logDebugIfVerbose(logger,
-                "WebP screenshot request: title={}, fullPage={}, quality={}", title, fullPage, quality);
-        try {
-            return captureScreenshot(page, title, screenshotDir, ".webp", ScreenshotType.WEBP, quality, fullPage, timeoutMs);
-        } finally {
-            // 同上：入口已判空
             if (!page.isClosed() && fullPage) {
                 restorePageHeightStyle(page);
             }

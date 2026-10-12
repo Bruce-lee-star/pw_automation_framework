@@ -57,7 +57,7 @@ public final class ScenarioTraceRecorder {
     private static final Logger logger = LoggerFactory.getLogger(ScenarioTraceRecorder.class);
 
     /** trace 落盘目录（与 Serenity 报告同目录，报告内可直接下载）。 */
-    private static final String TRACE_DIR = "target/site/serenity/traces";
+    static final String TRACE_DIR = "target/site/serenity/traces";
 
     /** 文件名片段最大长度（防超长名，文件系统上限 255）。 */
     private static final int MAX_NAME_FRAGMENT = 120;
@@ -217,7 +217,7 @@ public final class ScenarioTraceRecorder {
                 return;
             }
             attachToReport(file, scenarioId, startMs, endMs);
-            ArtifactRetention.pruneIfDue();
+            TraceRetention.pruneIfDue();
         } catch (Exception e) {
             // tracing 未启动 / 已停止 / 写盘失败 / 目标被占用：一律删残片，绝不把坏 zip 挂进报告
             deletePartialFile(file, e.getMessage());

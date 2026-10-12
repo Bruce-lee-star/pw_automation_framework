@@ -11,11 +11,6 @@ import com.microsoft.playwright.TimeoutError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -28,7 +23,6 @@ import java.util.function.Supplier;
  *       （{@code count()} / {@code isVisible()} / {@code isEnabled()} / {@code isEditable()}），
  *       {@link #getObstructingElements()} 用 actionability {@code trial} 判遮挡，
  *       {@link #getPageUrl()} / {@link #getPageTitle()} 记录失败现场；
- *       {@link #captureFailureScreenshot(String)} 存一张失败截图。
  *       产出由 {@code ElementOperationSupport} 装配进 {@link ElementOperationException}，
  *       最终出现在 Serenity/Cucumber 报告与控制台 —— 那是本类产出的<b>唯一消费者</b>。</li>
  *   <li><b>不做什么</b>：不等待、不重试、不做 DOM 抓取（不注入 JS、不维护属性白名单）、
@@ -277,39 +271,6 @@ public class ElementDiagnosticsCollector {
         int idx = message.indexOf('\n');
         String line = (idx < 0 ? message : message.substring(0, idx)).trim();
         return line.isEmpty() ? "unknown" : line;
-    }
-
-    /**
-     * 生成失败截图
-     */
-    public String captureFailureScreenshot(String testName) {
-        if (!PlaywrightManager.config().isElementScreenshotOnFailure()) {
-            logger.debug("Screenshot capture is disabled");
-            return null;
-        }
-
-        try {
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS"));
-            String sanitizedSelector = selector.replaceAll("[^a-zA-Z0-9]", "_").substring(0, Math.min(selector.length(), 30));
-            String fileName = String.format("FAILED_%s_%s_%s.png", testName, sanitizedSelector, timestamp);
-
-            Path screenshotDir = Paths.get(PlaywrightManager.config().getElementScreenshotPath());
-            File dir = screenshotDir.toFile();
-            if (!dir.exists() && !dir.mkdirs()) {
-                logger.warn("Failed to create screenshot directory: {}", screenshotDir);
-            }
-
-            Path screenshotPath = screenshotDir.resolve(fileName);
-            page.screenshot(new Page.ScreenshotOptions()
-                .setPath(screenshotPath)
-                .setFullPage(false));
-
-            logger.info("Failure screenshot saved: {}", screenshotPath);
-            return screenshotPath.toString();
-        } catch (Exception e) {
-            logger.error("Failed to capture screenshot for [{}]: {}", selector, e.getMessage());
-            return null;
-        }
     }
 
 }

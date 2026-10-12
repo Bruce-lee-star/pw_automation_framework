@@ -459,24 +459,10 @@ public class PlaywrightConfigManager {
     }
 
     /**
-     * 是否在失败时自动截图
-     */
-    public boolean isElementScreenshotOnFailure() {
-        return FrameworkConfigManager.getBoolean(WebFrameworkConfig.PLAYWRIGHT_ELEMENT_SCREENSHOT_ON_FAILURE);
-    }
-
-    /**
      * 是否收集详细诊断信息
      */
     public boolean isElementDetailedDiagnostics() {
         return FrameworkConfigManager.getBoolean(WebFrameworkConfig.PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED);
-    }
-
-    /**
-     * 获取失败截图保存路径
-     */
-    public String getElementScreenshotPath() {
-        return FrameworkConfigManager.getString(WebFrameworkConfig.PLAYWRIGHT_ELEMENT_SCREENSHOT_PATH);
     }
 
     /**

@@ -509,23 +509,14 @@ public enum WebFrameworkConfig {
      */
     PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO),
 
-    // ==================== 产物保留治理（trace / 截图，企业级磁盘治理）====================
+    /** trace 目录磁盘治理开关（自动清理上一轮旧 trace.zip）。 */
+    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED),
 
-    /** 是否启用产物保留治理（磁盘总上限 / 文件数上限 / 保留期）。 */
-    PLAYWRIGHT_ARTIFACTS_RETENTION_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_ENABLED),
+    /** trace 目录保留文件数上限。 */
+    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES),
 
-    /** 目标目录总字节上限（MB）。 */
-    PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_TOTAL_MB(ConfigKeys.WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_TOTAL_MB),
-
-    /** 目标目录文件数上限。 */
-    PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_FILES(ConfigKeys.WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_FILES),
-
-
-    /**
-     * 需治理的目录列表（逗号分隔）。注意：<b>本次 run 产出的文件永不删除</b>
-     * （只清理 mtime 早于本次 run 起点的遗留物），避免"证据凭空消失"。
-     */
-    PLAYWRIGHT_ARTIFACTS_RETENTION_DIRS(ConfigKeys.WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_DIRS),
+    /** trace 目录总容量上限（MB）。 */
+    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB),
 
     /**
      * Trace 时截图
@@ -664,24 +655,6 @@ public enum WebFrameworkConfig {
      * Serenity 截图目录
      */
     SERENITY_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_SERENITY_SCREENSHOTS_DIRECTORY),
-
-    /**
-     * WebP 合规截图开关（对应 Playwright 1.62 升级评估报 §3.1）。
-     * 默认 true：失败截图时<b>额外</b>落一张 WebP 到自建合规归档目录（不影响 Serenity 报告 PNG）。
-     * 注意：WebP 仅用于自建归档目录，<b>绝不</b>写入 {@code target/site/serenity}（Serenity 4.2.0 对截图
-     * 后缀/格式有内部假设，改用 WebP 会破坏报告渲染）。
-     */
-    PLAYWRIGHT_WEBP_SCREENSHOT_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_WEBP_SCREENSHOT_ENABLED),
-
-    /**
-     * WebP 合规截图质量（0-100，越高体积越大）。仅对 WEBP/JPEG 有损格式有效。
-     */
-    PLAYWRIGHT_WEBP_SCREENSHOT_QUALITY(ConfigKeys.WEB_PLAYWRIGHT_WEBP_SCREENSHOT_QUALITY),
-
-    /**
-     * WebP 合规截图落盘目录（与 Serenity 报告目录隔离的自建归档目录）。
-     */
-    PLAYWRIGHT_WEBP_SCREENSHOT_ARCHIVE_DIR(ConfigKeys.WEB_PLAYWRIGHT_WEBP_SCREENSHOT_ARCHIVE_DIR),
 
     // ==================== 日志配置 ====================
 
@@ -898,21 +871,10 @@ public enum WebFrameworkConfig {
     PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY),
 
     /**
-     * 失败时是否自动截图
-     * true=自动截图, false=不截图
-     */
-    PLAYWRIGHT_ELEMENT_SCREENSHOT_ON_FAILURE(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_SCREENSHOT_ON_FAILURE),
-
-    /**
      * 是否收集详细诊断信息
      * true=收集完整诊断信息, false=收集基本信息
      */
     PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED),
-
-    /**
-     * 失败截图保存路径
-     */
-    PLAYWRIGHT_ELEMENT_SCREENSHOT_PATH(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_SCREENSHOT_PATH),
 
     // ==================== API 断言配置 ====================
 

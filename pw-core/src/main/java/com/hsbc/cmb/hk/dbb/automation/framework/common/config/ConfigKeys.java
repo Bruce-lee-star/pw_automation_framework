@@ -466,25 +466,20 @@ public enum ConfigKeys {
         "true",
         "trace 按 scenario 分段（每用例一个文件）"
     ),
-    WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_ENABLED(
-        "playwright.artifacts.retention.enabled",
+    WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED(
+        "playwright.context.trace.retention.enabled",
         "true",
-        "产物（trace/截图）保留治理开关"
+        "trace 目录磁盘治理开关（自动清理上一轮旧 trace.zip，防止磁盘满）"
     ),
-    WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_TOTAL_MB(
-        "playwright.artifacts.retention.max.total.mb",
-        "2048",
-        "产物目录总上限（MB）"
+    WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES(
+        "playwright.context.trace.retention.max.files",
+        "200",
+        "trace 目录保留文件数上限（仅清理 mtime 早于本次 run 的旧产物）"
     ),
-    WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_MAX_FILES(
-        "playwright.artifacts.retention.max.files",
-        "500",
-        "产物目录文件数上限"
-    ),
-    WEB_PLAYWRIGHT_ARTIFACTS_RETENTION_DIRS(
-        "playwright.artifacts.retention.dirs",
-        "target/site/serenity/traces,target/screenshots,target/screenshots-webp",
-        "产物保留治理目录（逗号分隔）"
+    WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB(
+        "playwright.context.trace.retention.max.total.mb",
+        "1024",
+        "trace 目录总容量上限（MB）"
     ),
     WEB_PLAYWRIGHT_CONTEXT_TRACE_SCREENSHOTS(
         "playwright.context.trace.screenshots",
@@ -600,21 +595,6 @@ public enum ConfigKeys {
         "serenity.screenshots.directory",
         "target/site/serenity",
         "Serenity 截图目录"
-    ),
-    WEB_PLAYWRIGHT_WEBP_SCREENSHOT_ENABLED(
-        "playwright.screenshot.webp.enabled",
-        "true",
-        "失败截图是否额外落 WebP 到合规归档目录（不影响 Serenity 报告 PNG）"
-    ),
-    WEB_PLAYWRIGHT_WEBP_SCREENSHOT_QUALITY(
-        "playwright.screenshot.webp.quality",
-        "80",
-        "WebP 合规截图质量 0-100"
-    ),
-    WEB_PLAYWRIGHT_WEBP_SCREENSHOT_ARCHIVE_DIR(
-        "playwright.screenshot.webp.archiveDir",
-        "target/screenshots-webp",
-        "WebP 合规截图落盘目录（自建归档，与 Serenity 报告目录隔离）"
     ),
     WEB_SERENITY_LOGGING(
         "serenity.logging",
@@ -800,20 +780,10 @@ public enum ConfigKeys {
         "200",
         "元素操作后等待时间（毫秒）"
     ),
-    WEB_PLAYWRIGHT_ELEMENT_SCREENSHOT_ON_FAILURE(
-        "playwright.element.screenshot.on.failure",
-        "true",
-        "失败时是否自动截图"
-    ),
     WEB_PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED(
         "playwright.element.diagnostics.detailed",
         "true",
         "是否收集详细诊断信息"
-    ),
-    WEB_PLAYWRIGHT_ELEMENT_SCREENSHOT_PATH(
-        "playwright.element.screenshot.path",
-        "target/screenshots",
-        "失败截图保存路径"
     ),
     WEB_API_ASSERTION_WAIT_TIMEOUT(
         "api.assertion.wait.timeout.ms",

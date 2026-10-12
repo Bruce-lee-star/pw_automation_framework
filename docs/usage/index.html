@@ -106,8 +106,10 @@
   <a href="#api-test">9 · 接口测试（REST Assured）</a>
   <div class="grp">配置与运维</div>
   <a href="#config">10 · 配置属性</a>
-  <a href="#security">11 · 安全基线</a>
-  <a href="#faq">12 · FAQ</a>
+  <a href="#reports">11 · 报告与产物</a>
+  <a href="#crypto-and-redaction">12 · 加解密与脱敏</a>
+  <a href="#security">13 · 安全基线</a>
+  <a href="#faq">14 · FAQ</a>
 </nav>
 <main>
 
@@ -118,10 +120,6 @@
     <span class="badge">JDK 21</span><span class="badge">Maven 多模块</span>
     <span class="badge">Playwright 1.62</span><span class="badge">Serenity 4.3.4</span>
     <span class="badge">Cucumber 7.34</span><span class="badge">JUnit 4</span>
-  </div>
-  <div class="note" style="margin-top:16px">
-    本指南只讲<b>怎么用</b>（不含实现原理）。示例中的接口路径（<code>/api/users</code>、<code>/api/login</code> 等）对应仓库内
-    <code>route-demo-service</code> 演示后端，可直接拿来练手。
   </div>
 </header>
 
@@ -334,7 +332,7 @@ public class UserListPage extends AbstractManagedPage {
         userRows.waitForCount(expected, 30);   // 框架级等待（带重试 / 诊断）
     }
 }</code></pre>
-  <div class="note"><b>为什么继承 <code>AbstractManagedPage</code></b>：它把「复用页面能力 + <code>@Element</code>/<code>@RoleElement</code> 字段绑定」收口在框架层，业务页的继承面上只有构造 / <code>setManagedPage</code> / <code>getPage</code> 三个方法，无需继承庞大的 <code>BasePage</code>（那是框架内部实现基类）。页面对象统一由 <code>PageObjectFactory.getPage(XxxPage.class)</code> 获取。</div>
+  <div class="note">业务页继承 <code>AbstractManagedPage</code> 即可，元素用 <code>@Element</code> / <code>@RoleElement</code> 注解绑定；页面对象统一由 <code>PageObjectFactory.getPage(XxxPage.class)</code> 获取。</div>
 
   <h3>AbstractManagedPage 常用 API</h3>
   <table>
@@ -408,7 +406,7 @@ public class UserListPage extends AbstractManagedPage {
 <!-- ============ 6 拾取元素 ============ -->
 <section id="picker">
   <h2><span class="n">6</span>拾取元素（交互式拾取器）</h2>
-  <p class="lead">框架提供 <code>pw-codegen</code> 模块的交互式拾取器（<code>RoleElementPicker</code>）。它的使用体验类似 Playwright 的 <code>page.pause()</code>：在<b>有头浏览器</b>里点选你想操作的元素，它自动抓取被点元素的 a11y role / name，并生成带 <code>@RoleFile</code> + <code>@RoleElement</code> 的页面对象草稿——覆盖手写 selector 的繁琐。</p>
+  <p class="lead">框架提供 <code>pw-codegen</code> 模块的交互式拾取器（<code>RoleElementPicker</code>）。它的使用体验类似 Playwright 的 <code>page.pause()</code>：在<b>有头浏览器</b>里点选你想操作的元素，它自动抓取被点元素的 a11y role / name，并生成带 <code>@RoleFile</code> + <code>@RoleElement</code> 的页面对象草稿。<b>与 <code>page.pause()</code> 的关键区别</b>：pause 录出来是平铺在测试方法里的 <code>locator(...).click()</code> 脚本，选择器与业务步骤耦合；这边拾取产物直接落到页面对象字段，业务 step 只调语义方法——选择器只在 Page 类出现一次，UI 改版只改 Page。</p>
 
   <div class="warn"><b>跨源 iframe 限制（重点）</b>：拾取器<b>无法拾取跨源 iframe</b> 内的元素——跨源（不同域名 / 协议 / 端口）iframe 受浏览器安全策略限制，不经主框架，会被直接跳过。若需操作跨源 iframe 内的控件，请改用其他方式（单独驱动该 iframe 对应的页面 / 直接接口校验）。同源 iframe 不受影响（用 <code>frame</code> 属性声明嵌套路径即可，见第 5 节）。</div>
 
@@ -440,10 +438,7 @@ RoleElementPicker.openPanel(page, "nls/login.nls.json");</code></pre>
   <p>点「开始拾取」→ 在页面上点选元素（可跨弹窗 / 新标签页，拾取器会跟随）→ 点「停止并生成」→ 在面板里复制代码。生成物含 <b>页面类 + 步骤类 + 断言类</b>，跨页（弹窗等）会各自生成对应的页面类。</p>
 
   <p><b>② 代码内直接调用（程序化）</b></p>
-  <pre><code>// 阻塞式拾取：开启 → 等待你点选（按 ESC 或超时结束）→ 关闭 → 返回列表
-List&lt;RoleEntry&gt; picks = RoleElementPicker.pick(page);
-
-// 拾取并直接写入源码文件（outputDir 为源码根，如 src/test/java）
+  <pre><code>// 拾取并直接写入源码文件（outputDir 为源码根，如 src/test/java）
 RoleElementPicker.pickAndWrite(page, "src/test/java",
         "com.xxx.tests.pages", "LoginPage", "nls/login.nls.json");
 
@@ -454,23 +449,13 @@ RoleElementPicker.pickAndShow(page, "com.xxx.tests.pages", "LoginPage", "nls/log
   <h3>常用 API（方法签名速查）</h3>
   <p>所有方法都在 <code>com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleElementPicker</code> 下，静态调用。先拿到当前线程的 <code>Page</code>：在 Page 对象里调用 <code>getPage()</code>，或在 Steps 里用 <code>getPage()</code>。</p>
   <table>
-    <thead><tr><th>方法</th><th>作用</th><th>返回 / 说明</th></tr></thead>
+    <thead><tr><th>方法</th><th>作用</th></tr></thead>
     <tbody>
-      <tr><td><code>openPanel(Page, String... nlsFiles)</code></td><td>打开常驻面板；类名由当前 URL 自动派生（如 <code>/login</code> → <code>LoginPage</code>）。阻塞直到面板关闭或点击「终止运行」。</td><td>无；用户点「终止运行」抛 <code>PickerAbortedException</code></td></tr>
-      <tr><td><code>openPanel(Page, String packageName, String pageClassName, String stepClassName, String... nlsFiles)</code></td><td>完整重载：自定义包名 / 页面类 / 步骤类名。</td><td>无</td></tr>
-      <tr><td><code>pick(Page)</code></td><td>阻塞式拾取（无 nls 反查）。开启 → 等你点选（ESC 或超时结束）→ 关闭。</td><td><code>List&lt;RoleEntry&gt;</code>（可能为空草稿）</td></tr>
-      <tr><td><code>pick(Page, String... nlsFiles)</code></td><td>拾取并预加载 nls 反向查表，命中即用真实 key。</td><td><code>List&lt;RoleEntry&gt;</code></td></tr>
-      <tr><td><code>pickAndWrite(Page, String outputDir, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并写入源码文件（<code>outputDir</code> 如 <code>src/test/java</code>）。</td><td>无（写磁盘）</td></tr>
-      <tr><td><code>pickAndShow(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并弹出可复制代码面板（最贴近 <code>page.pause()</code>）。</td><td>无</td></tr>
-      <tr><td><code>pickAndGenerate(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并生成源码字符串（不落盘）。</td><td><code>String</code></td></tr>
-      <tr><td><code>pickAndDump(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取并打印生成源码到日志。</td><td>无</td></tr>
-      <tr><td><code>showCode(Page, String code)</code></td><td>弹出一个可复制代码面板（展示任意已有代码）。</td><td>无</td></tr>
-      <tr><td><code>start(Page)</code> / <code>start(Page, String nlsReverseJson)</code></td><td>底层：仅开启拾取模式（不预生成）。</td><td>无</td></tr>
-      <tr><td><code>stop(Page)</code></td><td>底层：关闭拾取模式、清监听。</td><td>无</td></tr>
-      <tr><td><code>getEntries(Page)</code> / <code>getSteps(Page)</code></td><td>底层：不阻塞读取当前已拾元素 / 已拾 step 序列。</td><td><code>List&lt;RoleEntry&gt;</code> / <code>List&lt;List&lt;RoleEntry&gt;&gt;</code></td></tr>
+      <tr><td><code>openPanel(Page, String... nlsFiles)</code></td><td>打开常驻面板（推荐）；类名由当前 URL 自动派生。点「停止并生成」后面板直接展示可复制的页面类 + 步骤类 + 断言类代码。</td></tr>
+      <tr><td><code>pickAndWrite(Page, String outputDir, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取完成后直接把源码写到 <code>outputDir</code>（如 <code>src/test/java</code>）。</td></tr>
+      <tr><td><code>pickAndShow(Page, String packageName, String pageClassName, String... nlsFiles)</code></td><td>拾取完成后弹出可复制代码面板（不落盘）。</td></tr>
     </tbody>
   </table>
-  <div class="note"><b>关于状态读取</b>：面板里的「已拾列表 / 生成代码」是<b>显式读回</b>的——没有可订阅的「重载事件」。需要程序化拿到最新结果，直接调用 <code>getEntries(page)</code> / <code>getSteps(page)</code> / <code>pickAndGenerate(...)</code>，它们返回的是当前内存态的快照。</div>
   <div class="note"><b>CI 自动跳过</b>：以上所有入口在检测到 CI 环境变量（Jenkins / GitHub Actions / GitLab CI / TeamCity 等）时会<b>直接跳过或返回空</b>，不会卡住等待人工交互——本地有头浏览器 + <code>-Ddbb.codegen.enabled=true</code> 才真正生效。</div>
 
   <h3>NLS 反查（让生成的 key 直接用真实多语言名）</h3>
@@ -528,22 +513,26 @@ public class LoginPage extends AbstractManagedPage {
     </tbody>
   </table>
   <div class="note"><b>DELAY 只能「变慢」，不能「造超时」</b>：它只是把真实请求推后 N 秒再放行，响应内容仍是真实后端的；它<b>不会</b>自己产生超时或失败。要测「接口超时 / 失败」，请用 MOCK 返回错误码，或把 DELAY 的延迟调到大于前端等待阈值，让<b>前端自己</b>超时。<br>
-    <b>什么是 fail-open</b>：指「放行、不阻断业务」。MONITOR 与 DELAY 都不拥有「终结权」——它们不改变请求去向，规则不命中的请求原样走真实网络（放行）。与它相对的是 <b>fail-closed</b>：<code>MOCK</code> / <code>MODIFY_REQUEST</code> / <code>DELAY</code> 这类<b>会改变请求行为</b>的能力，其<b>注册</b>失败会直接报错（规则没生效却继续跑，会静默改变断言口径）；只有纯观测的 MONITOR 注册失败才允许降级并告警。</div>
+    <b>注册失败的行为</b>：MONITOR 注册失败只告警、不阻断用例（观测不该拖死业务）；MOCK / MODIFY_REQUEST / DELAY 注册失败会直接报错——因为它们会改变请求行为，规则没生效却继续跑会让断言口径失真。</div>
 
   <h3>基本骨架</h3>
+  <p><code>.register()</code> / <code>.start()</code> 都返回 <code>AutoCloseable</code> 句柄——<b>推荐 try-with-resources</b>，出作用域自动精确注销，不会漏 <code>close()</code>：</p>
 <pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
 
-AutoCloseable handle = RouteDsl.on(page)     // 也可 RouteDsl.on(context)
-    .api("/api/users")                       // 端点即可，无需通配符（见下）
-    .monitor()                               // 选择能力：monitor / mock / modifyRequest / delay
-        .expectStatus(200)
-        .expectJsonPath("$.length()", 3)
-    .register();                             // 提交注册，返回可精确注销的句柄
-// ... 执行业务步骤 ...
-handle.close();                              // 精确注销（幂等）；场景结束框架也会自动清理</code></pre>
+try (AutoCloseable handle = RouteDsl.on(page)     // 也可 RouteDsl.on(context)
+        .api("/api/users")                       // 端点即可，无需通配符（见下）
+        .monitor()                               // 选择能力：monitor / mock / modifyRequest / delay
+            .expectStatus(200)
+            .expectJsonPath("$.length()", 3)
+        .register()) {
+    // ... 执行业务步骤，期间该规则生效 ...
+}  // 出 try 块自动 handle.close()，规则精确注销
+
+// 也可以手动持有句柄：AutoCloseable handle = ...register(); ...; handle.close();
+// 句柄 close() 幂等；即使忘了 close，scenario 结束时框架也会随 Context 统一清理。</code></pre>
   <div class="note">
     <b>pattern 不用手写通配符</b>：注册时框架会把端点<b>前后各补一层 <code>**</code></b>（<code>RoutePatterns.normalize</code>），所以 <code>.api("/api/users")</code>、相对端点 <code>.api("profile/list")</code> 都能命中真实绝对 URL，语义近似「URL 包含该片段」。显式写 <code>**</code> 结果相同，没必要写。<br>
-    <b>两种收尾写法完全等价</b>：<code>.register()</code> 立即注册并返回句柄；级联写法 <code>…done().start()</code> 也一样——底层 <code>start()</code> 就是 <code>return register();</code>，返回同一个合并句柄。<br>
+    <b>两种收尾写法完全等价</b>：<code>.register()</code> 立即注册并返回句柄；级联写法 <code>…done().start()</code> 也返回同一个句柄。<br>
     <b>DELAY 段只有 <code>.done().start()</code></b>：<code>monitor()</code> / <code>mock()</code> / <code>modifyRequest()</code> 段各自带一个 <code>register()</code>（可在段末直接提交），而 <code>delay()</code> 返回的 <code>DelayDsl</code> <b>没有</b> <code>register()</code> 方法，所以延迟规则必须用 <code>.done()</code> 收段、再由根 <code>.start()</code> 统一提交，即 <code>.api(p).delay(3).done().start();</code>。多规则级联时，「每条 <code>.done()</code>、最后一句 <code>.start()</code>」也是推荐写法。
   </div>
 
@@ -675,7 +664,7 @@ RouteDsl.on(page)
     </tbody>
   </table>
 
-  <div class="warn"><b>规则生命周期（重要）</b>：每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时——所以 <b>Route 规则不跨 scenario 保留</b>（每个 scenario 起点 runtime 重建、规则为空）。这是<b>故意且安全</b>的：route 的驱动绑定（<code>context.route</code> 拦截器）挂在 Playwright 的 <b>Channel</b> 上，<b>跨 scenario 持久化 runtime（"保留 Context、只清规则来复用"）会与主线程 UI 泵同一条连接竞态，触发 <code>Object doesn't exist: route@…</code> 类<b>通道连接错误</b></b>。因此<b>不要</b>手动这么做——交给默认收尾即可。同一 scenario 内若想换一批规则，用 <code>RouteDsl.clearRules(page)</code>（只清内存规则表、<b>故意不 unroute</b>，绕开驱动连接争用），随后重新 <code>register()</code>。</div>
+  <div class="warn"><b>规则生命周期（重要）</b>：每个 scenario 结束时框架会自动清理 Route 规则——所以 <b>Route 规则不跨 scenario 保留</b>。同一 scenario 内若想换一批规则，用 <code>RouteDsl.clearRules(page)</code>，随后重新 <code>register()</code>；只想跑完某段就撤，用 <code>register()</code> 返回的句柄 <code>close()</code>（或 try-with-resources 自动关）。</div>
   <div class="warn"><b>两条最易误用点</b>：① <code>MONITOR 断言 + static MOCK</code> 时，断言对象是<b>你伪造的夹具</b>而非真实响应（合法，但易误判为"没生效"）；② <code>interceptResponse()</code> 与静态 <code>status/body/headers</code> 互斥。</div>
 </section>
 
@@ -688,68 +677,71 @@ RouteDsl.on(page)
   <p>与 Web 用例一致的四层：<b>Feature（Gherkin）→ Glue（步骤绑定）→ Steps（持有 <code>BaseStep</code> 的步骤类）→（接口用例不写 Page）</b>。接口用例直接操作 <code>BaseStep</code>，不需要页面对象；框架不要求 Steps 继承任何基类。</p>
 <pre><code>Feature: 用户接口
   Scenario: 查询用户列表
-    Given an entity with "petstore"           # 创建并持有 BaseStep
+    Given an entity with "routedemo"           # 创建并持有 BaseStep
     When I set endpoint to "/api/users"
     And I send GET request
     Then response field "$.length()" should be 3
     And response body should match JSON schema "schemas/users.json"</code></pre>
 
-  <h3>创建 BaseStep（唯一入口）</h3>
-  <p><code>BaseStep</code> 的构造器是包私有的，<b>唯一创建方式</b>是通过 <code>TestServices</code> 工厂（返回当前线程 / scenario 级单例，天然支持并行）：</p>
+  <h3>创建 / 取用共享 BaseStep（ApiTestContext）</h3>
+  <p>同一个 scenario 内的多个 step 类需要共享同一个 <code>BaseStep</code>（entity 配置、请求参数、响应状态都挂在它身上）。框架在 <code>pw-api-core</code> 内置了 <code>ApiTestContext</code>，提供 scenario 级共享：<b>开头用 <code>init()</code> 创建一次，后续 step 直接 <code>baseStep()</code> 取用</b>，场景结束时由框架自动复位，无需手写清理钩子。</p>
+<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.ApiTestContext;
+
+// —— scenario 开头（EntitySteps 的 "Given an entity with ..."）——
+ApiTestContext.init();                       // 动态配置（手动 setBaseUri / setEndpoint）
+ApiTestContext.init("routedemo");            // 带实体配置（从 routedemo.conf 加载 baseUri / 端点）
+ApiTestContext.init("routedemo", "dev");     // 再叠加环境覆盖
+
+// —— 其余任意 step 类里直接取用同一个实例 ——
+BaseStep step = ApiTestContext.baseStep();</code></pre>
+  <div class="tip"><b>业务侧不要再自己包持有类、也不要再手写 <code>@After</code> 清理</b>：<code>ApiTestContext</code> 已随框架发布，scenario 结束时由框架统一复位，跨场景不会串扰。若 <code>baseStep()</code> 抛 <code>IllegalStateException</code>，说明本场景漏写了 <code>Given an entity with ...</code>。</div>
+
+  <h3>低层工厂（TestServices，了解即可）</h3>
+  <p>业务代码一般用上面的 <code>ApiTestContext</code>；保留三种形态备查：</p>
 <pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.services.TestServices;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.BaseStep;
 
-// 带实体配置（从 {entityName}.conf 加载 baseUri / 端点 / 默认头）
-BaseStep step = TestServices.initialize().withEntity("petstore").baseStep();
-
-// 带环境（dev / test / prod 各自的 baseUri 覆盖）
-BaseStep step = TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
-
-// 动态配置（不带实体，手动 setBaseUri / setEndpoint）
-BaseStep step = TestServices.initialize().baseStep();</code></pre>
-  <div class="tip"><b>框架唯一入口</b>：<code>TestServices.initialize()</code> 的实例按<b>线程</b>隔离（基于 <code>TestContextHolder</code>），同一线程内多次调用拿到同一份配置，天然支持并行。业务工程（如 test-automation）常在其上再包一层自己的持有类（例如 <code>ApiTestContext</code>）来统一串联 entity / 参数 / 响应状态，但那属于<b>业务侧封装、不属于本框架</b>——框架只提供 <code>TestServices</code> 这套 API。</div>
+BaseStep step = TestServices.initialize().withEntity("routedemo").baseStep();   // 带实体
+BaseStep step = TestServices.initialize().withEntity("routedemo").withEnv("dev").baseStep();
+BaseStep step = TestServices.initialize().baseStep();                          // 动态配置</code></pre>
 
   <h3>实体配置文件（{entityName}.conf）</h3>
-  <p>把各接口的 path / 默认头 / 参数 / 请求体集中声明在 classpath 下的 <code>{entityName}.conf</code>（或 <code>.properties</code>），运行时用 <code>loadEndpointConfig(name, method)</code> 一键加载：</p>
-<pre><code># petstore.conf（HOCON）
+  <p>把各接口的 path / 默认头 / 参数 / 请求体集中声明在 classpath 下的 <code>{entityName}.conf</code>（或 <code>.properties</code>），运行时用 <code>loadEndpointConfig(name, method)</code> 一键加载。仓库自带的 <code>routedemo.conf</code> 对应 <code>route-demo-service</code> 靶场（<code>http://localhost:8888/demo</code>），可直接拿来练手：</p>
+<pre><code># routedemo.conf（HOCON）—— 靶场实际端点
+api.base.uri.default = "http://localhost:8888/demo"
+headers.Accept      = "application/json"
+
 end-points {
-  user {
-    get {
-      path = "/api/users"
-      headers { Accept = "application/json" }
-      query.params { page = 1, size = 20 }
-    }
-    post {
-      path = "/api/users"
-      payload = "payloads/create-user.json"
-    }
-  }
+  listUsers   { get  { path = "/api/users" } }
+  getUser     { get  { path = "/api/users/{id}" } }
+  createUser  { post { path = "/api/users"  payload = "payloads/create-user.json" } }
+  login       { post { path = "/api/auth/login" payload = "payloads/login.json" } }
+  slow        { get  { path = "/api/slow/endpoint" } }
 }
 
-# Steps 里加载：把 user.get 的全部配置一次性灌到 BaseStep
-baseStep().loadEndpointConfig("user", "get");
+# Steps 里加载：把 listUsers.get 的全部配置一次性灌到 BaseStep
+baseStep().loadEndpointConfig("listUsers", "get");
 baseStep().getResource();</code></pre>
   <div class="note">配置按 <code>end-points.&lt;name&gt;.&lt;method&gt;</code> 组织；<code>name</code> 支持点号分层（如 <code>user.findById</code>）。也支持动态配置（不声明实体，直接 <code>setBaseUri</code> / <code>setEndpoint</code>）。</div>
 
   <h3>多环境切换（dev / test / prod）</h3>
   <p>环境通过 <code>withEnv("dev")</code> 显式传入（线程级、并行安全），对应配置文件里的同名节点会<b>合并</b>到基础配置之上。合并规则是 HOCON <b>按 key 深合并</b>：<b>环境节点 &gt; 实体 conf &gt; application.conf</b>，且粒度是<b>单个配置项 / 单个 header</b>——冲突的 key 由环境胜出，<b>不冲突的通用 key 自动保留</b>。所以你只需在环境节点里写「与通用不同的那些项」，其余继承。</p>
-<pre><code># petstore.conf（HOCON）
+<pre><code># routedemo.conf（HOCON）
 # —— 通用配置（所有环境共享）——
-api.base.uri.default = "https://api.example.com"   # 默认 http://localhost
-headers.Accept       = "application/json"          # 每个环境都带，不用重复写
+api.base.uri.default = "http://localhost:8888/demo"   # 靶场默认地址
+headers.Accept       = "application/json"
 headers.Content-Type = "application/json"
 
 end-points {
-  login   { post { path = "/auth/login"  payload = "payloads/login.json" } }
-  profile { get  { path = "/api/profile" } }
+  login  { post { path = "/api/auth/login" payload = "payloads/login.json" } }
+  user   { get  { path = "/api/users" } }
 }
 
 # —— 环境节点：只写「与通用不同的项」——
-# dev：baseUri 改成测试地址；Authorization 用固定 dev token
-#      Accept / Content-Type 不在 dev 里，自动继承通用的
+# dev：baseUri 改成远端 dev 环境；Authorization 用固定 dev token
 dev {
   api.base.uri.default = "https://api.dev.example.com"
-  headers.Authorization = "Bearer dev-fixed-token"   # 支持 ENC(...) 加密
+  headers.Authorization = "Bearer dev-fixed-token"
 }
 # test：baseUri 改测试地址，且不设固定 token（靠用例里 login 动态注入）
 test { api.base.uri.default = "https://api.test.example.com" }
@@ -760,7 +752,7 @@ prod {
 }</code></pre>
   <div class="tip"><b>合并结果示意（以 <code>withEnv("dev")</code> 为例）</b>：<code>api.base.uri.default = https://api.dev.example.com</code>（环境覆盖）｜<code>headers.Accept = application/json</code>（继承通用）｜<code>headers.Content-Type = application/json</code>（继承通用）｜<code>headers.Authorization = Bearer dev-fixed-token</code>（环境覆盖）。可见 <b>dev 只改了 baseUri 和 Authorization，其余通用 header 原样保留</b>。</div>
   <div class="warn"><b>一个坑：环境节点只能「覆盖」不能「删除」通用项。</b>HOCON 的合并只填缺失 key，<b>不会移除</b>通用配置里已有的 key。若通用已经写了 <code>headers.X = "A"</code>，想让某个环境「不带 X」，<b>不能靠省略</b>（省略会继承 A），只能把它<b>覆盖成一个空值</b>：<code>headers.X = ""</code>。需要彻底剔除时，建议把该 header 从通用区挪到各环境节点分别声明。</div>
-  <div class="note">也支持运行参数 <code>-Denv=dev</code> 或环境变量 <code>env=dev</code>（由 <code>EnvironmentUtils</code> 解析）；但 <code>withEnv</code> 语义更明确、且不会污染 JVM 全局，并行下互不串环境。务必在 <code>@After</code> 调用 <code>TestServices.clear()</code>。</div>
+  <div class="note">也支持运行参数 <code>-Denv=dev</code> 或环境变量 <code>env=dev</code>（由 <code>EnvironmentUtils</code> 解析）；但 <code>withEnv</code> 语义更明确、且不会污染 JVM 全局，并行下互不串环境。scenario 结束时 <code>ApiTestContext</code> 由框架自动复位，业务侧无需手写 <code>@After</code> 清理。</div>
 
   <h3>发请求</h3>
   <table>
@@ -815,14 +807,16 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
     <li><b>POST / PUT / PATCH 发前先设请求体</b>（<code>setRequestPayload</code> 内联或 <code>loadPayload</code> 读文件）；GET / DELETE 通常不带 body。</li>
     <li>header / query / body 都在「发送方法之前」调用，且<b>每次发送都是当前实例的瞬时状态</b>——换请求记得按需重设或清理（<code>clearHeader()</code> / <code>clearQueryParams()</code>）。</li>
   </ul>
-<pre><code>public class UserCrudSteps {
-    private final BaseStep step =
-            TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
+<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.ApiTestContext;
+
+public class UserCrudSteps {
+    private BaseStep step() { return ApiTestContext.baseStep(); }
 
     // 增：POST + 自定义 header + query 参数 + 请求体
     @When("创建用户")
     public void createUser() {
-        step.setEndpoint("/users");
+        BaseStep step = step();
+        step.setEndpoint("/api/users");
         step.addRequestHeader("Content-Type", "application/json");
         step.addQueryParam("async", "true");                 // → ?async=true
         step.setRequestPayload("{ \"name\":\"tom\", \"age\":20 }");
@@ -835,7 +829,8 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
     // 查：GET + query 参数（无 body）
     @When("查询用户列表")
     public void listUsers() {
-        step.setEndpoint("/users");
+        BaseStep step = step();
+        step.setEndpoint("/api/users");
         step.addQueryParam("role", "admin");                 // → ?role=admin
         step.getResource();                                  // method = GET
         step.verifyResponseStatusCode(200);
@@ -845,7 +840,8 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
     // 改：PUT + 路径里的 id + 请求体（用 JSONPath 改字段）
     @When("修改用户 {int}")
     public void updateUser(int id) {
-        step.setEndpoint("/users/" + id);
+        BaseStep step = step();
+        step.setEndpoint("/api/users/" + id);
         step.addRequestHeader("Content-Type", "application/json");
         step.setRequestPayload("{ \"name\":\"tom\", \"age\":20 }");
         step.modifyFieldsInRequestPayload("$.age", 21);      // 改请求体里的 age 字段
@@ -856,7 +852,8 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
     // 局部改：PATCH（同上，仅更新部分字段）
     @When("局部修改用户 {int}")
     public void patchUser(int id) {
-        step.setEndpoint("/users/" + id);
+        BaseStep step = step();
+        step.setEndpoint("/api/users/" + id);
         step.setRequestPayload("{ \"age\":22 }");
         step.patchPayload();                                 // method = PATCH
         step.verifyResponseStatusCode(200);
@@ -865,7 +862,8 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
     // 删：DELETE + 路径里的 id（通常无 body）
     @When("删除用户 {int}")
     public void deleteUser(int id) {
-        step.setEndpoint("/users/" + id);
+        BaseStep step = step();
+        step.setEndpoint("/api/users/" + id);
         step.deleteResource();                              // method = DELETE
         step.verifyResponseStatusCode(204);
     }
@@ -881,20 +879,20 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
   <div class="warn"><b>注意</b>：每次发请求都会<b>覆盖</b>实例里的响应，提取要在「下一次请求之前」完成；跨 step 传递的业务值请存在 Steps 类字段（<code>BaseStep</code> 不自动存业务值）。</div>
 
   <h3>完整示例（链路串联 Steps 片段）</h3>
-<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.services.TestServices;
+<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.ApiTestContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.BaseStep;
 import com.jayway.jsonpath.JsonPath;
 
-public class OrderApiSteps {
-    // 同一实例串起整条链路；withEnv 见多环境切换
-    private final BaseStep step =
-            TestServices.initialize().withEntity("petstore").withEnv("dev").baseStep();
+public class UserApiSteps {
+    // 同一 scenario 内，所有 step 通过 ApiTestContext.baseStep() 拿到同一个实例
+    private BaseStep step() { return ApiTestContext.baseStep(); }
 
     private String userId;   // 提取出来、给后续 step 用的信息
 
     @Given("登录并拿到 token")
     public void login() {
-        step.setEndpoint("/auth/login");
+        BaseStep step = step();
+        step.setEndpoint("/api/auth/login");
         step.addRequestHeader("Content-Type", "application/json");
         step.setRequestPayload("{ \"user\":\"alice\", \"pwd\":\"secret\" }");
         step.postPayload();                                              // ① 发登录
@@ -903,30 +901,30 @@ public class OrderApiSteps {
         step.addRequestHeader("Authorization", "Bearer " + token);       // ③ 注入，后续自动带
     }
 
-    @When("查询我的资料")
-    public void getProfile() {
-        step.setEndpoint("/api/profile");
+    @When("查询用户列表")
+    public void listUsers() {
+        BaseStep step = step();
+        step.setEndpoint("/api/users");
         step.getResource();                                             // ④ 已带 Authorization
 
-        userId = JsonPath.read(step.getResponseJson(), "$.data.id");    // ⑤ 提取依赖信息
+        userId = JsonPath.read(step.getResponseJson(), "$[0].id");      // ⑤ 提取依赖信息
     }
 
-    @When("用该 id 下单")
-    public void createOrder() {
-        step.setEndpoint("/api/orders");
-        step.setRequestPayload("{ \"userId\":\"" + userId + "\", \"item\":\"book\" }");
-        step.postPayload();                                             // ⑥ 依赖第二步的 userId
+    @When("查看该用户详情")
+    public void viewUser() {
+        BaseStep step = step();
+        step.setEndpoint("/api/users/" + userId);
+        step.getResource();                                             // ⑥ 依赖第二步的 userId
     }
 
-    @Then("下单成功")
-    public void assertOrder() {
-        step.verifyResponseStatusCode(201);
-        step.verifyResponseJsonPath("$.status", "CREATED");
+    @Then("请求成功")
+    public void assertOk() {
+        step().verifyResponseStatusCode(200);
     }
 }</code></pre>
-  <div class="note">更省事：把 <code>login</code> / <code>profile</code> 的 <code>path</code> / <code>payload</code> / 固定 <code>headers</code> 声明在 conf 的 <code>end-points</code> 里，用 <code>step.loadEndpointConfig("login", "post")</code> 一次性灌好，再 <code>postPayload()</code>。动态 token 仍走 <code>addRequestHeader</code>。</div>
+  <div class="note">更省事：把 <code>login</code> / <code>listUsers</code> 的 <code>path</code> / <code>payload</code> / 固定 <code>headers</code> 声明在 conf 的 <code>end-points</code> 里，用 <code>step.loadEndpointConfig("login", "post")</code> 一次性灌好，再 <code>postPayload()</code>。动态 token 仍走 <code>addRequestHeader</code>。</div>
 
-  <div class="warn"><b>收尾（重要）</b>：<code>TestServices</code> 的实例按线程隔离，但线程复用（Cucumber 复跑 scenario、线程池复用）时若不清理，下一个场景会读到上一个场景遗留的 entity / env / BaseStep 配置，导致<b>跨场景串扰</b>——表现为随机失败、极难定位。请在 <code>@After</code> 钩子里统一调用 <code>TestServices.clear()</code> 释放当前线程的状态。</div>
+  <div class="tip"><b>跨场景清理已自动化</b>：<code>ApiTestContext</code> 在 scenario 结束时由框架统一复位，业务侧<b>不需要</b>再写 <code>@After</code> 钩子去 <code>clear()</code>；若出现跨场景串扰，框架会在日志里打出残留告警。</div>
 </section>
 
 <!-- ============ 10 配置 ============ -->
@@ -972,38 +970,81 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
   <div class="warn"><b>别和接口实体配置混为一谈</b>：接口相关的实体配置（<code>baseUri</code> / <code>headers</code> / <code>end-points</code> / 环境节点）走<b>另一套</b>文件 <code>application.conf</code> + <code>config/{entity}.conf</code>（HOCON，由 pw-api-core 的 <code>ConfigProvider</code> 读取，规则见 §9），<b>不写</b>在这两份 Serenity 文件里。</div>
 
   <h3>常用键速查（节选）</h3>
+  <h4>浏览器 / 启动</h4>
   <table>
-    <thead><tr><th>分类</th><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td rowspan="10">浏览器 / 启动</td><td><code>playwright.browser.type</code></td><td>chromium</td><td>浏览器类型（chromium / firefox / webkit）</td></tr>
+      <tr><td><code>playwright.browser.type</code></td><td>chromium</td><td>浏览器类型（chromium / firefox / webkit）</td></tr>
       <tr><td><code>playwright.browser.headless</code></td><td>false</td><td>是否无头运行</td></tr>
       <tr><td><code>playwright.browser.channel</code></td><td>(空)</td><td>浏览器 channel（chrome / msedge）</td></tr>
-      <tr><td><code>playwright.browser.chrome.args</code></td><td>(空)</td><td>启动附加参数（如 --window-size=1920,1080）</td></tr>
+      <tr><td><code>playwright.browser.slowMo</code></td><td>500</td><td>浏览器慢动作延迟(ms)</td></tr>
+      <tr><td><code>playwright.browser.timeout</code></td><td>30000</td><td>浏览器启动/连接超时(ms)</td></tr>
+      <tr><td><code>playwright.browser.startup.backoff.ms</code></td><td>2000</td><td>启动失败重试退避基数(ms)</td></tr>
+      <tr><td><code>playwright.browser.chrome.executablePath</code></td><td>(空)</td><td>Chrome 可执行文件路径</td></tr>
+      <tr><td><code>playwright.browser.edge.executablePath</code></td><td>(空)</td><td>Edge 可执行文件路径</td></tr>
+      <tr><td><code>playwright.browser.chrome.args</code></td><td>(空)</td><td>Chrome 启动参数</td></tr>
+      <tr><td><code>playwright.browser.chromium.args</code></td><td>(空)</td><td>Chromium 启动参数</td></tr>
+      <tr><td><code>playwright.browser.edge.args</code></td><td>(空)</td><td>Edge 启动参数</td></tr>
+      <tr><td><code>playwright.browser.firefox.args</code></td><td>(空)</td><td>Firefox 启动参数</td></tr>
+      <tr><td><code>playwright.browser.webkit.args</code></td><td>(空)</td><td>WebKit 启动参数</td></tr>
       <tr><td><code>playwright.browsers.path</code></td><td>.playwright/browsers</td><td>浏览器安装目录</td></tr>
       <tr><td><code>playwright.driver.path</code></td><td>.playwright/driver</td><td>Playwright Driver 路径</td></tr>
+      <tr><td><code>playwright.browser.downloadsPath</code></td><td>target/downloads</td><td>浏览器内下载文件落盘目录</td></tr>
+      <tr><td><code>playwright.browser.download.timeout.minutes</code></td><td>5</td><td>浏览器下载超时(分钟)</td></tr>
+      <tr><td><code>serenity.playwright.window.maximize</code></td><td>true</td><td>窗口最大化</td></tr>
+    </tbody>
+  </table>
+
+  <h4>浏览器下载代理</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>playwright.download.proxy.enabled</code></td><td>false</td><td>浏览器下载代理开关</td></tr>
       <tr><td><code>playwright.browser.download.http.proxy</code></td><td>(空)</td><td>浏览器下载 HTTP 代理</td></tr>
       <tr><td><code>playwright.browser.download.https.proxy</code></td><td>(空)</td><td>浏览器下载 HTTPS 代理</td></tr>
-      <tr><td><code>playwright.download.proxy.enabled</code></td><td>false</td><td>浏览器下载代理开关</td></tr>
-      <tr><td><code>serenity.playwright.window.maximize</code></td><td>true</td><td>窗口最大化</td></tr>
-      <tr><td rowspan="3">上下文 / 视口</td><td><code>playwright.context.locale</code></td><td>en-US</td><td>上下文语言</td></tr>
+    </tbody>
+  </table>
+
+  <h4>上下文 / 视口</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>playwright.context.locale</code></td><td>en-US</td><td>上下文语言</td></tr>
       <tr><td><code>playwright.context.isMobile</code></td><td>false</td><td>移动设备模拟</td></tr>
       <tr><td><code>playwright.context.trace.enabled</code></td><td>true</td><td>是否开启 trace</td></tr>
-      <tr><td rowspan="6">超时 / 等待</td><td><code>playwright.page.timeout</code></td><td>15000</td><td>页面操作超时(ms)</td></tr>
+    </tbody>
+  </table>
+
+  <h4>超时 / 等待</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>playwright.page.timeout</code></td><td>15000</td><td>页面操作超时(ms)</td></tr>
       <tr><td><code>playwright.page.navigationTimeout</code></td><td>15000</td><td>导航超时(ms)</td></tr>
       <tr><td><code>playwright.element.wait.timeout</code></td><td>15000</td><td>元素等待/操作超时(ms)</td></tr>
       <tr><td><code>playwright.element.action.post.delay</code></td><td>200</td><td>元素操作后等待(ms)</td></tr>
       <tr><td><code>playwright.waits.retry.count</code></td><td>3</td><td>等待重试次数</td></tr>
       <tr><td><code>playwright.polling.interval</code></td><td>500</td><td>轮询间隔(ms)</td></tr>
-      <tr><td rowspan="9">截图 / trace / 产物</td><td><code>serenity.screenshot.strategy</code></td><td>AFTER_EACH_STEP</td><td>截图策略</td></tr>
+    </tbody>
+  </table>
+
+  <h4>截图 / trace / 产物治理</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>serenity.screenshot.strategy</code></td><td>AFTER_EACH_STEP</td><td>截图策略</td></tr>
       <tr><td><code>playwright.screenshot.fullpage</code></td><td>true</td><td>是否全页截图</td></tr>
-      <tr><td><code>playwright.screenshot.webp.enabled</code></td><td>true</td><td>失败截图额外落 WebP（合规归档）</td></tr>
-      <tr><td><code>playwright.screenshot.webp.quality</code></td><td>80</td><td>WebP 质量 0-100</td></tr>
-      <tr><td><code>playwright.element.screenshot.on.failure</code></td><td>true</td><td>失败自动截图</td></tr>
-      <tr><td><code>playwright.element.screenshot.path</code></td><td>target/screenshots</td><td>失败截图路径</td></tr>
-      <tr><td><code>playwright.artifacts.retention.enabled</code></td><td>true</td><td>产物（trace/截图）保留治理开关</td></tr>
-      <tr><td><code>playwright.artifacts.retention.max.files</code></td><td>500</td><td>产物目录文件数上限</td></tr>
-      <tr><td><code>playwright.artifacts.retention.max.total.mb</code></td><td>2048</td><td>产物总容量上限(MB)</td></tr>
-      <tr><td rowspan="8">报告 / 日志</td><td><code>serenity.outputDirectory</code></td><td>target/site/serenity</td><td>报告输出目录</td></tr>
+      <tr><td><code>playwright.context.trace.retention.enabled</code></td><td>true</td><td>trace 目录磁盘治理开关（自动清理上一轮旧 trace.zip）</td></tr>
+      <tr><td><code>playwright.context.trace.retention.max.files</code></td><td>200</td><td>trace 目录保留文件数上限</td></tr>
+      <tr><td><code>playwright.context.trace.retention.max.total.mb</code></td><td>1024</td><td>trace 目录总容量上限(MB)</td></tr>
+    </tbody>
+  </table>
+
+  <h4>报告 / 日志</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>serenity.outputDirectory</code></td><td>target/site/serenity</td><td>报告输出目录</td></tr>
       <tr><td><code>serenity.project.name</code></td><td>Serenity Playwright Demo</td><td>报告项目名</td></tr>
       <tr><td><code>serenity.features.root</code></td><td>src/test/resources/features</td><td>feature 根目录</td></tr>
       <tr><td><code>serenity.logging</code></td><td>VERBOSE</td><td>日志级别（Serenity 侧）</td></tr>
@@ -1011,13 +1052,26 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
       <tr><td><code>framework.trace.logging</code></td><td>false</td><td>框架超详细日志</td></tr>
       <tr><td><code>serenity.playwright.hang.watchdog.interval.ms</code></td><td>60000</td><td>卡住诊断看门狗采样间隔(ms)</td></tr>
       <tr><td><code>logging.root.level</code></td><td>INFO</td><td>根日志级别</td></tr>
-      <tr><td rowspan="3">并发</td><td><code>serenity.playwright.concurrent.max</code></td><td>自适应(核数/2, 2-32)</td><td>并发执行器硬上限</td></tr>
-      <tr><td><code>serenity.playwright.concurrent.crash.signatures</code></td><td>(崩溃信号白名单)</td><td>崩溃型失败识别特征</td></tr>
-      <tr><td><code>playwright.browser.close.after.concurrent.task</code></td><td>false</td><td>并发任务后关闭浏览器</td></tr>
-      <tr><td rowspan="3">代理</td><td><code>playwright.proxy.http</code></td><td>(空)</td><td>HTTP 代理 host:port</td></tr>
+    </tbody>
+  </table>
+
+  <h4>业务代理</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>playwright.context.proxy.enabled</code></td><td>false</td><td>是否给浏览器 context 挂代理</td></tr>
+      <tr><td><code>playwright.proxy.http</code></td><td>(空)</td><td>HTTP 代理 host:port</td></tr>
       <tr><td><code>playwright.proxy.https</code></td><td>(空)</td><td>HTTPS 代理 host:port</td></tr>
-      <tr><td><code>playwright.proxy.http.username/password</code></td><td>(空)</td><td>代理认证</td></tr>
-      <tr><td rowspan="12">接口 / HTTP</td><td><code>http.connection.timeout</code></td><td>30000</td><td>连接超时(ms)</td></tr>
+      <tr><td><code>playwright.proxy.http.username/password</code></td><td>(空)</td><td>HTTP 代理认证</td></tr>
+      <tr><td><code>playwright.proxy.https.username/password</code></td><td>(空)</td><td>HTTPS 代理认证</td></tr>
+    </tbody>
+  </table>
+
+  <h4>接口 / HTTP</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>http.connection.timeout</code></td><td>30000</td><td>连接超时(ms)</td></tr>
       <tr><td><code>http.socket.timeout</code></td><td>30000</td><td>socket 超时(ms)</td></tr>
       <tr><td><code>http.connection.pool.max-total</code></td><td>200</td><td>连接池最大总连接</td></tr>
       <tr><td><code>http.connection.pool.max-per-route</code></td><td>20</td><td>每路由最大连接</td></tr>
@@ -1029,11 +1083,25 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
       <tr><td><code>api.mock.rules.directory</code></td><td>src/test/resources/mocks</td><td>Mock 规则目录</td></tr>
       <tr><td><code>test.retry.count</code></td><td>3</td><td>测试重试次数</td></tr>
       <tr><td><code>test.retry.delay</code></td><td>1000</td><td>测试重试延迟(ms)</td></tr>
-      <tr><td rowspan="4">Route 采集</td><td><code>route.capture.all.type</code></td><td>false</td><td>只采 MONITOR；true 连 DELAY/MODIFY/MOCK 一起采</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Route 采集</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>route.capture.all.type</code></td><td>false</td><td>只采 MONITOR；true 连 DELAY/MODIFY/MOCK 一起采</td></tr>
       <tr><td><code>route.capture.inline.max.bytes</code></td><td>262144</td><td>响应体内联阈值(字节)</td></tr>
       <tr><td><code>route.capture.gzip.max.bytes</code></td><td>8388608</td><td>文本体 gzip 上限(字节)</td></tr>
       <tr><td><code>route.monitor.assert.body.max.bytes</code></td><td>2097152</td><td>MONITOR 断言体上限（超限降级）</td></tr>
-      <tr><td rowspan="9">Monitor 落库 / 落文件</td><td><code>monitor.db.store.enabled</code></td><td>false</td><td>响应写库</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Monitor 落库 / 落文件</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>monitor.db.store.enabled</code></td><td>false</td><td>响应写库</td></tr>
       <tr><td><code>monitor.db.type</code></td><td>(空)</td><td>数据库方言（MYSQL / H2）</td></tr>
       <tr><td><code>monitor.db.url / user / password</code></td><td>(空)</td><td>JDBC 连接（密码支持 ENC() 加密）</td></tr>
       <tr><td><code>monitor.db.pool.max.size</code></td><td>5</td><td>连接池最大连接</td></tr>
@@ -1042,13 +1110,34 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
       <tr><td><code>monitor.file.store.pretty</code></td><td>true</td><td>美化输出</td></tr>
       <tr><td><code>monitor.timeout.max.ms</code></td><td>300000</td><td>Monitor/Mock/Modify 超时上限(ms)</td></tr>
       <tr><td><code>monitor.observe.threads</code></td><td>8</td><td>观测执行器线程数</td></tr>
-      <tr><td rowspan="3">脱敏</td><td><code>sensitive.data.extra.header.keys</code></td><td>(空)</td><td>追加敏感头名（逗号分隔）</td></tr>
+    </tbody>
+  </table>
+
+  <h4>脱敏</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>sensitive.data.extra.header.keys</code></td><td>(空)</td><td>追加敏感头名（逗号分隔）</td></tr>
       <tr><td><code>sensitive.data.extra.body.keys</code></td><td>(空)</td><td>追加敏感体字段</td></tr>
       <tr><td><code>sensitive.data.extra.query.keys</code></td><td>(空)</td><td>追加敏感 query 键</td></tr>
-      <tr><td rowspan="3">可访问性</td><td><code>axe.scan.enabled</code></td><td>false</td><td>启用 axe-core 扫描</td></tr>
+    </tbody>
+  </table>
+
+  <h4>可访问性</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>axe.scan.enabled</code></td><td>false</td><td>启用 axe-core 扫描</td></tr>
       <tr><td><code>axe.scan.tags</code></td><td>(空)</td><td>WCAG 标签</td></tr>
       <tr><td><code>axe.scan.outputDir</code></td><td>target/accessibility-axe</td><td>报告目录</td></tr>
-      <tr><td rowspan="2">JSON / 编码</td><td><code>json.fail-on-unknown-properties</code></td><td>false</td><td>JSON 遇未知属性是否失败</td></tr>
+    </tbody>
+  </table>
+
+  <h4>JSON / 编码</h4>
+  <table>
+    <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>json.fail-on-unknown-properties</code></td><td>false</td><td>JSON 遇未知属性是否失败</td></tr>
       <tr><td><code>file.encoding.default</code></td><td>UTF-8</td><td>默认文件编码</td></tr>
     </tbody>
   </table>
@@ -1064,9 +1153,93 @@ framework.verbose.logging = false
 route.capture.all.type = false</code></pre>
 </section>
 
+<!-- ============ 报告 ============ -->
+<section id="reports">
+  <h2><span class="n">11</span>报告与产物</h2>
+  <p>所有产物默认落在 <code>target/site/serenity/</code>，跑完 <code>mvn verify</code> 后直接用浏览器打开即可。</p>
+
+  <table>
+    <thead><tr><th>文件 / 目录</th><th>作用</th><th>什么时候看</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>index.html</code></td>
+        <td>Serenity 全量报告：用例树、每步截图、失败堆栈、耗时</td>
+        <td>日常回归失败定位，先看这个</td>
+      </tr>
+      <tr>
+        <td><code>serenity-summary.html</code></td>
+        <td>框架聚合汇总：通过率、趋势、按 feature 分组、Trace 列入口</td>
+        <td>给领导/评审看的一页纸；CI 上只暴露这一个链接</td>
+      </tr>
+      <tr>
+        <td><code>monitor-failures.html</code></td>
+        <td>MONITOR 失败专项：哪条接口、期望 vs 实际、脱敏后的响应体</td>
+        <td>UI 跑通但接口断言挂了，从这里切进去</td>
+      </tr>
+      <tr>
+        <td><code>traces/trace-&lt;scenarioId&gt;-&lt;ts&gt;.zip</code></td>
+        <td>Playwright Trace Viewer：DOM 快照、网络、控制台、逐时间线回放</td>
+        <td>失败截图看不出原因时，拖到 <a href="https://trace.playwright.dev" target="_blank">trace.playwright.dev</a> 回放</td>
+      </tr>
+      <tr>
+        <td><code>*.html 同目录截图</code></td>
+        <td>失败步 PNG，自动嵌进 Serenity 报告</td>
+        <td>无需手动找，index.html 里点失败步即可看到</td>
+      </tr>
+      <tr>
+        <td><code>target/accessibility-axe/</code></td>
+        <td>axe-core 可访问性扫描报告（<code>axe.scan.enabled=true</code> 才有）</td>
+        <td>合规/无障碍专项</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">trace 目录由 <code>playwright.context.trace.retention.*</code> 自动做磁盘治理——只清上一轮旧 zip，本轮新产物永不删；磁盘紧时把 <code>max.total.mb</code> 调小即可，无需手工清理。</div>
+</section>
+
+<!-- ============ 加解密与脱敏 ============ -->
+<section id="crypto-and-redaction">
+  <h2><span class="n">12</span>配置加解密与日志脱敏</h2>
+
+  <h3>12.1 配置值加密（<code>ENC()</code>）</h3>
+  <p>密码 / token / API key 不要明文写进 <code>serenity.properties</code>。用框架自带的 AES-256-GCM 把它转成 <code>ENC(base64)</code>，框架在读取时<b>透明解密</b>——代码里拿到的还是明文，配置仓库里看不到。</p>
+
+  <p><b>第一步：先生成主密钥</b>（32 字节，64 位十六进制；主密钥本身绝不能入库）：</p>
+  <pre><code>openssl rand -hex 32</code></pre>
+  <p>把主密钥按下面任一方式给框架（按顺序找，先命中的生效）：</p>
+  <ol>
+    <li>环境变量 <code>CONFIG_MASTER_KEY</code>（CI 推荐）</li>
+    <li>JVM 系统属性 <code>-Dconfig.master.key=...</code></li>
+    <li>文件 <code>~/.dbb_automation_master_key</code>（内容就是 64 位 hex，建议权限 600）</li>
+  </ol>
+
+  <p><b>第二步：把明文加密成密文</b>（用框架自带 CLI）：</p>
+  <pre><code>java com.hsbc.cmb.hk.dbb.automation.framework.common.security.ConfigCipher encrypt "mySecretPwd123"
+# 输出形如：ENC(AbCdEf...==)</code></pre>
+
+  <p><b>第三步：写进配置</b>，代码侧零改动：</p>
+  <pre><code>monitor.db.password = ENC(AbCdEf...==)
+# 读取端仍写 ConfigProvider.get("monitor.db.password")，拿到的就是明文</code></pre>
+  <div class="note">校验密文：<code>java ...ConfigCipher decrypt "ENC(...)"</code>。裸 Base64（不带 <code>ENC()</code> 前缀）也会被识别为密文；不是密文的串原样返回，对旧配置零侵入。</div>
+
+  <h3>12.2 日志 / 报告自动脱敏</h3>
+  <p>不需要你写任何代码——框架在<b>所有数据出进程</b>的出口（logback、Serenity 报告、monitor-failures.html、落库、落文件）前强制过一道脱敏，已经覆盖：</p>
+  <ul>
+    <li><b>按字段名</b>：默认清单覆盖 password / token / secret / authorization / cookie / cvv / pan / 身份证 / 手机号 等（key 规范化后再比，<code>access_token</code>/<code>access-token</code>/<code>AccessToken</code> 都能命中）。</li>
+    <li><b>按值形态</b>：Luhn 校验的银行卡号、IBAN、HKID、大陆身份证（GB 11643 校验位）、护照、回乡证、统一社会信用代码、Bearer/JWT、URL 内嵌凭据——识别后<b>整段定长掩码</b>，不留前 6 位、不泄露长度。</li>
+    <li><b>递归结构</b>：JSON 树深度不限；XML、<code>x-www-form-urlencoded</code>、纯文本兜底都走自己的处理链。</li>
+  </ul>
+
+  <p><b>追加你自己的敏感字段</b>（默认清单不够时），在配置里加：</p>
+  <pre><code>sensitive.data.extra.header.keys  = x-internal-token, x-api-key
+sensitive.data.extra.body.keys    = customerPin, cvv2
+sensitive.data.extra.query.keys   = sign, ts</code></pre>
+  <div class="note">API 请求/响应详细日志默认关（<code>api.request.response.logging.enabled=false</code>）；调试时临时打开即可，打开后也会先脱敏再打。</div>
+</section>
+
 <!-- ============ 9 安全 ============ -->
 <section id="security">
-  <h2><span class="n">11</span>安全基线</h2>
+  <h2><span class="n">13</span>安全基线</h2>
   <ul>
     <li><b>凭据一律环境变量注入</b>（如 <code>DBB_TEST_PASSWORD</code>、<code>CONFIG_MASTER_KEY</code>），<b>禁止入库</b>。</li>
     <li>配置里的敏感值支持 <code>ENC(&lt;base64&gt;)</code> 透明解密（如 <code>monitor.db.password</code>）。</li>
@@ -1077,14 +1250,14 @@ route.capture.all.type = false</code></pre>
 
 <!-- ============ 10 FAQ ============ -->
 <section id="faq">
-  <h2><span class="n">12</span>FAQ</h2>
+  <h2><span class="n">14</span>FAQ</h2>
 
   <details><summary>跑用例报浏览器找不到 / 起不来？</summary>
     <div class="body">先安装浏览器：<code>mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"</code>。若公司有代理，配置 <code>playwright.browser.download.http.proxy</code> / <code>https.proxy</code>，或预置到 <code>playwright.browsers.path</code>。</div>
   </details>
 
   <details><summary>Route 规则这个 scenario 生效，下个 scenario 就没了？</summary>
-    <div class="body">这是<b>设计如此</b>。每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时，下个 scenario 重建、规则为空——这恰好避开了通道连接问题：route 的 driver 绑定挂在 Playwright <b>Channel</b> 上，若在 scenario 之间"保留 Context、只清规则"来复用 runtime，会与主线程 UI 泵同一条连接竞态，爆出 <code>Object doesn't exist: route@…</code>。所以<b>不要手动这么做</b>，交给默认收尾。同一 scenario 内想换规则可用 <code>RouteDsl.clearRules(page)</code>（故意不 unroute，安全）；只想跑完某段就撤，用 <code>register()</code> 返回的句柄 <code>close()</code>。</div>
+    <div class="body">这是<b>设计如此</b>。每个 scenario 结束时框架会关闭该 Context 的 Route 运行时，下个 scenario 重建、规则为空——这是默认的安全行为，<b>不要</b>手动跨 scenario 保留 Context 复用 runtime。同一 scenario 内想换规则可用 <code>RouteDsl.clearRules(page)</code>；只想跑完某段就撤，用 <code>register()</code> 返回的句柄 <code>close()</code>（或 try-with-resources 自动关）。</div>
   </details>
 
   <details><summary>Mock 没生效，页面还是走了真实接口？</summary>
@@ -1116,7 +1289,7 @@ route.capture.all.type = false</code></pre>
   </details>
 
   <details><summary>元素定位该用什么？</summary>
-    <div class="body">页面对象继承 <code>AbstractManagedPage</code>；元素优先用 <code>@RoleElement</code>（角色 + NLS，或 text/label/testId 等语义），比 CSS/XPath 更抗重构、可访问性更友好；无合适角色/语义时才退回 <code>@Element</code>（CSS / XPath）。<b>不要在 Steps 里直接持有 Playwright Locator</b>（框架架构门禁禁止类型泄漏）。</div>
+    <div class="body">页面对象继承 <code>AbstractManagedPage</code>；元素优先用 <code>@RoleElement</code>（角色 + NLS，或 text/label/testId 等语义），比 CSS/XPath 更抗重构；无合适角色/语义时才退回 <code>@Element</code>（CSS / XPath）。<b>不要在 Steps 里直接持有 Playwright Locator</b>。</div>
   </details>
 
   <details><summary>怎么快速生成页面对象代码？</summary>

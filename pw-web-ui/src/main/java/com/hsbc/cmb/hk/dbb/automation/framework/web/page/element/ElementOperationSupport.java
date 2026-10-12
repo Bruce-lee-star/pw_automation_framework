@@ -78,11 +78,9 @@ final class ElementOperationSupport {
             ElementDiagnosticsCollector diagnostics = new ElementDiagnosticsCollector(
                     locatorFn.get(), selector, page.getPageRaw(), page.getCurrentFrame());
             ElementOperationException.DiagnosticInfo info = diagnostics.collect();
-            String screenshotPath = diagnostics.captureFailureScreenshot(operation);
-            logger.debug("[{}] failed on '{}' | exists={} visible={} enabled={} count={} | screenshot={}",
+            logger.debug("[{}] failed on '{}' | exists={} visible={} enabled={} count={}",
                 operation, selector,
-                info.existsInDom(), info.isVisible(), info.isEnabled(), info.elementCount(),
-                screenshotPath != null ? screenshotPath : "N/A");
+                info.existsInDom(), info.isVisible(), info.isEnabled(), info.elementCount());
         } catch (Exception e) {
             // 诊断收集本身不应影响主异常抛出（预期降级，但不得静默，D7-3）
             logger.debug("[ElementOperationSupport] diagnostics collection failed: {}", e.toString());
@@ -235,17 +233,6 @@ final class ElementOperationSupport {
     private static void captureFailureAndLog(String operation, String testName,
                                              ElementOperationException ex,
                                              ElementDiagnosticsCollector diagnostics) {
-        String screenshotPath = null;
-        try {
-            screenshotPath = diagnostics.captureFailureScreenshot(
-                testName != null ? testName : operation);
-        } catch (Exception e) {
-            logger.warn("Failed to capture failure screenshot: {}", e.getMessage());
-        }
-
-        if (screenshotPath != null) {
-            logger.debug("Failure screenshot saved: {}", screenshotPath);
-        }
         // 降级为 WARN，避免与上游重试日志 + 下游 Listener 层形成三重 error 重复输出
         // 异常最终会被抛出并由 PlaywrightListener.stepFailed() 统一记录 error 日志
         logger.warn("Element operation failed: {}", ex.getMessage());

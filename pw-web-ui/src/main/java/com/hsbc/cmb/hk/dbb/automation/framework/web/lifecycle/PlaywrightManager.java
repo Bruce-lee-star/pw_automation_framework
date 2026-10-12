@@ -702,18 +702,6 @@ public class PlaywrightManager {
         return PlaywrightScreenshotManager.takeScreenshot(title);
     }
 
-    /**
-     * WebP 合规截图（落自建归档目录 {@code playwright.screenshot.webp.archiveDir}，不影响 Serenity 报告）。
-     *
-     * @apiNote <b>稳定的公开方法</b>：业务与框架代码均可调用以获取瘦身后的合规证据截图；
-     *          Serenity 报告内的失败截图仍由 {@link #takeScreenshot(String)} 以 PNG 提供，二者互不干扰。
-     * @param title 截图标题
-     * @return WebP 截图路径；禁用或失败返回 null
-     */
-    public static String takeScreenshotWebp(String title) {
-        return PlaywrightScreenshotManager.takeScreenshotWebp(title);
-    }
-
     // ==================== 配置访问（通过 config() 代理到 PlaywrightConfigManager） ====================
     // 使用 PlaywrightManager.config().getXXX() 或 PlaywrightConfigManager.config().getXXX() 访问配置
 
