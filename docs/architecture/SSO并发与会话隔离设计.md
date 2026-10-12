@@ -391,6 +391,18 @@ gate 只解决 "登录 /restore 串行"，**解决不了轮换窗口期**，必�
 - **独立 IO / 调度线程不是安全保证，反而是风险源**：`RouteIoExecutor` 仅用于提交 DELAY 调度任务（随即返回），本身不操作 `route`；但 Playwright `Route`/`Request`/`Response` 与底层 `Connection` 的回调/对象表（HashMap）**非线程安全**，协议调用（`route.fulfill`/`resume`/`fetch`）必须落在**单一拥有线程**。`RouteDelayScheduler` 的延迟回调在默认"直发"模式下落在**调度线程**（非拥有线程），构成跨线程驱动连接的竞态窗口——正是 §2 铁律与 §6 零容忍要杜绝的协议异常来源。**修复（强制）**：DELAY 到点回调必须经拥有线程重入（`setDelayDeliveryMainQueue(true)`，把 `fulfill/resume` 入队由拥有线程 `drainMainThreadActions` 执行），**禁止**在独立 IO / 调度线程上直接操作 `route`；启用该模式的前提是用 DELAY 的 scenario 改用 `RouteDsl.waitForUiFunction`（不能用原生 `page.waitForFunction`，否则 main 阻塞无人 drain → 15s 超时）。
 - route 并发隔离与 SSO 登录并发隔离**正交**（互不重叠）。
 
+### 8.4 优化项：消除调度线程对 `route` 的驱动（单一拥有线程）
+**目标**：把"调度线程（RouteDelayScheduler）/ 独立 IO 线程直接操作 `route`"彻底消除，让 `route` 的协议调用（`fulfill`/`resume`/`fetch`）只落在**单一拥有线程**，闭合 §2 铁律与 §6 零容忍。
+
+**更好设计（已采纳）**：
+1. **`RouteDelayScheduler` 降级为纯计时线程**：到点回调里**只**做 `runtime.enqueueMainAction(deliver)`，绝不调用 `route.fulfill/resume/fetch`。计时仍走模块自有 daemon 池（有界、不污染 `ForkJoinPool.commonPool`），但角色从"驱动线程"变为"计时线程"——这正是"消除调度线程（作为 `route` 操作者）"的本意。
+2. **DELAY 交付一律重入拥有线程**：入队的 `deliver` 由 **main 业务线程** `drainMainThreadActions()` 串行执行（`ResumeOptions/fulfillWithBody` 均为 sendMessageAsync，零泵连接）。drain 触发点已覆盖：step 边界（`PlaywrightListener` 每步后）、断言/采集查询、注册前、context 收尾 close——协议调用 100% 收敛到 main，与 `RouteRuntimeImpl` 既定原则一致。
+3. **移除"直发"模式**：`delayDeliveryMainQueue` 开关（及其"在调度线程直接 resume"的默认分支）是多余且违规的**第三写入面**，与零容忍矛盾，永久删除；DELAY 交付不再有"落在调度线程"的路径。
+4. **非-DELAY 路径（本项范围外）**：`fulfill/resume` 仍落在 Playwright 事件/pump 线程（其天然拥有者——`route` 由该线程送达，属合法单一拥有者），本项不动。其与 main 线程的"理论双写入面"作为**后续统一项**单列（全量 main 拥有线程需配套 `RouteDsl.waitForUiFunction` 迁移，风险大，不随本项实施）。
+5. **前提契约（硬约束）**：使用 DELAY 的 scenario，其 UI 等待**必须**走 `RouteDsl.waitForUiFunction`（内部循环 drain + 短窗 `page.waitForFunction`），**禁止**原生 `page.waitForFunction`——否则 main 阻塞在等待中无人 drain，延迟交付卡到 15s 超时（run-b 实证）。框架可加 ArchUnit / 运行期 guard 拦截原生 `waitForFunction` + 活跃 route 的组合。
+
+**验证**：§6.3 torture 已含 DELAY 路径；`DelayAppliesWaitTest#mainQueueModeDeliversOnlyAfterMainDrain` 已验证"交付只在 main drain 后发生"。
+
 ***
 
 ## 9. 与现有代码的接线（框架接入点为唯一真相）

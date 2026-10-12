@@ -168,44 +168,39 @@ public class DelayAppliesWaitTest {
     }
 
     /**
-     * 方案 B 可选通道（2026-10-11）：main 队列交付模式 —— 到点回调只入队（调度线程零协议调用），
-     * resume 由 main {@code drainMainThreadActions()} 串行执行。配套 {@code RouteDsl.waitForUiFunction}
-     * （UI 等待循环内周期 drain）可达成「零非 main 协议调用」。
+     * DELAY 交付默认重入 main 拥有线程（§8.4 零容忍，2026-10-12）：到点回调只入队（调度线程零协议调用），
+     * resume 由 main {@code drainMainThreadActions()} 串行执行。调度线程（RouteDelayScheduler）仅计时，
+     * 永不操作 {@code route}。配套 {@code RouteDsl.waitForUiFunction}（UI 等待循环内周期 drain）可达「零非 main 协议调用」。
      */
     @Test
-    public void mainQueueModeDeliversOnlyAfterMainDrain() throws Exception {
-        RouteDispatcher.setDelayDeliveryMainQueue(true);
-        try {
-            mockContext();
-            RouteDsl.on(ctx)
-                    .api("/api/queue/**")
-                    .delay(1)
-                    .done()
-                    .start();
-            Consumer<Route> handler = handlerFor("/api/queue/**");
-            Route route = mockRoute("http://h/api/queue/1");
-            AtomicLong resumeAtNanos = new AtomicLong(-1);
-            doAnswer(inv -> {
-                resumeAtNanos.set(System.nanoTime());
-                return null;
-            }).when(route).resume();
+    public void delayDeliversOnlyAfterMainDrain() throws Exception {
+        mockContext();
+        RouteDsl.on(ctx)
+                .api("/api/queue/**")
+                .delay(1)
+                .done()
+                .start();
+        Consumer<Route> handler = handlerFor("/api/queue/**");
+        Route route = mockRoute("http://h/api/queue/1");
+        AtomicLong resumeAtNanos = new AtomicLong(-1);
+        doAnswer(inv -> {
+            resumeAtNanos.set(System.nanoTime());
+            return null;
+        }).when(route).resume();
 
-            long t0 = System.nanoTime();
-            handler.accept(route);
+        long t0 = System.nanoTime();
+        handler.accept(route);
 
-            // 到点后（未 drain）：resume 不得由调度线程执行（入队模式 = 调度线程零协议调用）
-            Thread.sleep(1_100);
-            assertEquals("main-queue 模式：未 drain 时调度线程不得执行 resume（协议调用只在 main）",
-                    (long) -1, (long) resumeAtNanos.get());
+        // 到点后（未 drain）：resume 不得由调度线程执行（入队模式 = 调度线程零协议调用）
+        Thread.sleep(1_100);
+        assertEquals("DELAY 交付：未 drain 时调度线程不得执行 resume（协议调用只在 main）",
+                (long) -1, (long) resumeAtNanos.get());
 
-            // main drain → resume 在 main 串行执行（≥ delay 的 5/6，语义不变）
-            rt.drainMainThreadActions();
-            assertTrue("main-queue 模式：drain 后 resume 必须发生", resumeAtNanos.get() > 0);
-            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(resumeAtNanos.get() - t0);
-            assertTrue("main-queue 模式真实时延不足: " + elapsedMs + "ms（要求 delay=1000ms）",
-                    elapsedMs >= 800);
-        } finally {
-            RouteDispatcher.setDelayDeliveryMainQueue(false);
-        }
+        // main drain → resume 在 main 串行执行（≥ delay 的 5/6，语义不变）
+        rt.drainMainThreadActions();
+        assertTrue("DELAY 交付：drain 后 resume 必须发生", resumeAtNanos.get() > 0);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(resumeAtNanos.get() - t0);
+        assertTrue("DELAY 交付真实时延不足: " + elapsedMs + "ms（要求 delay=1000ms）",
+                elapsedMs >= 800);
     }
 }

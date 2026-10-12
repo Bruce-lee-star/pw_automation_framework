@@ -130,17 +130,16 @@ public final class RouteDsl {
     private static final long UI_WAIT_SLICE_MS = 250L;
 
     /**
-     * 方案 B 可选启用（2026-10-11）：UI 条件等待 —— 内部循环「drain + 短窗口 waitForFunction」。
+     * UI 条件等待（§8.4 零容忍，2026-10-12）：内部循环「drain + 短窗口 waitForFunction」。
      *
-     * <p><b>启用前提</b>：{@code RouteDispatcher.setDelayDeliveryMainQueue(true)} —— delay 到点回调
-     * 只入队，由 main 线程执行 resume/fulfill（零非 main 协议调用）。本方法在等待循环中周期
+     * <p><b>硬约束</b>：DELAY 交付现一律重入 main 拥有线程（调度线程只计时），故使用 DELAY 的 scenario
+     * 必须用本方法而非原生 {@code page.waitForFunction}。本方法在等待循环中周期
      * {@code RouteEngine.drainMainThreadActions(page.context())}：delay 到点（≤250ms 滞后）后
      * resume 在 main 串行执行，挂起请求恢复、UI 条件随后满足。</p>
      *
      * <p><b>行为等效</b>{@code page.waitForFunction(...)}：条件满足即返回；总超时抛
-     * {@code TimeoutError}（含总超时说明）。<b>配套约束</b>：入队模式必须配套本方法 —— 继续用
-     * 原生 {@code page.waitForFunction} 时，main 阻塞在等待中无人 drain，resume 永不执行
-     * （E2E run-b 实证 15s 超时）。默认直发模式（未启用入队）下本方法等价原生等待（drain 空队列）。</p>
+     * {@code TimeoutError}（含总超时说明）。<b>配套约束</b>：原生 {@code page.waitForFunction} 下 main
+     * 阻塞在等待中无人 drain，resume 永不执行（E2E run-b 实证 15s 超时），故 DELAY 场景禁用原生等待。</p>
      *
      * @param page          目标页面（取 page.context() 的 runtime）
      * @param pageFunction  等待的 JS 条件（同 {@code page.waitForFunction} 参数）

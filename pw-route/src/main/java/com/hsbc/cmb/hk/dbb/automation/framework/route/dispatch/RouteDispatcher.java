@@ -50,27 +50,34 @@ public final class RouteDispatcher {
     private static final long MAX_DELAY_MS = 30_000L;
 
     /**
-     * 方案 B 可选启用开关（2026-10-11）：DELAY 到点交付模式。
+     * DELAY 到点交付模式（2026-10-12 修订：§8.4 零容忍）。
      *
-     * <p>false（默认）=<b>直发</b>：到点回调在调度线程直接 resume/fulfill（sendMessageAsync，不泵连接）。
-     * UI 及时性优先 —— E2E 三连绿实证；调度线程与 main 并发写 Connection 存在理论窗口（文档化接受）。</p>
+     * <p><b>直发模式已移除</b>：原 false 默认（到点回调在调度线程直接 resume/fulfill）把 `route` 落在
+     * 调度线程，构成跨线程驱动连接的竞态窗口（与 §2 铁律 / §6 零容忍矛盾）。现 DELAY 交付<b>一律重入
+     * main 拥有线程</b>：到点回调只入队（{@code RouteRuntime.enqueueMainAction}），由 main 业务线程
+     * {@code drainMainThreadActions} 串行执行——协议调用 100% 收敛到 main（零并发写 Connection）。
+     * 调度线程（{@code RouteDelayScheduler}）仅保留计时职责，永不操作 `route`。</p>
      *
-     * <p>true =<b>main 队列</b>：到点回调只入队（{@code RouteRuntime.enqueueMainAction}），由 main
-     * 业务线程 drain 执行 —— 协议调用 100% 收敛到 main（零并发写 Connection）。
-     * <b>配套约束</b>：启用后业务 UI 等待必须改用 {@code RouteDsl.waitForUiFunction(...)}
-     * （内部循环 drain + 短窗口 waitForFunction）——继续用原生 {@code page.waitForFunction} 会因
+     * <p><b>配套硬约束</b>：使用 DELAY 的 scenario，其 UI 等待必须走 {@code RouteDsl.waitForUiFunction(...)}
+     * （内部循环 drain + 短窗口 waitForFunction）；继续用原生 {@code page.waitForFunction} 会因
      * main 阻塞在等待中无人 drain 而挂死（E2E run-b 实证 15s 超时）。</p>
      */
-    private static volatile boolean delayDeliveryMainQueue = false;
+    private static final boolean DELAY_DELIVERY_MAIN_QUEUE = true;
 
-    /** 启用「main 队列」DELAY 交付（方案 B 可选通道）；默认直发。见 {@link #delayDeliveryMainQueue}。 */
+    /**
+     * 历史开关（已废弃）：DELAY 交付现恒为 main 队列，本方法为 no-op，仅保留以兼容旧调用。
+     *
+     * @deprecated 直发模式已移除，见 §8.4。
+     */
+    @Deprecated
     public static void setDelayDeliveryMainQueue(boolean enabled) {
-        delayDeliveryMainQueue = enabled;
+        // no-op：直发模式已移除，DELAY 交付始终走 main 队列。
     }
 
-    /** 当前 DELAY 交付模式是否 main 队列。 */
+    /** @deprecated 恒为 true（DELAY 交付始终重入 main 拥有线程）。 */
+    @Deprecated
     public static boolean isDelayDeliveryMainQueue() {
-        return delayDeliveryMainQueue;
+        return DELAY_DELIVERY_MAIN_QUEUE;
     }
 
     /** T1 度量基线：进入分发器的请求数（= 路由层被触发的次数，即"下发次数"）。 */
@@ -742,23 +749,16 @@ public final class RouteDispatcher {
                             return; // sweep already settled (fallback resumed)
                         }
                         trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
-                        //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b>（组合 1 行为）—— delay 到点回调在
-                        //  调度线程直接 resume（sendMessageAsync，不泵连接）。UI 及时性优先：入队+main drain
-                        //  与「delay + 原生 waitForFunction」硬冲突（main 阻塞在等待中无人 drain → UI 15s 超时，
-                        //  E2E run-b 实证）。Connection 写入无锁 ⇒ 直发存在理论并发窗口，但 E2E 三连绿实证
-                        //  低概率；Java Playwright 无 async handler API 的固有代价，文档化接受（fail-open 兜底）。
-                        //  可选：setDelayDeliveryMainQueue(true) + 业务 UI 等待改 RouteDsl.waitForUiFunction
-                        //  ⇒ 到点回调只入队（零非 main 协议调用），resume 由 main drain 串行执行。
-                        if (delayDeliveryMainQueue) {
-                            runtime.enqueueMainAction(() -> {
-                                if (claim.isTerminal()) {
-                                    return;
-                                }
-                                afterDelay.run();
-                            });
-                        } else {
+                        //  2026-10-12 修订（§8.4 零容忍）：DELAY 交付<b>一律重入 main 拥有线程</b>——调度线程
+                        //  只做计时，绝不操作 `route`。到点回调只入队（零非 main 协议调用），由 main 业务线程
+                        //  drainMainThreadActions 串行执行 resume/fulfill（sendMessageAsync，零泵连接）。
+                        //  前提：使用 DELAY 的 scenario 必须走 RouteDsl.waitForUiFunction（见 §8.4 硬约束）。
+                        runtime.enqueueMainAction(() -> {
+                            if (claim.isTerminal()) {
+                                return;
+                            }
                             afterDelay.run();
-                        }
+                        });
                     });
         });
         if (!submitted) {
@@ -797,10 +797,9 @@ public final class RouteDispatcher {
                             return; // sweep already settled (fallback resumed)
                         }
                         trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
-                        //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b> fulfillWithBody（组合 1 行为，
-                        //  与 dispatchDelayChain 同理由 —— UI 及时性优先，见该处注释）。
-                        //  可选 main 队列：setDelayDeliveryMainQueue(true) ⇒ 到点只入队，main drain 交付。
-                        //  交付段：纯 sendMessageAsync（fulfillWithBody），零同步驱动调用 —— 不泵连接。
+                        //  2026-10-12 修订（§8.4 零容忍）：DELAY+intercept 交付<b>一律重入 main 拥有线程</b>——
+                        //  调度线程只做计时，绝不操作 `route`。物化在调用线程（O1 单泵），交付段纯
+                        //  sendMessageAsync（fulfillWithBody）入队由 main drain 串行执行，零同步驱动调用。
                         Runnable deliver = () -> {
                             if (claim.isTerminal()) {
                                 return;
@@ -812,11 +811,7 @@ public final class RouteDispatcher {
                                             + effectiveDelay + "ms (fetch=" + mat.fetchMs() + "ms; no driver call at delivery)",
                                     trace);
                         };
-                        if (delayDeliveryMainQueue) {
-                            runtime.enqueueMainAction(deliver);
-                        } else {
-                            deliver.run();
-                        }
+                        runtime.enqueueMainAction(deliver);
                     });
         });
         if (!submitted) {
