@@ -46,7 +46,7 @@
 对象矩阵（Playwright/Browser/Context/Page/调用期对象）与框架铁律一致。补充一点：路由 handler 已通过 `RouteClaim`（CAS 单所有者状态机）把"谁有权终结 Route"锁死，解决了 `playwright-java` 的 `RouteImpl.handled` 非原子 TOCTOU——这条应并入 §2.1 作为"调用期对象"的强约束证据。
 
 ### §3 SsoUserSessionGate —— 意图正确，实现路径应修正
-- **键维度**：设计稿用 `(entity, env, user)` 三维，**正确且需采纳**。`entity` 不是新造抽象——它对应 `Given ... logon <entity> ...` 步骤里已有的**实体名**维度（测试在步骤中显式写明的实体），沿用现有概念即可；注意 **`DBB` 是产品/项目名，不是该 `entity` 维度的值**。
+- **键维度**：设计稿用 `(entity, env, user)` 三维，**正确且需采纳**。`entity` 不是新造抽象——它对应 `Given ... logon <entity> ...` 步骤里已有的**实体名**维度（测试在步骤中显式写明的实体），沿用现有概念即可；注意 **`DBB` 是产品/项目名，不是该 `entity` 维度的值**，且**不存在"厂"的区分**——`entity` 仅作 `logon` 步骤透传的实体值，框架不得据此构造工厂/租户级分区或层级，不引入任何"厂"抽象。
   - **修正我的误判**：此前我把 `entity`（误称"厂"）判为"无对应抽象、冗余、退化为二维"是**错的**。同一 `env+user` 在不同 `entity` 下其实是**不同的登录身份**，若只用 `env_username` 会错误地把跨实体同账号并到同一道闸（既可能误串行，也可能串缓存），因此 `entity` 必须纳入键。
   - **做法**：不要新造 `SsoUserSessionGate`。在 `ConcurrencyPartitionKey` 上**显式新增 `entity` 维度**，值取自 `logon` 步骤的实体名（与 `sessionkey`/`apiclient`/`sessionPolicy` 同列一道 `ConcurrencyGate`），避免"两套并行闸门"象限分裂。
 - **leaseId 版本化 vs 持有表**：设计稿用 `activeLease` + leaseId 防误释放；实际用 `ThreadLocal<Deque<Key>>` 持有表，并在场景收尾 `releaseAllForCurrentThread()` 无条件释放。后者更优——它根治"许可泄漏 → 整套 park 死"的实测死锁，且不依赖调用方记得 release。应采用实际方案，删除设计稿的 leaseId 思路。
