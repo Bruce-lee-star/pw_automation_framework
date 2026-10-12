@@ -707,7 +707,7 @@ BaseStep step = TestServices.initialize().withEntity("petstore").withEnv("dev").
 
 // 动态配置（不带实体，手动 setBaseUri / setEndpoint）
 BaseStep step = TestServices.initialize().baseStep();</code></pre>
-  <div class="tip"><b>真实工程写法</b>：用 <code>ApiTestContext.init("petstore")</code> 创建并持有，其余 Steps 通过 <code>ApiTestContext.baseStep()</code> 取<b>同一个</b>实例（entity 配置、请求参数、响应状态靠它串起来）。scenario 结束务必 <code>ApiTestContext.clear()</code>（见结尾），否则线程复用会跨场景串扰。</div>
+  <div class="tip"><b>框架唯一入口</b>：<code>TestServices.initialize()</code> 的实例按<b>线程</b>隔离（基于 <code>TestContextHolder</code>），同一线程内多次调用拿到同一份配置，天然支持并行。业务工程（如 test-automation）常在其上再包一层自己的持有类（例如 <code>ApiTestContext</code>）来统一串联 entity / 参数 / 响应状态，但那属于<b>业务侧封装、不属于本框架</b>——框架只提供 <code>TestServices</code> 这套 API。</div>
 
   <h3>实体配置文件（{entityName}.conf）</h3>
   <p>把各接口的 path / 默认头 / 参数 / 请求体集中声明在 classpath 下的 <code>{entityName}.conf</code>（或 <code>.properties</code>），运行时用 <code>loadEndpointConfig(name, method)</code> 一键加载：</p>
@@ -777,11 +777,15 @@ String body = baseStep().getResponseJson();        // 响应体字符串
 baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(3));</code></pre>
 
   <h3>完整示例（Steps 片段）</h3>
-<pre><code>public class UserApiSteps extends UIInteractionSteps {
-    private BaseStep baseStep() { return ApiTestContext.baseStep(); }
+<pre><code>import com.hsbc.cmb.hk.dbb.automation.framework.api.core.services.TestServices;
+import com.hsbc.cmb.hk.dbb.automation.framework.api.core.step.BaseStep;
+
+public class UserApiSteps extends UIInteractionSteps {
+    // 取当前线程的 BaseStep（entity/env 已在 init 时设定）
+    private BaseStep baseStep() { return TestServices.initialize().baseStep(); }
 
     @Given("an entity with {string}")
-    public void initEntity(String name) { ApiTestContext.init(name); }
+    public void initEntity(String name) { TestServices.initialize().withEntity(name); }
 
     @When("I set endpoint to {string}")
     public void setEndpoint(String ep) { baseStep().setEndpoint(ep); }
@@ -793,7 +797,7 @@ baseStep().getValidatableResponse().statusCode(200).body("data.size()", equalTo(
     public void check(String path, int v) { baseStep().verifyResponseJsonPath(path, v); }
 }</code></pre>
 
-  <div class="warn"><b>收尾（重要）</b>：<code>ApiTestContext</code> 是线程（scenario）级共享。scenario 结束必须 <code>ApiTestContext.clear()</code>（可用 <code>@After</code> 钩子统一调用），否则 Cucumber 复用线程时下一个场景会读到上一个场景遗留的 BaseStep，导致配置 / 参数 / 响应<b>跨场景串扰</b>——表现为随机失败，极难定位。</div>
+  <div class="warn"><b>收尾（重要）</b>：<code>TestServices</code> 的实例按线程隔离，但线程复用（Cucumber 复跑 scenario、线程池复用）时若不清理，下一个场景会读到上一个场景遗留的 entity / env / BaseStep 配置，导致<b>跨场景串扰</b>——表现为随机失败、极难定位。请在 <code>@After</code> 钩子里统一调用 <code>TestServices.clear()</code> 释放当前线程的状态。</div>
 </section>
 
 <!-- ============ 10 配置 ============ -->
