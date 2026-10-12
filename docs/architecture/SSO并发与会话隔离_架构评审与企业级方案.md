@@ -25,7 +25,7 @@
 
 | 维度 | PoC 设计稿 | 实际落地 | 判定 |
 | --- | --- | --- | --- |
-| 闸门类 | 新造 `SsoUserSessionGate`（键 `entity/env/user`） | 复用 `ConcurrencyGate`（键 `sessionKey=env_username`） | **冲突**：不应再新造一套；应扩展现有键维度 |
+| 闸门类 | 新造 `SsoUserSessionGate`（键 `entity/env/user`） | 复用 `ConcurrencyGate`（键 `sessionKey=env_username`，**缺 `entity`**） | **冲突+缺口**：不应新造一套；且 `entity` 维度（取自 `logon <entity>` 步骤）须补入 `ConcurrencyPartitionKey`，否则跨实体同账号错并一道闸 |
 | 接入点 | 业务层 `SsoScenarioHooks`（`@Before/@After`） | 框架 `SessionStore` 会话路径（restore/save 入口）+ `PlaywrightListener` 收尾无条件释放 | **设计稿反模式**：业务层接线会依赖 `@After` 释放、易泄漏；以框架接入点为唯一真相 |
 | 同线程重入 | leaseId 版本化 | `ThreadLocal<Deque>` 持有表 + 重入 no-op | **实际更优**：重入 + 泄漏兜底释放，杜绝自锁/卡死 |
 | 公平/许可 | 公平 `Semaphore(1)` | 公平 `Semaphore(perKeyPermits)` | 一致 |
@@ -46,8 +46,9 @@
 对象矩阵（Playwright/Browser/Context/Page/调用期对象）与框架铁律一致。补充一点：路由 handler 已通过 `RouteClaim`（CAS 单所有者状态机）把"谁有权终结 Route"锁死，解决了 `playwright-java` 的 `RouteImpl.handled` 非原子 TOCTOU——这条应并入 §2.1 作为"调用期对象"的强约束证据。
 
 ### §3 SsoUserSessionGate —— 意图正确，实现路径应修正
-- **键维度**：设计稿用 `(entity, env, user)` 三维。但实际 `sessionKey = env + "_" + username` 已天然包含 `env+user`；`entity`（厂）维度在本框架**无对应抽象**，属冗余。若不引入"厂"概念，三维退化为二维，与现有 `ConcurrencyPartitionKey` 完全重合。
-  - **修正**：不要新造 `SsoUserSessionGate`。在 `ConcurrencyPartitionKey.of(Map.of("sessionkey", ...))` 上**扩展维度**即可（如 `tenant`/`role`/`apiclient`/`sessionPolicy`），复用同一道 `ConcurrencyGate`，避免"两套并行闸门"象限分裂。
+- **键维度**：设计稿用 `(entity, env, user)` 三维，**正确且需采纳**。`entity` 不是新造抽象——它对应 `Given ... logon <entity> ...` 步骤里已有的**实体名**维度（测试在步骤中显式写明的实体），沿用现有概念即可；注意 **`DBB` 是产品/项目名，不是该 `entity` 维度的值**。
+  - **修正我的误判**：此前我把 `entity`（误称"厂"）判为"无对应抽象、冗余、退化为二维"是**错的**。同一 `env+user` 在不同 `entity` 下其实是**不同的登录身份**，若只用 `env_username` 会错误地把跨实体同账号并到同一道闸（既可能误串行，也可能串缓存），因此 `entity` 必须纳入键。
+  - **做法**：不要新造 `SsoUserSessionGate`。在 `ConcurrencyPartitionKey` 上**显式新增 `entity` 维度**，值取自 `logon` 步骤的实体名（与 `sessionkey`/`apiclient`/`sessionPolicy` 同列一道 `ConcurrencyGate`），避免"两套并行闸门"象限分裂。
 - **leaseId 版本化 vs 持有表**：设计稿用 `activeLease` + leaseId 防误释放；实际用 `ThreadLocal<Deque<Key>>` 持有表，并在场景收尾 `releaseAllForCurrentThread()` 无条件释放。后者更优——它根治"许可泄漏 → 整套 park 死"的实测死锁，且不依赖调用方记得 release。应采用实际方案，删除设计稿的 leaseId 思路。
 - **公平信号量**：一致，保留。
 
@@ -59,7 +60,7 @@
 
 ### §5 跨 fork 分区 —— 思路正确，当前 N/A，SPI 方向对
 - 当前部署 `forkCount=1`（单 JVM、进程内多线程并行），故跨 fork 账号碰撞**物理上不可能发生**（见 `ConcurrencyGate` 类注与 SessionManager 评审结论）。设计稿 §5 属"未来 `forkCount>1` 时"的前瞻设计。
-- §5.7 的 `RunScopeAccountProvider` SPI 思路**正确且企业级**：框架不读业务参数，由业务项目经 SPI 决定本次账号池。但"从 env 名前缀推导厂（O63→厂）"脆弱——env 命名可自由变化。**修正**：厂/账号池由业务显式声明（配置或 SPI 返回），不隐式推导。
+- §5.7 的 `RunScopeAccountProvider` SPI 思路**正确且企业级**：框架不读业务参数，由业务项目经 SPI 决定本次账号池。`entity` 维度**本就来自 `logon <entity>` 步骤**（测试已显式给出实体名），**不应从 env 名前缀推导（O63→厂 脆弱且错误）**。**修正**：entity 由 `logon` 步骤直接提供，框架从步骤取，不隐式推导、不靠 env 前缀；账号池由业务显式声明（配置或 SPI 返回）。
 - §5.6 静态账号扫描 + Dry-run 报告：有价值的"开跑前 fail fast"，但与 stride 一样依赖 `forkCount>1`。单 JVM 下也可保留为"账号清单校验"（缺失账号早失败），与 fork 解耦，建议保留。
 
 ### §6 SSO 三态 —— 合理，但需与 Playwright 通道竞态治理对齐
@@ -88,7 +89,7 @@
 
 | 场景 | 特征 | 企业级行为 | 落地要点 |
 | --- | --- | --- | --- |
-| **不分厂（单厂）** | 无 `entity` 维度 | `sessionKey=env_username` 足够；`ConcurrencyPartitionKey` 不加 `tenant` 维度 | 与现有实现一致，零改动 |
+| **不分实体（单 entity）** | 全部测试只 `logon` 同一实体 | `entity` 为常量可省略，退化为 `env_username`；多实体时 `entity` 维度必须纳入，避免跨实体同账号错并闸 | 与现有实现一致（单 entity 时零改动） |
 | **没有 SSO 竞态**（服务端允许多并发会话） | 同账号可同时多 Context | `sessionPolicy=MULTI`：该身份 gate 退化为 `permits=N`（并行限额）或 no-op；`fail-closed` 不得误杀并行场景 | **新增策略维度**（设计稿缺失） |
 | **有 SSO 竞态**（账户级单会话，如 DBB） | 同账号二登互踢 | `sessionPolicy=SINGLE`（默认）：同 `sessionKey` 串行（permits=1），不同并行 | 当前 `ConcurrencyGate` 已满足 |
 | **API 并发** | rest-assured / 服务令牌复用 | API 凭证经同一 `ConcurrencyPartitionKey` 建模（维度含 `apiclient`/`apitoken`），按 `sessionPolicy` 串行/并行；route 捕获并发由 route 模块独立隔离 | **设计稿缺失，需补** |
@@ -96,9 +97,10 @@
 | **Playwright 通道连接异常** | `Object doesn't exist` / 导航中断 / 网络抖动 | **零容忍（Prevention-First）**：源端治理杜绝（单协调入口 / 对象不逃逸 / 受控销毁）；`response@` 已消除；残余协议异常 → `SUSPECT` 兜底且按框架缺陷暴露诊断、收敛到 0 | 与 §4.10 / §6 三态对齐 |
 | **场景失败** | stepFailed / 超时 | gate 由框架收尾无条件释放，Context 关闭（同 `sessionKey` 失败不关、无绑定才彻底拆——见 `clearThreadResourcesOnCaseAbort`） | 当前已实现 |
 
-> **核心结论**：同一套 `ConcurrencyGate` + `ConcurrencyPartitionKey`，通过**两个新增维度**即可覆盖全部场景：
-> 1. `sessionPolicy`（SINGLE/MULTI）—— 决定同身份串行还是并行；
-> 2. `apiclient`/`apitoken`（或通用 `identityType`）—— 把 API 凭证纳入同一分区模型。
+> **核心结论**：同一套 `ConcurrencyGate` + `ConcurrencyPartitionKey` 覆盖全部场景：
+> - 身份键 = `entity` + `env` + `user`；`entity` 取自 `logon <entity>` 步骤的实体名（**不是产品名 DBB**）。此前把 `entity` 误判为冗余"厂"是错的——同 `env+user` 跨实体即不同身份，必须纳入键，否则错并闸/串缓存；
+> - `sessionPolicy`（SINGLE/MULTI）—— 决定同身份串行还是并行；
+> - `apiclient`/`apitoken`（或通用 `identityType`）—— 把 API 凭证纳入同一分区模型。
 > 不引入第二套闸门、不引入业务层接线。
 
 ---
@@ -108,12 +110,13 @@
 ### 4.1 统一身份 + 策略模型
 复用 `ConcurrencyPartitionKey`，维度规范化（小写维度名、值保留大小写以兼容大小写敏感 IdP）：
 ```
-sessionkey = env + "_" + username          // UI 登录身份（现有）
+entity     = <logon 步骤实体名>             // UI 登录身份实体维度（取自 Given ... logon <entity> ...，非产品名 DBB）
+sessionkey = env + "_" + username          // UI 登录身份（现有）；须与 entity 维度叠加，否则跨实体同账号错并闸
 apiclient  = <clientId>                     // API 凭证身份（新增）
 sessionPolicy = SINGLE | MULTI              // 串行/并行策略（新增，默认 SINGLE）
 tenant / role                              // 可选扩展维度
 ```
-`ConcurrencyGate.perKeyPermits()` 由 `sessionPolicy` 决定：`SINGLE→1`，`MULTI→N`（可配）。键含 `sessionPolicy` 维度，使"同身份不同策略"不会串到同一道闸。
+`ConcurrencyGate.perKeyPermits()` 由 `sessionPolicy` 决定：`SINGLE→1`，`MULTI→N`（可配）。键含 `entity` + `sessionPolicy` 维度，使"同 `env+user` 跨实体"不会串到同一道闸、且"同身份不同策略"也不会串到同一道闸。
 
 ### 4.2 单一闸门实现（不新造）
 - 维持 `ConcurrencyGate` 为唯一闸门；删除 PoC 的 `SsoUserSessionGate` 方案。
@@ -136,7 +139,7 @@ tenant / role                              // 可选扩展维度
 ### 4.6 跨 fork 账号分区（仅 `forkCount>1`）
 - 保留 `RunScopeAccountProvider` SPI（业务项目决定本次账号池），框架不读业务参数。
 - `stride` 静态切分 + 可选静态账号扫描（开跑前 fail fast：缺失账号早失败、未用账号 WARN）。
-- 账号池由业务**显式声明**，不靠 env 名前缀隐式推导厂。
+- 账号池由业务**显式声明**，`entity` 由 `logon` 步骤直接提供，不靠 env 名前缀隐式推导。
 
 ### 4.7 API 并发（独立补充）
 - API 测试与 UI 测试混跑时，统一身份模型：API 客户端凭证走 `apiclient` 维度分区，按 `sessionPolicy` 串行/并行。
@@ -176,7 +179,7 @@ tenant / role                              // 可选扩展维度
 | 序 | 项 | 类型 | 优先级 | 说明 |
 | --- | --- | --- | --- | --- |
 | 1 | 原子写补 `.prev` 回滚位 + 主文件损坏回退 | 缺口修复 | P0 | 直接消除"登录态损坏→全体重登"风险 |
-| 2 | `sessionPolicy` 维度（SINGLE/MULTI）+ `perKeyPermits` 联动 | 兼容性 | P0 | 覆盖"无 SSO 竞态"场景，避免误串行 |
+| 2 | `entity` 维度（取自 `logon` 步骤）+ `sessionPolicy` 维度（SINGLE/MULTI）+ `perKeyPermits` 联动 | 兼容性/正确性 | P0 | `entity` 补入键避免跨实体同账号错并闸；`sessionPolicy` 覆盖"无 SSO 竞态"场景避免误串行 |
 | 3 | API 凭证身份维度（`apiclient`）+ 接入点 | 兼容性 | P1 | 覆盖"API 并发"场景 |
 | 4 | 抽 `SsoSessionState` 枚举 + 失效检测链接入 + 协议异常零容忍验证门禁 | 健壮性 | P1 | 落实 §6 三态；新增 CI 通道压测断言零协议异常（§4.10） |
 | 5 | 删除设计稿 `SsoUserSessionGate`/`SsoScenarioHooks` 反模式，文档以框架接入点为真相 | 文档/治理 | P1 | 防业务误接线 |
