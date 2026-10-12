@@ -505,19 +505,6 @@ public class LoginPage extends AbstractManagedPage {
     </tbody>
   </table>
 
-  <h3>配套配置键</h3>
-  <table>
-    <thead><tr><th>配置键</th><th>默认</th><th>说明</th></tr></thead>
-    <tbody>
-      <tr><td><code>dbb.codegen.enabled</code></td><td><code>false</code></td><td>系统属性。是否激活 codegen 运行时协作（拾取注入 / 清理钩子）。</td></tr>
-      <tr><td><code>picker.wait.timeout.ms</code></td><td><code>1800000</code>（30 分钟）</td><td>拾取 / 面板等待人工操作的<b>上界</b>。超时降级为「生成已拾取子集」，不再永久阻塞。<code>≤0</code> 表示不超时（本地调试逃生门）。</td></tr>
-      <tr><td><code>codegen.picker.eval.timeout.ms</code></td><td><code>10000</code></td><td>用户显式命令（开始 / 停止并生成）的 <code>page.evaluate</code> 超时。</td></tr>
-      <tr><td><code>codegen.picker.eval.softTimeout.ms</code></td><td><code>2000</code></td><td>每轮重做的幂等动作（面板回灌等）短超时。</td></tr>
-      <tr><td><code>rolePicker.panelSessionMaxMs</code></td><td><code>1800000</code>（30 分钟）</td><td>面板会话最长存活；事件丢失时兜底结束，避免无限阻塞调用线程。</td></tr>
-      <tr><td><code>rolePicker.nlsCacheTtlMs</code></td><td><code>300000</code>（5 分钟）</td><td>NLS 反向映射缓存 TTL。</td></tr>
-    </tbody>
-  </table>
-
   <div class="warn"><b>注意</b>：① 跨源 iframe 内的元素因浏览器安全限制不经主框架拾取，会被跳过；② 拾取只采集"你点选"的元素，不会整页枚举；③ 生成的代码务必人工 review 后再合入——不要直接手改 <code>&lt;generated:fields&gt;</code> 块内（再生成会被覆盖）。</div>
 </section>
 
@@ -742,7 +729,6 @@ RouteDsl.on(page)
       <tr><td rowspan="2">脱敏</td><td><code>sensitive.data.extra.header.keys</code></td><td>(空)</td><td>追加敏感头名（逗号分隔）</td></tr>
       <tr><td><code>sensitive.data.extra.body.keys</code> / <code>…query.keys</code></td><td>(空)</td><td>追加敏感体字段 / query 键</td></tr>
       <tr><td>可访问性</td><td><code>axe.scan.enabled</code></td><td>false</td><td>是否启用 axe-core 扫描</td></tr>
-      <tr><td>拾取器</td><td><code>picker.wait.timeout.ms</code></td><td>1800000</td><td>交互拾取等待人工操作超时（ms）</td></tr>
     </tbody>
   </table>
 
