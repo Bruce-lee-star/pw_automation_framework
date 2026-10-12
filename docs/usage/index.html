@@ -655,7 +655,7 @@ RouteDsl.on(page)
     <tbody>
       <tr><td>只停某个 pattern 的某能力</td><td><code>RouteDsl.stopMonitor(page, "/api/users")</code>（或 stopMock/stopModify/stopDelay/stopApi）</td><td>该 pattern 该能力</td></tr>
       <tr><td>注销自己注册的规则</td><td>持有 <code>register()</code> 返回的 <code>AutoCloseable</code> 调 <code>close()</code></td><td>该句柄覆盖的规则</td></tr>
-      <tr><td>清空该 context 全部规则，<b>保留</b> context 与登录态</td><td><code>RouteDsl.clearRules(page)</code>（返回退役条数）</td><td>该 context 规则</td></tr>
+      <tr><td>同一 scenario 内清空该 context 全部规则（<b>保留</b> context，不关 context、不收尾）</td><td><code>RouteDsl.clearRules(page)</code>（返回退役条数）</td><td>该 context 规则</td></tr>
       <tr><td>清空全部 context 的规则</td><td><code>RouteDsl.clearRulesAll()</code></td><td>所有 context</td></tr>
       <tr><td>关闭并释放某 context 的 Route 运行时</td><td><code>RouteDsl.clear(page)</code></td><td>该 context 整个 runtime</td></tr>
     </tbody>
@@ -675,7 +675,7 @@ RouteDsl.on(page)
     </tbody>
   </table>
 
-  <div class="warn"><b>规则生命周期（重要）</b>：每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时——所以 <b>Route 规则不跨 scenario 保留</b>（每个 scenario 起点 runtime 重建、规则为空）。需要"复用 Context、只清规则"时用 <code>RouteDsl.clearRules(page)</code>。</div>
+  <div class="warn"><b>规则生命周期（重要）</b>：每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时——所以 <b>Route 规则不跨 scenario 保留</b>（每个 scenario 起点 runtime 重建、规则为空）。这是<b>故意且安全</b>的：route 的驱动绑定（<code>context.route</code> 拦截器）挂在 Playwright 的 <b>Channel</b> 上，<b>跨 scenario 持久化 runtime（"保留 Context、只清规则来复用"）会与主线程 UI 泵同一条连接竞态，触发 <code>Object doesn't exist: route@…</code> 类<b>通道连接错误</b></b>。因此<b>不要</b>手动这么做——交给默认收尾即可。同一 scenario 内若想换一批规则，用 <code>RouteDsl.clearRules(page)</code>（只清内存规则表、<b>故意不 unroute</b>，绕开驱动连接争用），随后重新 <code>register()</code>。</div>
   <div class="warn"><b>两条最易误用点</b>：① <code>MONITOR 断言 + static MOCK</code> 时，断言对象是<b>你伪造的夹具</b>而非真实响应（合法，但易误判为"没生效"）；② <code>interceptResponse()</code> 与静态 <code>status/body/headers</code> 互斥。</div>
 </section>
 
@@ -1084,7 +1084,7 @@ route.capture.all.type = false</code></pre>
   </details>
 
   <details><summary>Route 规则这个 scenario 生效，下个 scenario 就没了？</summary>
-    <div class="body">这是<b>设计如此</b>。每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时，下个 scenario 重建、规则为空。需要"复用 Context、只清规则"用 <code>RouteDsl.clearRules(page)</code>；只想跑完某段就撤，用 <code>register()</code> 返回的句柄 <code>close()</code>。</div>
+    <div class="body">这是<b>设计如此</b>。每个 scenario 结束（<code>testFinished</code>）框架会关闭该 Context 的 Route 运行时，下个 scenario 重建、规则为空——这恰好避开了通道连接问题：route 的 driver 绑定挂在 Playwright <b>Channel</b> 上，若在 scenario 之间"保留 Context、只清规则"来复用 runtime，会与主线程 UI 泵同一条连接竞态，爆出 <code>Object doesn't exist: route@…</code>。所以<b>不要手动这么做</b>，交给默认收尾。同一 scenario 内想换规则可用 <code>RouteDsl.clearRules(page)</code>（故意不 unroute，安全）；只想跑完某段就撤，用 <code>register()</code> 返回的句柄 <code>close()</code>。</div>
   </details>
 
   <details><summary>Mock 没生效，页面还是走了真实接口？</summary>
