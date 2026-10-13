@@ -284,6 +284,13 @@ public final class AccountManifest {
 
 **落地顺序**：先上 stride（§5.1，零成本），PoC 跑通后再加静态扫描（§5.6）作为质量增强。
 
+**【2026-10-13 落地状态】**：构建期账号缺配 fail-fast + dry-run 报告已落地（test-automation 模块，零框架改动、免重装）。
+- 新增 `tests/ssoplan` 包：`SsoAccountManifest`（从 `sso.accounts.<env>` 加载清单，单测可注入 map）、`FeatureAccountScanner`（扫 `*.feature` 抽取 `logon DBB "<env>" environment as user "<user>"` 身份，兼容 `logonDBB` / `I logon DBB` / `using the RoleElement page` 变体，排除 `Scenario Outline` 的 `<...>` 占位）、`SsoPlanValidator` + `SsoPlanResult`（评估 + `[SsoPlan]` 报告 + `failFast()`）。
+- 构建期门禁 `SsoPlanDryRunValidatorTest`（随 `mvn test` 运行）：开跑前打印 `[SsoPlan]` 计划（文件/scenario 数、账号引用分布、fork 分配、未用账号 WARN）；**fail-fast 仅在 `sso.accounts.*` 已配置时生效**——某 env 声明了清单却含场景引用未声明的 user，构建直接失败并列出缺失账号与所属 scenario（design §5.6.2 fail-closed）。当前仓库未配置 `sso.accounts.*` 时仅打印报告、不 fail（零回归）。
+- 单测 `SsoPlanValidatorTest`(7) + `FeatureAccountScannerTest`(3) 全绿；dry-run 实扫 13 文件 / 66 scenario 正确识别 `O63_SIT1/WP7UAT2_2`（19 处）。
+- 端到端验证：`-Dsso.accounts.O63_SIT1=WP7UAT2_9`（声明不含实际引用账号）时构建 FAIL，确认硬门禁生效。
+- **未随本项闭环**：§5 跨 fork 账号分区 `ForkAwareAccountResolver`（§5.1~§5.5）仍待实现，故阶段 3~5（跨 JVM 多 fork 并行）尚未可达；本 §5.6 是低成本质量增强，独立于 §5 fork 分区。
+
 ### 5.7 只跑部分账号时的并发
 配置里有 O63/O38/O88 三个 env 的账号，但本次只跑 O63 的 case——此时 O38/O88 的账号不应参与分区，fork 数也只受 O63 可用账号数约束。
 
