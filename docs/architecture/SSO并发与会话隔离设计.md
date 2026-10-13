@@ -293,7 +293,7 @@ public final class AccountManifest {
   - 新增 `tests/ssoplan/ForkAwareAccountResolver`（静态 stride 解析器，§5.1~§5.3）：`currentForkIndex()` 读取 `fork.index` 显式覆盖 → `surefire.forkNumber`（1-based→0-based）→ 缺省 0（IDE 单跑 / `-Pparallel` 单 JVM 均归 fork 0）；`stride()` 读 `sso.fork.user.stride`（默认 4）；`myUsers(env)` 按当前 fork × stride 切出账号池连续片段；`isMine(env,user)` / `assertAccountBelongsToCurrentFork(env,user)` 做跨 fork 归属 fail-fast（未配置 `sso.accounts.<env>` 时 no-op，零回归）。
   - 接线点（§9.3 单一真相）：`BDDUtils.getLogonDBBInfo(env, username)` 入口调用 `assertAccountBelongsToCurrentFork` —— `LogonGlue` 与 `RoleElementLoginGlue` 两条登录路径均经此漏斗，故一处覆盖、无重复。多 fork 下某账号被分给其它 fork 时登录即 fail-closed 并指明正确 fork（fix：`-Dfork.index=N` 或重平衡 stride/账号池），与 §3 `ConcurrencyGate`（JVM 之内同 user 串行）形成 §5.4 两层防线。
   - 单测 `ForkAwareAccountResolverTest`(12) 覆盖：fork.index 覆盖优先级 / surefire 1-based 转换 / 缺省归零 / 负值与脏值防御 / stride 自定义与默认值 / 切片与末段补齐 / isMine / 切片内 OK / 跨 fork 抛异常且消息指明归属 fork / 未配置 env no-op。
-  - 阶段 3~5（跨 JVM 多 fork 并行）现已可达：CI 配 `forkCount>1` + `-Dsso.fork.user.stride=N` + `sso.accounts.<env>` 声明账号池即可；账号不足时多余 scenario 在本类 fail-closed（等同 §5.7「降并发」语义，但 §5.7 的 `RunScopeAccountProvider` SPI 动态裁剪仍属未闭环的增强项）。
+  - 阶段 3~5（跨 JVM 多 fork 并行）现已可达：CI 配 `forkCount>1` + `-Dsso.fork.user.stride=N` + `sso.accounts.<env>` 声明账号池即可；账号不足时多余 scenario 在本类 fail-closed（等同 §5.7「降并发」语义）。§5.7 的 `RunScopeAccountProvider` SPI 动态裁剪**已落地**（见 §5.7 落地区块）：业务仅跑 O63 时 provider 返回 O63 子集，fork 只在子集里切，O38/O88 账号不参与分区、不占 fork、不触发跨 fork fail-fast。
 
 ### 5.7 只跑部分账号时的并发
 配置里有 O63/O38/O88 三个 env 的账号，但本次只跑 O63 的 case——此时 O38/O88 的账号不应参与分区，fork 数也只受 O63 可用账号数约束。
@@ -369,7 +369,7 @@ public enum SsoSessionState { VALID, SUSPECT, INVALID }
 - 本地 torture 用例 `pw-route` 的 `DelayGuardTortureTest` 已落地（沿用 `DelayAppliesWaitTest` 的 Mock 脚手架，高并发 + 慢 main drain + DELAY），断言协议调用（`resume`）永远只在 main 拥有线程发生，本地跑通 → §8.4 根源已消除。
 - 计数器单测（`DriverRaceErrorsTest`：累加 / 对象 GUID 解析 / NONE 不计 / reset）已落地。
 - 验证：pw-route 312 例、pw-web-ui 411 例全绿，无编码警告，BUILD SUCCESS。
-- **待办（未随本项闭环）**：CI 真浏览器压测里加 `DriverRaceErrors.Monitor.raceCount() == 0` 断言（`test-automation` 模块，本地缺 SIT 不可跑），作为 fail-closed 硬门禁；该断言落地后，本 §6.3 描述的"CI 加入 torture 用例集"方视为完全闭环。
+- **§6.3 门禁已落地（test-automation，2026-10-13）**：新增 `DriverRaceGate`（`assertZeroRaces()` fail-closed 断言 + `isEnabled()` 开关 `sso.race.gate.enabled` 默认关），由共享 glue `DriverRaceGateGlue` 的 `@Before(order=-1000)`/`@After(order=1000)` 在每 scenario 重置/断言计数（仅在 CI 压测显式开启开关时激活，普通运行零回归）；单测 `DriverRaceGateTest`(4) 锁定「零竞态不抛 / 非零抛且含 §6.3+GUID+类别诊断 / 开关默认 false」。`RunScopeAccountProviderTest`(4) + `ForkAwareAccountResolverTest` 扩展 §5.7 裁剪用例（16）亦落地。上述 test-automation 单测共 24 例全绿 BUILD SUCCESS。**本地缺 SIT 不可跑真浏览器压测**，但 fail-closed 逻辑已被单测覆盖；CI 通道压测设 `-Dsso.race.gate.enabled=true` 即视为本 §6.3「CI 加入 torture 用例集 + 断言运行期零协议异常」完全闭环。
 
 ***
 
