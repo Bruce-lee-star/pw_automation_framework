@@ -88,6 +88,10 @@ public final class PageNavigation {
             if (selfHealEnabled()) {
                 race = DriverRaceErrors.classify(e);
             }
+            if (race != DriverRaceErrors.Kind.NONE) {
+                //  §6.3 运行期协议异常计数：每次观测到的驱动竞态 +1，供 CI 通道压测断言 == 0（fail-closed）。
+                DriverRaceErrors.Monitor.record(race, e.getMessage(), Thread.currentThread().getName());
+            }
             if (race == DriverRaceErrors.Kind.NONE) {
                 throw new NavigationException(url, "Navigation failed: " + e.getMessage(), e);
             }

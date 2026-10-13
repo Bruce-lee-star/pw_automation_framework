@@ -6,6 +6,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -91,5 +92,39 @@ public class DriverRaceErrorsTest {
         assertEquals(DriverRaceErrors.Kind.OBJECT_LIFECYCLE_RACE,
                 DriverRaceErrors.classify(new PlaywrightException(INTERRUPTED_MESSAGE,
                         new PlaywrightException(OBJECT_GONE_MESSAGE))));
+    }
+
+    @Test
+    // @DisplayName: "运行期协议异常计数器：累加 / 诊断对象 GUID / NONE 不计 / reset"
+    public void monitorCountsRacesWithDiagnostics() {
+        DriverRaceErrors.Monitor.reset();
+        assertEquals(0L, DriverRaceErrors.Monitor.raceCount());
+
+        DriverRaceErrors.Monitor.record(DriverRaceErrors.Kind.OBJECT_LIFECYCLE_RACE, OBJECT_GONE_MESSAGE, "main");
+        assertEquals(1L, DriverRaceErrors.Monitor.raceCount());
+
+        DriverRaceErrors.Record first = DriverRaceErrors.Monitor.last();
+        assertNotNull(first);
+        //  OBJECT_GONE_MESSAGE = "Object doesn't exist: response@1256921968353cbde3445ff7a129b1ce"
+        //  objectGuid 仅取 '@' 之后的对象句柄（不含 "response@" 前缀）
+        assertEquals("1256921968353cbde3445ff7a129b1ce", first.objectGuid);
+        assertEquals(DriverRaceErrors.Kind.OBJECT_LIFECYCLE_RACE, first.kind);
+
+        DriverRaceErrors.Monitor.record(DriverRaceErrors.Kind.INTERRUPTED_BY_ANOTHER_NAVIGATION,
+                INTERRUPTED_MESSAGE, "main");
+        assertEquals(2L, DriverRaceErrors.Monitor.raceCount());
+
+        DriverRaceErrors.Record last = DriverRaceErrors.Monitor.last();
+        assertNotNull(last);
+        assertEquals(DriverRaceErrors.Kind.INTERRUPTED_BY_ANOTHER_NAVIGATION, last.kind);
+        //  INTERRUPTED 文案无 '@'，objectGuid 为空串
+        assertEquals("", last.objectGuid);
+
+        //  NONE 不计入（超时被排除在外，此处直接以 NONE 入参验证守卫）
+        DriverRaceErrors.Monitor.record(DriverRaceErrors.Kind.NONE, "ignored", "main");
+        assertEquals(2L, DriverRaceErrors.Monitor.raceCount());
+
+        DriverRaceErrors.Monitor.reset();
+        assertEquals(0L, DriverRaceErrors.Monitor.raceCount());
     }
 }

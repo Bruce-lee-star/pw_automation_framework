@@ -3,6 +3,9 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.TimeoutError;
 
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+
 /**
  * Playwright Java「驱动侧竞态」错误分类器 —— 框架自愈策略的<b>唯一判据来源</b>。
  *
@@ -125,5 +128,86 @@ public final class DriverRaceErrors {
             return Kind.INTERRUPTED_BY_ANOTHER_NAVIGATION;
         }
         return Kind.NONE;
+    }
+
+    /**
+     * 运行期「驱动竞态」计数器（§6.3 验证门禁的<b>唯一计数来源</b>）。
+     *
+     * <p>每次 {@link #classify(Throwable)} 判定为可自愈竞态（{@code OBJECT_LIFECYCLE_RACE} /
+     * {@code INTERRUPTED_BY_ANOTHER_NAVIGATION}）即 +1，并留存最后一次诊断
+     * （线程名 / 对象 GUID / 文案 / 时间戳），供 CI「通道压测」断言
+     * <b>运行期协议异常计数 == 0</b>（fail-closed）并定位所有权违规。
+     *
+     * <p>计数线程安全；{@link #reset()} 仅供测试隔离。诊断里的「context GUID」由调用方在
+     * {@code PageNavigation} 消费点尽力提供（此处仅解析稳定的对象 GUID）。
+     */
+    public static final class Monitor {
+        private static final AtomicLong RACE_COUNT = new AtomicLong(0L);
+        private static final AtomicReference<Record> LAST = new AtomicReference<>(null);
+
+        private Monitor() {
+        }
+
+        /** 记录一次驱动竞态（在 {@code PageNavigation} 唯一消费点调用）。 */
+        public static void record(Kind kind, String message, String threadName) {
+            if (kind == null || kind == Kind.NONE) {
+                return;
+            }
+            RACE_COUNT.incrementAndGet();
+            LAST.set(new Record(kind, message, threadName));
+        }
+
+        /** 运行期累计驱动竞态次数（§6.3 门禁断言目标）。 */
+        public static long raceCount() {
+            return RACE_COUNT.get();
+        }
+
+        /** 最近一次诊断（可能为 {@code null}）。 */
+        public static Record last() {
+            return LAST.get();
+        }
+
+        /** 测试隔离：清零计数与最近记录。 */
+        public static void reset() {
+            RACE_COUNT.set(0L);
+            LAST.set(null);
+        }
+    }
+
+    /** 单次驱动竞态诊断快照。 */
+    public static final class Record {
+        public final Kind kind;
+        public final String message;
+        public final String threadName;
+        public final String objectGuid;
+        public final long timestamp;
+
+        Record(Kind kind, String message, String threadName) {
+            this.kind = kind;
+            this.message = message;
+            this.threadName = threadName;
+            this.objectGuid = parseObjectGuid(message);
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        /** 从 {@code Object doesn't exist: <type>@<guid>} 提取对象 GUID（缺失则为空串）。 */
+        private static String parseObjectGuid(String message) {
+            if (message == null) {
+                return "";
+            }
+            int at = message.indexOf('@');
+            if (at < 0) {
+                return "";
+            }
+            int end = at + 1;
+            while (end < message.length() && isGuidChar(message.charAt(end))) {
+                end++;
+            }
+            return message.substring(at + 1, end);
+        }
+
+        private static boolean isGuidChar(char c) {
+            return Character.isLetterOrDigit(c) || c == '-';
+        }
     }
 }
