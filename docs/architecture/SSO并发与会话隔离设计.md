@@ -354,6 +354,12 @@ public enum SsoSessionState { VALID, SUSPECT, INVALID }
 - CI 加入"故意高并行 + 故意慢 handler + 故意中断导航 + **故意启用 DELAY 能力（触发调度线程重入路径）**"的 torture 用例集，断言**运行期协议异常计数 == 0**；非零则**构建失败（fail-closed）**，并输出诊断（线程 / context GUID / 对象 GUID / 栈）定位所有权违规。DELAY 路径必须覆盖，因跨线程 `route` 驱动调用只在该路径暴露。
 - SUSPECT 仅作为兜底安全网：即便发生，也不破坏 SSO 缓存、不重登，并计入框架质量信号推动治理收敛到零。
 
+**【2026-10-13 落地状态】**：运行期协议异常计数已由 `framework.web.lifecycle.DriverRaceErrors.Monitor` 提供（线程安全 `raceCount()` + 诊断快照 `线程名 / context GUID / 对象 GUID / 文案 / 时间戳`，`reset()` 供测试隔离）；其唯一消费点为 `PageNavigation`（框架内唯一会触发协议驱动重试的边界），故 `raceCount()` 是 §8.4 跨线程驱动"协议异常计数 == 0"的唯一事实来源，供 CI 真浏览器通道压测 fail-closed 断言。
+- 本地 torture 用例 `pw-route` 的 `DelayGuardTortureTest` 已落地（沿用 `DelayAppliesWaitTest` 的 Mock 脚手架，高并发 + 慢 main drain + DELAY），断言协议调用（`resume`）永远只在 main 拥有线程发生，本地跑通 → §8.4 根源已消除。
+- 计数器单测（`DriverRaceErrorsTest`：累加 / 对象 GUID 解析 / NONE 不计 / reset）已落地。
+- 验证：pw-route 312 例、pw-web-ui 411 例全绿，无编码警告，BUILD SUCCESS。
+- **待办（未随本项闭环）**：CI 真浏览器压测里加 `DriverRaceErrors.Monitor.raceCount() == 0` 断言（`test-automation` 模块，本地缺 SIT 不可跑），作为 fail-closed 硬门禁；该断言落地后，本 §6.3 描述的"CI 加入 torture 用例集"方视为完全闭环。
+
 ***
 
 ## 7. Refresh Token Rotation 专项
