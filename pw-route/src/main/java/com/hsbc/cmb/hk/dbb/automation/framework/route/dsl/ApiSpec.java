@@ -109,8 +109,10 @@ public final class ApiSpec {
      * 见 {@code CaptureSink} 的两处闸门与 {@link #captureActive()}。
      */
     private final boolean captureExplicitlyOff;
-    /** 是否采集响应体（默认 false；开启后经 IO 线程读取，受 captureBodyLimitBytes 截断）。 */
+    /** 是否采集响应体（默认由全局 {@code route.capture.body.default} 决定；本字段为逐规则显式意图）。 */
     private final boolean captureBody;
+    /** 逐规则是否显式关闭了响应体采集（{@code .captureBody(false)}）；优先于全局默认开关。 */
+    private final boolean captureBodyExplicitlyOff;
     /** 响应体采集截断上限（字节，默认 {@value CaptureLimits#DEFAULT_BODY_LIMIT_BYTES}）。 */
     private final int captureBodyLimitBytes;
 
@@ -164,6 +166,7 @@ public final class ApiSpec {
         this.captureImplicit = b.captureImplicit;
         this.captureExplicitlyOff = b.captureExplicitlyOff;
         this.captureBody = b.captureBody;
+        this.captureBodyExplicitlyOff = b.captureBodyExplicitlyOff;
         this.captureBodyLimitBytes = b.captureBodyLimitBytes;
         this.times = b.times;
         this.matchMethod = b.matchMethod;
@@ -219,6 +222,7 @@ public final class ApiSpec {
         this.captureImplicit = from.captureImplicit;
         this.captureExplicitlyOff = from.captureExplicitlyOff;
         this.captureBody = from.captureBody;
+        this.captureBodyExplicitlyOff = from.captureBodyExplicitlyOff;
         this.captureBodyLimitBytes = from.captureBodyLimitBytes;
         this.times = from.times;
         this.matchMethod = from.matchMethod;
@@ -476,6 +480,8 @@ public final class ApiSpec {
         // 显式关闭保守传染：同 pattern 任一段要求不采，合并结果即不采
         b.captureExplicitlyOff = b.captureExplicitlyOff || o.captureExplicitlyOff;
         b.captureBody = b.captureBody || o.captureBody;
+        // 显式关闭保守传染：同 pattern 任一段要求不读响应体，合并结果即不读
+        b.captureBodyExplicitlyOff = b.captureBodyExplicitlyOff || o.captureBodyExplicitlyOff;
         b.autoStopOnMatch = b.autoStopOnMatch || o.autoStopOnMatch;
         b.onlyMainFrame = b.onlyMainFrame && o.onlyMainFrame;
         b.onlyApiCall = b.onlyApiCall || o.onlyApiCall;
@@ -623,6 +629,11 @@ public final class ApiSpec {
 
     public boolean captureBodyEnabled() {
         return captureBody;
+    }
+
+    /** 逐规则是否显式关闭了响应体采集（{@code .captureBody(false)}）；优先于全局默认开关。 */
+    public boolean captureBodyExplicitlyOff() {
+        return captureBodyExplicitlyOff;
     }
 
     public int captureBodyLimitBytes() {
@@ -780,6 +791,7 @@ public final class ApiSpec {
         private boolean captureImplicit;
         private boolean captureExplicitlyOff;
         private boolean captureBody;
+        private boolean captureBodyExplicitlyOff;
         /** 默认响应体截断上限（64 KiB，与 CaptureLimits.DEFAULT_BODY_LIMIT_BYTES 对齐）。 */
         private int captureBodyLimitBytes = DEFAULT_CAPTURE_BODY_LIMIT_BYTES;
         private Integer times;
@@ -835,6 +847,7 @@ public final class ApiSpec {
             this.captureImplicit = s.captureImplicit;
             this.captureExplicitlyOff = s.captureExplicitlyOff;
             this.captureBody = s.captureBody;
+            this.captureBodyExplicitlyOff = s.captureBodyExplicitlyOff;
             this.captureBodyLimitBytes = s.captureBodyLimitBytes;
             this.times = s.times;
             this.matchMethod = s.matchMethod;
@@ -1058,9 +1071,13 @@ public final class ApiSpec {
             return this;
         }
 
-        /** 是否采集响应体（默认 false；开启后经 IO 线程读取，按 captureBodyLimitBytes 截断）。 */
+        /**
+         * 是否采集响应体（默认由全局 {@code route.capture.body.default} 决定；本开关为逐规则意图）。
+         * 显式 {@code .captureBody(false)} 优先于全局默认，关掉该规则的响应体采集。
+         */
         public Builder captureBody(boolean enable) {
             this.captureBody = enable;
+            this.captureBodyExplicitlyOff = !enable;
             return this;
         }
 

@@ -62,7 +62,7 @@ public final class RouteCapturePolicy {
         return assertBodyMaxBytes;
     }
 
-    /** 三项生效值的来源层（键 + 生效值 + 层），供诊断/日志（返回不可变快照）。 */
+    /** 四项生效值的来源层（键 + 生效值 + 层），供诊断/日志（返回不可变快照）。 */
     public List<ConfigSource.Resolved> provenance() {
         return List.copyOf(provenance);
     }

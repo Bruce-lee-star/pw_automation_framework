@@ -272,10 +272,14 @@ public final class CaptureSink {
         CapturedExchange snapshot;
         while ((snapshot = pendingMaterialization.poll()) != null) {
             ApiSpec spec = snapshot.spec();
-            if (spec != null && spec.captureBodyEnabled()) {
+            // 响应体读取判定：只要该规则进入了采集集合（recordRequest 已放行），
+            // 就默认读取响应体（MONITOR 恒采集；all.type=true 时其它类型也一并采集）；
+            // 仅逐规则 .captureBody(false) 显式关闭时例外（超大响应等场景的逃生阀）。
+            boolean readBody = spec != null && !spec.captureBodyExplicitlyOff();
+            if (readBody) {
                 captureBodyNow(snapshot, spec); // 业务线程（main）：读 body 后入队
             } else {
-                // 未开启 captureBody：只保留 status/headers（本地快照），不发起 body() 协议调用
+                // 未读取响应体：只保留 status/headers（本地快照），不发起 body() 协议调用
                 enqueue(snapshot, null, null, false);
             }
         }

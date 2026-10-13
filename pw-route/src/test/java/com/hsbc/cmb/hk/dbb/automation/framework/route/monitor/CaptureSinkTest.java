@@ -63,6 +63,7 @@ public class CaptureSinkTest {
     public void recordsRequestAndResponsePair() {
         ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR)
                 .capture(true)
+                .captureBody(false)
                 .build();
         CaptureSink sink = newSink(100, 30_000);
 
@@ -78,7 +79,7 @@ public class CaptureSinkTest {
         assertEquals((long) 200L, (long) call.responseStatus());
         assertTrue(call.durationMs() >= 0);
         assertEquals((Object) "{\"name\":\"u\"}", (Object) call.requestBodyPreview());
-        assertNull( "未开启 captureBody 时响应体必须为 null", call.responseBody());
+        assertNull( "显式 .captureBody(false) 时响应体必须为 null", call.responseBody());
         assertFalse(call.responseBodyTruncated());
         assertTrue(call.recordedAtMillis() > 0);
     }
