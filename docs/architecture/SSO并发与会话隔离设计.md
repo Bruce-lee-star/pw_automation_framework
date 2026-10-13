@@ -289,7 +289,11 @@ public final class AccountManifest {
 - 构建期门禁 `SsoPlanDryRunValidatorTest`（随 `mvn test` 运行）：开跑前打印 `[SsoPlan]` 计划（文件/scenario 数、账号引用分布、fork 分配、未用账号 WARN）；**fail-fast 仅在 `sso.accounts.*` 已配置时生效**——某 env 声明了清单却含场景引用未声明的 user，构建直接失败并列出缺失账号与所属 scenario（design §5.6.2 fail-closed）。当前仓库未配置 `sso.accounts.*` 时仅打印报告、不 fail（零回归）。
 - 单测 `SsoPlanValidatorTest`(7) + `FeatureAccountScannerTest`(3) 全绿；dry-run 实扫 13 文件 / 66 scenario 正确识别 `O63_SIT1/WP7UAT2_2`（19 处）。
 - 端到端验证：`-Dsso.accounts.O63_SIT1=WP7UAT2_9`（声明不含实际引用账号）时构建 FAIL，确认硬门禁生效。
-- **未随本项闭环**：§5 跨 fork 账号分区 `ForkAwareAccountResolver`（§5.1~§5.5）仍待实现，故阶段 3~5（跨 JVM 多 fork 并行）尚未可达；本 §5.6 是低成本质量增强，独立于 §5 fork 分区。
+- **§5.1~§5.5 已落地（2026-10-13 补充，test-automation 模块，零框架改动、免重装）**：
+  - 新增 `tests/ssoplan/ForkAwareAccountResolver`（静态 stride 解析器，§5.1~§5.3）：`currentForkIndex()` 读取 `fork.index` 显式覆盖 → `surefire.forkNumber`（1-based→0-based）→ 缺省 0（IDE 单跑 / `-Pparallel` 单 JVM 均归 fork 0）；`stride()` 读 `sso.fork.user.stride`（默认 4）；`myUsers(env)` 按当前 fork × stride 切出账号池连续片段；`isMine(env,user)` / `assertAccountBelongsToCurrentFork(env,user)` 做跨 fork 归属 fail-fast（未配置 `sso.accounts.<env>` 时 no-op，零回归）。
+  - 接线点（§9.3 单一真相）：`BDDUtils.getLogonDBBInfo(env, username)` 入口调用 `assertAccountBelongsToCurrentFork` —— `LogonGlue` 与 `RoleElementLoginGlue` 两条登录路径均经此漏斗，故一处覆盖、无重复。多 fork 下某账号被分给其它 fork 时登录即 fail-closed 并指明正确 fork（fix：`-Dfork.index=N` 或重平衡 stride/账号池），与 §3 `ConcurrencyGate`（JVM 之内同 user 串行）形成 §5.4 两层防线。
+  - 单测 `ForkAwareAccountResolverTest`(12) 覆盖：fork.index 覆盖优先级 / surefire 1-based 转换 / 缺省归零 / 负值与脏值防御 / stride 自定义与默认值 / 切片与末段补齐 / isMine / 切片内 OK / 跨 fork 抛异常且消息指明归属 fork / 未配置 env no-op。
+  - 阶段 3~5（跨 JVM 多 fork 并行）现已可达：CI 配 `forkCount>1` + `-Dsso.fork.user.stride=N` + `sso.accounts.<env>` 声明账号池即可；账号不足时多余 scenario 在本类 fail-closed（等同 §5.7「降并发」语义，但 §5.7 的 `RunScopeAccountProvider` SPI 动态裁剪仍属未闭环的增强项）。
 
 ### 5.7 只跑部分账号时的并发
 配置里有 O63/O38/O88 三个 env 的账号，但本次只跑 O63 的 case——此时 O38/O88 的账号不应参与分区，fork 数也只受 O63 可用账号数约束。
