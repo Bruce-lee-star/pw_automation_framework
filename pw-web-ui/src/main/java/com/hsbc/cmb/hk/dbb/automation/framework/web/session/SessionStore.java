@@ -284,6 +284,11 @@ final class SessionStore {
         } catch (Exception e) {
             LOGGER.warn("Failed to delete corrupted meta file for {}: {}", sessionKey, e.getMessage());
         }
+        try {
+            Files.deleteIfExists(getPrevPath(sessionKey));
+        } catch (Exception e) {
+            LOGGER.warn("Failed to delete corrupted prev file for {}: {}", sessionKey, e.getMessage());
+        }
         META_CACHE.invalidate(sessionKey);
         STORAGE_CONTENT_CACHE.invalidate(sessionKey);
     }
@@ -362,6 +367,31 @@ final class SessionStore {
             STORAGE_CONTENT_CACHE.put(sessionKey, content);
             return content;
         } catch (Exception e) {
+            // §4.3 P0 缺口：主文件损坏/格式错时，先尝试回退 .prev（上一次成功登录态）。
+            Path prevPath = getPrevPath(sessionKey);
+            if (Files.exists(prevPath)) {
+                try {
+                    String prevContent = new String(Files.readAllBytes(prevPath), StandardCharsets.UTF_8);
+                    if (isValidStorageStateJson(prevContent)) {
+                        LOGGER.warn("[SessionStore] Main storageState for {} is corrupt (cause: {}) "
+                                + "-> falling back to .prev backup", sessionKey, e.getMessage());
+                        // 自愈：把 .prev 原子还原为主文件，避免后续每次读取都走回退路径
+                        Path prevTmp = prevPath.resolveSibling(sessionKey + ".prev.tmp");
+                        Files.writeString(prevTmp, prevContent, StandardCharsets.UTF_8);
+                        try {
+                            Files.move(prevTmp, getSessionPath(sessionKey),
+                                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                        } catch (java.nio.file.AtomicMoveNotSupportedException ae) {
+                            Files.move(prevTmp, getSessionPath(sessionKey), StandardCopyOption.REPLACE_EXISTING);
+                        }
+                        STORAGE_CONTENT_CACHE.put(sessionKey, prevContent);
+                        return prevContent;
+                    }
+                } catch (Exception prevReadIgnored) {
+                    LOGGER.error("[SessionStore] .prev backup for {} also unreadable -> purging (cause: {})",
+                            sessionKey, prevReadIgnored.getMessage());
+                }
+            }
             LOGGER.error("[SessionStore] Corrupted/unreadable storageState for {} -> purging session files "
                     + "so next run re-logs in (cause: {})", sessionKey, e.getMessage());
             INVALIDATED_KEYS.add(sessionKey);
@@ -885,11 +915,31 @@ final class SessionStore {
         return Paths.get(SESSION_DIR, sessionKey + ".meta");
     }
 
+    private static Path getPrevPath(String sessionKey) {
+        return Paths.get(SESSION_DIR, sessionKey + ".prev.json");
+    }
+
     private static void writeStorageStateAtomically(String sessionKey, String json) {
         Path sessionPath = getSessionPath(sessionKey);
+        Path prevPath = getPrevPath(sessionKey);
         Path tmp = sessionPath.resolveSibling(sessionPath.getFileName() + ".tmp");
         try {
             Files.writeString(tmp, json, StandardCharsets.UTF_8);
+            // §4.3 P0 缺口：覆盖主文件前，先把「上一次成功的」主文件备份为 .prev 回滚位。
+            // 顺序必须在 move 替换主文件之前；仅当主文件存在且为合法 storageState 时才备份，
+            // 避免把已损坏的主文件覆盖掉好的 .prev。
+            if (Files.exists(sessionPath)) {
+                try {
+                    String existing = new String(Files.readAllBytes(sessionPath), StandardCharsets.UTF_8);
+                    if (isValidStorageStateJson(existing)) {
+                        Files.copy(sessionPath, prevPath, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (Exception backupIgnored) {
+                    VerboseLogging.logDebugIfVerbose(LOGGER,
+                            "Prev backup skipped for {} (current main unreadable): {}",
+                            sessionKey, backupIgnored.getMessage());
+                }
+            }
             try {
                 Files.move(tmp, sessionPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (java.nio.file.AtomicMoveNotSupportedException e) {
