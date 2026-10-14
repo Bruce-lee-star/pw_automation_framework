@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.OriginResolver;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.DriverErrors;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType;
@@ -739,6 +740,20 @@ public final class CaptureSink {
                 c.pattern(), c.method(), c.url(),
                 c.requestHeaders(), c.requestBodyPreview(), c.responseStatus(), c.responseHeaders(),
                 responseText, c.responseBodyTruncated(), c.durationMs(), c.timedOut(),
-                c.recordedAtMillis(), c.channels(), c.contentType(), responseBytes);
+                c.recordedAtMillis(), c.channels(), c.contentType(), responseBytes,
+                toOriginView(c.origin()));
+    }
+
+    /** 归属映射：pw-route 的 {@link RequestOrigin} → pw-core 的跨模块视图（null 安全）。 */
+    private static com.hsbc.cmb.hk.dbb.automation.framework.common.route.RequestOriginView toOriginView(
+            RequestOrigin origin) {
+        if (origin == null) {
+            return com.hsbc.cmb.hk.dbb.automation.framework.common.route.RequestOriginView.UNKNOWN;
+        }
+        if (origin == RequestOrigin.DEGRADED) {
+            return com.hsbc.cmb.hk.dbb.automation.framework.common.route.RequestOriginView.DEGRADED;
+        }
+        return new com.hsbc.cmb.hk.dbb.automation.framework.common.route.RequestOriginView(
+                origin.ownerPageId(), origin.frameId(), origin.navSeq(), origin.degraded());
     }
 }

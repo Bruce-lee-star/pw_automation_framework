@@ -29,9 +29,13 @@ import org.slf4j.LoggerFactory;
  *       {@code path()} 完成后才可用，与普通 {@code Response} 语义不同；采集侧目前不把它归因到
  *       触发请求。</li>
  *   <li>{@code REDIRECT_CHAIN_UNMODELLED}：重定向各跳当前未串联。</li>
- *   <li>{@code NAVIGATION_EPOCH_NOT_QUERYABLE}：归属三元组（{@code ownerPageId}/{@code frameId}/
- *       {@code navSeq}）已随每条采集记录落地，但等待/查询接口<b>尚未</b>按 owner 或代次过滤，
- *       故连续导航仍需配合 {@code waitForApiSince} 的采集序号门槛使用。</li>
+ * </ul>
+ *
+ * <p><b>已闭合的边界（不再列为标签）</b>：归属三元组（{@code ownerPageId}/{@code frameId}/
+ * {@code navSeq}）此前只入库、业务读不到；现已映射到跨模块视图
+ * （{@code CapturedApiCallView#origin()}）并配套 {@code getCallsByOwner} /
+ * {@code waitForApiFromOwner}，故"归属不可查询"这一条已消除。
+ * 连续导航仍需配合 {@code waitForApiSince} 的采集序号门槛使用。</p>
  * </ul>
  *
  * <p><b>线程安全</b>：不可变；{@link #announceOnce()} 用 {@link AtomicBoolean} 保证 JVM 内只告警一次
@@ -56,7 +60,6 @@ public final class CoverageScope {
         built.add(Tag.SERVICE_WORKER_UNVERIFIED);
         built.add(Tag.DOWNLOADS_UNMODELLED);
         built.add(Tag.REDIRECT_CHAIN_UNMODELLED);
-        built.add(Tag.NAVIGATION_EPOCH_NOT_QUERYABLE);
         this.tags = Collections.unmodifiableSet(built);
     }
 
@@ -71,9 +74,7 @@ public final class CoverageScope {
         /** 下载未归因到触发请求。 */
         DOWNLOADS_UNMODELLED,
         /** 重定向各跳未串联。 */
-        REDIRECT_CHAIN_UNMODELLED,
-        /** 归属三元组已记录，但等待/查询尚未按 owner 或导航代次过滤。 */
-        NAVIGATION_EPOCH_NOT_QUERYABLE
+        REDIRECT_CHAIN_UNMODELLED
     }
 
     /** 当前覆盖范围（不可变视图）。 */
@@ -117,10 +118,9 @@ public final class CoverageScope {
         LOGGER.warn("[Route] API coverage scope = [{}]. Note: BrowserContext.route() bypasses the HTTP cache "
                         + "(cache-related observations are NOT representative); Service Worker is not set to BLOCK, "
                         + "so requests intercepted/served inside a Service Worker are invisible; downloads are not "
-                        + "attributed to their trigger request; redirect hops are not chained; request origin "
-                        + "(ownerPageId/frameId/navSeq) is recorded but waits are not yet filtered by it "
+                        + "attributed to their trigger request; redirect hops are not chained "
                         + "(a late response from a previous navigation may satisfy a later wait — use waitForApiSince(..) "
-                        + "to scope waits to records produced after your action).",
+                        + "or waitForApiFromOwner(..) to scope waits to records produced after your action).",
                 INSTANCE.describe());
     }
 }

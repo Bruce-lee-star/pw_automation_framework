@@ -29,6 +29,9 @@ import java.util.Set;
  * @param timedOut             是否超时未定案
  * @param recordedAtMillis     记录时刻（epoch millis）
  * @param channels             产生该记录的渠道集合
+ * @param origin               请求归属三元组（所属 Page / Frame / 主文档导航代次）；
+ *                             不可归属时为 {@link RequestOriginView#UNKNOWN}。
+ *                             注意：owner/frame id 只在本次 JVM 运行内稳定，不可跨进程持久化
  */
 public record CapturedApiCallView(
         String pattern,
@@ -45,7 +48,8 @@ public record CapturedApiCallView(
         long recordedAtMillis,
         Set<String> channels,
         String contentType,
-        byte[] responseBodyBytes) {
+        byte[] responseBodyBytes,
+        RequestOriginView origin) {
 
     /**
      * 紧凑构造：对可变集合做防御性拷贝并包成不可修改视图。
@@ -96,5 +100,15 @@ public record CapturedApiCallView(
     /** 业务侧常用判据：该记录是否由指定渠道产生（渠道名见类注释）。 */
     public boolean fromChannel(String channel) {
         return channel != null && channels != null && channels.contains(channel);
+    }
+
+    /** 业务侧常用判据：该记录是否由指定 Page 发出（不可归属的记录恒不匹配）。 */
+    public boolean fromOwner(String ownerPageId) {
+        return origin != null && origin.fromOwner(ownerPageId);
+    }
+
+    /** 业务侧常用判据：该记录是否属于指定主文档导航代次。 */
+    public boolean onNavigation(long navSeq) {
+        return origin != null && origin.navSeq() == navSeq;
     }
 }

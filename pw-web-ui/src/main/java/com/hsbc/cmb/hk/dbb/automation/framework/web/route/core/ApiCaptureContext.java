@@ -109,4 +109,33 @@ public final class ApiCaptureContext {
         ApiCaptureQuery q = query();
         return q == null ? null : q.waitForApi(context(), predicate, timeoutMs, minCaptureSeq);
     }
+
+    /**
+     * 指定 Page 的全部记录（按请求归属过滤；非消费式）。
+     *
+     * <p>用途：popup / 多标签场景下把"另一个页面"的流量排除掉。{@code ownerPageId}
+     * 取自 {@link CapturedApiCallView#origin()}，是运行时身份 id，
+     * <b>只在本次运行内稳定</b> —— 不要写进用例数据或跨进程传递。
+     */
+    public List<CapturedApiCallView> getCallsByOwner(String ownerPageId) {
+        if (ownerPageId == null) {
+            return List.of();
+        }
+        return getAllApiCalls().stream().filter(v -> v.fromOwner(ownerPageId)).toList();
+    }
+
+    /**
+     * 等待指定 Page 上出现的首个满足条件的记录，且只接受本次动作之后产生的记录。
+     *
+     * <p>组合了两种隔离：<b>归属隔离</b>（只看该 Page）与 <b>序号隔离</b>（只看动作之后的记录）。
+     * 典型场景：点击后新开 popup，只认 popup 自己发出的请求，既不认宿主页的流量，
+     * 也不认上一轮导航的迟到响应。
+     */
+    public CapturedApiCallView waitForApiFromOwner(String ownerPageId, long minCaptureSeq,
+                                                   Predicate<CapturedApiCallView> predicate, long timeoutMs) {
+        if (predicate == null) {
+            return null;
+        }
+        return waitForApiSince(minCaptureSeq, v -> v.fromOwner(ownerPageId) && predicate.test(v), timeoutMs);
+    }
 }
