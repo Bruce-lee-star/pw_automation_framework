@@ -60,7 +60,11 @@ public class RuleRegistry<C> {
                 fired.add(r);
             }
         }
-        fired.forEach(r -> { if (r.oneShot()) rules.remove(r.name()); });
+        fired.forEach(r -> {
+            if (r.oneShot()) {
+                rules.remove(r.name());
+            }
+        });
         return fired;
     }
 
@@ -71,7 +75,9 @@ public class RuleRegistry<C> {
         for (Rule<C> r : new ArrayList<>(rules.values())) {
             if (r.matches(context)) {
                 r.apply(context);
-                if (r.oneShot()) rules.remove(r.name());
+                if (r.oneShot()) {
+                rules.remove(r.name());
+            }
                 return Optional.of(r);
             }
         }

@@ -3,7 +3,10 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media.PlaywrightScreenshotManager;
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
 import net.thucydides.model.screenshots.ScreenshotAndHtmlSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,19 +51,37 @@ final class FailureScreenshotHandler {
         }
         try {
             TestContextHolder.get().set(TAKING_SCREENSHOT_KEY, Boolean.TRUE);
-            String screenshotPath = PlaywrightScreenshotManager.takeScreenshot(screenshotName);
-            if (screenshotPath != null) {
-                File pngFile = new File(screenshotPath);
-                File htmlFile = new File(screenshotPath.replace(".png", ".html"));
-                if (pngFile.exists()) {
-                    ScreenshotAndHtmlSource result = new ScreenshotAndHtmlSource(
-                            pngFile, htmlFile.exists() && htmlFile.length() > 0 ? htmlFile : null);
-                    VerboseLogging.logDebugIfVerbose(logger, "Screenshot captured: {} -> {}",
-                            screenshotName, pngFile.getName());
-                    ListenerPerfStats.incrementScreenshot();
-                    return result;
+            // §9.4 登录页位图脱敏：URL 含 /logon 时，对密码框叠加 DOM 覆盖层（避免密码出现在截图中）。
+            // 脱敏准备失败（如页面半死）时，出于安全优先跳过截图，而非带密码截图。
+            boolean onLogon = isOnLogonPage();
+            boolean redactionPrepared = false;
+            if (onLogon) {
+                redactionPrepared = prepareLogonRedaction();
+                if (!redactionPrepared) {
+                    VerboseLogging.logInfoIfVerbose(logger,
+                            "On logon page but password-field redaction failed -> skipping screenshot for security");
+                    return null;
                 }
-                VerboseLogging.logInfoIfVerbose(logger, "Screenshot file not found: {}", screenshotPath);
+            }
+            try {
+                String screenshotPath = PlaywrightScreenshotManager.takeScreenshot(screenshotName);
+                if (screenshotPath != null) {
+                    File pngFile = new File(screenshotPath);
+                    File htmlFile = new File(screenshotPath.replace(".png", ".html"));
+                    if (pngFile.exists()) {
+                        ScreenshotAndHtmlSource result = new ScreenshotAndHtmlSource(
+                                pngFile, htmlFile.exists() && htmlFile.length() > 0 ? htmlFile : null);
+                        VerboseLogging.logDebugIfVerbose(logger, "Screenshot captured: {} -> {}",
+                                screenshotName, pngFile.getName());
+                        ListenerPerfStats.incrementScreenshot();
+                        return result;
+                    }
+                    VerboseLogging.logInfoIfVerbose(logger, "Screenshot file not found: {}", screenshotPath);
+                }
+            } finally {
+                if (redactionPrepared) {
+                    clearLogonRedaction();
+                }
             }
         } catch (Exception e) {
             VerboseLogging.logInfoIfVerbose(logger, "Failed to capture screenshot: {}", screenshotName, e);
@@ -86,5 +107,68 @@ final class FailureScreenshotHandler {
     /** scenario 结束时清理 per-context 重入标记（由 TestContext.resetForCurrentThread 统一解绑）。 */
     static void clearThreadState() {
         TestContextHolder.get().remove(TAKING_SCREENSHOT_KEY);
+    }
+
+    // ===================== §9.4 登录页密码框位图脱敏 =====================
+
+    /** 当前页面是否处于登录页（URL 含 /logon）。半死 / 已关闭页面返回 false。 */
+    private static boolean isOnLogonPage() {
+        Page page = PlaywrightManager.getPageThreadLocal();
+        if (page == null || page.isClosed()) {
+            return false;
+        }
+        try {
+            String url = page.url();
+            return url != null && url.toLowerCase().contains("/logon");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 对密码框叠加不透明 DOM 覆盖层，使截图中不暴露密码。返回是否成功叠加。 */
+    private static boolean prepareLogonRedaction() {
+        Page page = PlaywrightManager.getPageThreadLocal();
+        if (page == null || page.isClosed()) {
+            return false;
+        }
+        try {
+            Locator password = page.locator("input[type=password]");
+            if (password.count() == 0) {
+                return false;
+            }
+            password.evaluateAll("els => els.forEach(el => {"
+                    + " const r = el.getBoundingClientRect();"
+                    + " const d = document.createElement('div');"
+                    + " d.setAttribute('data-pw-sso-redact', '1');"
+                    + " d.style.position='fixed';"
+                    + " d.style.left=r.left+'px';"
+                    + " d.style.top=r.top+'px';"
+                    + " d.style.width=r.width+'px';"
+                    + " d.style.height=r.height+'px';"
+                    + " d.style.background='#000';"
+                    + " d.style.zIndex='2147483647';"
+                    + " (document.body || document.documentElement).appendChild(d);"
+                    + "});");
+            VerboseLogging.logDebugIfVerbose(logger,
+                    "Logon redaction overlay applied to {} password field(s)", password.count());
+            return true;
+        } catch (Exception e) {
+            VerboseLogging.logDebugIfVerbose(logger, "Logon redaction overlay failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** 移除 §9.4 叠加的密码框覆盖层，避免影响后续页面操作。 */
+    private static void clearLogonRedaction() {
+        Page page = PlaywrightManager.getPageThreadLocal();
+        if (page == null || page.isClosed()) {
+            return;
+        }
+        try {
+            page.evaluate("() => document.querySelectorAll('[data-pw-sso-redact]').forEach(d => d.remove());");
+        } catch (Exception ignored) {
+            VerboseLogging.logDebugIfVerbose(logger,
+                    "Failed to clear logon redaction overlay: {}", ignored.getMessage());
+        }
     }
 }

@@ -15,6 +15,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.ConcurrencyGate;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.ConcurrencyPartitionKey;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.SsoConcurrencySelfCheck;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.microsoft.playwright.BrowserContext;
 import org.slf4j.Logger;
@@ -485,6 +486,7 @@ final class SessionStore {
         }
         ConcurrencyGate.acquire(key);
         SESSION_GATE.set(key);
+        SsoConcurrencySelfCheck.onAcquire(key);
     }
 
     static void releaseSessionGate() {
@@ -492,6 +494,7 @@ final class SessionStore {
         SESSION_GATE.remove();
         if (key != null) {
             ConcurrencyGate.release(key);
+            SsoConcurrencySelfCheck.onRelease(key);
         }
         String leaderKey = MY_LOGIN_GUARD_KEY.get();
         if (leaderKey != null) {

@@ -144,7 +144,7 @@ Files.move(tmp, base,
 ```
 - 备份必须在覆盖主文件**之前**，否则 prev 备份的是新内容，失去回滚价值。
 - 写完才可见，避免读到一半的 JSON。
-- 保留 `.prev.json` 回滚位；主文件损坏/格式错时自动回退 `.prev`（**实现缺口 P0**：当前 `SessionStore.writeStorageStateAtomically` 仅做 `ATOMIC_MOVE`，需补回滚位）。
+- 保留 `.prev.json` 回滚位；主文件损坏/格式错时自动回退 `.prev`（已于 2026-10-13 落地：写前先备份主文件为 `.prev` 回滚位、主文件损坏自动回退 `.prev` 自愈，见 `SessionStore.writeStorageStateAtomically`）。
 
 ***
 
@@ -438,7 +438,7 @@ gate 只解决 "登录 /restore 串行"，**解决不了轮换窗口期**，必�
 ### 9.2 `SessionStore`
 - 移除对 `BrowserContext` / `Page` 的缓存。
 - 保留 `SsoSessionEntry`（storageState 路径 + token 元数据）。
-- 落盘写走 §4.3 原子写（补 `.prev` 回滚位，见 §4.3 实现缺口）。
+- 落盘写走 §4.3 原子写（`.prev` 回滚位已于 2026-10-13 落地，见 `SessionStore.writeStorageStateAtomically`）。
 
 ### 9.3 `BDDUtils.getDbbLoginInfo`
 - `Given logon DBB "O63_SIT1" as user "WP7UAT2_2"` 中 `DBB` 为产品名，解析时忽略；键只取 `env` + `user`。
