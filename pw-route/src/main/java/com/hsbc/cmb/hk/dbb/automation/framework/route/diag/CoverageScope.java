@@ -28,14 +28,18 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code DOWNLOADS_UNMODELLED}：下载走浏览器特殊路径，{@code Download} 事件在<b>开始</b>时发出，
  *       {@code path()} 完成后才可用，与普通 {@code Response} 语义不同；采集侧目前不把它归因到
  *       触发请求。</li>
- *   <li>{@code REDIRECT_CHAIN_UNMODELLED}：重定向各跳当前未串联。</li>
  * </ul>
  *
- * <p><b>已闭合的边界（不再列为标签）</b>：归属三元组（{@code ownerPageId}/{@code frameId}/
- * {@code navSeq}）此前只入库、业务读不到；现已映射到跨模块视图
- * （{@code CapturedApiCallView#origin()}）并配套 {@code getCallsByOwner} /
- * {@code waitForApiFromOwner}，故"归属不可查询"这一条已消除。
- * 连续导航仍需配合 {@code waitForApiSince} 的采集序号门槛使用。</p>
+ * <p><b>已闭合的边界（不再列为标签）</b>：
+ * <ul>
+ *   <li>归属三元组（{@code ownerPageId}/{@code frameId}/{@code navSeq}）此前只入库、业务读不到；
+ *       现已映射到跨模块视图（{@code CapturedApiCallView#origin()}）并配套
+ *       {@code getCallsByOwner} / {@code waitForApiFromOwner}。</li>
+ *   <li>重定向各跳此前未串联（"最终 URL 命中一次"被误当作整条链）；现已按
+ *       {@code redirectedFrom()} 回溯出 {@code redirectChainId} 与 {@code redirectHop}，
+ *       各跳共享链 id，可分别断言链中/链尾状态。</li>
+ * </ul>
+ * 连续导航仍建议配合 {@code waitForApiSince} 的采集序号门槛使用。</p>
  * </ul>
  *
  * <p><b>线程安全</b>：不可变；{@link #announceOnce()} 用 {@link AtomicBoolean} 保证 JVM 内只告警一次
@@ -59,7 +63,6 @@ public final class CoverageScope {
         built.add(Tag.HTTP_CACHE_DISABLED_BY_ROUTE);
         built.add(Tag.SERVICE_WORKER_UNVERIFIED);
         built.add(Tag.DOWNLOADS_UNMODELLED);
-        built.add(Tag.REDIRECT_CHAIN_UNMODELLED);
         this.tags = Collections.unmodifiableSet(built);
     }
 
@@ -72,9 +75,7 @@ public final class CoverageScope {
         /** 未禁用 Service Worker ⇒ 其拦截/闭环的请求不可见。 */
         SERVICE_WORKER_UNVERIFIED,
         /** 下载未归因到触发请求。 */
-        DOWNLOADS_UNMODELLED,
-        /** 重定向各跳未串联。 */
-        REDIRECT_CHAIN_UNMODELLED
+        DOWNLOADS_UNMODELLED
     }
 
     /** 当前覆盖范围（不可变视图）。 */
@@ -118,7 +119,7 @@ public final class CoverageScope {
         LOGGER.warn("[Route] API coverage scope = [{}]. Note: BrowserContext.route() bypasses the HTTP cache "
                         + "(cache-related observations are NOT representative); Service Worker is not set to BLOCK, "
                         + "so requests intercepted/served inside a Service Worker are invisible; downloads are not "
-                        + "attributed to their trigger request; redirect hops are not chained "
+                        + "not attributed to their trigger request "
                         + "(a late response from a previous navigation may satisfy a later wait — use waitForApiSince(..) "
                         + "or waitForApiFromOwner(..) to scope waits to records produced after your action).",
                 INSTANCE.describe());

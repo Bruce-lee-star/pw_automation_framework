@@ -30,6 +30,14 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class OriginResolver {
 
+    /**
+     * 重定向链回溯上限。
+     *
+     * <p>循环重定向（A→B→A）会让 {@code redirectedFrom()} 链无限延长；即便服务端通常会先报
+     * {@code ERR_TOO_MANY_REDIRECTS}，本方法也必须自带硬上限 —— 事件线程上不允许任何无界遍历。
+     */
+    private static final int MAX_REDIRECT_HOPS = 32;
+
     private final ConcurrentMap<String, AtomicLong> epochsByOwner = new ConcurrentHashMap<>();
 
     /**
@@ -62,7 +70,8 @@ public final class OriginResolver {
             if (navigation && mainFrame) {
                 navSeq = counter.incrementAndGet();
             }
-            return new RequestOrigin(ownerPageId, frameId, navSeq, false);
+            return new RequestOrigin(ownerPageId, frameId, navSeq, false,
+                    chainIdOf(request), hopOf(request));
         } catch (Throwable degradation) {
             // Service Worker / detach / 驱动对象已回收：记录降级，但绝不向上抛，更不影响采集
             return RequestOrigin.DEGRADED;
@@ -86,5 +95,55 @@ public final class OriginResolver {
 
     private static String id(String prefix, Object target) {
         return prefix + "@" + Integer.toHexString(System.identityHashCode(target));
+    }
+
+    /**
+     * 链 id：取自<b>链首</b>请求的身份哈希；非重定向请求返回 null。
+     *
+     * <p>每次服务器重定向都会产生<b>新的 Request</b>，二者由
+     * {@code redirectedFrom()}/{@code redirectedTo()} 连接；因此"最终 URL 命中一次"
+     * 不能代表整条链 —— 中间 hop 可能是 302、链尾才是 200。用链首身份作 id
+     * 可把各跳归到同一条链上，供"链尾状态 + 每跳状态分别断言"。
+     */
+    private static String chainIdOf(Request request) {
+        Request root = rootOf(request);
+        return root == null || root == request ? null : id("chain", root);
+    }
+
+    /** 本请求在链上的跳序（链首为 0）。 */
+    private static int hopOf(Request request) {
+        int hop = 0;
+        Request cursor = request;
+        try {
+            while (hop < MAX_REDIRECT_HOPS) {
+                Request previous = cursor.redirectedFrom();
+                if (previous == null) {
+                    break;
+                }
+                cursor = previous;
+                hop++;
+            }
+        } catch (Throwable t) {
+            // redirectedFrom() 在对象已被驱动回收时可能抛：按"能回溯多少算多少"处理，绝不外抛
+            return hop;
+        }
+        return hop;
+    }
+
+    /** 回溯到链首；到达上限或异常时返回当前已到达的节点（有界，绝不无限）。 */
+    private static Request rootOf(Request request) {
+        Request cursor = request;
+        try {
+            for (int i = 0; i < MAX_REDIRECT_HOPS; i++) {
+                Request previous = cursor.redirectedFrom();
+                if (previous == null) {
+                    break;
+                }
+                cursor = previous;
+            }
+        } catch (Throwable t) {
+            return cursor;
+        }
+        return cursor;
     }
 }

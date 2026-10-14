@@ -8,6 +8,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -122,5 +123,58 @@ public class OriginResolverTest {
     @Test
     public void nullRequestIsNullSafe() {
         assertEquals("null 输入必须安全（不得 NPE 到 route 线程）", RequestOrigin.UNKNOWN, resolver.resolve(null));
+    }
+
+    @Test
+    public void redirectHopsShareOneChainId() {
+        Page page = page();
+        Frame frame = frame();
+
+        Request first = requestOn(page, frame, true, false);
+        Request second = requestOn(page, frame, true, false);
+        Request third = requestOn(page, frame, true, false);
+        when(second.redirectedFrom()).thenReturn(first);
+        when(third.redirectedFrom()).thenReturn(second);
+
+        RequestOrigin o1 = resolver.resolve(first);
+        RequestOrigin o2 = resolver.resolve(second);
+        RequestOrigin o3 = resolver.resolve(third);
+
+        assertNull("链首自身不带链 id", o1.redirectChainId());
+        assertEquals("链首跳序为 0", 0, o1.redirectHop());
+
+        assertNotNull("第二跳必须归入某条链", o2.redirectChainId());
+        assertEquals("各跳必须共享同一个链 id", o2.redirectChainId(), o3.redirectChainId());
+        assertEquals("第二跳跳序为 1", 1, o2.redirectHop());
+        assertEquals("第三跳跳序为 2", 2, o3.redirectHop());
+        assertTrue("第二/三跳须标记为重定向跳", o2.isRedirectHop() && o3.isRedirectHop());
+        assertFalse("链首不算重定向跳", o1.isRedirectHop());
+    }
+
+    @Test
+    public void circularRedirectIsBounded() {
+        Page page = page();
+        Frame frame = frame();
+        Request a = requestOn(page, frame, true, false);
+        Request b = requestOn(page, frame, true, false);
+        // 循环重定向：a → b → a → …（事件线程上绝不允许无界回溯）
+        when(a.redirectedFrom()).thenReturn(b);
+        when(b.redirectedFrom()).thenReturn(a);
+
+        RequestOrigin origin = resolver.resolve(a);
+        assertTrue("循环链必须被硬上限截断，跳序有界",
+                origin.redirectHop() >= 0 && origin.redirectHop() <= 32);
+    }
+
+    @Test
+    public void redirectChainLookupFailureDoesNotThrow() {
+        Page page = page();
+        Frame frame = frame();
+        Request request = requestOn(page, frame, true, false);
+        when(request.redirectedFrom()).thenThrow(new IllegalStateException("object already collected"));
+
+        RequestOrigin origin = resolver.resolve(request);
+        assertTrue("回溯失败也必须能解析出归属（不得整条降级）", origin.attributed());
+        assertEquals("回溯失败时跳序保守为 0", 0, origin.redirectHop());
     }
 }

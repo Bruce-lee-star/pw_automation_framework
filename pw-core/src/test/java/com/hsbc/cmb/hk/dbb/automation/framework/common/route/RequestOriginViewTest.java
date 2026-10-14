@@ -18,7 +18,7 @@ public class RequestOriginViewTest {
 
     @Test
     public void attributedOriginMatchesOwnerAndEpoch() {
-        RequestOriginView origin = new RequestOriginView("page@1a2b", "frame@3c4d", 2L, false);
+        RequestOriginView origin = new RequestOriginView("page@1a2b", "frame@3c4d", 2L, false, null, 0);
 
         assertTrue("有 owner 且未降级 ⇒ 可归属", origin.attributed());
         assertTrue(origin.fromOwner("page@1a2b"));

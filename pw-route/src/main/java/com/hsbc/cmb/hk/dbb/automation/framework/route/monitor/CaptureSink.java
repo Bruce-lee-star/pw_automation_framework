@@ -754,6 +754,7 @@ public final class CaptureSink {
             return com.hsbc.cmb.hk.dbb.automation.framework.common.route.RequestOriginView.DEGRADED;
         }
         return new com.hsbc.cmb.hk.dbb.automation.framework.common.route.RequestOriginView(
-                origin.ownerPageId(), origin.frameId(), origin.navSeq(), origin.degraded());
+                origin.ownerPageId(), origin.frameId(), origin.navSeq(), origin.degraded(),
+                origin.redirectChainId(), origin.redirectHop());
     }
 }
