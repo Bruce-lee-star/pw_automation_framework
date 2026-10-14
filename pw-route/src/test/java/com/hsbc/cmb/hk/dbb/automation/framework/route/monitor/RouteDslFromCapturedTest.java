@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteRuntime;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
 import com.microsoft.playwright.APIRequestContext;
 import com.microsoft.playwright.BrowserContext;
@@ -83,7 +84,7 @@ public class RouteDslFromCapturedTest {
         CapturedApiCall captured = new CapturedApiCall("/api/cap", "GET", "https://host/api/cap",
                 null, null, 200, Map.of("x-trace", "t-1"),
                 null, false, 12L, false, 1L, null, "MONITOR", "application/json", null, body,
-                CapturedApiCall.UNSEQUENCED);
+                CapturedApiCall.UNSEQUENCED, RequestOrigin.UNKNOWN);
 
         RouteDsl.on(ctx).api("/api/cap").mock().fromCaptured(captured).register();
 
@@ -142,7 +143,7 @@ public class RouteDslFromCapturedTest {
         CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/png", "GET", "https://host/api/png",
                 null, null, 200, Map.of(), null, false, 5L, false, 1L, null, "MONITOR", "image/png", null,
-                carrier, CapturedApiCall.UNSEQUENCED);
+                carrier, CapturedApiCall.UNSEQUENCED, RequestOrigin.UNKNOWN);
 
         RouteDsl.on(ctx).api("/api/png").mock().fromCaptured(captured).register();
         carrier.close();   // 快照自足性：载体关闭后仍须逐字节回放
@@ -175,7 +176,7 @@ public class RouteDslFromCapturedTest {
         CapturedBody body = BodyStore.of(raw, "application/json", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/cap", "GET", "https://host/api/cap",
                 null, null, 200, Map.of(), null, false, 12L, false, 1L, null, "MONITOR",
-                "application/json", null, body, CapturedApiCall.UNSEQUENCED);
+                "application/json", null, body, CapturedApiCall.UNSEQUENCED, RequestOrigin.UNKNOWN);
 
         RouteDsl.on(ctx).api("/api/cap").mock().fromCaptured(captured)
                 .replaceField("$.name", "replayed")
@@ -211,7 +212,7 @@ public class RouteDslFromCapturedTest {
         CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/png", "GET", "https://host/api/png",
                 null, null, 200, Map.of(), null, false, 5L, false, 1L, null, "MONITOR", "image/png", null,
-                carrier, CapturedApiCall.UNSEQUENCED);
+                carrier, CapturedApiCall.UNSEQUENCED, RequestOrigin.UNKNOWN);
 
         RouteDsl.on(ctx).api("/api/png").mock().fromCaptured(captured)
                 .replaceField("$.name", "x")

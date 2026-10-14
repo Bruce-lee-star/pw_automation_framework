@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.OriginResolver;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.DriverErrors;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType;
@@ -136,6 +137,9 @@ public final class CaptureSink {
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
         snapshot.holdSpec(spec); // 业务线程（dump）延迟读 body 需要规则引用
+        // 归属三元组（所属 Page / Frame / 主文档导航代次）：只做本地字段读取，零协议调用；
+        // 失败降级为 DEGRADED 而绝不丢观测（Service Worker / Frame 未创建/已 detach 均属此类）。
+        snapshot.holdOrigin(origins.resolve(request));
         // 采集序号在**请求发起时**分配（而非响应物化入队时）：等待方要排除的是"动作前发起、
         // 动作后才完成"的请求 —— 若按入队顺序编号，这类请求会拿到更大编号从而再次满足门槛，
         // 正好复现我们要消灭的"过期命中"。volatile 写入对后续业务线程可见。
@@ -416,6 +420,14 @@ public final class CaptureSink {
     private final java.util.concurrent.atomic.AtomicLong captureSequence =
             new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * 请求归属解析器：派生每条记录的 {@code ownerPageId / frameId / navSeq}。
+     *
+     * <p>per-sink（= per BrowserContext）持有：代次表按 Page 划分，天然按 context 隔离，
+     * 并行 scenario 互不污染。随 {@link #reset()} 清空，内存有界。
+     */
+    private final OriginResolver origins = new OriginResolver();
+
     private static CapturedApiCall toDto(CapturedExchange snapshot, CapturedBody body, String contentType,
                                          boolean truncated, long captureSeq) {
         // 分渠道透传：与 ofRequest 同源（channels=全部命中渠道，primaryChannel=优先级最高者）。
@@ -426,7 +438,7 @@ public final class CaptureSink {
                 null, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
-                contentType, null, body, captureSeq);
+                contentType, null, body, captureSeq, snapshot.origin());
     }
 
     /**
@@ -548,6 +560,9 @@ public final class CaptureSink {
         redirectNotAvailableBodyReads.set(0);
         handleReclaimedBodyReads.set(0);
         protocolErrorBodyReads.set(0);
+        // 归属代次表随历史一并清空：新的 scenario 会用新的 Page 集合，旧代次已无意义。
+        // 若不清，identityHashCode 派生的 owner id 在长生命周期 context 上存在极小概率撞号。
+        origins.reset();
         // 结束所有等待者：resetStamp 自增让 waitFor 立即返回 null（历史已清空，再等无意义），
         // 并按等待者数量释放许可把阻塞中的线程叫醒（单次 release 只唤醒一个）。
         resetStamp.incrementAndGet();

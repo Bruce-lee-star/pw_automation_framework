@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.microsoft.playwright.Response;
 
@@ -75,6 +76,13 @@ public final class CapturedExchange {
      * 未分配的（如派发链证据路径）为 {@link CapturedApiCall#UNSEQUENCED}。
      */
     private volatile long captureSeq = CapturedApiCall.UNSEQUENCED;
+
+    /**
+     * 请求归属三元组（所属 Page / Frame / 主文档导航代次），由 {@link com.hsbc.cmb.hk.dbb.automation
+     * .framework.route.diag.OriginResolver} 在记录请求时解析。
+     * 默认 {@link com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin#UNKNOWN}。
+     */
+    private volatile RequestOrigin origin = RequestOrigin.UNKNOWN;
 
     /** 命中规则引用（业务线程延迟断言需要：PayloadAssertor 消费 spec 的期望与 body 断言配置）。 */
     private volatile ApiSpec heldSpec;
@@ -213,6 +221,18 @@ public final class CapturedExchange {
 
     ApiSpec spec() {
         return heldSpec;
+    }
+
+    /** 写入请求归属（一次性；重复写入保留首次，避免下游重入覆盖）。 */
+    void holdOrigin(RequestOrigin resolved) {
+        if (resolved != null && this.origin == RequestOrigin.UNKNOWN) {
+            this.origin = resolved;
+        }
+    }
+
+    /** 请求归属三元组；未解析时为 {@link RequestOrigin#UNKNOWN}。 */
+    RequestOrigin origin() {
+        return origin;
     }
 
     /**

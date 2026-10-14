@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -19,11 +20,11 @@ import static org.junit.Assert.assertTrue;
  */
 public class CapturedApiCallBodyTest {
 
-    /** 规范构造（18 参）：体只放在载体里，文本/字节旧组件传 null —— 与 sink 接线后的形态一致。 */
+    /** 规范构造（19 参）：体只放在载体里，文本/字节旧组件传 null —— 与 sink 接线后的形态一致。 */
     private static CapturedApiCall withCarrier(CapturedBody body, String contentType) {
         return new CapturedApiCall("p", "GET", "https://host/x", null, null, 200, null,
                 null, false, 1L, false, 2L, null, "MONITOR", contentType, null, body,
-                CapturedApiCall.UNSEQUENCED);
+                CapturedApiCall.UNSEQUENCED, RequestOrigin.UNKNOWN);
     }
 
     @Test

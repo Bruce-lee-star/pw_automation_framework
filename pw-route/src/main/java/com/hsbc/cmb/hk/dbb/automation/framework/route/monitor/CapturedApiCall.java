@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParser;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.microsoft.playwright.Request;
 
 import java.util.Collections;
@@ -62,6 +63,10 @@ import java.util.Set;
  *                               （派发链 / monitor 结果渲染）为 {@link #UNSEQUENCED}。
  *                               用途：让等待器只认"动作之后新产生"的记录，避免连续导航下
  *                               上一轮的迟到响应满足新一轮等待（即"过期命中"）。
+ * @param origin                 请求归属三元组（所属 Page / Frame / 主文档导航代次），
+ *                               由 {@code OriginResolver} 解析；非采集路径为
+ *                               {@link RequestOrigin#UNKNOWN}。配合 {@code captureSeq}
+ *                               一起表达"谁 / 哪一版导航 / 第几条记录"。
  */
 public record CapturedApiCall(String pattern, String method, String url,
                               Map<String, String> requestHeaders, String requestBodyPreview,
@@ -70,14 +75,14 @@ public record CapturedApiCall(String pattern, String method, String url,
                               long durationMs, boolean timedOut, long recordedAtMillis,
                               Set<String> channels, String primaryChannel,
                               String contentType, byte[] responseBodyBytes,
-                              CapturedBody body, long captureSeq) {
+                              CapturedBody body, long captureSeq, RequestOrigin origin) {
 
     /** 未被采集序号标记（派发链证据等不走 {@code CaptureSink} 的路径）。 */
     public static final long UNSEQUENCED = -1L;
 
     /**
      * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null、
-     * {@code captureSeq} 为 {@link #UNSEQUENCED}。
+     * {@code captureSeq} 为 {@link #UNSEQUENCED}、{@code origin} 为 {@link RequestOrigin#UNKNOWN}。
      *
      * <p>目的：本次只为采集记录增加"分渠道"信息，既有调用点（派发链证据、monitor 结果渲染等）
      * 不需要跟着改签名，避免大范围牵动；需要标注渠道的新调用点走全参构造即可。
@@ -89,7 +94,7 @@ public record CapturedApiCall(String pattern, String method, String url,
                            long durationMs, boolean timedOut, long recordedAtMillis) {
         this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
                 responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
-                Set.of(), null, null, null, null, UNSEQUENCED);
+                Set.of(), null, null, null, null, UNSEQUENCED, RequestOrigin.UNKNOWN);
     }
 
     /** 敏感头键（小写比较）：值一律打码。 */
