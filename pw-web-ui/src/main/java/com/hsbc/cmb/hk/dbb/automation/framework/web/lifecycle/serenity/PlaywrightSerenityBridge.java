@@ -465,7 +465,7 @@ public class PlaywrightSerenityBridge {
      */
     public static void cleanupForScenario(boolean scenarioFailed) {
         VerboseLogging.logDebugIfVerbose(logger, "Cleaning up for scenario...");
-        // 路由命中证据 → Serenity 报告：内核在 Playwright 事件线程 / IO 池线程只入队（那些线程直接写报告会丢），
+        // 路由命中证据 → Serenity 报告：内核在 Playwright 事件线程（route 调用线程）只入队（那些线程直接写报告会丢），
         // 真正的写入必须发生在测试主线程 —— 本方法即场景收尾的主线程钩子。无 SPI 实现 / 非 Serenity 环境
         // 均静默降级（见 SerenityRouteEvidenceSink）；队列为空时是零成本空操作。
         com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry.flush();

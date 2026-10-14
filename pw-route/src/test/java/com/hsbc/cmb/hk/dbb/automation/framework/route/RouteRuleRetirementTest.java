@@ -10,7 +10,6 @@ import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
@@ -184,50 +183,9 @@ public class RouteRuleRetirementTest {
         Mockito.verify(nativeHandle, Mockito.never()).close();
     }
 
-    /**
-     * 竞态守护（R-4 语义定稿）：目的退役是<b>纯内存</b>操作 ⇒ IO 池饱和绝不影响退役（结构性保证，
-     * 不再依赖独立撤销执行器）。
-     */
-    @Test
-    public void retirementIsUnaffectedByIoPoolSaturation() throws Exception {
-        GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
-        // 极紧配置：IO 单线程 + 队列容量 1 ⇒ 两个阻塞任务即可占满 IO 池
-        RouteConfig tight = new RouteConfig(1, 1, 1, 1, 1L, 1000L, 10, 2000L);
-        RouteRuntime runtime = RouteEngine.runtimeOf(mockContext(), tight);
-        runtime.register(ApiSpec.builder("/api/saturated", RouteCapability.MONITOR).expectStatus(200).build());
 
-        CountDownLatch release = new CountDownLatch(1);
-        assertTrue(runtime.io().trySubmit("block-1", () -> awaitQuietly(release)));
-        assertTrue(runtime.io().trySubmit("block-2", () -> awaitQuietly(release)));
 
-        try {
-            assertTrue("目的退役必须成功（纯内存，不依赖 IO 池）",
-                    ((RouteRuntimeImpl) runtime).retireByPurpose("/api/saturated"));
-            verify(nativeHandle, Mockito.never()).close();
-            assertEquals("无 unroute 提交 ⇒ 无未确证", 0, runtime.unconfirmedRetirements());
-            assertTrue("无 unroute 提交 ⇒ 状态判为干净", awaitClean(runtime));
-        } finally {
-            release.countDown();
-        }
-    }
 
-    private static void awaitQuietly(CountDownLatch latch) {
-        try {
-            latch.await(5, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    private static boolean awaitClean(RouteRuntime runtime) throws InterruptedException {
-        for (int i = 0; i < 150; i++) {
-            if (runtime.isClean()) {
-                return true;
-            }
-            TimeUnit.MILLISECONDS.sleep(20);
-        }
-        return runtime.isClean();
-    }
 
     /** 等待监控窗口到期完成规则退役（退役计数增长）。 */
     private static void awaitRetired(RouteRuntime runtime) throws InterruptedException {

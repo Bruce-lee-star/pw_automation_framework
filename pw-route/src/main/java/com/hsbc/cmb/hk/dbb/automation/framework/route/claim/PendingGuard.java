@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>为什么必要（对应 playwright-java-1.62.0 源码事实）：handler 返回未终结时驱动返回
  * {@code Router.HandleResult.PendingHandler}，请求在浏览器侧**无限期挂起**直到终结。
- * 若 IO 线程积压（慢 fetch / 队列拥塞），页面批量请求会全部挂起导致假死。因此挂起
+ * 若请求积压（慢 fetch / 队列拥塞），页面批量请求会全部挂起导致假死。因此挂起
  * 必须是有额度的：额度耗尽时新请求立即 fallback（fail-open 放行）。
  *
  * <p>并发安全：{@link AtomicInteger} 计数，{@link #tryAcquire()} 与 {@link #release()}

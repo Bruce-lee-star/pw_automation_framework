@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.util.DriverErrors;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
@@ -95,6 +96,21 @@ public final class MonitorSink {
      * {@link #onResponseForSpec}）。计数使"确实没断言上"仍可被观测（而不是静默放过）。</p>
      */
     private final AtomicLong inconclusiveBodyReads = new AtomicLong(0);
+    /**
+     * 3xx 重定向响应体不可用的次数（P0-2 / P0-3）：重定向响应体本就不可用（官方语义），
+     * 属<b>已知事实</b>而非竞态，单独计数（不计入 {@link #inconclusiveBodyReads()} 竞态桶），
+     * 避免把"正常 3xx"误计为 inconclusive。
+     */
+    private final AtomicLong redirectNotAvailableBodyReads = new AtomicLong(0);
+    /**
+     * body 断言因响应句柄<b>已被驱动回收</b>（navigate-away / context closed / 对象表摘除）而未能判定的次数（P0-3）。
+     * 属框架/驱动竞态，与 {@link #protocolErrorBodyReads()} 区分计数。
+     */
+    private final AtomicLong handleReclaimedBodyReads = new AtomicLong(0);
+    /**
+     * body 断言因<b>真协议错误</b>（非句柄回收类竞态）而未能判定的次数（P0-3）。
+     */
+    private final AtomicLong protocolErrorBodyReads = new AtomicLong(0);
     /** body 断言因<b>超出断言体上限</b>（{@link #assertBodyMaxBytes}）而<b>被跳过</b>的次数（inconclusive）。 */
     private final AtomicLong skippedBodyAssertions = new AtomicLong(0);
     /** per-spec 命中计数（autoStopOnMatch + minMatches 对齐：达到后停止记录/断言）。 */
@@ -192,7 +208,7 @@ public final class MonitorSink {
             onPurposeMet.accept(spec);
             LOGGER.debug("[Route] purpose met for '{}' → retire submitted", spec.pattern());
         } catch (Throwable t) {
-            LOGGER.warn("[Route] purpose-met callback failed for '{}': {}", spec.pattern(), t.toString());
+            LOGGER.warn("[Route] purpose-met callback failed for '{}': {}", spec.pattern(), DriverErrors.shortMessage(t));
         }
     }
 
@@ -276,8 +292,8 @@ public final class MonitorSink {
      *   <li>无 body 断言 → 调度线程直接 volatile 写 status 断言（零阻塞）；</li>
      *   <li>有 body 断言（jsonPath / bodyContains / bodyRegex / formField）→ 先写 status，
      *       再在本线程（句柄存活期）<b>就地</b>快照 body（{@link #takeBodySnapshot}），
-     *       把「内容类型感知断言（{@link PayloadAssertor}）」投递 IO 线程（纯 CPU 解析）；
-     *       队列满时丢弃断言但保留 status（fail-open，绝不阻塞调度线程）。</li>
+     *       并就地把「内容类型感知断言（{@link PayloadAssertor}）」同步执行（纯 CPU 解析，
+     *       零等待、不可能因队列满被丢弃）；status 与断言结果一并写入证据。</li>
      * </ul>
      *
      * @param spec     该请求在 dispatch 时命中的规则（与 recordRequest 同一实例）
@@ -317,7 +333,7 @@ public final class MonitorSink {
         try {
             deferredContentType = response.headers().get("content-type");
         } catch (Throwable ignored) {
-            LOGGER.trace("[Route] monitor response.headers() defensive fallback: {}", ignored.toString());
+            LOGGER.trace("[Route] monitor response.headers() defensive fallback: {}", DriverErrors.shortMessage(ignored));
         }
         if (isStreamingContentType(deferredContentType) && spec.hasBodyAssertions()) {
             // 流式端点：体不读 ⇒ body 断言无法判定（inconclusive，绝不判失败），status 断言照常结算
@@ -389,6 +405,19 @@ public final class MonitorSink {
         } catch (Throwable t) {
             names = List.of("<header-read-failed>");
         }
+        // P0-2：3xx 重定向响应体不可用（官方语义），显式短路、不发 body() 协议调用
+        // —— 避免无谓驱动往返 + 把"正常 3xx"误计为 inconclusive；location 等头已由 markResponse 保留。
+        int status = -1;
+        try {
+            status = response.status();
+        } catch (Throwable ignored) {
+            LOGGER.trace("[Route] monitor response.status() defensive fallback: {}",
+                    DriverErrors.shortMessage(ignored));
+        }
+        if (status >= 300 && status < 400) {
+            return new BodySnapshot(null, names, contentType,
+                    "redirect response (status=" + status + "): body not available", null, false);
+        }
         if (isStreamingContentType(contentType)) {
             return new BodySnapshot(null, names, contentType, null, null, true);
         }
@@ -399,8 +428,10 @@ public final class MonitorSink {
             byte[] bytes = response.body();
             return new BodySnapshot(bytes, names, contentType, null, preview(bytes, contentType), false);
         } catch (Throwable t) {
-            String msg = t.getMessage() == null ? t.toString() : t.getMessage();
-            return new BodySnapshot(null, names, contentType, "body-unavailable: " + msg, null, false);
+            // P0-3：区分"句柄已被回收（框架/驱动竞态）"与"真协议错误"，供子计数分类
+            String reason = (DriverErrors.isHandleReclaimed(t) ? "handle-reclaimed: " : "body-read-protocol-error: ")
+                    + DriverErrors.shortMessage(t);
+            return new BodySnapshot(null, names, contentType, reason, null, false);
         }
     }
 
@@ -525,12 +556,13 @@ public final class MonitorSink {
         Response held = exchange.takeHeldResponse();
         if (held == null) {
             // 句柄已不可用（页面跳转 / 驱动回收）：body 无法判定 → inconclusive，绝不判失败
-            exchange.markBodyAssertionInconclusive(
-                    "body-unavailable: response handle reclaimed (deferred read)");
+            String reason = "handle-reclaimed: response handle reclaimed (deferred read)";
+            exchange.markBodyAssertionInconclusive(reason);
             inconclusiveBodyReads.incrementAndGet();
+            handleReclaimedBodyReads.incrementAndGet();
             LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
                             + "pattern='{}' url='{}': {}",
-                    spec.pattern(), exchange.url(), "body-unavailable: response handle reclaimed (deferred read)");
+                    spec.pattern(), exchange.url(), reason);
             reportOutcome(exchange); // 结果进报告（标注"未判定"，与"通过/失败"区分开）
             return;
         }
@@ -548,12 +580,23 @@ public final class MonitorSink {
             return;
         }
         if (snapshot.inconclusiveReason() != null) {
-            // 误报防线：句柄已回收属框架/驱动竞态（非应用缺陷）→ inconclusive，绝不判失败
-            exchange.markBodyAssertionInconclusive(snapshot.inconclusiveReason());
-            inconclusiveBodyReads.incrementAndGet();
+            // 误报防线：句柄已回收 / 3xx 重定向 属框架/驱动竞态或已知语义（非应用缺陷）→ inconclusive，绝不判失败
+            String reason = snapshot.inconclusiveReason();
+            if (reason.startsWith("redirect response")) {
+                // 3xx 重定向：响应体本就不可用，单独计数（不计入 inconclusive 竞态桶）
+                redirectNotAvailableBodyReads.incrementAndGet();
+            } else {
+                inconclusiveBodyReads.incrementAndGet();
+                if (reason.startsWith("handle-reclaimed")) {
+                    handleReclaimedBodyReads.incrementAndGet();
+                } else {
+                    protocolErrorBodyReads.incrementAndGet();
+                }
+            }
+            exchange.markBodyAssertionInconclusive(reason);
             LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
                             + "pattern='{}' url='{}': {}",
-                    spec.pattern(), exchange.url(), snapshot.inconclusiveReason());
+                    spec.pattern(), exchange.url(), reason);
             reportOutcome(exchange);
             return;
         }
@@ -609,6 +652,21 @@ public final class MonitorSink {
         return inconclusiveBodyReads.get();
     }
 
+    /** 3xx 重定向响应体不可用的次数（P0-2 / P0-3）：已知事实，单独计数，不计入 {@link #inconclusiveBodyReads()}。 */
+    public long redirectNotAvailableBodyReads() {
+        return redirectNotAvailableBodyReads.get();
+    }
+
+    /** body 断言因响应句柄<b>已被驱动回收</b>而未能判定的次数（P0-3，框架/驱动竞态）。 */
+    public long handleReclaimedBodyReads() {
+        return handleReclaimedBodyReads.get();
+    }
+
+    /** body 断言因<b>真协议错误</b>（非句柄回收）而未能判定的次数（P0-3）。 */
+    public long protocolErrorBodyReads() {
+        return protocolErrorBodyReads.get();
+    }
+
     /** body 断言因<b>超出断言体上限</b>而被跳过的次数（inconclusive；与采集留存无关，capture 侧仍整存）。 */
     public long skippedBodyAssertions() {
         return skippedBodyAssertions.get();
@@ -634,7 +692,7 @@ public final class MonitorSink {
                         }
                     }
                 } catch (Throwable t) {
-                    LOGGER.debug("[Route] failed to read body for failure evidence: {}", t.toString());
+                    LOGGER.debug("[Route] failed to read body for failure evidence: {}", DriverErrors.shortMessage(t));
                 }
             }
             settledFailures.add(exchange);
@@ -656,7 +714,7 @@ public final class MonitorSink {
         try {
             RouteEvidenceRegistry.record("MONITOR RESULT", exchange.url(), exchange.resultDetail());
         } catch (Throwable t) {
-            LOGGER.debug("[Route] monitor outcome report skipped (non-fatal): {}", t.toString());
+            LOGGER.debug("[Route] monitor outcome report skipped (non-fatal): {}", DriverErrors.shortMessage(t));
         }
     }
 
@@ -703,7 +761,7 @@ public final class MonitorSink {
                             exchange.markResponseBody(snap.preview());
                         }
                     } catch (Throwable t) {
-                        LOGGER.debug("[Route] monitor failure body read failed (non-fatal): {}", t.toString());
+                        LOGGER.debug("[Route] monitor failure body read failed (non-fatal): {}", DriverErrors.shortMessage(t));
                     }
                 }
             }

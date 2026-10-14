@@ -6,8 +6,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.ClaimRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.PendingGuard;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedApiCall;
 import com.microsoft.playwright.APIRequestContext;
 import com.microsoft.playwright.Request;
@@ -31,7 +30,7 @@ import java.util.Map;
  *       {@link #register}/{@link #stop}/{@link #stopApi}/{@link #dispatch}/{@link #close}/
  *       {@link #dumpCapturedApis}/{@link #drainSettledAssertionFailures}/{@link #metrics}；</li>
  *   <li><b>模块内部契约</b>（{@code @apiNote framework-internal}，仅本模块内部协作者使用）：
- *       {@link #ruleSnapshot}/{@link #claims}/{@link #pending}/{@link #ops}/{@link #io}/
+ *       {@link #ruleSnapshot}/{@link #claims}/{@link #pending}/{@link #ops}/
  *       {@link #recordObservation}/{@link #isDegraded}；</li>
  * </ul>
  *
@@ -70,13 +69,7 @@ public interface RouteRuntime extends AutoCloseable {
      * 预算执行器（无超时往返耗时/超时统计）。
      * @apiNote framework-internal
      */
-    BoundedOps ops();
-
-    /**
-     * IO 线程池（阻塞操作唯一落点）。
-     * @apiNote framework-internal
-     */
-    RouteIoExecutor io();
+    GuardedRunner guarded();
 
     /**
      * 本 runtime 所属 Context 的 {@link APIRequestContext}（共享该 Context 的 cookie 存储）。
@@ -232,9 +225,26 @@ public interface RouteRuntime extends AutoCloseable {
         return List.of();
     }
 
+    /** 当前已分配的采集序号（= 已进入历史队列的记录数）；不支持时返回 -1。 */
+    default long capturedApiSequence() {
+        return -1L;
+    }
+
     /** 等待首个满足条件的采集记录（非消费式）。默认 null。 */
     default CapturedApiCall waitForCapturedApi(java.util.function.Predicate<CapturedApiCall> predicate,
                                                long timeoutMs) {
+        return waitForCapturedApi(predicate, timeoutMs, 0L);
+    }
+
+    /**
+     * 等待首个满足条件的采集记录，且<b>只</b>接受 {@code captureSeq >= minCaptureSeq} 的记录（非消费式）。
+     *
+     * @param minCaptureSeq 采集序号门槛；{@code <=0} 表示不限（与二参版本等价）。
+     *                      典型用法：业务在触发动作前取 {@link #capturedApiSequence()}，把 {@code 值+1}
+     *                      传进来，杜绝"上一轮导航的迟到响应满足本轮等待"（过期命中）。默认 null。
+     */
+    default CapturedApiCall waitForCapturedApi(java.util.function.Predicate<CapturedApiCall> predicate,
+                                               long timeoutMs, long minCaptureSeq) {
         return null;
     }
 
@@ -308,7 +318,7 @@ public interface RouteRuntime extends AutoCloseable {
 
     /** 只读指标（T1 度量基线：每用例统计下发次数 / 路由命中数 / 已按目的撤销数 / 未确证撤销数 / 每条规则 armed 时长）。 */
     record RouteMetrics(int generation, int inFlightClaims, int pendingIo,
-                          long opsAccepted, long opsRejected, long ioRejected,
+                          long opsAccepted, long opsRejected,
                           int monitorSize, int capturedSize, long captureDropped,
                           long dispatches, long hits, int retiredByPurpose,
                           int unconfirmedRetirements, Map<String, Long> ruleArmedDurationsMs) {

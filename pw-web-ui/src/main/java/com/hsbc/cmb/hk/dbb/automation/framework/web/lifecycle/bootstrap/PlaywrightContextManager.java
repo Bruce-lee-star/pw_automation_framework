@@ -579,20 +579,27 @@ public class PlaywrightContextManager {
 
     /**
      * 配置自定义 Context 选项
+     *
+     * @apiNote 框架内部能力（包级私有）：仅供 {@link #createContext()} 接线与同包单测断言。
      */
-    private static void configureCustomContextOptions(Browser.NewContextOptions contextOptions) {
+    static void configureCustomContextOptions(Browser.NewContextOptions contextOptions) {
         CustomOptions cm = PlaywrightManager.customOptions();
 
-        // StorageState：优先用内存缓存的 JSON 内容（零文件 IO）；否则退回文件路径
-        String storageState = cm.getStorageState();
-        if (storageState != null && !storageState.isEmpty()) {
-            contextOptions.setStorageState(storageState);
-            VerboseLogging.logInfoIfVerbose(logger, "Using in-memory storageState (from cache)");
+        // StorageState（newContext 冷启动 / 重建）：文件路径优先，内存 JSON 兜底。
+        // 两者均走 Browser.NewContextOptions 的<b>原生重载</b>（setStorageStatePath(Path) / setStorageState(String)），
+        // 各自直接生效，<b>不落临时文件</b>——临时文件只在「已启动的 live Context 就地换会话」
+        // （PlaywrightManager.applyStorageState(String)）才需要，因为 live BrowserContext.setStorageState 仅接受 Path。
+        // 文件路径优先：落盘的 .json 是 saveSession / reusePersistedSession 写入的权威凭证；
+        // 内存 JSON 仅作为无文件时的缓存兜底。
+        Path storagePath = cm.getStorageStatePath();
+        if (storagePath != null && Files.exists(storagePath)) {
+            contextOptions.setStorageStatePath(storagePath);
+            VerboseLogging.logInfoIfVerbose(logger, "Using custom storageStatePath (cold start / rebuild): {}", storagePath);
         } else {
-            Path storagePath = cm.getStorageStatePath();
-            if (storagePath != null && Files.exists(storagePath)) {
-                contextOptions.setStorageStatePath(storagePath);
-                VerboseLogging.logInfoIfVerbose(logger, "Using custom storageStatePath: {}", storagePath);
+            String storageState = cm.getStorageState();
+            if (storageState != null && !storageState.isEmpty()) {
+                contextOptions.setStorageState(storageState);
+                VerboseLogging.logInfoIfVerbose(logger, "Using in-memory storageState (from cache)");
             }
         }
 

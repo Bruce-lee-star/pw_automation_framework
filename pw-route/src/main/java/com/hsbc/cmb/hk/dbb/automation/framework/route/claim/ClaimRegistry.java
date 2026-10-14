@@ -78,7 +78,7 @@ public final class ClaimRegistry {
     /**
      * 巡检：强制落定超龄 IO_AWAIT claim（fail-open，不悬挂请求）。
      *
-     * <p>仅调度线程调用；内部用 {@code tryTerminal} 抢占，不会与 IO 线程并发终结同一 Route。
+     * <p>仅调度线程调用；内部用 {@code tryTerminal} 抢占，不会与 fetch 调用线程并发终结同一 Route。
      */
     public void sweep() {
         long now = System.nanoTime();

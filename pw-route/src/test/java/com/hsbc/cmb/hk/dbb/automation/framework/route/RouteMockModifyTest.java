@@ -102,7 +102,7 @@ public class RouteMockModifyTest {
 
         Route route = mockRoute(mockRequestWithBody("https://host/api/user", "GET", null, null));
         handler.accept(route);
-        runtime.io().close(); // 等待 IO 替换任务落定
+         // 等待 IO 替换任务落定
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
@@ -132,7 +132,7 @@ public class RouteMockModifyTest {
         // 方案 A：真实响应由 runtime 所属 Context 的 APIRequestContext 取（不再走 route.fetch）
         when(lastApiCtx.fetch(anyString(), any())).thenReturn(apiResponse);
         handler.accept(route);
-        runtime.io().close();
+        
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
@@ -163,7 +163,7 @@ public class RouteMockModifyTest {
         Route route = mockRoute(mockRequestWithBody("https://host/api/case", "GET", null, null));
         when(lastApiCtx.fetch(anyString(), any())).thenReturn(apiResponse);
         handler.accept(route);
-        runtime.io().close();
+        
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
@@ -194,7 +194,7 @@ public class RouteMockModifyTest {
         Route route = mockRoute(mockRequestWithBody("https://host/api/leftmenu", "GET", null, null));
         when(lastApiCtx.fetch(anyString(), any())).thenReturn(apiResponse);
         handler.accept(route);
-        runtime.io().close();
+        
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
@@ -242,7 +242,7 @@ public class RouteMockModifyTest {
         Route route = mockRoute(mockRequestWithBody("https://host/api/login", "POST",
                 "{\"user\":\"u\",\"password\":\"old\"}", "application/json"));
         handler.accept(route);
-        runtime.io().close(); // 等待 body 修改任务落定
+         // 等待 body 修改任务落定
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.ResumeOptions> captor = ArgumentCaptor.forClass((Class) Route.ResumeOptions.class);
@@ -267,7 +267,7 @@ public class RouteMockModifyTest {
         Route route = mockRoute(mockRequestWithBody("https://host/api/bin", "POST",
                 "binary-data", "application/octet-stream"));
         handler.accept(route);
-        runtime.io().close();
+        
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.ResumeOptions> captor = ArgumentCaptor.forClass((Class) Route.ResumeOptions.class);
@@ -290,7 +290,7 @@ public class RouteMockModifyTest {
 
         Route route = mockRoute(mockRequestWithBody("https://host/api/fromfile", "GET", null, null));
         handler.accept(route);
-        runtime.io().close();
+        
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass((Class) Route.FulfillOptions.class);
@@ -316,16 +316,16 @@ public class RouteMockModifyTest {
     }
 
     /**
-     * <b>O1b 契约：MODIFY 阶段必须在调用线程就地执行</b>（不再派发 IO 池）。
+     * <b>O1b 契约：MODIFY 阶段必须在调用线程就地执行</b>（同步驱动，不派发到其它线程）。
      *
-     * <p>判据手法：<b>不调用</b> {@code runtime.io().close()}，直接在 {@code handler.accept(route)}
-     * 之后断言 resume 已发生，并记录调用线程名必须等于测试线程名 —— 若仍派发 IO 池，两处都会失败。</p>
+     * <p>判据手法：<b>不等待任何异步执行</b>，直接在 {@code handler.accept(route)}
+     * 之后断言 resume 已发生，并记录调用线程名必须等于测试线程名 —— 若派发到其它线程，两处都会失败。</p>
      *
      * <p>为什么必须就地：该阶段链尾可能落到 MOCK intercept 的取真实响应（同步驱动调用），而 Playwright
      * 的连接由"等待者线程"分发消息、其对象/回调表非线程安全，多一个线程驱动同一连接就会重新引入竞态。</p>
      */
     @Test
-    public void modifyRunsOnTheCallingThreadWithoutWaitingForTheIoPool() throws Exception {
+    public void modifyRunsOnTheCallingThreadInPlace() throws Exception {
         mockContext();
         RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
 
@@ -346,18 +346,18 @@ public class RouteMockModifyTest {
             return null;
         }).when(route).resume(any());
 
-        handler.accept(route);   // 刻意不等待 IO 池：就地执行则此刻已 resume
+        handler.accept(route);   // 刻意不等待异步执行：就地执行则此刻已 resume
 
-        assertEquals("MODIFY 必须在调用线程就地执行（O1b：不得派发 IO 池）",
+        assertEquals("MODIFY 必须在调用线程就地执行（O1b：同步驱动，不派发其它线程）",
                 callingThread, resumeThread.get());
-        runtime.io().close();    // 收尾（不影响上方断言：断言发生在等待之前）
+            // 收尾（不影响上方断言：断言发生在等待之前）
     }
 
     /**
-     * <b>O1 契约：MOCK intercept 的取真实响应必须在调用线程就地发生</b>（不派发 IO 池）。
+     * <b>O1 契约：MOCK intercept 的取真实响应必须在调用线程就地发生</b>（同步驱动，不派发其它线程）。
      *
-     * <p>判据手法：<b>不调用</b> {@code runtime.io().close()}，直接在 {@code handler.accept(route)}
-     * 之后断言 fetch 已在<b>测试线程</b>上发生 —— 若仍派发 IO 池，fetch 线程名必然不等于调用线程名。</p>
+     * <p>判据手法：<b>不等待任何异步执行</b>，直接在 {@code handler.accept(route)}
+     * 之后断言 fetch 已在<b>测试线程</b>上发生 —— 若派发到其它线程，fetch 线程名必然不等于调用线程名。</p>
      *
      * <p>与上一条 MODIFY 契约共同保证：我们这一侧的驱动调用（MODIFY 的本地读 + MOCK intercept 的 fetch）
      * 都发生在"持有连接约束的那条线程"上 ⇒ 不新增驱动线程、不破坏 Playwright 连接的单线程使用契约。</p>
@@ -389,10 +389,10 @@ public class RouteMockModifyTest {
         });
 
         Route route = mockRoute(mockRequestWithBody("https://host/api/inplace", "GET", null, null));
-        handler.accept(route);   // 刻意不等待 IO 池：就地执行则此刻 fetch 已完成
+        handler.accept(route);   // 刻意不等待异步执行：就地执行则此刻 fetch 已完成
 
-        assertEquals("intercept 取真实响应必须在调用线程就地发生（O1：不得派发 IO 池）",
+        assertEquals("intercept 取真实响应必须在调用线程就地发生（O1：同步驱动，不派发其它线程）",
                 callingThread, fetchThread.get());
-        runtime.io().close();
+        
     }
 }

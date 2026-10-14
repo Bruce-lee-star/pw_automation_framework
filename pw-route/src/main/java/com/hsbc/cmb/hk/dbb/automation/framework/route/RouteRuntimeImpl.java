@@ -14,9 +14,9 @@ import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.PendingGuard;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dispatch.RouteDispatcher;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteDelayScheduler;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteRetireExecutor;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CaptureSink;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedApiCall;
@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>创建收口：实例仅经 {@link RouteRuntimeFactory}（默认 {@link DefaultRouteRuntimeFactory}）
  * 创建，{@link RouteEngine} 不再直接 new；可经 SPI/factory 替换为测试替身（真多态）。
  *
- * <p>线程清单：事件线程（Playwright 回调）、IO 线程池、巡检线程（daemon）。
+ * <p>线程清单：事件线程（Playwright 回调，route 处理器在此就地执行 fetch/fulfill）、巡检线程（daemon）。
  */
 public final class RouteRuntimeImpl implements RouteRuntime {
 
@@ -65,9 +65,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     private final ClaimRegistry claims;
     /** F1（2026-10-10）：失败信号下的挂起收敛已触发标记（CAS 幂等 —— 只收敛一次）。 */
     private final AtomicBoolean failFastAborted = new AtomicBoolean(false);
-    private final BoundedOps ops;
-    private final RouteIoExecutor io;
-    /** 独立撤销执行器（S2，R-4）：与 IO 池隔离，避免撤销等待占住线程、挤压 body 断言/采集。 */
+    private final GuardedRunner guarded;
+    /** 独立撤销执行器（S2，R-4）：与 fetch 调用线程隔离，避免撤销等待占住线程、挤压 body 断言/采集。 */
     private final RouteRetireExecutor retire;
     private final MonitorSink monitor;
     private final CaptureSink capture;
@@ -114,9 +113,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         this.ownerRegistry = ownerRegistry;
         this.pendingGuard = new PendingGuard(config.maxPending());
         this.claims = new ClaimRegistry(pendingGuard, Duration.ofSeconds(config.ioAwaitTimeoutSeconds()));
-        this.ops = new BoundedOps(config.opsMaxConcurrent(), Duration.ofMillis(500));
+        this.guarded = new GuardedRunner(config.guardedRunnerMaxConcurrent(), Duration.ofMillis(500));
         String tag = String.valueOf(contextSeq.incrementAndGet());
-        this.io = new RouteIoExecutor(tag, config.ioThreads(), config.ioQueueCapacity());
         this.retire = new RouteRetireExecutor(tag);
         // 采集配置在本刻唯一解析并冻结（RouteCapturePolicy）：两个采集闸门 + monitor 断言体上限共用同一快照
         this.capturePolicy = RouteCapturePolicy.resolveNow();
@@ -126,7 +124,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         this.sweeper = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
             @Override
             public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "route-v2-sweep-" + tag);
+                Thread t = new Thread(r, "route-sweep-" + tag);
                 t.setDaemon(true);
                 return t;
             }
@@ -143,13 +141,23 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         // 之前无法被拦截，且因 Connection 为共享单连接，会以「此刻在等结果的任意调用线程」为宿主抛出
         // （实测：会话校验导航被炸 → 误判会话失效 → 删缓存 → 每轮全量重登）。
         // 响应侧观测改走 route 通道：recordObservation 持有 Request，轮询 existingResponse()（本地字段）。
-        VerboseLogging.logInfoIfVerbose(LOGGER, "[Route] runtime installed for context @{} (maxPending={}, ioThreads={})",
-                System.identityHashCode(context), config.maxPending(), config.ioThreads());
-        // 临时诊断看门狗（与 web HangWatchdog 同源，待去除）：按本 runtime 生命周期武装
+        VerboseLogging.logInfoIfVerbose(LOGGER, "[Route] runtime installed for context @{} (maxPending={})",
+                System.identityHashCode(context), config.maxPending());
+        // 临时诊断看门狗（与 web HangWatchdog 同源，待去除）：按本 runtime 生命周期武装。
+        // P1-5：改为 opt-in —— 默认不武装（不常驻诊断 daemon、不污染生产日志），
+        // 仅当 -Droute.hang.watchdog.enabled=true 时才武装（排查卡死时显式开启）。
         this.hangWatchdog = new HangWatchdog("ctx@" + System.identityHashCode(context));
-        this.hangWatchdog.arm();
-        VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[Route] HangWatchdog armed (diag, temporary) for context @{}", System.identityHashCode(context));
+        if (Boolean.getBoolean("route.hang.watchdog.enabled")) {
+            this.hangWatchdog.arm();
+            VerboseLogging.logInfoIfVerbose(LOGGER,
+                    "[Route] HangWatchdog armed (diag, opt-in) for context @{}",
+                    System.identityHashCode(context));
+        } else {
+            VerboseLogging.logInfoIfVerbose(LOGGER,
+                    "[Route] HangWatchdog not armed (opt-in disabled) for context @{}; "
+                            + "set -Droute.hang.watchdog.enabled=true to enable",
+                    System.identityHashCode(context));
+        }
     }
 
     /** 响应轮询<b>起始</b>间隔（毫秒）：细粒度使已到达的响应近乎即时定案，且不空转。 */
@@ -174,11 +182,11 @@ public final class RouteRuntimeImpl implements RouteRuntime {
      * {@link ApiSpec} 实例，比原先按 URL 匹配更精确）。
      *
      * <p><b>线程模型</b>：经 {@link RouteDelayScheduler}（模块自有 daemon 调度池）递归调度，
-     * 不占用 IO 线程、不使用 {@code Thread.sleep}（框架 ArchUnit 明令禁止）；命中即投递 sink
+     * 不占用调用线程、不使用 {@code Thread.sleep}（框架 ArchUnit 明令禁止）；命中即投递 sink
      * （sink 在<b>本线程就地</b>完成 {@code status}/{@code headers}/{@code body} 快照 ——
-     * {@code body()} 是协议调用，必须趁句柄存活时同步读（2026-09-28 修正：旧实现交 IO 线程
-     * 排队执行，实测 IO 池繁忙时句柄被回收、body 恒 null）；CPU 型断言/解析才交 IO 线程，
-     * 断言阶段零句柄依赖，见 {@code MonitorSink}/{@code CaptureSink}）。窗口内未命中则静默结束
+     * {@code body()} 是协议调用，必须趁句柄存活时同步读（2026-09-28 修正：旧实现交独立 IO 线程
+     * 排队执行，实测 IO 池繁忙时句柄被回收、body 恒 null；现行实现改为在调用线程就地读取，
+     * 零句柄依赖，见 {@code MonitorSink}/{@code CaptureSink}）。窗口内未命中则静默结束
      * ——由 sink 的 drain 超时定案路径兜底（与事件驱动时代语义一致）。轮询间隔按
      * {@link #RESPONSE_POLL_MAX_MS} 自适应退避（见该常量的说明），既保证及时定案，
      * 又不让观测任务淹没延迟调度池。</p>
@@ -257,13 +265,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     }
 
     @Override
-    public BoundedOps ops() {
-        return ops;
-    }
-
-    @Override
-    public RouteIoExecutor io() {
-        return io;
+    public GuardedRunner guarded() {
+        return guarded;
     }
 
     @Override
@@ -363,8 +366,13 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     }
 
     @Override
+    public long capturedApiSequence() {
+        return capture.captureSequence();
+    }
+
+    @Override
     public CapturedApiCall waitForCapturedApi(java.util.function.Predicate<CapturedApiCall> predicate,
-                                              long timeoutMs) {
+                                              long timeoutMs, long minCaptureSeq) {
         //  方案 B（2026-10-11）：等待期间<b>周期</b>执行 main 队列（DELAY resume）——只开头 drain 一次不够：
         //  delay 到点可能在等待途中发生，resume 入队后若无人执行 ⇒ 请求继续挂起、响应永不到达 ⇒ waitFor 超时。
         //  短窗口（≤50ms）事件驱动等待 + 每窗口前 drain，delay 到点至多滞后一个窗口即被 main 执行。
@@ -375,7 +383,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
             if (remainingMs <= 0L) {
                 return null;
             }
-            CapturedApiCall hit = capture.waitFor(predicate, Math.min(50L, remainingMs));
+            CapturedApiCall hit = capture.waitFor(predicate, Math.min(50L, remainingMs), minCaptureSeq);
             if (hit != null) {
                 return hit;
             }
@@ -722,19 +730,13 @@ public final class RouteRuntimeImpl implements RouteRuntime {
                 "[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown, {} unconfirmed",
                 retiredByPurpose.get(), confirmed, unconfirmed);
         // T1 度量基线：每用例（= 每 runtime 生命周期）汇总一行，报表可见、真跑归档。
-        // ioPool 段用于验证 IO 池自适应（基线/实际 core/峰值/扩容次数/回落次数/被拒绝任务数）：
-        // 有积压就抬、连续空闲就回落，若 grown=0 而 elapsed 仍高，说明瓶颈不在 IO 池（别再往这里调）。
         LOGGER.info("[Route] case metrics @{}: dispatches={}, hits={}, retiredByPurpose={}, "
                         + "unconfirmedRetirements={}, rulesArmedMs={}, "
-                        + "ioPool=[base={}, core={}, peakCore={}, grown={}, shrunk={}, rejected={}, active={}]",
+                        + "delayDeliveries(directed={}, queued={})",
                 System.identityHashCode(context), dispatcher.dispatchCount(), dispatcher.hitCount(),
                 retiredByPurpose.get(), unconfirmedRetirements.get(), armedDurationsMs,
-                io.baselineThreads(), io.coreThreads(), io.maxCoreObserved(),
-                io.grownCount(), io.shrunkCount(), io.rejectedCount(), io.activeCount());
+                dispatcher.directedDeliveries(), dispatcher.queuedDeliveries());
         if (contextClosing) { retire.closeNoWait(); } else { retire.close(); } // 收尾 flush 是同步的；此处等待在途的"目的驱动撤销"完成（不阻塞、有界）
-        if (contextClosing) { io.closeNoWait(); } else {
-            io.close();
-        }
         if (ownerRegistry != null) {
             ownerRegistry.remove(context, this);
         }
@@ -858,9 +860,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
                 generations.generation(),
                 claims.size(),
                 claims.pendingCount(),
-                ops.acceptedCount(),
-                ops.rejectedCount(),
-                io.rejectedCount(),
+                guarded.acceptedCount(),
+                guarded.rejectedCount(),
                 monitor.size(),
                 capture.size(),
                 capture.droppedCount(),

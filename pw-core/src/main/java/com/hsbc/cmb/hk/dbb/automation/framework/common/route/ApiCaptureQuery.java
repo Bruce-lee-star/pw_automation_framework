@@ -42,6 +42,30 @@ public interface ApiCaptureQuery {
     /** 等待首个满足条件的记录（非消费式）；超时返回 null。 */
     CapturedApiCallView waitForApi(Object context, Predicate<CapturedApiCallView> predicate, long timeoutMs);
 
+    /**
+     * 当前已分配的采集序号（= 已进入历史队列的记录数）；实现不支持时返回 -1。
+     *
+     * <p>配合 {@link #waitForApi(Object, Predicate, long, long)} 使用：动作前取该值，
+     * 把 {@code 值+1} 当门槛，即可只看本次动作之后新产生的采集。
+     */
+    default long capturedApiSequence(Object context) {
+        return -1L;
+    }
+
+    /**
+     * 等待首个满足条件的记录（非消费式），且只接受指定序号及之后的记录；超时返回 null。
+     *
+     * <p><b>为什么需要</b>：{@code get*}/{@code waitForApi} 扫描的是<b>只增历史</b>，不区分导航代次。
+     * 连续导航 / 重复轮询同一 URL 时，上一轮的迟到响应会满足新一轮等待（"过期命中"）。
+     * 用序号把等待限定在"动作之后产生的记录"，即可把这条失效模式挡掉。
+     *
+     * <p>默认实现退化为二参 {@code waitForApi}（不支持序号的实现不会因此报错，但也就没有上述保护）。
+     */
+    default CapturedApiCallView waitForApi(Object context, Predicate<CapturedApiCallView> predicate,
+                                           long timeoutMs, long minCaptureSeq) {
+        return waitForApi(context, predicate, timeoutMs);
+    }
+
     /** 清空该 context 的采集数据（用例收尾清理；幂等）。 */
     void resetCapturedApis(Object context);
 }

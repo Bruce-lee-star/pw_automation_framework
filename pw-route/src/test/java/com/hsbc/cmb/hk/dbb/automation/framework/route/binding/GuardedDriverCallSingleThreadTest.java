@@ -65,9 +65,9 @@ public class GuardedDriverCallSingleThreadTest {
         allDone.await();
 
         assertEquals("任意时刻仅一个驱动调用在执行（单线程串行，根治并发竞态）", 1, maxInFlight.get());
-        assertFalse("驱动调用必须运行在专用线程（route-v2-driver-），而非调用方线程", names.isEmpty());
+        assertFalse("驱动调用必须运行在专用线程（route-driver-），而非调用方线程", names.isEmpty());
         for (String name : names) {
-            assertTrue("驱动线程命名须为 route-v2-driver-*：" + name, name.startsWith("route-v2-driver-"));
+            assertTrue("驱动线程命名须为 route-driver-*：" + name, name.startsWith("route-driver-"));
         }
     }
 

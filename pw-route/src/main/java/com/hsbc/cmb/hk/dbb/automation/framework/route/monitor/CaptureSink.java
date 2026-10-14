@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.util.DriverErrors;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.util.MediaType;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
@@ -74,6 +75,12 @@ public final class CaptureSink {
     private final AtomicLong timedOutCount = new AtomicLong();
     /** 响应体读取失败数（可观测；失败仍保留核心快照）。 */
     private final AtomicLong bodyReadFailures = new AtomicLong();
+    /** 3xx 重定向响应体不可用的次数（P0-2 / P0-3）：已知事实，单独计数，不计入 {@link #bodyReadFailures}。 */
+    private final AtomicLong redirectNotAvailableBodyReads = new AtomicLong();
+    /** 响应体读取因句柄<b>已被驱动回收</b>失败的次数（P0-3，框架/驱动竞态）。 */
+    private final AtomicLong handleReclaimedBodyReads = new AtomicLong();
+    /** 响应体读取因<b>真协议错误</b>（非句柄回收）失败的次数（P0-3）。 */
+    private final AtomicLong protocolErrorBodyReads = new AtomicLong();
 
     /** 采集策略（不可变冻结快照）：请求侧与响应侧两个闸门共用同一份，杜绝口径漂移。 */
     private final com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy capturePolicy;
@@ -129,6 +136,10 @@ public final class CaptureSink {
         }
         CapturedExchange snapshot = CapturedExchange.ofRequest(request, spec);
         snapshot.holdSpec(spec); // 业务线程（dump）延迟读 body 需要规则引用
+        // 采集序号在**请求发起时**分配（而非响应物化入队时）：等待方要排除的是"动作前发起、
+        // 动作后才完成"的请求 —— 若按入队顺序编号，这类请求会拿到更大编号从而再次满足门槛，
+        // 正好复现我们要消灭的"过期命中"。volatile 写入对后续业务线程可见。
+        snapshot.assignCaptureSeq(captureSequence.incrementAndGet());
         pendingByPattern.computeIfAbsent(spec.pattern(), k -> new ConcurrentLinkedQueue<>()).add(snapshot);
         return true;
     }
@@ -191,6 +202,7 @@ public final class CaptureSink {
         if (response == null) {
             // 句柄已被回收（页面跳转 / 驱动清理）：body 不可读，保留 status/headers 快照
             bodyReadFailures.incrementAndGet();
+            handleReclaimedBodyReads.incrementAndGet();
             LOGGER.warn("[Route] capture body unavailable (response handle reclaimed) "
                             + "pattern='{}' url='{}'",
                     spec.pattern(), snapshot.url());
@@ -202,13 +214,15 @@ public final class CaptureSink {
             contentType = response.headers().get("content-type");
         } catch (Throwable ignored) {
             // headers() 为客户端本地快照（协议事件已携带），正常不抛；防御性兜底。
-            LOGGER.trace("[Route] response.headers() defensive fallback: {}", ignored.toString());
+            LOGGER.trace("[Route] response.headers() defensive fallback: {}", DriverErrors.shortMessage(ignored));
         }
         // 3xx 重定向：响应体通常不可用（官方语义：重定向响应无 body 或 body 不可读）。
         // 显式短路、不发起 body() 协议调用 —— 避免无谓驱动往返 + 误计 bodyReadFailures；
         // location 等头已由 markResponse 保留，业务断言直接可用。
         int status = response.status(); // status() 为本地快照（事件已携带），零协议往返
         if (status >= 300 && status < 400) {
+            // 已知事实（重定向响应无 body），单独计数，不计入 bodyReadFailures 竞态桶
+            redirectNotAvailableBodyReads.incrementAndGet();
             enqueue(snapshot, null, contentType, false);
             return;
         }
@@ -224,9 +238,14 @@ public final class CaptureSink {
             bytes = response.body();
         } catch (Throwable t) {
             bodyReadFailures.incrementAndGet();
+            if (DriverErrors.isHandleReclaimed(t)) {
+                handleReclaimedBodyReads.incrementAndGet();
+            } else {
+                protocolErrorBodyReads.incrementAndGet();
+            }
             LOGGER.warn("[Route] capture body unavailable (driver handle reclaimed / page closed) "
                             + "pattern='{}' url='{}': {}",
-                    spec.pattern(), snapshot.url(), t.toString());
+                    spec.pattern(), snapshot.url(), DriverErrors.shortMessage(t));
             enqueue(snapshot, null, contentType, false);
             return;
         }
@@ -245,7 +264,7 @@ public final class CaptureSink {
             // of() 内部已 fail-open（gzip/落盘失败均退回内存）；此处兜住任何意外并退回内存原字节
             bodyReadFailures.incrementAndGet();
             LOGGER.debug("[Route] capture body retention failed, falling back to in-memory bytes: {}",
-                    t.toString());
+                    DriverErrors.shortMessage(t));
             if (created != null) {
                 // 已建但未能交付（例如入队途中出错）⇒ 就地释放，避免"丢弃旧的 + 新建一个"双份泄漏
                 created.close();
@@ -305,7 +324,7 @@ public final class CaptureSink {
             }
             return;
         }
-        CapturedApiCall call = toDto(snapshot, body, contentType, truncated);
+        CapturedApiCall call = toDto(snapshot, body, contentType, truncated, snapshot.captureSeq());
         captured.add(call);
         // 非消费式历史（peek 用）：与消费式队列并行维护，保证"用例收尾复核真实流量"不会被
         // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
@@ -386,9 +405,19 @@ public final class CaptureSink {
      */
     private final java.util.concurrent.atomic.AtomicLong resetStamp =
             new java.util.concurrent.atomic.AtomicLong();
+    /**
+     * 采集序号分配器：每次 {@link #recordRequest}（即<b>请求发起</b>）取一个严格递增编号（首条为 1）。
+     *
+     * <p>用途：让等待器能表达"只要动作之后新产生的记录"（{@link #waitFor(java.util.function.Predicate, long, long)}），
+     * 消除连续导航下"上一轮的迟到响应满足新一轮等待"的<b>过期命中</b>。
+     * {@code recordVersion} 与之数值相近但语义不同：后者是"有无新记录"的唤醒判据，
+     * 可能在<b>未实际入队</b>的情况下前进（如容量丢记录），故不能充当过滤门槛。
+     */
+    private final java.util.concurrent.atomic.AtomicLong captureSequence =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private static CapturedApiCall toDto(CapturedExchange snapshot, CapturedBody body, String contentType,
-                                         boolean truncated) {
+                                         boolean truncated, long captureSeq) {
         // 分渠道透传：与 ofRequest 同源（channels=全部命中渠道，primaryChannel=优先级最高者）。
         return new CapturedApiCall(
                 snapshot.pattern(), snapshot.method(), snapshot.url(),
@@ -397,7 +426,7 @@ public final class CaptureSink {
                 null, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
-                contentType, null, body);
+                contentType, null, body, captureSeq);
     }
 
     /**
@@ -479,6 +508,21 @@ public final class CaptureSink {
         return bodyReadFailures.get();
     }
 
+    /** 3xx 重定向响应体不可用的次数（P0-2 / P0-3）：已知事实，单独计数。 */
+    public long redirectNotAvailableBodyReads() {
+        return redirectNotAvailableBodyReads.get();
+    }
+
+    /** 响应体读取因句柄已被驱动回收失败的次数（P0-3，框架/驱动竞态）。 */
+    public long handleReclaimedBodyReads() {
+        return handleReclaimedBodyReads.get();
+    }
+
+    /** 响应体读取因真协议错误（非句柄回收）失败的次数（P0-3）。 */
+    public long protocolErrorBodyReads() {
+        return protocolErrorBodyReads.get();
+    }
+
     // ==================== 索引查询 / 重置 / 跨模块视图（业务读取 API 采集信息） ====================
 
     /**
@@ -501,6 +545,9 @@ public final class CaptureSink {
         dropped.set(0);
         timedOutCount.set(0);
         bodyReadFailures.set(0);
+        redirectNotAvailableBodyReads.set(0);
+        handleReclaimedBodyReads.set(0);
+        protocolErrorBodyReads.set(0);
         // 结束所有等待者：resetStamp 自增让 waitFor 立即返回 null（历史已清空，再等无意义），
         // 并按等待者数量释放许可把阻塞中的线程叫醒（单次 release 只唤醒一个）。
         resetStamp.incrementAndGet();
@@ -584,8 +631,32 @@ public final class CaptureSink {
         return out;
     }
 
-    /** 等待首个满足条件的记录（非消费式；事件驱动，无固定间隔轮询）；超时或中断返回 null。 */
+    /**
+     * 当前<b>已分配</b>到的采集序号（= 已记录的请求数，与是否已物化入队无关）。
+     *
+     * <p>业务在触发动作前取该值，然后把 {@code 值 + 1} 作为 {@code minCaptureSeq} 传给等待接口，
+     * 即可只看本次动作之后新产生的采集 —— 这是"避免过期命中"的推荐用法。
+     */
+    public long captureSequence() {
+        return captureSequence.get();
+    }
+
+    /** 等价于 {@link #waitFor(java.util.function.Predicate, long, long)}，{@code minCaptureSeq = 0}（不限代次）。 */
     public CapturedApiCall waitFor(java.util.function.Predicate<CapturedApiCall> predicate, long timeoutMs) {
+        return waitFor(predicate, timeoutMs, 0L);
+    }
+
+    /**
+     * 等待首个满足条件的记录（非消费式；事件驱动，无固定间隔轮询）；超时或中断返回 null。
+     *
+     * @param minCaptureSeq 只看 {@code captureSeq >= minCaptureSeq} 的记录。
+     *                      <b>0 表示不限</b>（既有行为）；&gt;=1 表示"只要某个时间点之后新产生的采集" ——
+     *                      典型用法是在触发业务动作<b>之前</b>取 {@link #captureSequence()}，把该值 +1 传进来，
+     *                      从而杜绝"上一轮导航的迟到响应满足本轮等待"的过期命中。
+     *                      {@link CapturedApiCall#UNSEQUENCED}（-1）的记录在门槛 &gt;=1 时不可见。
+     */
+    public CapturedApiCall waitFor(java.util.function.Predicate<CapturedApiCall> predicate, long timeoutMs,
+                                   long minCaptureSeq) {
         if (predicate == null) {
             return null;
         }
@@ -598,7 +669,9 @@ public final class CaptureSink {
             long versionAtScan = recordVersion.get();
             // 1) 扫描（无锁；history 为并发队列，且生产者不持锁 ⇒ 无死锁、无锁竞争）
             for (CapturedApiCall c : history) {
-                if (c != null && predicate.test(c)) {
+                // minCaptureSeq <= 0 ⇒ 完全按既有行为（不做任何序号门槛，历史中的所有记录都可选）
+                if (c != null && (minCaptureSeq <= 0L || c.captureSeq() >= minCaptureSeq)
+                        && predicate.test(c)) {
                     return c;
                 }
             }

@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.binding;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteRuntime;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.CoverageScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
 import com.microsoft.playwright.BrowserContext;
@@ -96,6 +97,9 @@ public final class PatternBinder implements AutoCloseable {
                         spec.times() == null ? null
                                 : new BrowserContext.RouteOptions().setTimes(spec.times())));
         if (handle != null) {
+            // 首次成功注册即宣告覆盖范围：此刻"HTTP 缓存被绕开"才成立，且揭示 SW / 下载 /
+            // 重定向 / 导航代次四条观测边界（一次性，JVM 内只告警一次，不影响任何行为）。
+            CoverageScope.announceOnce();
             return new PatternBinder(context, spec.pattern(), runtime, handle, false);
         }
         if (failClosed) {
@@ -120,7 +124,7 @@ public final class PatternBinder implements AutoCloseable {
     }
 
     private static void onRoute(Route route, RouteRuntime runtime, String pattern) {
-        // 事件线程入口：全程无阻塞（终结命令走 sendMessageAsync；fetch/重装走 IO 池）
+        // 事件线程入口：全程无阻塞（终结命令走 sendMessageAsync；fetch 在本线程就地执行）
         runtime.dispatch(route, pattern);
     }
 

@@ -7,8 +7,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.ClaimRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.PendingGuard;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedApiCall;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Route;
@@ -29,8 +28,8 @@ public final class StubRouteRuntime implements RouteRuntime {
     private final GenerationRegistry generations = new GenerationRegistry();
     private final PendingGuard pending = new PendingGuard(1);
     private final ClaimRegistry claims = new ClaimRegistry(pending, Duration.ofMillis(1));
-    private final BoundedOps ops = new BoundedOps(1, Duration.ofMillis(1));
-    private final RouteIoExecutor io = new RouteIoExecutor("stub", 1, 1);
+    private final GuardedRunner guarded = new GuardedRunner(1, Duration.ofMillis(1));
+
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     @Override
@@ -49,13 +48,8 @@ public final class StubRouteRuntime implements RouteRuntime {
     }
 
     @Override
-    public BoundedOps ops() {
-        return ops;
-    }
-
-    @Override
-    public RouteIoExecutor io() {
-        return io;
+    public GuardedRunner guarded() {
+        return guarded;
     }
 
     @Override
@@ -131,7 +125,7 @@ public final class StubRouteRuntime implements RouteRuntime {
 
     @Override
     public RouteMetrics metrics() {
-        return new RouteMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0L, 0L, 0, 0, Map.of());
+        return new RouteMetrics(0, 0, 0, 0, 0, 0, 0, 0, 0L, 0L, 0, 0, Map.of());
     }
 
     @Override
@@ -141,11 +135,6 @@ public final class StubRouteRuntime implements RouteRuntime {
                 claims.closeAll();
             } catch (Exception ignored) {
                 // 测试替身：资源释放失败不影响验证
-            }
-            try {
-                io.close();
-            } catch (Exception ignored) {
-                // 同上
             }
         }
     }

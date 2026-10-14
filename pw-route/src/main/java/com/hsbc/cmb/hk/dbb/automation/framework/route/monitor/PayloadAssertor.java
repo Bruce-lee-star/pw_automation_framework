@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Payload 断言分派器 —— 按响应 Content-Type 路由 body 断言（IO 线程执行）。
+ * Payload 断言分派器 —— 按响应 Content-Type 路由 body 断言（在调用线程就地执行，纯 CPU 解析）。
  *
  * <p>内容类型感知（不把 JSON 当默认）：
  * <ul>

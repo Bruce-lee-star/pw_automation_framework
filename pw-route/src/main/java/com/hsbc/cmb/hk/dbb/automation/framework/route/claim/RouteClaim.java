@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * </pre>
  * <ul>
  *   <li>{@code NEW}：已索赔，事件线程尚未决定终结方式；</li>
- *   <li>{@code IO_AWAIT}：已占挂起额度，交 IO 线程延迟终结（DELAY / MOCK intercept）；</li>
+ *   <li>{@code IO_AWAIT}：已占挂起额度，在调用线程就地延迟终结（DELAY / MOCK intercept）；</li>
  *   <li>{@code HANDLED}：已终结（resume / fulfill / abort 成功）；</li>
  *   <li>{@code RELEASED}：放弃终结（fallback 放行 / 异常逃生）。</li>
  * </ul>

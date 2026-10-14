@@ -471,7 +471,7 @@ public class PlaywrightListener implements StepListener {
         }
         FrameworkListenerBridge.afterStep(TestContextHolder.get().get(CURRENT_STEP_TITLE_KEY));
 
-        //  路由命中证据 → Serenity 报告：内核只在 Playwright 事件线程 / IO 池线程入队（那些线程直接
+        //  路由命中证据 → Serenity 报告：内核只在 Playwright 事件线程（route 调用线程）入队（那些线程直接
         //  写报告数据会丢），真正的写入必须回到测试主线程。本方法是"步骤结束"的主线程钩子 ——
         //  Serenity 每个步骤必经此处（已由运行日志逐步骤证实），在此刷入即让证据<b>归属当前步骤</b>，
         //  而不是像原先那样全场景证据都堆在最后一步（实测：DELAY 场景的断言步下面挂着登录流程自己的

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * （Context 生命周期由 sessionKey 判据唯一掌管，见 FIX_PLAN I-9 / T2 裁定：路由是辅助设施，不得绑架会话）。</p>
  *
  * <p><b>范围说明</b>：本单线程化仅覆盖<b>同步</b>驱动协议调用（guarded bind/unroute）。
- * 拦截期 {@code route.fetch} / {@code page.request} 经 {@code BoundedOps} / IO 池并发执行
+ * 拦截期 {@code route.fetch} / {@code page.request} 经 {@code GuardedRunner} 在调用线程就地执行
  * （串行化会回归并发请求吞吐，且其 channel 竞态已由 T2 的 claim / closeConfirmed 收敛），不在 T6 范围内。</p>
  *
  * <p><b>2026-09-29 全新评审（P0）—— 上文"毒化重置"段落已被取代</b>：{@code compareAndSet} 换新建实例的前提是
@@ -79,7 +79,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
     private static ExecutorService newDriverExecutor() {
         int epoch = DRIVER_EPOCH.incrementAndGet();
         ThreadFactory tf = r -> {
-            Thread t = new Thread(r, "route-v2-driver-" + epoch);
+            Thread t = new Thread(r, "route-driver-" + epoch);
             t.setDaemon(true);
             t.setPriority(Thread.NORM_PRIORITY - 1);
             return t;

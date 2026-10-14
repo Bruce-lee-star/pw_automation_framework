@@ -173,7 +173,7 @@ public class RouteDslLegacyCompatTest {
         Route route = mock(Route.class);
         when(route.request()).thenReturn(req);
         handler.accept(route);
-        runtime.io().close();
+        
 
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass(Route.FulfillOptions.class);
         verify(route).fulfill(captor.capture());
@@ -197,7 +197,7 @@ public class RouteDslLegacyCompatTest {
         Route route = mock(Route.class);
         when(route.request()).thenReturn(req);
         handler.accept(route);
-        runtime.io().close();
+        
 
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass(Route.FulfillOptions.class);
         verify(route).fulfill(captor.capture());
@@ -222,7 +222,7 @@ public class RouteDslLegacyCompatTest {
         Route route = mock(Route.class);
         when(route.request()).thenReturn(req);
         handler.accept(route);
-        runtime.io().close();
+        
 
         ArgumentCaptor<Route.FulfillOptions> captor = ArgumentCaptor.forClass(Route.FulfillOptions.class);
         verify(route).fulfill(captor.capture());
@@ -273,8 +273,8 @@ public class RouteDslLegacyCompatTest {
         Route route = mock(Route.class);
         when(route.request()).thenReturn(request);
         handler.accept(route);
-        // 无 body 修改 → 事件线程直接 resume，无需 IO 线程
-        runtime.io().close();
+        // 无 body 修改 → 事件线程直接 resume
+        
 
         ArgumentCaptor<Route.ResumeOptions> resumeCaptor = ArgumentCaptor.forClass(Route.ResumeOptions.class);
         verify(route).resume(resumeCaptor.capture());

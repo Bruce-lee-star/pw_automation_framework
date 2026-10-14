@@ -63,6 +63,19 @@ public final class CapturedExchange {
     private volatile boolean bodyAssertionPending;
     /** body 断言是否已在业务线程结算（幂等保护：drain 多轮/多入口不重复断言）。 */
     private volatile boolean bodyAssertionSettled;
+    /**
+     * 采集序号：由 {@link CaptureSink} 在<b>记录请求时</b>（{@code recordRequest}，即请求发起顺序）
+     * 分配，供等待方表达"只要某个动作之后发起的请求"。
+     *
+     * <p><b>为什么必须在 recordRequest 而不是入队时分配</b>：响应体是业务线程延迟物化的，
+     * 入队发生在之后。若按入队顺序编号，一条<b>动作前发起、动作后才完成</b>的请求会拿到更大的编号，
+     * 从而仍满足门槛 —— 恰好复现要消灭的"过期命中"。按请求发起顺序编号才能把这类请求正确排除。
+     *
+     * <p>volatile：写发生在 route 事件线程、读发生在业务线程（入队/结算），需要跨线程可见。
+     * 未分配的（如派发链证据路径）为 {@link CapturedApiCall#UNSEQUENCED}。
+     */
+    private volatile long captureSeq = CapturedApiCall.UNSEQUENCED;
+
     /** 命中规则引用（业务线程延迟断言需要：PayloadAssertor 消费 spec 的期望与 body 断言配置）。 */
     private volatile ApiSpec heldSpec;
 
@@ -200,6 +213,22 @@ public final class CapturedExchange {
 
     ApiSpec spec() {
         return heldSpec;
+    }
+
+    /**
+     * 写入采集序号（由 {@link CaptureSink} 在 {@code recordRequest} 时调用一次）。
+     *
+     * @param seq 严格单调序号（&gt; 0）；重复写入以首次为准，避免下游重入把序号打回去
+     */
+    void assignCaptureSeq(long seq) {
+        if (this.captureSeq == CapturedApiCall.UNSEQUENCED) {
+            this.captureSeq = seq;
+        }
+    }
+
+    /** 采集序号；未分配时为 {@link CapturedApiCall#UNSEQUENCED}。 */
+    long captureSeq() {
+        return captureSeq;
     }
 
     void markResponse(int status, Map<String, String> headers) {

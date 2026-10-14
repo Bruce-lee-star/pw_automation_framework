@@ -386,13 +386,32 @@ public final class RouteEngine {
         return runtime == null ? List.of() : runtime.capturedApisByChannel(channel);
     }
 
+    /** 指定 context 当前已分配的采集序号；runtime 不存在时返回 -1。 */
+    public static long capturedApiSequence(BrowserContext context) {
+        Objects.requireNonNull(context, "context");
+        RouteRuntime runtime = RUNTIMES.get(context);
+        return runtime == null ? -1L : runtime.capturedApiSequence();
+    }
+
     /** 等待首个满足条件的采集记录（非消费式）。 */
     public static CapturedApiCall waitForCapturedApi(BrowserContext context,
                                                      java.util.function.Predicate<CapturedApiCall> predicate,
                                                      long timeoutMs) {
+        return waitForCapturedApi(context, predicate, timeoutMs, 0L);
+    }
+
+    /**
+     * 等待首个满足条件的采集记录，且只看 {@code captureSeq >= minCaptureSeq} 的记录（非消费式）。
+     *
+     * @param minCaptureSeq 序号门槛；{@code <=0} 不限。详见
+     *                      {@link RouteRuntime#waitForCapturedApi(java.util.function.Predicate, long, long)}
+     */
+    public static CapturedApiCall waitForCapturedApi(BrowserContext context,
+                                                     java.util.function.Predicate<CapturedApiCall> predicate,
+                                                     long timeoutMs, long minCaptureSeq) {
         Objects.requireNonNull(context, "context");
         RouteRuntime runtime = RUNTIMES.get(context);
-        return runtime == null ? null : runtime.waitForCapturedApi(predicate, timeoutMs);
+        return runtime == null ? null : runtime.waitForCapturedApi(predicate, timeoutMs, minCaptureSeq);
     }
 
     /** 聚合全部活跃 runtime 的已定案断言失败（消费式；幂等——第二次调用返回空列表）。

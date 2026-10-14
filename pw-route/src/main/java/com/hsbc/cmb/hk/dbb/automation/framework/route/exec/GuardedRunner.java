@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * 有界操作预算 —— 为「同步且可能无客户端超时」的 Playwright 调用提供限流与逃生。
+ * 有界操作预算（原 {@code BoundedOps}）—— 为「同步且可能无客户端超时」的 Playwright 调用提供限流与逃生。
  *
  * <p>为什么必须（对应 playwright-java-1.62.0 源码事实）：
  * <ul>
@@ -26,16 +26,16 @@ import java.util.function.Supplier;
  *
  * <p>并发安全：{@link Semaphore} 信号量 + 原子计数器（指标），无共享可变状态。
  */
-public final class BoundedOps {
+public final class GuardedRunner {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(BoundedOps.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(GuardedRunner.class);
 
     private final Semaphore semaphore;
     private final long acquireTimeoutMs;
     private final AtomicLong rejected = new AtomicLong(0);
     private final AtomicLong accepted = new AtomicLong(0);
 
-    public BoundedOps(int maxConcurrent, Duration acquireTimeout) {
+    public GuardedRunner(int maxConcurrent, Duration acquireTimeout) {
         if (maxConcurrent <= 0) {
             throw new IllegalArgumentException("maxConcurrent must be > 0");
         }
@@ -60,26 +60,26 @@ public final class BoundedOps {
      * @param action 同步动作（不得阻塞超过其自身超时上限）
      * @return 动作结果；{@link Optional#empty()} 表示预算耗尽或等待超时（调用方必须 fail-open）
      */
-    public <T> Optional<T> tryRun(String op, Supplier<T> action) {
+    public <T> Optional<T> run(String op, Supplier<T> action) {
         boolean acquired;
         try {
             acquired = semaphore.tryAcquire(acquireTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            LOGGER.warn("[Route] BoundedOps interrupted while acquiring for op='{}'", op);
+            LOGGER.warn("[Route] GuardedRunner interrupted while acquiring for op='{}'", op);
             rejected.incrementAndGet();
             return Optional.empty();
         }
         if (!acquired) {
             rejected.incrementAndGet();
-            LOGGER.warn("[Route] BoundedOps budget exhausted for op='{}', caller must fail-open", op);
+            LOGGER.warn("[Route] GuardedRunner budget exhausted for op='{}', caller must fail-open", op);
             return Optional.empty();
         }
         accepted.incrementAndGet();
         try {
             return Optional.ofNullable(action.get());
         } catch (RuntimeException e) {
-            LOGGER.warn("[Route] BoundedOps op='{}' failed: {}", op, e.toString());
+            LOGGER.warn("[Route] GuardedRunner op='{}' failed: {}", op, e.toString());
             return Optional.empty();
         } finally {
             semaphore.release();
@@ -87,8 +87,8 @@ public final class BoundedOps {
     }
 
     /** 有界执行无返回值动作。 */
-    public boolean tryRunVoid(String op, Runnable action) {
-        return tryRun(op, () -> {
+    public boolean runVoid(String op, Runnable action) {
+        return run(op, () -> {
             action.run();
             return Boolean.TRUE;
         }).isPresent();

@@ -57,6 +57,11 @@ import java.util.Set;
  * @param body                   响应体<b>载体</b>（{@link CapturedBody}）：非 null 时优先于
  *                               {@code responseBody} / {@code responseBodyBytes}；采集器路径只在载体中
  *                               留一份（不重复占用堆），派发链证据路径无载体（为 null，沿用文本组件）
+ * @param captureSeq             采集序号：由 {@link CaptureSink} 分配的<b>严格单调</b>编号，
+ *                               标识"第几条采集记录"；非采集路径构造的证据
+ *                               （派发链 / monitor 结果渲染）为 {@link #UNSEQUENCED}。
+ *                               用途：让等待器只认"动作之后新产生"的记录，避免连续导航下
+ *                               上一轮的迟到响应满足新一轮等待（即"过期命中"）。
  */
 public record CapturedApiCall(String pattern, String method, String url,
                               Map<String, String> requestHeaders, String requestBodyPreview,
@@ -65,10 +70,14 @@ public record CapturedApiCall(String pattern, String method, String url,
                               long durationMs, boolean timedOut, long recordedAtMillis,
                               Set<String> channels, String primaryChannel,
                               String contentType, byte[] responseBodyBytes,
-                              CapturedBody body) {
+                              CapturedBody body, long captureSeq) {
+
+    /** 未被采集序号标记（派发链证据等不走 {@code CaptureSink} 的路径）。 */
+    public static final long UNSEQUENCED = -1L;
 
     /**
-     * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null。
+     * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null、
+     * {@code captureSeq} 为 {@link #UNSEQUENCED}。
      *
      * <p>目的：本次只为采集记录增加"分渠道"信息，既有调用点（派发链证据、monitor 结果渲染等）
      * 不需要跟着改签名，避免大范围牵动；需要标注渠道的新调用点走全参构造即可。
@@ -80,7 +89,7 @@ public record CapturedApiCall(String pattern, String method, String url,
                            long durationMs, boolean timedOut, long recordedAtMillis) {
         this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
                 responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
-                Set.of(), null, null, null, null);
+                Set.of(), null, null, null, null, UNSEQUENCED);
     }
 
     /** 敏感头键（小写比较）：值一律打码。 */

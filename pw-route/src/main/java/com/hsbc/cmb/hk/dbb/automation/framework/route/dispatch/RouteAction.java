@@ -27,7 +27,8 @@ import java.util.concurrent.atomic.AtomicReference;
  *       统一出口把所有终结路径收敛到一个 try/catch 边界，失败一律记录并转为 fail-open；</li>
  *   <li>{@code resume/fulfill/abort/fallback} 均为 {@code sendMessageAsync}（Connection:139），
  *       不阻塞事件线程——因此这些动作允许在事件线程直接调用，而 {@code fetch()} 是同步 HTTP，
- *       只允许在 IO 线程经 BoundedOps 调用（见 {@link #fetchAndFulfill}）。</li>
+ *       只允许在调用线程经 {@link GuardedRunner} 限流调用（见 {@link #fetchAndFulfill}；
+ *       不得派发到其它线程，避免并发驱动同一条连接）。</li>
  * </ul>
  */
 public final class RouteAction {
@@ -186,7 +187,7 @@ public final class RouteAction {
         }
     }
 
-    /** 以真实响应终结（MOCK intercept，IO 线程内调用）。 */
+    /** 以真实响应终结（MOCK intercept，在调用线程就地调用）。 */
     public static boolean fulfillWithResponse(Route route, APIResponse response) {
         try {
             route.fulfill(new Route.FulfillOptions().setResponse(response));
@@ -197,7 +198,7 @@ public final class RouteAction {
         }
     }
 
-    /** 以显式 status/headers/body 终结（MOCK 字段替换后，IO 线程内调用）。 */
+    /** 以显式 status/headers/body 终结（MOCK 字段替换后，在调用线程就地调用）。 */
     public static boolean fulfillWithBody(Route route, Integer status, Map<String, String> headers, String body) {
         try {
             Route.FulfillOptions options = new Route.FulfillOptions();
@@ -219,7 +220,7 @@ public final class RouteAction {
     }
 
     /**
-     * 以显式 status/headers/<b>字节体</b>终结（IO 线程内调用）。
+     * 以显式 status/headers/<b>字节体</b>终结（在调用线程就地调用）。
      *
      * <p>供<b>字节保真通道</b>使用：非文本 Mock 体（或 {@code fromCaptured} 的非文本采集记录）
      * 只存在于 {@code mockBodyBytes}，当规则同时声明了字段替换时必须按原字节交付 ——
@@ -314,11 +315,11 @@ public final class RouteAction {
     }
 
     /**
-     * IO 线程专用：真实响应拦截（MOCK intercept）的取响应实现。
+     * 真实响应拦截（MOCK intercept）的取响应实现（在调用线程就地调用）。
      *
      * <p><b>必须在本线程就地调用（O1）</b>：它是同步 HTTP，且会驱动（泵）所属连接。经
-     * {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps} 只是为"有界预算"
-     * （该实现是信号量 + <b>内联执行</b>，不换线程）；<b>不得派发到 IO 池</b> —— Playwright 的
+     * {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner} 只是为"有界预算"
+     * （该实现是信号量 + <b>内联执行</b>，不换线程）；<b>不得派发到其它线程</b> —— Playwright 的
      * {@code Connection} 由等待者线程分发消息，其对象表/回调表<b>非线程安全</b>，多线程并发驱动
      * 同一连接会命中竞态（假 {@code Object doesn't exist: xxx@} 与应答被丢弃 ⇒ 超时/毒化/RESET）。</p>
      *
@@ -326,7 +327,7 @@ public final class RouteAction {
      * 取好的 {@link RequestSnapshot}（url/method/headers/body 值拷贝）+ {@code page.request()} 从零重发。
      * 取响应因此<b>不依赖</b>任何可能被浏览器驱动回收的 {@code frame}/{@code Request} 句柄，
      * 从结构上消除"导航期句柄回收"竞态——<b>无需</b>任何异常捕获或错误串匹配。任何失败直接上抛，
-     * 由 {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.BoundedOps} 统一 fail-open。</p>
+     * 由 {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner} 统一 fail-open。</p>
      *
      * @param requestContext runtime 所属 Context 的 {@link APIRequestContext}（调用方保证非空）
      * @param snapshot       拦截时的请求快照（调用方保证非空）
@@ -362,7 +363,7 @@ public final class RouteAction {
         }
     }
 
-    /** 单次 fetch + 失败探针。不持有任何锁；失败上抛（由 BoundedOps 统一 fail-open，语义不变）。 */
+    /** 单次 fetch + 失败探针。不持有任何锁；失败上抛（由 GuardedRunner 统一 fail-open，语义不变）。 */
     private static APIResponse fetchOnce(APIRequestContext requestContext, RequestSnapshot snapshot,
                                          RequestOptions options, long seq, int inflight) {
         try {

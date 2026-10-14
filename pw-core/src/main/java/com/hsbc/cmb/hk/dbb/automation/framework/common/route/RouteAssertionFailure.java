@@ -32,7 +32,7 @@ public record RouteAssertionFailure(String pattern, String method, String url,
                                       String requestHeaders, String responseHeaders) {
 
     /**
-     * 防御性拷贝构造：bodyFailures 不可变快照，杜绝调用方（IO 线程产物）与报告方（业务线程）
+     * 防御性拷贝构造：bodyFailures 不可变快照，杜绝调用方（route 调用线程产物）与报告方（业务线程）
      * 之间共享可变列表。
      */
     public RouteAssertionFailure {

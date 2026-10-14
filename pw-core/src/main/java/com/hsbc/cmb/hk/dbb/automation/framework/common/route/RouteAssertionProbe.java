@@ -12,7 +12,7 @@ import java.util.List;
  * <p>消费语义（幂等）：本方法一次性取走当前全部已定案的断言失败并清空；再次调用返回空列表。
  * 因此"步骤结束抛 AssertionError + testFinished 兜底标记"两条路径天然防重，无需额外的防重入标志。
  *
- * <p>定案定义（对齐 {@code MonitorSink}）：收到响应且（无 body 断言，或 body 断言已在 IO 线程
+ * <p>定案定义（对齐 {@code MonitorSink}）：收到响应且（无 body 断言，或 body 断言已在调用线程就地
  * 评估完成）→ 定案；或超过 monitor 超时窗口仍未收到响应 → 定案为超时失败。未定案的请求
  * 留在观测队列继续等待（timeout 窗口语义），不会在步骤结束时被误判。
  */

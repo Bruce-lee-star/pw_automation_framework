@@ -68,13 +68,25 @@ public final class ApiCaptureQueryImpl implements ApiCaptureQuery {
 
     @Override
     public CapturedApiCallView waitForApi(Object context, Predicate<CapturedApiCallView> predicate, long timeoutMs) {
+        return waitForApi(context, predicate, timeoutMs, 0L);
+    }
+
+    @Override
+    public long capturedApiSequence(Object context) {
+        BrowserContext ctx = asContext(context);
+        return ctx == null ? -1L : RouteEngine.capturedApiSequence(ctx);
+    }
+
+    @Override
+    public CapturedApiCallView waitForApi(Object context, Predicate<CapturedApiCallView> predicate,
+                                          long timeoutMs, long minCaptureSeq) {
         BrowserContext ctx = asContext(context);
         if (ctx == null || predicate == null) {
             return null;
         }
         // 视图层谓词 → DTO 层谓词：按 View 判定，但轮询仍复用 sink 的非消费式等待。
         return CaptureSink.toView(RouteEngine.waitForCapturedApi(ctx,
-                dto -> predicate.test(CaptureSink.toView(dto)), timeoutMs));
+                dto -> predicate.test(CaptureSink.toView(dto)), timeoutMs, minCaptureSeq));
     }
 
     @Override

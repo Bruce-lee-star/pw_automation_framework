@@ -3,7 +3,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteIoExecutor;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
 import org.junit.After;

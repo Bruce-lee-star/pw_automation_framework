@@ -23,9 +23,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * <b>去误报</b>：仅当同栈集合连续 {@code route.hang.watchdog.frozen.samples}（默认 3）次采样不变才上报；
  * 健康但运行久的用例其栈在推进 ⇒ 永不误报。
  *
- * <p><b>为什么 route2 也需要</b>：route2 已在根因层用 {@code GuardedDriverCall} / {@code BoundedOps}
- * 设界（原生驱动调用不会无限挂起），但业务线程调 route2 API（如 {@code register} 等待 IO 池 /
- * pending 满）仍可能长时间阻塞；本看门狗提供最后兜底诊断，与根因防护正交。
+ * <p><b>为什么 route2 也需要</b>：route2 已在根因层用 {@code GuardedDriverCall} / {@code GuardedRunner}
+ * 设界（原生驱动调用不会无限挂起），但业务线程调 route2 API（如 {@code register} 等待 pending 满）
+ * 仍可能长时间阻塞；本看门狗提供最后兜底诊断，与根因防护正交。
  *
  * <p><b>临时</b>：与 web {@code HangWatchdog} 一并去除（去除清单见仓库根 {@code FIX_PLAN.md} §7）。放在 {@code diag}
  * 子包，便于整包移除，且不影响运行时依赖（仅诊断期使用，复用进程级 daemon 调度池）。</p>
@@ -41,7 +41,7 @@ public final class HangWatchdog {
             new ThreadFactory() {
                 @Override
                 public Thread newThread(Runnable r) {
-                    Thread t = new Thread(r, "route-v2-hang-watchdog");
+                    Thread t = new Thread(r, "route-hang-watchdog");
                     t.setDaemon(true);
                     return t;
                 }
@@ -51,7 +51,7 @@ public final class HangWatchdog {
     private static final String[] NOISE_THREAD_PREFIXES = {
             "Reference Handler", "Finalizer", "Signal Dispatcher", "Attach Listener",
             "Common-Cleaner", "Notification Thread", "process reaper", "Cleaner-",
-            "route-v2-hang-watchdog"
+            "route-hang-watchdog"
     };
 
     private final String id;
@@ -199,7 +199,7 @@ public final class HangWatchdog {
             sb.append("    [").append(th.getName()).append("] ").append(th.getState()).append(" | ")
                     .append(firstInterestingFrame(entry.getValue())).append('\n');
         }
-        sb.append("==== [Route-HangWatchdog] 采样结束（若停在 GuardedDriverCall/RouteIoExecutor 则是 route2 阻塞；"
+        sb.append("==== [Route-HangWatchdog] 采样结束（若停在 GuardedDriverCall 则是 route2 阻塞；"
                 + "停在 Playwright sendMessage 则是协议层等待）====");
         return sb.toString();
     }

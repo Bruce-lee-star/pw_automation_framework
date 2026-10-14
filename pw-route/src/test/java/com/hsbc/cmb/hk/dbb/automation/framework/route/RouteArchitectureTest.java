@@ -23,7 +23,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 /**
  * 架构分层门禁（T0-1 风格）：固化 route2 的"驱动协议调用收口" —— 所有同步阻塞的 Playwright
  * 驱动协议调用（route / unroute / Route.close / fetch）必须经由有界守卫
- * （{@code GuardedDriverCall} / {@code BoundedOps} / IO 线程池），禁止在 binding / dispatch 等
+ * （{@code GuardedDriverCall} / {@code GuardedRunner}），禁止在 binding / dispatch 等
  * 业务代码里直接调用原生驱动 API。
  *
  * <p><b>背景</b>：{@code context.route()} / {@code context.unroute()} 在客户端是 {@code NO_TIMEOUT}
@@ -44,7 +44,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  *       （具名 daemon，由有界池管理）与 {@code BodyStore} 的 shutdown hook（一次性 JVM 收尾）中；</li>
  *   <li><b>fetch 收口扩展</b>：{@code APIRequestContext.fetch} 只允许在 {@code RouteAction} 内调用；</li>
  *   <li><b>固化 F5 修复</b>：{@code RouteAction.fetch} 的调用方白名单 = {@code RouteDispatcher} 唯一 ——
- *       禁止调度器/IO 线程回调里 fetch（历史缺陷：DELAY 到点回调在 {@code RouteDelayScheduler} 线程
+ *       禁止调度器线程回调里 fetch（历史缺陷：DELAY 到点回调在 {@code RouteDelayScheduler} 线程
  *       fetch ⇒ 与主线程并发驱动同一条连接 ⇒ O1 竞态面重现）。</li>
  * </ul>
  * </p>
@@ -91,16 +91,15 @@ public class RouteArchitectureTest {
     }
 
     /**
-     * 驱动 fetch（拦截真实响应）必须经 {@code BoundedOps} / IO 线程池
-     * （{@code RouteAction} / {@code RouteIoExecutor} 已收口）。禁止其它业务代码直接调
+     * 驱动 fetch（拦截真实响应）必须经 {@code GuardedRunner} 限流
+     * （{@code RouteAction} 已收口）。禁止其它业务代码直接调
      * {@code Route.fetch}（事件线程严禁同步 fetch，否则卡死主链）。
      */
     @Test
-    public void driverFetchMustGoThroughBoundedOps() {
+    public void driverFetchMustGoThroughGuardedRunner() {
         ArchRule rule = noClasses()
             .that().resideInAPackage("..route..")
             .and().doNotHaveSimpleName("RouteAction")
-            .and().doNotHaveSimpleName("RouteIoExecutor")
             .and().doNotHaveSimpleName("GuardedDriverCall")
             .and().doNotHaveSimpleName("GuardedDriverCallImpl")
             .and().doNotHaveSimpleName("GuardedDriverCallRegistry")
@@ -153,7 +152,7 @@ public class RouteArchitectureTest {
      * <ol>
      *   <li><b>{@link ThreadFactory} 实现</b>：模块在 {@code ThreadFactory.newThread} 内构造具名 daemon
      *       线程（{@code sweeper} / {@code HangWatchdog} / {@code RouteDelayScheduler} /
-     *       {@code RouteIoExecutor} / {@code RouteRetireExecutor} / {@code GuardedDriverCallImpl}），
+     *       {@code RouteRetireExecutor} / {@code GuardedDriverCallImpl}），
      *       它们由<b>有界</b>线程池负责 start —— 池内不显式调 {@code Thread.start}，天然不命中；</li>
      *   <li><b>{@code BodyStore}</b>：{@code Runtime.addShutdownHook} 的落盘目录清理钩子 ——
      *       JVM 收尾时自行启动、非长驻 —— 不显式调 {@code Thread.start}，天然不命中。</li>
@@ -175,7 +174,7 @@ public class RouteArchitectureTest {
     /**
      * F7：<b>驱动 fetch（真实响应拦截）必须经 {@code RouteAction} 收口</b>——{@code APIRequestContext.fetch}
      * （同步 HTTP + 驱动泵连接）只允许在 {@code RouteAction.fetch} 内调用。
-     * {@link #driverFetchMustGoThroughBoundedOps()} 查的是 {@code Route.fetch}（Playwright 原生拦截
+     * {@link #driverFetchMustGoThroughGuardedRunner()} 查的是 {@code Route.fetch}（Playwright 原生拦截
      * 通道，已弃用）；本规则覆盖<b>实际使用</b>的 {@code APIRequestContext} 通道（O1/O1b 方案 A：
      * 事件线程拦截快照 + {@code page.request()} 从零重发）。
      */
@@ -195,12 +194,12 @@ public class RouteArchitectureTest {
      * <p>fetch 是同步协议泵调用，只允许发生在<b>调用线程（事件线程/泵线程）</b>——即
      * {@code RouteDispatcher.dispatchMock}（intercept 就地 fetch）与
      * {@code RouteDispatcher.materializeResponse}（DELAY+intercept 预取物化，2026-10-10）。
-     * <b>禁止在调度器/IO 线程回调里 fetch</b>（历史缺陷：DELAY 到点回调在
+     * <b>禁止在调度器线程回调里 fetch</b>（历史缺陷：DELAY 到点回调在
      * {@code RouteDelayScheduler} 线程 fetch ⇒ 与主线程并发驱动同一条连接 ⇒ O1 竞态面重现）。
-     * 未来若有人把 fetch 挪进 {@code RouteDelayScheduler} / IO lambda 的宿主类，本规则立即失败。</p>
+     * 未来若有人把 fetch 挪进 {@code RouteDelayScheduler} 线程，本规则立即失败。</p>
      */
     @Test
-    public void fetchMustNotBeCalledFromSchedulerOrIoThreads() {
+    public void fetchMustNotBeCalledFromSchedulerThread() {
         ArchRule rule = noClasses()
             .that().resideInAPackage("..route..")
             .and().doNotHaveSimpleName("RouteDispatcher")

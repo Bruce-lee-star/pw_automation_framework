@@ -44,7 +44,7 @@ public final class RouteRetireExecutor implements AutoCloseable {
 
     public RouteRetireExecutor(String contextTag) {
         ThreadFactory factory = r -> {
-            Thread t = new Thread(r, "route-v2-retire-" + contextTag);
+            Thread t = new Thread(r, "route-retire-" + contextTag);
             t.setDaemon(true);
             return t;
         };

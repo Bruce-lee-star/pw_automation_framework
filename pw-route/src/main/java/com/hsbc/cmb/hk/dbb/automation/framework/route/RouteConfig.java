@@ -10,12 +10,8 @@ public final class RouteConfig {
 
     /** 每 context 最多同时挂起（等待 IO 延迟终结）的请求数。 */
     public static final int DEFAULT_MAX_PENDING = 16;
-    /** IO 线程数（fetch / sleep / 观测消费）。 */
-    public static final int DEFAULT_IO_THREADS = 2;
-    /** IO 任务队列容量（队满即拒绝 → fail-open）。 */
-    public static final int DEFAULT_IO_QUEUE_CAPACITY = 64;
-    /** BoundedOps 最大并发（同步 fetch / pattern 重装类操作）。 */
-    public static final int DEFAULT_OPS_MAX_CONCURRENT = 8;
+    /** GuardedRunner 最大并发（同步 fetch / pattern 重装类操作）。 */
+    public static final int DEFAULT_GUARDED_RUNNER_MAX_CONCURRENT = 8;
     /** 挂起 claim 的超龄阈值（秒）：超过即被巡检强制 fallback。须大于 fetch 超时（30s）。 */
     public static final long DEFAULT_IO_AWAIT_TIMEOUT_SECONDS = 35L;
     /** 巡检周期（毫秒）。 */
@@ -39,18 +35,14 @@ public final class RouteConfig {
 
     public static final RouteConfig DEFAULTS = new RouteConfig(
             DEFAULT_MAX_PENDING,
-            DEFAULT_IO_THREADS,
-            DEFAULT_IO_QUEUE_CAPACITY,
-            DEFAULT_OPS_MAX_CONCURRENT,
+            DEFAULT_GUARDED_RUNNER_MAX_CONCURRENT,
             DEFAULT_IO_AWAIT_TIMEOUT_SECONDS,
             DEFAULT_SWEEP_INTERVAL_MS,
             DEFAULT_MAX_CAPTURED,
             DEFAULT_CAPTURE_TIMEOUT_MS);
 
     private final int maxPending;
-    private final int ioThreads;
-    private final int ioQueueCapacity;
-    private final int opsMaxConcurrent;
+    private final int guardedRunnerMaxConcurrent;
     private final long ioAwaitTimeoutSeconds;
     private final long sweepIntervalMs;
     private final int maxCaptured;
@@ -63,17 +55,15 @@ public final class RouteConfig {
      * 解析由 {@code ConfigSource} 承担，{@code RouteCapturePolicy} 在 RouteRuntime 构造期按
      * 「环境变量 → 系统属性 → 配置文件属性 → 上述默认值」解析一次并<b>冻结</b>（故运行期改配置需新 runtime）。
      */
-    public RouteConfig(int maxPending, int ioThreads, int ioQueueCapacity,
-                         int opsMaxConcurrent, long ioAwaitTimeoutSeconds, long sweepIntervalMs,
+    public RouteConfig(int maxPending, int guardedRunnerMaxConcurrent,
+                         long ioAwaitTimeoutSeconds, long sweepIntervalMs,
                          int maxCaptured, long captureTimeoutMs) {
-        if (maxPending <= 0 || ioThreads <= 0 || ioQueueCapacity <= 0 || opsMaxConcurrent <= 0
+        if (maxPending <= 0 || guardedRunnerMaxConcurrent <= 0
                 || maxCaptured <= 0 || captureTimeoutMs <= 0) {
             throw new IllegalArgumentException("concurrency bounds must be > 0");
         }
         this.maxPending = maxPending;
-        this.ioThreads = ioThreads;
-        this.ioQueueCapacity = ioQueueCapacity;
-        this.opsMaxConcurrent = opsMaxConcurrent;
+        this.guardedRunnerMaxConcurrent = guardedRunnerMaxConcurrent;
         this.ioAwaitTimeoutSeconds = ioAwaitTimeoutSeconds;
         this.sweepIntervalMs = sweepIntervalMs;
         this.maxCaptured = maxCaptured;
@@ -84,16 +74,8 @@ public final class RouteConfig {
         return maxPending;
     }
 
-    public int ioThreads() {
-        return ioThreads;
-    }
-
-    public int ioQueueCapacity() {
-        return ioQueueCapacity;
-    }
-
-    public int opsMaxConcurrent() {
-        return opsMaxConcurrent;
+    public int guardedRunnerMaxConcurrent() {
+        return guardedRunnerMaxConcurrent;
     }
 
     public long ioAwaitTimeoutSeconds() {

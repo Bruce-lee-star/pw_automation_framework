@@ -32,7 +32,9 @@ import java.util.function.Consumer;
  * <p>执行契约（对齐 playwright-java-1.62.0 的 PendingHandler 机制）：
  * <ul>
  *   <li><b>事件线程绝不阻塞</b>：resume/fulfill 是异步命令（sendMessageAsync）；
- *       fetch/sleep 一律交 IO 线程，事件线程返回 pending（驱动返回 PendingHandler，请求挂起）；</li>
+ *       fetch/sleep 在调用线程（即 Playwright 事件线程）就地执行（sleep 经
+ *       {@link RouteDelayScheduler} daemon 递归调度），不额外派发 IO 池，
+ *       事件线程返回 pending（驱动返回 PendingHandler，请求挂起）；</li>
  *   <li><b>单所有权</b>：{@link RouteClaim} CAS 保证每个 Route 恰好一个终结者；</li>
  *   <li><b>匹配条件链式裁决</b>：规则匹配条件（method/resourceType/header/query/body…）不满足时
  *       {@code fallback}（驱动级 Fallback，不置 handled），Router 自动把请求交给下一个匹配
@@ -77,6 +79,13 @@ public final class RouteDispatcher {
     private final AtomicLong dispatchCount = new AtomicLong(0);
     /** T1 度量基线：真正命中规则条件并触发能力的请求数（<= 下发次数，即"路由命中数"）。 */
     private final AtomicLong hitCount = new AtomicLong(0);
+    /**
+     * DELAY 到点后<b>直接</b>在调度线程 resume / fulfill 的交付次数（P0-1 度量；对应 {@link #delayDeliveryMainQueue()} 默认 false）。
+     * 与 {@link #queuedDeliveries()} 之和 = DELAY 终结总数；两者比例反映"直发 vs main 队列"的实际占比。
+     */
+    private final AtomicLong directedDeliveries = new AtomicLong(0);
+    /** DELAY 到点后只<b>入 main 队列</b>、由业务线程 drain 串行交付的次数（P0-1 度量；对应 {@link #delayDeliveryMainQueue()} true）。 */
+    private final AtomicLong queuedDeliveries = new AtomicLong(0);
 
     /** spec → 预编译匹配器缓存（ApiSpec 不可变，实例即稳定 key；同一 spec 只编译一次）。 */
     private final ConcurrentMap<ApiSpec, ApiMatcher> matcherCache = new ConcurrentHashMap<>();
@@ -407,9 +416,9 @@ public final class RouteDispatcher {
         return null;
     }
 
-    /** MOCK：静态伪造直接 fulfill；intercept / 字段替换交 IO 线程。 */
+    /** MOCK：静态伪造直接 fulfill；intercept / 字段替换在调用线程就地执行。 */
     private void dispatchMock(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime, HitTrace trace) {
-        // 事件线程取好请求句柄：IO 线程的 fulfill 分支也要用同一份"完整请求信息"上报结果
+        // 事件线程取好请求句柄：fulfill 分支（就地执行）也要用同一份"完整请求信息"上报结果
         Request request = route.request();
         boolean hasStaticBody = hasStaticBody(spec);
         if (hasStaticBody && spec.mockReplacements().isEmpty()
@@ -498,7 +507,7 @@ public final class RouteDispatcher {
                 Optional<APIResponse> response = Optional.empty();
                 long fetchStartNs = System.nanoTime();
                 if (fallbackCtx != null && fallbackSnapshot != null) {
-                    response = runtime.ops().tryRun("route.fetch",
+                    response = runtime.guarded().run("route.fetch",
                             () -> RouteAction.fetch(fallbackCtx, fallbackSnapshot));
                 }
                 long fetchMs = (System.nanoTime() - fetchStartNs) / 1_000_000L;
@@ -597,7 +606,7 @@ public final class RouteDispatcher {
         long fetchStartNs = System.nanoTime();
         Optional<APIResponse> response = (ctx == null || snapshot == null)
                 ? Optional.empty()
-                : runtime.ops().tryRun("route.fetch", () -> RouteAction.fetch(ctx, snapshot));
+                : runtime.guarded().run("route.fetch", () -> RouteAction.fetch(ctx, snapshot));
         long fetchMs = (System.nanoTime() - fetchStartNs) / 1_000_000L;
         if (response.isEmpty()) {
             return Optional.empty();
@@ -702,7 +711,7 @@ public final class RouteDispatcher {
      * <p><b>DELAY + intercept MOCK 组合（F5，2026-10-10 修复）</b>：该组合下链尾的 MOCK 需要取真实响应
      * （同步驱动调用）。若放到点回调里执行，fetch 会落在<b>调度器线程</b>——与主线程并发驱动同一条连接，
      * 重新打开 O1/O1b 已消除的竞态面。修法：<b>调用线程预取物化</b>（{@link #materializeResponse}：
-     * fetch + status/headers/body bytes + dispose，仍经 BoundedOps 有界），到点回调只做
+     * fetch + status/headers/body bytes + dispose，仍经 GuardedRunner 有界），到点回调只做
      * {@code fulfillWithBody}（sendMessageAsync）→ <b>交付段零同步驱动调用</b>。
      * 权衡（显式化）：① 物化多读一次 body（intercept 本就 fetch，读 body 是必须的）；② 延迟计时从
      * 物化完成后起算，浏览器感知延迟 ≈ fetchMs + delayMs（≥ delayMs，断言"延迟生效"仍成立）。</p>
@@ -729,42 +738,40 @@ public final class RouteDispatcher {
             dispatchDelayIntercept(route, spec, claim, runtime, effectiveDelay, requestedMs, trace);
             return;
         }
-        boolean submitted = runtime.io().trySubmit("delay:" + spec.pattern(), () -> {
-            if (claim.isTerminal()) {
-                return; // sweep 已兜底（fallback 已放行）
-            }
-            // 事件线程已返回 pending，请求由驱动挂起。延迟到点后唯一终结路径 = 继续链路（或 sweep 兜底）。
-            // 计时起点取"投递调度之前"：实测值因此同时含调度池排队时间 —— 正是要观测的"延迟是否准时"。
-            final long scheduledNs = System.nanoTime();
-            com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteDelayScheduler
-                    .delay(effectiveDelay, () -> {
-                        if (claim.isTerminal()) {
-                            return; // sweep already settled (fallback resumed)
-                        }
-                        trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
-                        //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b>（组合 1 行为）—— delay 到点回调在
-                        //  调度线程直接 resume（sendMessageAsync，不泵连接）。UI 及时性优先：入队+main drain
-                        //  与「delay + 原生 waitForFunction」硬冲突（main 阻塞在等待中无人 drain → UI 15s 超时，
-                        //  E2E run-b 实证）。Connection 写入无锁 ⇒ 直发存在理论并发窗口，但 E2E 三连绿实证
-                        //  低概率；Java Playwright 无 async handler API 的固有代价，文档化接受（fail-open 兜底）。
-                        //  可选：setDelayDeliveryMainQueue(true) + 业务 UI 等待改 RouteDsl.waitForUiFunction
-                        //  ⇒ 到点回调只入队（零非 main 协议调用），resume 由 main drain 串行执行。
-                        if (delayDeliveryMainQueue) {
-                            runtime.enqueueMainAction(() -> {
-                                if (claim.isTerminal()) {
-                                    return;
-                                }
-                                afterDelay.run();
-                            });
-                        } else {
-                            afterDelay.run();
-                        }
-                    });
-        });
-        if (!submitted) {
-            RouteAction.fallback(route);
-            runtime.claims().markTerminal(claim, false);
+        // P1-4：DELAY 调度本身 O(1)（一次 route-delay 线程池任务），不再经 io 池中转——
+        // 直接在当前 dispatch 线程投到 RouteDelayScheduler（消除无意义的 io 线程 hop）。
+        // RouteDelayScheduler.delay 对调度拒绝 fail-open（任务丢弃由 sweep 兜底，绝不抛回事件线程）。
+        if (claim.isTerminal()) {
+            return; // sweep 已兜底（fallback 已放行）
         }
+        // 计时起点取"投递调度之前"：实测值因此同时含调度池排队时间 —— 正是要观测的"延迟是否准时"。
+        final long scheduledNs = System.nanoTime();
+        com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteDelayScheduler
+                .delay(effectiveDelay, () -> {
+                    if (claim.isTerminal()) {
+                        return; // sweep already settled (fallback resumed)
+                    }
+                    trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
+                    //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b>（组合 1 行为）—— delay 到点回调在
+                    //  调度线程直接 resume（sendMessageAsync，不泵连接）。UI 及时性优先：入队+main drain
+                    //  与「delay + 原生 waitForFunction」硬冲突（main 阻塞在等待中无人 drain → UI 15s 超时，
+                    //  E2E run-b 实证）。Connection 写入无锁 ⇒ 直发存在理论并发窗口，但 E2E 三连绿实证
+                    //  低概率；Java Playwright 无 async handler API 的固有代价，文档化接受（fail-open 兜底）。
+                    //  可选：setDelayDeliveryMainQueue(true) + 业务 UI 等待改 RouteDsl.waitForUiFunction
+                    //  ⇒ 到点回调只入队（零非 main 协议调用），resume 由 main drain 串行执行。
+                    if (delayDeliveryMainQueue) {
+                        queuedDeliveries.incrementAndGet();
+                        runtime.enqueueMainAction(() -> {
+                            if (claim.isTerminal()) {
+                                return;
+                            }
+                            afterDelay.run();
+                        });
+                    } else {
+                        directedDeliveries.incrementAndGet();
+                        afterDelay.run();
+                    }
+                });
     }
 
     /**
@@ -786,43 +793,40 @@ public final class RouteDispatcher {
             return;
         }
         final MaterializedResponse mat = materialized.get();
-        boolean submitted = runtime.io().trySubmit("delay:" + spec.pattern(), () -> {
-            if (claim.isTerminal()) {
-                return; // sweep 已兜底
-            }
-            final long scheduledNs = System.nanoTime();
-            com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteDelayScheduler
-                    .delay(effectiveDelay, () -> {
-                        if (claim.isTerminal()) {
-                            return; // sweep already settled (fallback resumed)
-                        }
-                        trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
-                        //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b> fulfillWithBody（组合 1 行为，
-                        //  与 dispatchDelayChain 同理由 —— UI 及时性优先，见该处注释）。
-                        //  可选 main 队列：setDelayDeliveryMainQueue(true) ⇒ 到点只入队，main drain 交付。
-                        //  交付段：纯 sendMessageAsync（fulfillWithBody），零同步驱动调用 —— 不泵连接。
-                        Runnable deliver = () -> {
-                            if (claim.isTerminal()) {
-                                return;
-                            }
-                            RouteAction.fulfillWithBody(route, mat.status(), mat.headers(), mat.body());
-                            runtime.claims().markTerminal(claim, true);
-                            reportOutcome("MOCK RESULT", spec, route.request(), mat.status(), mat.headers(), null,
-                                    "delay+intercept: materialized on calling thread, delivered after "
-                                            + effectiveDelay + "ms (fetch=" + mat.fetchMs() + "ms; no driver call at delivery)",
-                                    trace);
-                        };
-                        if (delayDeliveryMainQueue) {
-                            runtime.enqueueMainAction(deliver);
-                        } else {
-                            deliver.run();
-                        }
-                    });
-        });
-        if (!submitted) {
-            RouteAction.fallback(route);
-            runtime.claims().markTerminal(claim, false);
+        // P1-4：DELAY 调度本身 O(1)，不再经 io 池中转（同 dispatchDelayChain）。RouteDelayScheduler.delay fail-open。
+        if (claim.isTerminal()) {
+            return; // sweep 已兜底
         }
+        final long scheduledNs = System.nanoTime();
+        com.hsbc.cmb.hk.dbb.automation.framework.route.exec.RouteDelayScheduler
+                .delay(effectiveDelay, () -> {
+                    if (claim.isTerminal()) {
+                        return; // sweep already settled (fallback resumed)
+                    }
+                    trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
+                    //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b> fulfillWithBody（组合 1 行为，
+                    //  与 dispatchDelayChain 同理由 —— UI 及时性优先，见该处注释）。
+                    //  可选 main 队列：setDelayDeliveryMainQueue(true) ⇒ 到点只入队，main drain 交付。
+                    //  交付段：纯 sendMessageAsync（fulfillWithBody），零同步驱动调用 —— 不泵连接。
+                    Runnable deliver = () -> {
+                        if (claim.isTerminal()) {
+                            return;
+                        }
+                        RouteAction.fulfillWithBody(route, mat.status(), mat.headers(), mat.body());
+                        runtime.claims().markTerminal(claim, true);
+                        reportOutcome("MOCK RESULT", spec, route.request(), mat.status(), mat.headers(), null,
+                                "delay+intercept: materialized on calling thread, delivered after "
+                                        + effectiveDelay + "ms (fetch=" + mat.fetchMs() + "ms; no driver call at delivery)",
+                                trace);
+                    };
+                    if (delayDeliveryMainQueue) {
+                        queuedDeliveries.incrementAndGet();
+                        runtime.enqueueMainAction(deliver);
+                    } else {
+                        directedDeliveries.incrementAndGet();
+                        deliver.run();
+                    }
+                });
     }
 
     /**
@@ -852,5 +856,15 @@ public final class RouteDispatcher {
     /** T1：命中规则条件并触发能力的请求数（"路由命中数"）。 */
     public long hitCount() {
         return hitCount.get();
+    }
+
+    /** DELAY 到点后直接交付（调度线程 resume）的次数（P0-1 度量）。 */
+    public long directedDeliveries() {
+        return directedDeliveries.get();
+    }
+
+    /** DELAY 到点后入 main 队列、由业务线程 drain 交付的次数（P0-1 度量）。 */
+    public long queuedDeliveries() {
+        return queuedDeliveries.get();
     }
 }

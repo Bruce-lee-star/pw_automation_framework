@@ -43,7 +43,7 @@ public final class RouteDelayScheduler {
     private static final AtomicLong REJECTED = new AtomicLong(0);
 
     /** 线程名前缀：守卫测试据此断言"任务没有跑在 ForkJoinPool.commonPool 上"。 */
-    public static final String THREAD_NAME_PREFIX = "route-v2-delay";
+    public static final String THREAD_NAME_PREFIX = "route-delay";
 
     /** 有界线程数的 daemon 调度池（见类注释：任务极小，2 线程足够；绝不用 commonPool）。 */
     private static final ScheduledExecutorService SCHED = Executors.newScheduledThreadPool(

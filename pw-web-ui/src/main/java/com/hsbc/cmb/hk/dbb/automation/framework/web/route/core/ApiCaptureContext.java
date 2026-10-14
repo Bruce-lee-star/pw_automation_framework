@@ -84,4 +84,29 @@ public final class ApiCaptureContext {
         ApiCaptureQuery q = query();
         return q == null ? null : q.waitForApi(context(), predicate, timeoutMs);
     }
+
+    /**
+     * 当前已分配的采集序号（= 已进入历史队列的记录数）；无实现时返回 -1。
+     *
+     * <p>推荐用法（消除"过期命中"）：触发业务动作<b>之前</b>取一次该值，动作之后调用
+     * {@link #waitForApiSince(long, Predicate, long)} 并传入 {@code 序号 + 1}，
+     * 即可只匹配本次动作之后新产生的采集记录。
+     */
+    public long capturedApiSequence() {
+        ApiCaptureQuery q = query();
+        return q == null ? -1L : q.capturedApiSequence(context());
+    }
+
+    /**
+     * 等待首个满足条件的记录，且<b>只</b>匹配采集序号 &gt;= {@code minCaptureSeq} 的记录；超时返回 null。
+     *
+     * <p>为什么需要：历史是不区分导航代次的<b>只增队列</b>。点击 → 页面连发两次同一 URL、
+     * 或连续两次导航时，上一轮的迟到响应会被新一次 {@code waitForApi} 命中，
+     * 测试因此"通过"却根本没有验证本轮流量。用序号把等待限定在动作之后即可避免。
+     */
+    public CapturedApiCallView waitForApiSince(long minCaptureSeq, Predicate<CapturedApiCallView> predicate,
+                                               long timeoutMs) {
+        ApiCaptureQuery q = query();
+        return q == null ? null : q.waitForApi(context(), predicate, timeoutMs, minCaptureSeq);
+    }
 }

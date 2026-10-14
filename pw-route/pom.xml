@@ -15,7 +15,7 @@
     <description>
         Route 妯″潡 V2锛堥噸寤虹増锛屼笌 pw-route 骞跺瓨锛屼笟鍔℃祴璇曢€愭杩佺Щ锛夈€?
         璁捐鐩爣锛堝鐓?playwright-java-1.62.0 婧愮爜鏈哄埗锛夛細
-        1. 鍗曟墍鏈夋潈锛氭瘡涓?Route 浜嬩欢鍞竴 RouteClaim锛圕AS锛夛紝鏉滅粷骞跺彂缁堢粨 / 閲嶆斁銆?        2. 绾跨▼杈圭晫锛氫簨浠剁嚎绋嬶紙Playwright 鍥炶皟锛夊彧鍋氭棤闃诲瑁佸喅锛涢樆濉炴搷浣滐紙fetch / pattern 閲嶈锛?           鍙湪鏈夌晫 IO 绾跨▼姹犳墽琛岋紝鍙?BoundedOps 棰勭畻鎺у埗銆?        3. per-context 闅旂锛氬叏閮ㄧ姸鎬佹寕鍦?RouteRuntime锛堟瘡 BrowserContext 涓€浠斤級锛屾棤鍏ㄥ眬 static 鍙彉琛ㄣ€?        4. 鍘熷瓙鍙戝竷锛氳鍒欎互涓嶅彲鍙?RuleGeneration 蹇収鍙戝竷锛圓tomicReference CAS 鍒囨崲锛夛紝璇讳晶鏃犻攣銆?        5. fail-open锛氫换浣曞紓甯?/ 瓒呮椂 / 棰勭畻鑰楀敖 / 鎸傝捣瓒呴檺 鈫?fallback锛坈ontinue锛夛紝璇锋眰姘镐笉鎮寕銆?        6. 鏈夌晫骞跺彂锛歱ending 涓婇檺 + IO 姹犳湁鐣?+ 淇″彿閲忛檺娴併€?
+        1. 鍗曟墍鏈夋潈锛氭瘡涓?Route 浜嬩欢鍞竴 RouteClaim锛圕AS锛夛紝鏉滅粷骞跺彂缁堢粨 / 閲嶆斁銆?        2. 绾跨▼杈圭晫锛氫簨浠剁嚎绋嬶紙Playwright 鍥炶皟锛夊彧鍋氭棤闃诲瑁佸喅锛涢樆濉炴搷浣滐紙fetch / pattern 閲嶈锛?           鍙湪鏈夌晫 IO 绾跨▼姹犳墽琛岋紝鍙?GuardedRunner 棰勭畻鎺у埗銆?        3. per-context 闅旂锛氬叏閮ㄧ姸鎬佹寕鍦?RouteRuntime锛堟瘡 BrowserContext 涓€浠斤級锛屾棤鍏ㄥ眬 static 鍙彉琛ㄣ€?        4. 鍘熷瓙鍙戝竷锛氳鍒欎互涓嶅彲鍙?RuleGeneration 蹇収鍙戝竷锛圓tomicReference CAS 鍒囨崲锛夛紝璇讳晶鏃犻攣銆?        5. fail-open锛氫换浣曞紓甯?/ 瓒呮椂 / 棰勭畻鑰楀敖 / 鎸傝捣瓒呴檺 鈫?fallback锛坈ontinue锛夛紝璇锋眰姘镐笉鎮寕銆?        6. 鏈夌晫骞跺彂锛歱ending 涓婇檺 + IO 姹犳湁鐣?+ 淇″彿閲忛檺娴併€?
         浠呬緷璧?playwright + slf4j + pw-core(SPI 鎺ュ彛)锛屼笉渚濊禆浠讳綍鍏勫紵瀹炵幇妯″潡锛坧w-route / pw-web-ui锛夛紝
         鍙嫭绔嬫紨杩涖€佺嫭绔嬪紩鍏ャ€?    </description>
 

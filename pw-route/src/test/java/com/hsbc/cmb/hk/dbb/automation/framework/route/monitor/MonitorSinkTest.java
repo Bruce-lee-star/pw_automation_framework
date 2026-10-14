@@ -17,6 +17,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -370,6 +371,42 @@ public class MonitorSinkTest {
                         && exchange.bodyAssertionInconclusiveReason().contains("Object doesn't exist"));
         assertTrue( "不得记为断言失败明细", exchange.bodyAssertionFailures().isEmpty());
         assertFalse("不得判断言失败（status 200 已通过）", Boolean.FALSE.equals(exchange.assertionPassed()));
+    }
+
+    /**
+     * (P0-2) 3xx 重定向响应体不可用：monitor 侧同样必须短路（绝不调 body()），并单独计入
+     * {@link MonitorSink#redirectNotAvailableBodyReads()}，不污染 {@link MonitorSink#inconclusiveBodyReads()} 竞态桶。
+     */
+    @Test
+    public void redirectResponseShortCircuitsBodyRead_andCountsSeparately() throws Exception {
+        ApiSpec spec = ApiSpec.builder("/api/sso/**", RouteCapability.MONITOR)
+                .expectStatus(302)
+                .expectJsonPath("$.code", "0")
+                .build();
+        MonitorSink sink = newSink();
+
+        Response redirect = mock(Response.class);
+        when(redirect.url()).thenReturn("https://host/api/sso/login");
+        when(redirect.status()).thenReturn(302);
+        when(redirect.headers()).thenReturn(Map.of("location", "/sso/login", "content-type", "text/html"));
+
+        sink.recordRequest(mockRequest("https://host/api/sso/login"), spec);
+        sink.onResponseForSpec(spec, redirect);
+
+        assertTrue("3xx 不得结算为断言失败", sink.drainSettledFailures().isEmpty());
+        assertEquals("redirect=" + sink.redirectNotAvailableBodyReads()
+                        + " inconclusive=" + sink.inconclusiveBodyReads()
+                        + " handleReclaimed=" + sink.handleReclaimedBodyReads()
+                        + " protocolError=" + sink.protocolErrorBodyReads(),
+                (long) 1L, sink.redirectNotAvailableBodyReads());
+        assertEquals("3xx 不污染 inconclusive 竞态桶", (long) 0L, sink.inconclusiveBodyReads());
+        verify(redirect, never()).body(); // 3xx 绝不发起 body() 协议调用
+
+        CapturedExchange exchange = sink.drain().get(0);
+        assertTrue("3xx 须标 inconclusive（已知事实，非失败）",
+                exchange.bodyAssertionInconclusiveReason() != null
+                        && exchange.bodyAssertionInconclusiveReason().contains("redirect response"));
+        assertFalse("3xx 不得判断言失败", Boolean.FALSE.equals(exchange.assertionPassed()));
     }
 
     /**

@@ -8,7 +8,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.route;
  * 故内核只在命中处调用本接口，落到哪里由实现决定 —— 与 {@link RouteLifecycle}/{@code RouteLifecycleRegistry}
  * 同一套路（SPI + {@code META-INF/services} 注册，实现缺失即静默降级）。</p>
  *
- * <p><b>线程契约</b>：{@link #record} 会在 Playwright 事件线程或 IO 池线程被调用，
+ * <p><b>线程契约</b>：{@link #record} 会在 Playwright 事件线程（即 route 的调用线程）被调用，
  * 实现<b>必须线程安全</b>，且<b>不得</b>在这些线程上直接写报告（Serenity 只认测试主线程）——
  * 正确做法是入队，再由 {@link #flush()} 在主线程批量写入（参照 master 的 {@code SerenityReporter}）。</p>
  */

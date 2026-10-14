@@ -82,7 +82,8 @@ public class RouteDslFromCapturedTest {
         CapturedBody body = BodyStore.of(raw, "application/json", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/cap", "GET", "https://host/api/cap",
                 null, null, 200, Map.of("x-trace", "t-1"),
-                null, false, 12L, false, 1L, null, "MONITOR", "application/json", null, body);
+                null, false, 12L, false, 1L, null, "MONITOR", "application/json", null, body,
+                CapturedApiCall.UNSEQUENCED);
 
         RouteDsl.on(ctx).api("/api/cap").mock().fromCaptured(captured).register();
 
@@ -141,7 +142,7 @@ public class RouteDslFromCapturedTest {
         CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/png", "GET", "https://host/api/png",
                 null, null, 200, Map.of(), null, false, 5L, false, 1L, null, "MONITOR", "image/png", null,
-                carrier);
+                carrier, CapturedApiCall.UNSEQUENCED);
 
         RouteDsl.on(ctx).api("/api/png").mock().fromCaptured(captured).register();
         carrier.close();   // 快照自足性：载体关闭后仍须逐字节回放
@@ -174,7 +175,7 @@ public class RouteDslFromCapturedTest {
         CapturedBody body = BodyStore.of(raw, "application/json", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/cap", "GET", "https://host/api/cap",
                 null, null, 200, Map.of(), null, false, 12L, false, 1L, null, "MONITOR",
-                "application/json", null, body);
+                "application/json", null, body, CapturedApiCall.UNSEQUENCED);
 
         RouteDsl.on(ctx).api("/api/cap").mock().fromCaptured(captured)
                 .replaceField("$.name", "replayed")
@@ -186,7 +187,6 @@ public class RouteDslFromCapturedTest {
         Route route = mock(Route.class);
         when(route.request()).thenReturn(request);
         handler.accept(route);
-        runtime.io().close();   // 字段替换在 IO 线程执行：关池等待落定
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor =
@@ -211,7 +211,7 @@ public class RouteDslFromCapturedTest {
         CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);
         CapturedApiCall captured = new CapturedApiCall("/api/png", "GET", "https://host/api/png",
                 null, null, 200, Map.of(), null, false, 5L, false, 1L, null, "MONITOR", "image/png", null,
-                carrier);
+                carrier, CapturedApiCall.UNSEQUENCED);
 
         RouteDsl.on(ctx).api("/api/png").mock().fromCaptured(captured)
                 .replaceField("$.name", "x")
@@ -223,7 +223,7 @@ public class RouteDslFromCapturedTest {
         Route route = mock(Route.class);
         when(route.request()).thenReturn(request);
         handler.accept(route);
-        runtime.io().close();
+        
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Route.FulfillOptions> captor =

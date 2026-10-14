@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@link RouteEvidenceSink} 的 Serenity 实现 —— 待报告队列 + 主线程 flush（对齐 master 的
  * {@code framework/web/route/util/SerenityReporter}）。
  *
- * <p><b>为什么必须入队而不是直接写</b>：内核的上报发生在 Playwright 事件线程 / IO 池线程上，
+ * <p><b>为什么必须入队而不是直接写</b>：内核的上报发生在 Playwright 事件线程（route 调用线程）上，
  * 与 Serenity 的测试主线程没有 ThreadLocal 关联 —— 在这些线程上直接调
  * {@code Serenity.recordReportData()} 数据会丢。故 {@link #record} 只入队（线程安全），
  * 由框架在测试主线程的收尾钩子（{@code PlaywrightSerenityBridge.cleanupForScenario}）调用
