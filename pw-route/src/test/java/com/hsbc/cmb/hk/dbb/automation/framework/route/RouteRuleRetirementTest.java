@@ -74,9 +74,9 @@ public class RouteRuleRetirementTest {
         assertEquals("目的退役不产生未确证（无协议提交）", 0, runtime.unconfirmedRetirements());
         assertTrue("无 unroute 提交 ⇒ isClean 恒 true", runtime.isClean());
 
-        // 驱动绑定随收尾统一 flush
+        // 驱动绑定随 context.close() 原生释放（teardown 不再 flush unroute）
         RouteEngine.shutdown(ctx);
-        verify(nativeHandle, Mockito.timeout(3000)).close();
+        verify(nativeHandle, Mockito.never()).close();
     }
 
     /** 场景 2：重复退役幂等（无 unroute 提交、无未确证），驱动绑定保留到收尾。 */
@@ -110,20 +110,21 @@ public class RouteRuleRetirementTest {
         assertTrue("无 unroute 提交 ⇒ isClean 恒 true（结构性保证）", runtime.isClean());
     }
 
-    /** 场景 4：收尾兜底 flush —— 剩余规则在 runtime 关闭时统一撤销并汇总。 */
+    /** 场景 4（2026-10-15 定稿）：teardown 不再逐条 unroute —— 剩余规则只做内存收尾，handler 随 context.close() 原生释放。 */
     @Test
-    public void teardownFlushUnroutesRemainingRules() throws Exception {
+    public void teardownSkipsUnrouteOfRemainingRules() throws Exception {
         GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
         RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
         runtime.register(ApiSpec.builder("/api/a", RouteCapability.MONITOR).expectStatus(200).build());
         runtime.register(ApiSpec.builder("/api/b", RouteCapability.MOCK).build());
         AutoCloseable handle = nativeHandle;
 
-        RouteEngine.shutdown(ctx); // 收尾兜底 flush
+        RouteEngine.shutdown(ctx); // teardown 只做内存收尾，不发起 unroute
 
-        verify(handle, Mockito.timeout(3000).atLeastOnce()).close();
-        assertFalse("收尾 flush 全部确证后不得降级", runtime.isDegraded());
-        assertTrue("收尾 flush 全部确证后应判为干净", runtime.isClean());
+        verify(handle, Mockito.never()).close();
+        assertTrue("teardown 只做内存收尾，runtime 必须已关闭", runtime.isClosed());
+        assertFalse("无注册失败 ⇒ 不得降级", runtime.isDegraded());
+        assertTrue("无 unroute 提交 ⇒ isClean 恒 true", runtime.isClean());
     }
 
     /** 场景 5（2026-10-10 语义定稿）：目的退役零协议调用 ⇒ 无"需自愈"状态（重同步路径随契约退役）。 */
@@ -154,7 +155,7 @@ public class RouteRuleRetirementTest {
         assertTrue(runtime.isClean());
 
         RouteEngine.shutdown(ctx);
-        verify(nativeHandle, Mockito.timeout(3000)).close(); // 收尾 flush 才撤销绑定
+        verify(nativeHandle, Mockito.never()).close(); // teardown 不再 flush unroute，句柄随 context.close() 释放
     }
 
     /**

@@ -138,15 +138,11 @@ public interface RouteRuntime extends AutoCloseable {
      *（走独立撤销执行器 —— 与"目的达成撤销"同一条可确证路径），<b>runtime 与 Context 都保留</b>，
      * 之后可继续 {@link #register(ApiSpec)}，既不需要重建 runtime，也不触发重新登录（不变式 I-1）。</p>
      *
-     * <p><b>为什么需要</b>：feature 模式下 Context 跨 scenario 复用，而"清规则"与"拆引擎"本是两件事。
-     * 缺本入口时业务只能以"拆 runtime"代替"清规则"，代价是每 scenario 重建线程池，且无法在
-     * "确定性清空规则"之后继续复用同一 Context。</p>
+     * <p><b>语义</b>：调用返回时内存规则表<b>已为空</b>（不再有新请求命中）；驱动侧绑定为<b>内存撤销</b>
+     * （不再发 unroute，消除与业务线程 UI 的连接竞态），结论计入 {@link #isClean()}，句柄随
+     * {@code context.close()} 原生释放。本方法幂等。</p>
      *
-     * <p><b>语义</b>：调用返回时内存规则表<b>已为空</b>（不再有新请求命中）；驱动侧绑定以异步可确证
-     * 路径撤销，结论计入 {@link #isClean()} / {@link #unconfirmedRetirements()}（未确证 ⇒ 重同步
-     * 自愈 + 可见告警，<b>绝不重建 Context</b>）。本方法幂等。</p>
-     *
-     * <p><b>并发约定</b>：面向用例 / feature 边界的确定性清理，调用方须保证与
+     * <p><b>并发约定</b>：面向用例边界的确定性清理，调用方须保证与
      * {@link #register(ApiSpec)} 不并发（边界清理本就是单线程语义）；与 {@link #dispatch}（事件线程）
      * 并发是安全的 —— 事件线程只会看到"清空前"或"清空后"的一致代际快照。</p>
      *
@@ -157,10 +153,9 @@ public interface RouteRuntime extends AutoCloseable {
     /**
      * 【档 B】<b>纯内存</b>解绑：只清空规则表，<b>保留</b>驱动侧绑定（handler）与 runtime —— <b>零协议调用</b>。
      *
-     * <p><b>与 {@link #clearRules()} 的本质区别</b>：{@code clearRules()} 会对每条规则走"目的达成撤销"
-     * 路径 ⇒ 每条一次 {@code context.unroute()}（= 客户端 {@code setNetworkInterceptionPatterns}，
-     * {@code NO_TIMEOUT} + 调用线程泵消息）。实测这条收尾链路正是 30s 卡死与"未确证 ⇒ 信道污染
-     * ⇒ 下一用例 bind 挂死"的引信（FIX_PLAN §4 / §4.1）。本方法<b>一条协议调用都不发</b>。</p>
+     * <p><b>与 {@link #clearRules()} 的本质区别</b>：{@code clearRules()} 对每条规则走"目的达成撤销"
+     * 路径（内存撤销，<b>不再发 unroute</b>，消除与业务线程 UI 的连接竞态）。本方法<b>一条协议调用都不发</b>，
+     * 驱动侧绑定随 {@code context.close()} 由 Playwright 原生释放。</p>
      *
      * <p><b>为什么安全（不会残留脏行为）</b>：驱动侧 handler 常驻，但每次命中都经
      * {@code RouteDispatcher.dispatch} 读当前代际表；规则表为空 ⇒ 走 fail-open 分支

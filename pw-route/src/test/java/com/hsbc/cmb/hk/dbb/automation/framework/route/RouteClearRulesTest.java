@@ -22,11 +22,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * V2-2 验收：feature 模式「只清规则、保留 context」入口（{@code RouteEngine.clearRules} / {@code RouteDsl.clearRules}）。
+ * 验收：只清规则、保留 runtime 与 context 入口（{@code RouteEngine.clearRules} / {@code RouteDsl.clearRules}）。
  *
  * <p>四条断言（缺一即不成立）：
  * <ol>
- *   <li><b>规则确被退役</b>：每条规则持有的驱动句柄都收到关闭调用（走独立撤销执行器，故异步等待）；</li>
+ *   <li><b>规则确被退役</b>：内存规则表清空（驱动句柄不被关闭 —— 走内存撤销，不驱动 unroute）；</li>
  *   <li><b>runtime 未被关闭</b>且是<b>同一实例</b>（未重建 ⇒ 不丢线程池、不触发重新登录）；</li>
  *   <li><b>Context 未被触碰</b>（{@code ctx.close()} 从未被调用）；</li>
  *   <li><b>清规则后同一 runtime 可继续注册</b>（幂等且可复用）。</li>
@@ -76,15 +76,12 @@ public class RouteClearRulesTest {
         assertSame("必须是同一 runtime 实例（未重建）", runtime, RouteEngine.runtimeOf(ctx));
         assertFalse("runtime 不得被关闭", runtime.isClosed());
         verify(ctx, never()).close();
-        // 2026-10-10 语义：clearRules 只清内存规则表，不驱动 unroute（消除与主线程 UI 的连接竞态）；
-        // 驱动绑定随收尾统一 flush。
+        // 2026-10-15 语义：clearRules 与 teardown 均不驱动 unroute —— 驱动绑定随 context.close()
+        // 由 Playwright 原生释放（消除句柄已失效时 unroute 抛 Object doesn't exist 报错，且避免连接竞态）。
         for (AutoCloseable handle : driverHandles) {
             verify(handle, never()).close();
         }
-        RouteEngine.shutdown(ctx);
-        for (AutoCloseable handle : driverHandles) {
-            verify(handle, timeout(5_000L).atLeastOnce()).close();
-        }
+        RouteEngine.shutdown(ctx); // teardown 只做内存收尾，不关闭驱动句柄
     }
 
     @Test

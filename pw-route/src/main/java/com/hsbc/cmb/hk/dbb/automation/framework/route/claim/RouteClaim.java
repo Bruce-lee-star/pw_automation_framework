@@ -29,6 +29,20 @@ public final class RouteClaim {
     /** 状态（不可直接暴露可变引用）。 */
     enum State { NEW, IO_AWAIT, HANDLED, RELEASED }
 
+    /**
+     * 转发状态（volatile，单写多读）：本 claim 是否已<b>向上游 / 真实网络发出业务请求</b>。
+     *
+     * <p>由唯一所有者线程（mockTask / deliver / mockOrResume）在「请求已真实发出」之后置位：
+     * <ul>
+     *   <li>MOCK intercept：{@code route.fetch()} 成功取回应答（业务请求已发往上游客栈）；</li>
+     *   <li>MODIFY / 纯放行：{@code route.resume()} 成功（浏览器请求已转发真实网络）；</li>
+     * </ul>
+     * 一旦置位，任何 {@code fallback()}（= 再次放行到真实网络）都必须<b>抑制</b>——
+     * 否则会与已发出的 fetch / 已转发的 resume 叠加成<b>重复发送</b>（重复下单 / 重复副作用）。
+     * 用于保护异常路径（fulfill 失败、sweep 超时兜底、运行时关闭）不触发二次发送。</p>
+     */
+    private volatile boolean issued = false;
+
     /** 终结抢占结果：{@code granted}=是否抢占成功；{@code wasIoAwait}=迁移前是否占用挂起额度。 */
     public static final class TerminalResult {
         private final boolean granted;
@@ -76,6 +90,21 @@ public final class RouteClaim {
 
     public boolean isIoAwait() {
         return state.get() == State.IO_AWAIT;
+    }
+
+    /**
+     * 标记业务请求已向上游 / 真实网络发出（转发状态保护）。
+     *
+     * <p>仅由唯一所有者线程调用（置位后不清除）；sweep / closeAll 线程只读。
+     * volatile 保证跨线程可见，无需 CAS（无并发写）。</p>
+     */
+    public void markIssued() {
+        this.issued = true;
+    }
+
+    /** 是否已发出业务请求（{@code true} 时 fallback 必须抑制，防重复发送）。 */
+    public boolean isIssued() {
+        return issued;
     }
 
     /** 占用挂起额度（NEW → IO_AWAIT）。失败表示已被终结或已被占用。 */

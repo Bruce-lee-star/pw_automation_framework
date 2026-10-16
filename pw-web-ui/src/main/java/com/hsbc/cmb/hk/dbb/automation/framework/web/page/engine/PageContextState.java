@@ -201,10 +201,19 @@ final class PageContextState {
         }
     }
 
-    /** 确保当前 BrowserContext 有效（无效时从 PlaywrightManager 拉取）。 */
+    /**
+     * 确保当前 BrowserContext 有效（无效/过期时从 PlaywrightManager 拉取）。
+     *
+     * <p>2026-10-16：除 {@code null} 外增加<b>过期判定</b>——页面对象跨 scenario 复用（PageObjectFactory
+     * 缓存 + per-thread 上下文不随场景清理）时，缓存的 {@code context} 可能已是上一场景的（已关闭）实例，
+     * 仅判 null 会把它当活的交回去，导致 {@code getContext().cookies()/pages()} 打到已关闭 context
+     * （TargetClosedError / Object doesn't exist）。与 {@link #ensurePageValid()} 对齐：与 PlaywrightManager
+     * 当前 context 比对，不一致即刷新（{@code currentContextForThread()} 为无副作用 getter）。</p>
+     */
     void ensureContextValid() {
         assertOwningThread();
-        if (owner.context == null) {
+        BrowserContext current = PlaywrightManager.currentContextForThread();
+        if (owner.context == null || owner.context != current) {
             owner.context = PlaywrightManager.getContext();
         }
     }

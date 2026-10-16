@@ -491,8 +491,8 @@ public class PlaywrightSerenityBridge {
         //  2026-09-30 收口：统一为每 case 重建并销毁 Context（scenario-scoped），不再区分 feature/credential 档。
         VerboseLogging.logDebugIfVerbose(logger,
                 "Scenario-scoped Context - closing for fresh rebuild");
-        //  关闭前吸收迟到事件（见 absorbPendingEventsBeforeClose 说明）：必须在 Context 仍存活时执行
-        absorbPendingEventsBeforeClose();
+        //  2026-10-16：移除关闭前的 context.cookies() 迟到事件吸收探测（见下方说明）——
+        //  它会在 context.close() 前追加 settle + 同步协议往返，关闭/信道脏时纯等待 + TargetClosed 噪音。
         PlaywrightManager.closePage();
         PlaywrightManager.closeContext();
         //  窗口堆积修复：兜底回收本线程 Browser 上仍残留的 Context（closeContext 可能因 CONTEXT_KEY 丢失被跳过）
@@ -504,7 +504,7 @@ public class PlaywrightSerenityBridge {
         // Browser 关闭时机（方案 A / 官方模型）：正常模式 Browser 为 worker 级重对象，
         // scenario 收尾<b>不关闭 Browser</b>（仅销毁 Context/Page），下一 scenario 直接复用同一
         // Playwright+Browser 新建 Context —— 避免频繁创建 Playwright(driver) 与浏览器进程；
-        // 2026-09-30 收口后已无 feature 模式"跨场景复用同一 Context"分支；
+        // 2026-09-30 收口后已无「跨场景复用同一 Context」分支；
         // 浏览器进程最终由套件收尾（JVM shutdown hook → cleanupAll）统一回收。
         //  T8-0（2026-10-10 更新）：方案 A 落地后 Browser 真正跨 scenario 保留，
         //  与"轻量 newContext 即可隔离"的官方初衷一致，不再退化成"每用例重启浏览器"。
@@ -513,75 +513,12 @@ public class PlaywrightSerenityBridge {
         }
     }
 
-    /**
-     * 关闭 Context 前的「迟到事件吸收」静默窗口（毫秒）。
-     *
-     * <p>可通过 {@code -Dplaywright.teardown.eventAbsorbMs=N} 调整（设为 0 即关闭该机制）。
-     */
-    private static final int EVENT_ABSORB_SETTLE_MS =
-            Integer.getInteger("playwright.teardown.eventAbsorbMs", 150);
-
-    /**
-     * 关闭 Context 前「吸收迟到事件」—— 实测 Flake（随机用例报
-     * {@code Object doesn't exist: response@…}）的根治方向。
-     *
-     * <p><b>为什么需要</b>：Playwright Java <b>只在有命令等待返回时</b>才处理连接上的 incoming 消息。
-     * 本场景 Context 关闭后，其上在途响应的 {@code response} 事件仍会到达；当下个命令（常见为
-     * <b>下一场景</b>的首次 {@code page.evaluate}）的等待线程处理到它时，若事件引用的对象已随
-     * Context 关闭被移除，客户端 {@code Connection.getExistingObject} 会抛
-     * {@code Object doesn't exist}，并<b>顺着那条命令抛出</b> —— 失败被算到无关场景头上
-     * （表现为随机用例挂、重试即过）。上游同名问题见 playwright-java#1439，无官方修复版本。
-     *
-     * <p><b>做法</b>：先给一个短静默窗口让在途响应抵达，再用一条<b>轻量服务端往返</b>命令
-     * （{@code context.cookies()}）在本线程把已入队事件消化掉 —— 于是迟到事件大概率在
-     * <b>收尾期</b>被吸收（异常隔离，仅记日志），而不是抛到下个场景。
-     *
-     * <p><b>耗时</b>：默认每场景约 {@value #EVENT_ABSORB_SETTLE_MS}ms（可用系统属性调整/关闭）。
-     */
-    /** 有界静默窗口（替代 {@code Thread.sleep}，满足框架 ArchUnit frameworkCodeMustNotCallThreadSleep）：
-     *  用 {@code CompletableFuture.delayedExecutor} 调度一个完成信号、再 {@code join} 阻塞当前（收尾/清理）线程；
-     *  join 不占用 Playwright 事件循环、不调 {@code Thread.sleep}，语义与 {@code Thread.sleep} 等价（仍阻塞调用线程 ms 毫秒）。 */
-    private static void settle(long ms) {
-        final java.util.concurrent.CompletableFuture<Void> f = new java.util.concurrent.CompletableFuture<>();
-        java.util.concurrent.CompletableFuture.delayedExecutor((int) ms, java.util.concurrent.TimeUnit.MILLISECONDS)
-                .execute(() -> f.complete(null));
-        try {
-            f.join();
-        } catch (java.util.concurrent.CompletionException ce) {
-            //  调度任务不会抛；防御性吞掉（interrupted 时重置标志，与原 Thread.sleep 分支语义一致）
-            if (ce.getCause() instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-
-    private static void absorbPendingEventsBeforeClose() {
-        if (EVENT_ABSORB_SETTLE_MS <= 0) {
-            return;
-        }
-        BrowserContext context;
-        try {
-            context = PlaywrightManager.currentContextForThread();
-        } catch (Exception e) {
-            return;   // 无法解析上下文（已关闭/无上下文）⇒ 无需吸收
-        }
-        if (context == null) {
-            return;
-        }
-        try {
-            settle(EVENT_ABSORB_SETTLE_MS);
-            //  轻量往返：驱动客户端在本线程处理已入队的 incoming 事件。
-            //  有界执行：cookies() 也可能因浏览器无响应而挂，限时防止 scenario 线程被卡。
-            CloseGuard.runBounded("absorb-before-close", () -> context.cookies(), CloseGuard.ABSORB_OP_LIMIT_MS);
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Absorbed pending Playwright events before closing Context (settle={}ms)",
-                    EVENT_ABSORB_SETTLE_MS);
-        } catch (Exception e) {
-            //  吸收失败绝不影响收尾（上下文已关闭/浏览器断开等）
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Event absorb skipped (context/browser gone): {}", e.toString());
-        }
-    }
+    // 2026-10-16 移除「关闭前 context.cookies() 迟到事件吸收探测」（原 EVENT_ABSORB_SETTLE_MS /
+    // settle() / absorbPendingEventsBeforeClose()）：它在 context.close() 前追加 settle(150ms) +
+    // 一条同步协议往返 context.cookies()（有界 2s），关闭 / 信道脏 / context 已被 Cucumber @After
+    // 提前关时纯属额外等待 + TargetClosed/Object doesn't exist 噪音，且无任何关闭闸门。
+    // 类 javadoc 早已认定其为非必要（剩余极小窗口的事件丢失是可接受的监控代价）；迟到事件由 live
+    // 监听器与 route 的 Request#existingResponse 轮询通道各自处理，无需收尾期额外发起命令。
 
     /**
      * 关闭 Context 之后的迟到事件：
@@ -592,15 +529,15 @@ public class PlaywrightSerenityBridge {
      * 驱动就会下发 {@code response} 事件，而 Playwright 在该分支里<b>先</b>做
      * {@code Connection.getExistingObject(guid)}，句柄已回收即抛给"当时在等回包的任意调用线程"，
      * 迟到事件本就由它们监控。真正的"线程必释放"由 {@code CloseGuard} 有界关闭 + 超时强收本线程 Playwright 保证，
-     * 无需在收尾期额外发起命令。关闭前的 {@code absorbPendingEventsBeforeClose}（只读 {@code cookies} 往返）已足够
-     * 消化大多数在途事件，剩余的极小窗口丢失是可接受的监控代价。
+     * 无需在收尾期额外发起命令。（2026-10-16：原"关闭前 context.cookies() 吸收探测"已移除，见上方说明；
+     * 剩余极小窗口的事件丢失是可接受的监控代价。）
      */
 
     // ==================== Feature 生命周期 ====================
 
     /**
-     * Feature / 套件级清理（Serenity feature 边界与 suite teardown 共用）。
-     * 2026-09-30 收口：feature 模式"跨 scenario 复用活 Context"已移除，每个 case 都重建 Context，
+     * 套件级清理（{@code cleanupForFeature} 与 suite teardown 共用）。
+     * 2026-09-30 收口："跨 scenario 复用活 Context"已移除，每个 case 都重建 Context，
      * 故本方法即跨 feature 的兜底收尾（关 Context+Page、回收残留、清当前会话 key、关本线程 Browser）。
      */
     public static void cleanupForFeature() {

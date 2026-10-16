@@ -96,4 +96,39 @@ public final class SerenityBusBridge {
             }
         }
     }
+
+    /**
+     * 业务<b>捕获并恢复</b>了 {@code @Step} 代理步骤抛出的异常后调用，使<b>后续</b> {@code @Step} 步骤恢复执行。
+     *
+     * <p><b>机制（Serenity 4.3.4 字节码核实）</b>：{@code @Step} 方法抛异常时
+     * {@code StepEventBus.stepFailed(failure)} 会把内部 {@code stepFailed} 标志置 {@code true}，
+     * 并把失败记入 {@code TestResultTally}（→ 报告）。此后 {@code StepInterceptor} 对每个后续
+     * {@code @Step} 调用检查 {@code aStepInTheCurrentTestHasFailed() && !DEEP_STEP_EXECUTION_AFTER_FAILURES}
+     * （该 Serenity 开关 {@code ThucydidesSystemProperty.DEEP_STEP_EXECUTION_AFTER_FAILURES} <b>默认 false</b>），
+     * 命中即<b>静默跳过</b>该步骤：只发 skipped 事件、返回默认值、<b>不执行业务方法体</b>。
+     * 若业务自行 try/catch 了该异常（自愈重试 / 降级返回），JUnit/Cucumber 不会收到未处理异常（绿灯），
+     * 但 Serenity 侧出现两件事：① 失败态残留、报告留红；② 后续代理步骤被逐个跳过。本方法针对 ②。</p>
+     *
+     * <p><b>诚实边界（必读）</b>：{@code StepEventBus.clearStepFailures()} <b>只</b>复位 {@code stepFailed} 标志，
+     * <b>不会</b>撤回已记入 {@code TestResultTally} 的失败（Serenity 无公开移除 API）——报告仍会显示该步骤失败。
+     * 若要求报告也干净（重试后整体判绿），正确做法是把重试放进 {@code @Step} 方法<b>内部</b>（或调用一个非代理的
+     * private 帮助方法），让代理根本看不到失败；本方法仅用于"捕获点必须在 @Step 之外"的场景
+     * （例如通用重试框架包装步骤调用）。</p>
+     *
+     * <p><b>线程语义</b>：必须在<b>业务线程</b>（与 {@code @Step} 调用同线程）调用——{@code stepFailed} 标志是
+     * {@code StepEventBus}（ThreadLocal 单例）上的实例状态。</p>
+     *
+     * <p>非 Serenity 环境（离线单测 / 总线不可用）下安全降级为 no-op，绝不向上抛（与本类其它方法一致）。</p>
+     */
+    public static void clearStepFailureState() {
+        try {
+            StepEventBus bus = StepEventBus.getEventBus();
+            if (bus != null) {
+                bus.clearStepFailures();
+            }
+        } catch (Throwable t) {
+            LOGGER.debug("[SerenityBusBridge] clearStepFailureState skipped (no Serenity bus available): {}",
+                    t.getMessage());
+        }
+    }
 }

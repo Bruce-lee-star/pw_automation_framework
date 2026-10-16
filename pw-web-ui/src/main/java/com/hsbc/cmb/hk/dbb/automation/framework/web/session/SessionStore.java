@@ -650,7 +650,7 @@ final class SessionStore {
         }
         acquireSessionGate(sessionKey);
         //  2026-09-30 收口：不再区分 feature/credential/scenario 档，统一为「每 case 重建 Context +
-        //  复用已落盘凭证（免登录）」。feature 模式复用活 Context 的快速路径（tryFeatureCacheHit）已移除。
+        //  复用已落盘凭证（免登录）」。跨 scenario 复用活 Context 的快速路径（tryFeatureCacheHit）已移除。
 
 
         if (reusePersistedSession(sessionKey)) {
@@ -683,7 +683,7 @@ final class SessionStore {
         }
         acquireSessionGate(sessionKey);
         //  2026-09-30 收口：不再区分 feature/credential/scenario 档，统一为「每 case 重建 Context +
-        //  复用已落盘凭证（免登录）」。feature 模式复用活 Context 的快速路径（tryFeatureCacheHit）已移除。
+        //  复用已落盘凭证（免登录）」。跨 scenario 复用活 Context 的快速路径（tryFeatureCacheHit）已移除。
 
 
         if (reusePersistedSession(sessionKey)) {

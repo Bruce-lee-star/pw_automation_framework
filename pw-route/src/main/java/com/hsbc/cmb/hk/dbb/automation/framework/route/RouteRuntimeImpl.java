@@ -4,7 +4,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GenerationRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCallRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.PatternBinder;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.HangWatchdog;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.RouteBinderRegistry;
@@ -201,15 +200,19 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         }
         Response response = safeExistingResponse(request);
         if (response != null) {
-            deliverResponse(spec, response, monitorPending, capturePending);
+            deliverResponse(spec, request, response, monitorPending, capturePending);
             return;
         }
         if (System.nanoTime() >= deadlineNs) {
             return; // 窗口内未到达：交由 sink 的超时定案
         }
         long next = Math.min(RESPONSE_POLL_MAX_MS, intervalMs * 2);
+        // 2026-10-15：响应轮询收口 —— 调度器仅作「节拍器」（回调只 enqueue，不碰连接对象），
+        // existingResponse/deliverResponse 由业务线程 main drain 执行，与 q-0 DELAY 交付同构；
+        // 彻底消除调度线程触碰连接对象的窗口。保留 intervalMs 节拍，避免纯 enqueue 在单次 drain 内忙等。
         RouteDelayScheduler.delay(intervalMs,
-                () -> scheduleResponsePoll(request, spec, monitorPending, capturePending, deadlineNs, next));
+                () -> enqueueMainAction(() -> scheduleResponsePoll(request, spec, monitorPending,
+                        capturePending, deadlineNs, next)));
     }
 
     /** {@code existingResponse()} 为本地字段读取；防御性兜底，绝不因取响应失败而中断观测链。 */
@@ -221,19 +224,19 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         }
     }
 
-    /** 按 spec 投递响应；单条管道异常不得影响另一条，更不得逃逸到调度线程。 */
-    private void deliverResponse(ApiSpec spec, Response response,
+    /** 按 spec 投递响应；单条管道异常不得影响另一条，更不得逃逸到调度线程。request 透传以支持按请求身份精确配对。 */
+    private void deliverResponse(ApiSpec spec, Request request, Response response,
                                  boolean monitorPending, boolean capturePending) {
         if (monitorPending) {
             try {
-                monitor.onResponseForSpec(spec, response);
+                monitor.onResponseForSpec(spec, request, response);
             } catch (Throwable t) {
                 LOGGER.warn("[Route] monitor onResponse failed for pattern='{}': {}", spec.pattern(), t.toString());
             }
         }
         if (capturePending) {
             try {
-                capture.onResponseForSpec(spec, response);
+                capture.onResponseForSpec(spec, request, response);
             } catch (Throwable t) {
                 LOGGER.warn("[Route] capture onResponse failed for pattern='{}': {}", spec.pattern(), t.toString());
             }
@@ -280,12 +283,14 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     }
 
     /**
-     * 标记路由设施降级（注册失败，或撤销自愈后仍不可确证）。
+     * 标记路由设施降级（注册未确证）。
      *
-     * <p><b>语义边界（2026-09-29 裁定）</b>：这是<b>可观测信号</b>（报告/诊断用），
+     * <p><b>语义边界（2026-10-15 修订）</b>：这是<b>可观测信号</b>（报告/诊断用），
      * <b>不表示要重建 Context</b> —— route 层永不动 Context（2026-09-30 收口后 Context 每 case
-     * 由生命周期层重建，不变式 I-1），路由状态分叉由全量快照重发
-     * （{@link PatternBinder#retryUnroute()}）自愈。</p>
+     * 由生命周期层重建，不变式 I-1）。teardown 已不再逐条 unroute（2026-10-15），故不存在
+     * "撤销未确证 ⇒ 状态分叉" 的自愈需求；本标记现在只反映<b>注册期</b>未确证（MONITOR 降级绑定），
+     * 注册期 {@code route()} 本就下发本地 Router 全量快照，单连接 FIFO 有序，状态一致性由全量快照 +
+     * Context 每 case 重建保证。</p>
      */
     void markDegraded() {
         if (degraded.compareAndSet(false, true)) {
@@ -410,6 +415,12 @@ public final class RouteRuntimeImpl implements RouteRuntime {
                 LOGGER.warn("[Route] main-thread action failed (fail-open): {}", t.toString());
             }
         }
+        // 2026-10-16 到达即读：本批 main 动作（含响应轮询 deliverResponse 持句柄）跑完后，就地物化
+        // 已到达 exchange 的 body（业务线程、协议调用安全）——不再延迟到下一次采集查询/断言结算。
+        // 这让 drainSettledAssertionFailures/register/close 等非查询型 drain 检出的到达也同批读 body，
+        // 压缩"检出到达→读取"窗口（对齐文档"立即读、自己存"）。两者内部均 fail-open，绝不抛异常。
+        capture.materializeArrivedBodies();
+        monitor.materializeArrivedBodies();
     }
 
     @Override
@@ -646,16 +657,16 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     /**
      * {@code context.onClose} 回调路径：context 正在销毁 ⇒ 只做内存收尾。
      *
-     * <p><b>为什么这里不 unroute（2026-09-29 全新评审，P1）</b>：
+     * <p><b>为什么 teardown 不 unroute（2026-10-15 定稿）</b>：runtime 关闭时无论 Context 是否仍存活，
+     * 一律只做内存收尾（{@code binders.clear()}），驱动侧 handler 随 {@code context.close()} 由 Playwright
+     * 原生释放。理由：
      * <ol>
-     *   <li>该回调运行在 Playwright 的<b>消息泵线程</b>上，而客户端是"调用者自己泵消息"
-     *       （{@code Connection.sendMessage → ChannelOwner.runUntil → processOneMessage}）——
-     *       在此发起同步协议调用等于在泵线程里做嵌套下发；每条 unroute 的界值是 {@code unrouteBoundMs()}，
-     *       再加上线程池 {@code awaitTermination}，最长可阻塞消息泵数十秒（30s 级卡顿的同类机制）；</li>
-     *   <li>context 正在销毁时，<b>驱动侧 route handler 由 Playwright 随 context 一并释放</b>，
-     *       逐条 unroute 是纯多余开销。</li>
+     *   <li>unroute 是同步协议调用（{@code setNetworkInterceptionPatterns}，客户端 {@code NO_TIMEOUT}），
+     *       实测可阻塞 10s/30s，且句柄已失效时直接抛 {@code Object doesn't exist}；</li>
+     *   <li>本框架每 case 重建 Context（不变式 I-1），Context 关闭即 handler 全部释放，逐条 unroute
+     *       纯属浪费的同步协议往返（也是"收尾未确证 ⇒ 状态分叉 ⇒ 病态 Context 遗传"的来源），无需再做。</li>
      * </ol>
-     * 真正需要逐条 unroute 的只有"context 仍存活、而 runtime 被显式关闭"（如 feature 模式的用例边界清理）。</p>
+     * 故 {@link #close()} 与 {@link #closeAfterContextClosed()} 均不再发起 unroute，与 {@code EngineControl} 裁定一致。</p>
      */
     private void closeAfterContextClosed() {
         markContextClosing();
@@ -688,47 +699,21 @@ public final class RouteRuntimeImpl implements RouteRuntime {
                 System.identityHashCode(context));
         sweeper.shutdownNow();
         claims.closeAll();
-        //  收尾兜底 flush（T2+）：把"未被目的触发撤销"的剩余规则一并撤销，并**汇总确证结论** ——
-        //  这是把"用例收尾恢复如初"从『执行了动作』升级为『可判定的状态』的关键一步：
-        //  全部确证 ⇒ 干净；任一未确证 ⇒ 记入 unconfirmedRetirements + 降级（不变式 I-9：<b>重同步自愈 +
-        //  可见告警，绝不重建 Context</b> —— 路由是辅助设施，其状态不确定性不得绑架会话/Context 生命周期）。
-        //  注：close() 可能由 context.onClose 在事件线程触发，此处 flush 是同步协议调用（沿用原行为、
-        //  经 GuardedDriverCall 有界）；T6（驱动调用单线程化）会一并收口该路径。
-        //  A+B（2026-10-09）：信道已不可用**或** UI 侧已上报"本场景驱动异常"时，不再发起 unroute。
-        //  A 只挡重复（unroute 超时正是"不可用"的来源）；B 由 UI 侧在步骤因 Playwright 异常失败时上报
-        //  （见 DriverFailureSignal），使**第一次**也不再等待 —— 因此 route 不会把 UI 的失败放大成自己的报错。
-        final boolean driverBroken = !GuardedDriverCallRegistry.instance().isChannelUsable()
-                || DriverFailureSignal.reported();
-        int confirmed = 0;
-        int unconfirmed = 0;
+        //  收尾内存 flush（2026-10-15）：仅定稿剩余规则的 armed 时长 + binders.clear()，<b>不再发起任何
+        //  unroute 协议调用</b>。与 {@code EngineControl} 裁定一致 —— context 关闭时驱动侧 route handler
+        //  随 context 原生释放，逐条 unroute 是纯浪费的同步协议往返（客户端无超时、实测 10s 未确证），
+        //  且是「收尾未确证 ⇒ 状态分叉 ⇒ 病态 Context 遗传」的来源；句柄已失效时 unroute 还会抛
+        //  "Object doesn't exist" 报错。故 teardown 删除 unroute 清理，驱动绑定统一由 context.close() 释放。
+        //  注：本方法仍可能由 context.onClose 在事件线程触发，但不再有同步协议调用，无泵连接风险。
+        int flushed = binders.size();
         for (Map.Entry<String, PatternBinder> e : binders.entrySet()) {
             recordArmedDuration(e.getKey()); // T1：定稿剩余规则的 armed 时长
-            boolean ok;
-            if (contextClosing || driverBroken) {
-                ok = contextClosing;      // 连接关闭中 ⇒ 无需确证；驱动/信道已坏 ⇒ 不发起驱动调用
-            } else {
-                ok = e.getValue().closeConfirmed();
-            }
-            if (ok) {
-                confirmed++;
-            } else {
-                unconfirmed++;
-            }
         }
         binders.clear();
-        if (unconfirmed > 0) {
-            unconfirmedRetirements.addAndGet(unconfirmed);
-            markDegraded();
-            //  WARN 而非 ERROR：实证因果链是"UI 侧驱动失败 → 连接失联 → unroute 超时 → 未确证"，
-            //  本项是次生现象，不是用例失败原因（路由是辅助设施，不变式 I-9）。
-            LOGGER.warn("[Route] teardown UNCONFIRMED {} rule(s) @{} — driver/channel already broken; "
-                            + "route is a helper, not a failure cause",
-                    unconfirmed, System.identityHashCode(context));
-        }
         DriverFailureSignal.reset();   // B：消费即清零（本场景收尾已过，下一个场景重新开始）
         VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown, {} unconfirmed",
-                retiredByPurpose.get(), confirmed, unconfirmed);
+                "[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown",
+                retiredByPurpose.get(), flushed);
         // T1 度量基线：每用例（= 每 runtime 生命周期）汇总一行，报表可见、真跑归档。
         LOGGER.info("[Route] case metrics @{}: dispatches={}, hits={}, retiredByPurpose={}, "
                         + "unconfirmedRetirements={}, rulesArmedMs={}, "

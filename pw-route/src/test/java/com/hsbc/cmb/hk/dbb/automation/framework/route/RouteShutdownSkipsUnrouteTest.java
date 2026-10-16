@@ -17,18 +17,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 「Context 正被主动关闭时跳过逐条 unroute」契约（T8-5，FIX_PLAN §10.3 C-4）。
+ * 「teardown 跳过逐条 unroute」契约（2026-10-15 定稿）。
  *
- * <p><b>为什么必须有这个用例</b>：{@link RouteRuntimeImpl} 里早有 {@code contextClosing} 短路，
- * 但它<b>只在 {@code context.onClose} 事件路径置位</b>；而框架主动收尾是
- * {@code stopContextEngine}（→ {@code runtime.close()}）<b>先于</b>真实的 {@code context.close()}，
- * 此刻 Context 仍存活 ⇒ 不显式传意图就会把"马上要丢弃的 Context"上的规则再逐条撤销一遍。
- * 每撤销一条就是一次 {@code setNetworkInterceptionPatterns}（客户端无超时、实测有 10s 未确证的记录），
- * 这正是「收尾未确证 ⇒ 状态分叉 ⇒ 病态 Context 遗传」的来源。
+ * <p><b>背景</b>：本框架每 case 重建 Context（不变式 I-1），Context 关闭时驱动侧 route handler 由
+ * Playwright 随 context 一并释放，逐条 unroute 纯属浪费的同步协议往返（客户端无超时、实测 10s 未确证），
+ * 且是「收尾未确证 ⇒ 状态分叉」的来源；句柄已失效时 unroute 还会抛 {@code Object doesn't exist}。
+ * 故 {@link RouteRuntimeImpl#close()} 与 {@link RouteRuntimeImpl#closeAfterContextClosed()} 无论
+ * Context 是否仍存活都<b>不再发起 unroute</b>，只做内存收尾。</p>
  *
  * <p>本用例用 {@link CapturingGuardedDriverCall}（只记录、不执行 action）断言<b>协议调用面</b>：
- * 传 {@code true} ⇒ 不出现任何 {@code unroute:}；不传（或传 false）⇒ 仍会出现（行为不变，
- * 供「Context 仍需存活」的路径使用）。
+ * 传 {@code true}（context 正在关闭）与不传 / 传 {@code false}（context 仍存活）均不得出现任何
+ * {@code unroute:} —— teardown 统一不 unroute，与 Context 生命周期状态无关。</p>
  */
 public class RouteShutdownSkipsUnrouteTest {
 
@@ -77,7 +76,7 @@ public class RouteShutdownSkipsUnrouteTest {
     }
 
     @Test
-    public void withoutIntent_unrouteIsStillIssued_soLiveContextsStayClean() {
+    public void withoutIntent_unrouteIsAlsoSkipped() {
         CapturingGuardedDriverCall guard = installCapturingGuard();
         BrowserContext context = mockContext();
         RouteRuntime runtime = RouteEngine.runtimeOf(context);
@@ -85,7 +84,7 @@ public class RouteShutdownSkipsUnrouteTest {
 
         RouteEngine.shutdown(context, false);
 
-        assertTrue("Context 仍需存活的路径（如会话切换）必须照旧逐条 unroute",
+        assertFalse("teardown 统一不 unroute（handler 随 context.close() 原生释放），与 intent 无关",
                 guard.hasCallWithOpPrefix("unroute"));
     }
 }

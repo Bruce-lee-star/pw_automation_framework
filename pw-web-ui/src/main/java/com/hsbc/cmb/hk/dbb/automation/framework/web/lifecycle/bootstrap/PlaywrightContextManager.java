@@ -418,7 +418,9 @@ public class PlaywrightContextManager {
                 ScenarioTraceRecorder.onContextClosing(context);
                 //  独立的 close try：即使上面任何步骤抛异常，也要保证 context.close() 被执行，
                 //    否则已关闭失败会导致 context 资源泄漏。
-                //    注意：BrowserContext 无 isClosed() 方法，用 browser 连接状态判断其是否仍活跃。
+                //    注意：BrowserContext.isClosed() 在 Playwright Java 中可用（与 Page.isClosed() 同族）；
+                //      本收口只负责"执行 close"，是否仍活跃由调用方复用判定（ContextRegistryImpl.getContext）
+                //      统一用 isClosed() 把关，此处不重复。
                 //  窗口堆积修复：原实现仅在 browser() 可用且已连接时才 close —— 浏览器已断开/对象失效时
                 //    静默跳过，Context 及其窗口残留（直到套件级 cleanupAll 才释放）。改为无条件尝试 close，
                 //    已关闭/失效（TargetClosedError 等）按预期降级为 debug 日志。

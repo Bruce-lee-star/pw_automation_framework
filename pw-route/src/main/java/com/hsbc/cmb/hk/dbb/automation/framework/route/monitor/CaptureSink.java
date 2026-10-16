@@ -30,9 +30,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>请求侧 {@link #recordRequest} 在 route 事件线程（dispatch 入口，所有能力必经）调用，
  *       只入队（O(1)），不阻塞；</li>
  *   <li>响应侧 {@link #onResponseForSpec} 在响应轮询线程调用（由 {@code RouteRuntimeImpl} 轮询
- *       {@code Request#existingResponse()} 命中后按 spec 精确投递）：弹出 pending 快照 →
- *       volatile 写响应状态 → <b>就地</b>快照响应体（{@code Response.body()} 是协议调用，必须趁句柄
- *       存活时读；交给 IO 线程排队会因句柄被回收而永远采不到 body）→ 定案入队；</li>
+ *       {@code Request#existingResponse()} 命中后按<b>请求身份</b>精确投递）：取出与之共享同一 {@link Request} 引用的 pending 快照 →
+ *       volatile 写响应状态 → 仅原子配对 + 快照 status/headers（本地字段）+ 持有句柄
+ *       （<b>零协议调用</b>；{@code Response.body()} 是协议调用，延后到业务线程 main 由
+ *       {@link #flushPendingResponses} 读取）→ 定案入队；</li>
  *   <li>{@link #dump} 在业务线程调用（消费式快照；含 pending 超时定案）。</li>
  * </ul>
  *
@@ -87,6 +88,13 @@ public final class CaptureSink {
     /** 采集策略（不可变冻结快照）：请求侧与响应侧两个闸门共用同一份，杜绝口径漂移。 */
     private final com.hsbc.cmb.hk.dbb.automation.framework.route.RouteCapturePolicy capturePolicy;
 
+    /**
+     * 响应体读取器（framework-internal）：读一次 + 失败分类。跨浏览器<b>无挽回</b>——页面关闭三浏览器俱败、
+     * Chromium 重取仅限 GET 静态安全类型（不含 JSON/XHR/POST），故不做失败后重试；真正的 mitigation 是
+     * "立即读、自己存"（压缩到达→读取窗口），详见《网络API分层指南》§3.1。
+     */
+    private final ResponseBodyReader bodyReader = new ResponseBodyReader();
+
     /** 便捷构造：策略在本类内冻结一次（等价 {@code RouteCapturePolicy.resolveNow()}）。 */
     public CaptureSink(int maxCaptured, long defaultTimeoutMs) {
         this(maxCaptured, defaultTimeoutMs,
@@ -97,9 +105,8 @@ public final class CaptureSink {
      * 注入构造：策略由装配方（{@code RouteRuntimeImpl}）解析并冻结一次后注入，
      * 使请求侧与响应侧闸门判定恒为同一快照。
      *
-     * <p><b>无 IO 执行器参数</b>：采集路径在响应轮询线程<b>就地</b>完成字节快照与留存
-     * （{@code Response.body()} 是协议调用，必须趁句柄存活时读；提交到 IO 池排队会因句柄被回收
-     * 而永远采不到 body），故本类不承载也不再接收 IO 执行器。
+     * <p><b>无 IO 执行器参数</b>：body 读取（协议调用）由业务线程 main 完成、与 UI/断言串行
+     * （无并发泵 Connection）；绝不提交到独立 IO 池排队（实测池繁忙时句柄被回收、body 恒 null）。
      *
      * @param maxCaptured      采集队列上限
      * @param defaultTimeoutMs 未响应定案窗口（毫秒）
@@ -150,17 +157,19 @@ public final class CaptureSink {
     }
 
     /**
-     * 路由通道响应定案（按 spec 精确配对）——取代原 {@code context.onResponse} 事件订阅。
+     * 路由通道响应定案（按<b>请求身份</b>精确配对）——取代原 {@code context.onResponse} 事件订阅。
      *
-     * <p>与请求侧 {@link #recordRequest} 使用同一 {@link ApiSpec} 实例，配对关系由调用方
-     * （{@code RouteRuntimeImpl} 的响应轮询）保证，故<b>不再做 URL 匹配</b>。
-     * 响应体采集（{@code captureBody}）在本线程（响应轮询线程）<b>就地</b>读取（3xx 短路、
+     * <p>与请求侧 {@link #recordRequest} 使用同一 {@link ApiSpec} 实例定位 pending 队列，
+     * 但配对由<b>请求身份</b>（{@code request} 引用）在队列内精确取出，故<b>不再做 URL 匹配、也不按 FIFO 队头盲取</b>——
+     * 同 pattern 并发多请求时，响应只归档到"与其共享同一 {@link Request} 引用"的交换，杜绝串扰。
+     * 响应体采集（{@code captureBody}）<b>不在此线程读取</b>（延后到业务线程 main 由 flushPendingResponses 读取；（3xx 短路、
      * BodyStore 留存，见 {@link #captureBodyNow}）；未开启则直接入队。
      *
      * @param spec     该请求在 dispatch 时命中的规则（与 recordRequest 同一实例）
+     * @param request  该请求的 {@link Request} 引用（用于请求身份精确配对）；null 时退化为 FIFO
      * @param response 已到达的真实响应（本地持有）；null 安全（忽略）
      */
-    public void onResponseForSpec(ApiSpec spec, Response response) {
+    public void onResponseForSpec(ApiSpec spec, Request request, Response response) {
         // 与 recordRequest 完全同一口径：显式 capture() / 主渠道 MONITOR / route.capture.all.type=true
         // 三者之一才归档响应侧（spec 为空的场景仍先短路）。
         if (spec == null || response == null) {
@@ -179,11 +188,12 @@ public final class CaptureSink {
         if (pending == null) {
             return;
         }
-        // 配对：poll 队头（原子移除——并发下每条响应精确配对一条请求，不重复不遗漏；
-        // FIFO 近似，与历史实现同口径：响应乱序时配对按请求到达顺序）。
+        // 配对：按<b>请求身份</b>精确取出（matchByRequest），而非 FIFO 队头——
+        // 同 pattern 并发多请求时，响应必须结算到"与其共享同一 Request 引用"的交换，
+        // 否则会出现"响应 B 错误结算/归档请求 A 的交换"的串扰（采集归档错配）。
         // 轮询线程到此为止只写本地字段（status/headers）+ 持有句柄，
         // **零协议调用**（body() 是协议调用，一律延后到业务线程 main 读取 —— 2026-10-11 定稿）。
-        CapturedExchange snapshot = pending.poll();
+        CapturedExchange snapshot = matchByRequest(pending, request);
         if (snapshot != null) {
             snapshot.markResponse(response.status(), response.headers());
             snapshot.holdResponse(response); // 持有句柄：业务线程（flush）延迟读 body
@@ -193,6 +203,38 @@ public final class CaptureSink {
             recordVersion.incrementAndGet();
             recordArrival.release(recordArrival.getQueueLength() + 1);
         }
+    }
+
+    /**
+     * 响应侧投递（向后兼容 / 防御性兜底：不传请求身份时退化为 FIFO 队首配对）。
+     * 新调用方应使用 {@link #onResponseForSpec(ApiSpec, Request, Response)} 以按请求身份精确配对。
+     */
+    public void onResponseForSpec(ApiSpec spec, Response response) {
+        onResponseForSpec(spec, null, response);
+    }
+
+    /**
+     * 在 {@code pending} 队列中按<b>请求身份</b>精确取出交换；{@code request == null} 时退化为 FIFO {@code poll()}。
+     *
+     * <p>身份判定：遍历队列寻找 {@code CapturedExchange#request()} 引用与 {@code request} 相等者，
+     * 用 {@link ConcurrentLinkedQueue#remove(Object)}（默认按对象身份）摘除同一实例；
+     * 若已被 drain 并发移除（返回 false）则回退 null，本次投递跳过——绝不误归档他人交换。</p>
+     */
+    private CapturedExchange matchByRequest(ConcurrentLinkedQueue<CapturedExchange> pending, Request request) {
+        if (request == null) {
+            return pending.poll();
+        }
+        CapturedExchange matched = null;
+        for (CapturedExchange e : pending) {
+            if (e.request() != null && e.request() == request) {
+                matched = e;
+                break;
+            }
+        }
+        if (matched == null) {
+            return null; // 响应早于记录到达（理论不应发生）→ 跳过，交由超时定案
+        }
+        return pending.remove(matched) ? matched : null;
     }
 
     /**
@@ -238,22 +280,23 @@ public final class CaptureSink {
             enqueue(snapshot, null, contentType, false);
             return;
         }
-        byte[] bytes = null;
-        try {
-            bytes = response.body();
-        } catch (Throwable t) {
+        // 读响应体（ResponseBodyReader：只读一次 + 失败分类；跨浏览器无挽回，见 §3.1）。
+        // 语义：仅"抛错"才 fail-open；body() 未抛而返回 null/空则照常入队（不当失败）。
+        ResponseBodyReader.Result read = bodyReader.read(response);
+        if (read.failed()) {
             bodyReadFailures.incrementAndGet();
-            if (DriverErrors.isHandleReclaimed(t)) {
+            if (DriverErrors.isHandleReclaimed(read.failure)) {
                 handleReclaimedBodyReads.incrementAndGet();
             } else {
                 protocolErrorBodyReads.incrementAndGet();
             }
             LOGGER.warn("[Route] capture body unavailable (driver handle reclaimed / page closed) "
                             + "pattern='{}' url='{}': {}",
-                    spec.pattern(), snapshot.url(), DriverErrors.shortMessage(t));
+                    spec.pattern(), snapshot.url(), DriverErrors.shortMessage(read.failure));
             enqueue(snapshot, null, contentType, false);
             return;
         }
+        byte[] bytes = read.bytes;
         CapturedBody created = null;
         try {
             // 【不截断】整响应保留 —— 供业务"取整响应 → 改指定节点 → 当 mock 回放"使用。
@@ -440,6 +483,21 @@ public final class CaptureSink {
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
                 contentType, null, body, captureSeq, snapshot.origin());
+    }
+
+    /**
+     * <b>到达即读</b>：把已到达但尚未物化的 exchange 就地读 body 并入队（{@link #flushPendingResponses}）。
+     *
+     * <p>由 {@code RouteRuntimeImpl} 在每批 {@code drainMainThreadActions()} 收尾调用——响应轮询在 drain 里
+     * 检出到达、持句柄后，<b>当次 drain 即读 body</b>（业务线程、协议调用安全），不再延迟到下一次采集查询。
+     * 这让 {@code drainSettledAssertionFailures/register/close} 等<b>非查询型 drain</b>检出的到达也能立即物化，
+     * 压缩"检出到达→读取 body"窗口（对齐《网络API分层指南》"立即读、自己存"）。幂等：无待物化项时为空操作。</p>
+     *
+     * <p>注：不可压缩的是"网络到达→本次业务 drain"窗口（受"body() 必须业务线程、禁后台泵 Connection"约束），
+     * 本方法只保证"一旦 drain 检出到达，同批内即读"。</p>
+     */
+    public void materializeArrivedBodies() {
+        flushPendingResponses();
     }
 
     /**

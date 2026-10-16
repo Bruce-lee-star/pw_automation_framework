@@ -80,7 +80,10 @@ public final class ContextRegistryImpl implements ContextRegistry {
         //    （headed 下即重复开窗，是窗口堆积的主因）。
         if (context == null) {
             BrowserContext threaded = CURRENT_CONTEXT_BY_THREAD.get();
-            if (threaded != null && threaded.browser() != null && threaded.browser().isConnected()) {
+            //  失效守卫：context.close() 只关 context、browser 通常仍 connected —— 仅判 isConnected()
+            //    会原样复用已关闭的死 context（上一个场景的失效 context）。必须用 isClosed() 把关。
+            if (threaded != null && !threaded.isClosed()
+                    && threaded.browser() != null && threaded.browser().isConnected()) {
                 context = threaded;
                 TestContextHolder.get().set(PlaywrightManager.CONTEXT_KEY, threaded);
             }
@@ -98,7 +101,9 @@ public final class ContextRegistryImpl implements ContextRegistry {
         final BrowserContext existingContext = context;
         return LifecycleLockMediator.withContextLock(() -> {
             BrowserContext result = existingContext;
-            if (result == null || (result.browser() != null && !result.browser().isConnected())) {
+            //  失效守卫：已关闭的 context（browser 可能仍 connected）必须重建，否则复用死 context。
+            if (result == null || result.isClosed()
+                    || (result.browser() != null && !result.browser().isConnected())) {
                 result = createContext();
                 TestContextHolder.get().set(PlaywrightManager.CONTEXT_KEY, result);
             }
@@ -286,7 +291,8 @@ public final class ContextRegistryImpl implements ContextRegistry {
      */
     public boolean hasContext() {
         BrowserContext context = TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
-        return context != null && context.browser() != null && context.browser().isConnected();
+        return context != null && !context.isClosed()
+                && context.browser() != null && context.browser().isConnected();
     }
 
     /**
@@ -312,7 +318,8 @@ public final class ContextRegistryImpl implements ContextRegistry {
     @Override
     public BrowserContext getCurrentContext() {
         BrowserContext context = TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
-        return (context != null && context.browser() != null && context.browser().isConnected()) ? context : null;
+        return (context != null && !context.isClosed()
+                && context.browser() != null && context.browser().isConnected()) ? context : null;
     }
 
     /**
@@ -326,7 +333,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
      * 丢弃当前线程的 Page/Context（仅关闭，不清除 custom options），
      * 使下一次 PlaywrightManager.getContext()/PlaywrightManager.getPage() 在干净起点重建。
      * <p>
-     * 用于 Feature 模式切换不同 env/user（不同 sessionKey）时，避免复用上一个 session 的
+     * 用于切换不同 env/user（不同 sessionKey）时，避免复用上一个 session 的
      * Context（其 Cookie/Storage 残留会污染新用户）。调用方负责随后清理/重设自定义配置
      * （例如清除过期 storageStatePath），本方法仅关闭 Page+Context。
      */

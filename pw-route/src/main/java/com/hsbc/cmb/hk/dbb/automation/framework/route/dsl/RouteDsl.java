@@ -90,7 +90,7 @@ import java.util.Objects;
  * m.close();
  * }</pre>
  *
- * <p><b>feature 模式语义（V2-2 明确）</b>：web 层在每个 scenario 的 {@code testFinished} 对 Context 调
+ * <p><b>scenario 级语义（每 case 重建 Context）</b>：web 层在每个 scenario 的 {@code testFinished} 对 Context 调
  * {@code clearContext}，而 V2 的该挂点会<b>关闭整个 per-context 运行时</b> —— 故<b>默认 route 规则
  * 不跨 scenario 保留</b>（每个 scenario 起点 runtime 被重建、规则为空）。需要"保留 Context 与 runtime、
  * 只确定性清空规则"时用 {@link #clearRules(BrowserContext)}；只想注销自己注册的几条规则，持有
@@ -130,12 +130,13 @@ public final class RouteDsl {
     private static final long UI_WAIT_SLICE_MS = 250L;
 
     /**
-     * 方案 B 可选启用（2026-10-11）：UI 条件等待 —— 内部循环「drain + 短窗口 waitForFunction」。
+     * UI 条件等待（2026-10-15：main 队列已成为 DELAY 交付默认，无需显式启用）：内部循环「drain + 短窗口 waitForFunction」。
      *
-     * <p><b>启用前提</b>：{@code RouteDispatcher.setDelayDeliveryMainQueue(true)} —— delay 到点回调
-     * 只入队，由 main 线程执行 resume/fulfill（零非 main 协议调用）。本方法在等待循环中周期
+     * <p><b>配套约束（必需）</b>：DELAY 默认走 main 队列 —— delay 到点回调只入队，由 main 线程执行
+     * resume/fulfill（零非 main 协议调用）。本方法在等待循环中周期
      * {@code RouteEngine.drainMainThreadActions(page.context())}：delay 到点（≤250ms 滞后）后
-     * resume 在 main 串行执行，挂起请求恢复、UI 条件随后满足。</p>
+     * resume 在 main 串行执行，挂起请求恢复、UI 条件随后满足。改用本方法替代原生
+     * {@code page.waitForFunction} 是 DELAY + UI 等待唯一安全路径。</p>
      *
      * <p><b>行为等效</b>{@code page.waitForFunction(...)}：条件满足即返回；总超时抛
      * {@code TimeoutError}（含总超时说明）。<b>配套约束</b>：入队模式必须配套本方法 —— 继续用

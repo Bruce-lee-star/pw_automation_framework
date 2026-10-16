@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 580" width="100%" role="img">
+  <title>后台 fetch 采集与重放风控管线</title>
+  <desc>从 route handler 入口到异步消费者的五级风控流水线，含拒绝分支、写操作策略与熔断降级</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <text x="40" y="48" font-size="14" font-weight="500" fill="#2C2C2A">后台 fetch 采集 / 重放的风控管线（route handler 与消费者）</text>
+  <rect x="200" y="64" width="280" height="52" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="84" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">入口守卫</text>
+  <text x="340" y="102" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">域名白名单 · 内部标识头防循环采集</text>
+  <line x1="340" y1="116" x2="340" y2="138" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="200" y="138" width="280" height="52" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="158" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">方法分级</text>
+  <text x="340" y="176" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">GET/HEAD 可采可放 · 写操作默认禁放</text>
+  <line x1="340" y1="190" x2="340" y2="212" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="200" y="212" width="280" height="52" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="232" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">安全头保持</text>
+  <text x="340" y="250" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">Cookie / Origin / CSRF 只追加不改写</text>
+  <line x1="340" y1="264" x2="340" y2="286" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="200" y="286" width="280" height="52" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="306" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">有界队列</text>
+  <text x="340" y="324" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">丢弃即计数 · 绝不阻塞派发线程</text>
+  <line x1="340" y1="338" x2="340" y2="360" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="200" y="360" width="280" height="52" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="340" y="380" font-size="14" font-weight="500" fill="#0C447C" text-anchor="middle" dominant-baseline="central">异步消费者</text>
+  <text x="340" y="398" font-size="12" fill="#185FA5" text-anchor="middle" dominant-baseline="central">去重(TTL) · traceId 审计 · 独立超时</text>
+  <line x1="340" y1="412" x2="340" y2="434" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="200" y="434" width="280" height="48" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="340" y="452" font-size="13" font-weight="500" fill="#085041" text-anchor="middle" dominant-baseline="central">外发 / 落库</text>
+  <text x="340" y="470" font-size="12" fill="#0F6E56" text-anchor="middle" dominant-baseline="central">独立 APIRequestContext · 独立超时</text>
+  <line x1="480" y1="90" x2="493" y2="90" stroke="#A32D2D" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="495" y="64" width="145" height="52" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+  <text x="567" y="84" font-size="13" font-weight="500" fill="#791F1F" text-anchor="middle" dominant-baseline="central">拒绝并审计</text>
+  <text x="567" y="102" font-size="12" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">route.abort()</text>
+  <line x1="480" y1="164" x2="493" y2="164" stroke="#854F0B" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="495" y="138" width="145" height="52" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+  <text x="567" y="158" font-size="13" font-weight="500" fill="#633806" text-anchor="middle" dominant-baseline="central">写操作默认禁放</text>
+  <text x="567" y="176" font-size="12" fill="#854F0B" text-anchor="middle" dominant-baseline="central">白名单+幂等键放行</text>
+  <rect x="40" y="500" width="600" height="56" rx="8" fill="#FCEBEB" stroke="#A32D2D" stroke-width="0.5"/>
+  <text x="340" y="520" font-size="14" font-weight="500" fill="#791F1F" text-anchor="middle" dominant-baseline="central">熔断 fail-open</text>
+  <text x="340" y="540" font-size="12" fill="#A32D2D" text-anchor="middle" dominant-baseline="central">连续失败超阈 → context.unrouteAll() 降级纯观测 + 告警，半开探测恢复</text>
+  <polyline points="110,500 110,90 196,90" fill="none" stroke="#A32D2D" stroke-width="0.5" stroke-dasharray="3 3" marker-end="url(#arrow)"/>
+</svg>

@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
+import com.microsoft.playwright.Request;
 import com.microsoft.playwright.Response;
 
 import java.util.ArrayList;
@@ -31,6 +32,8 @@ public final class CapturedExchange {
     private final String pattern;
     private final Map<String, String> requestHeaders;
     private final String postDataPreview;
+    /** 请求身份（route 分发入口的 {@link Request} 引用，用于响应侧按"同一请求"精确配对，避免同 pattern 并发错配）。 */
+    private final com.microsoft.playwright.Request request;
     private final long requestTimeNanos;
     private final Integer expectStatus;
     private final long monitorTimeoutMs;
@@ -60,6 +63,8 @@ public final class CapturedExchange {
      * <b>绝不跨线程做协议调用</b>：body() 是协议调用，必须由业务线程（main，串行安全）在结算时读取。
      */
     private volatile Response heldResponse;
+    /** "到达即读"预取的 body 快照（业务线程 drain 收尾生成；非空则 body 断言消费它而非活句柄）。 */
+    private volatile BodySnapshot prefetchedBody;
     /** body 断言是否待业务线程结算（轮询线程只写本地字段，不读 body）。 */
     private volatile boolean bodyAssertionPending;
     /** body 断言是否已在业务线程结算（幂等保护：drain 多轮/多入口不重复断言）。 */
@@ -87,21 +92,23 @@ public final class CapturedExchange {
     /** 命中规则引用（业务线程延迟断言需要：PayloadAssertor 消费 spec 的期望与 body 断言配置）。 */
     private volatile ApiSpec heldSpec;
 
-    /** 兼容构造（旧 8 参签名）：不携带渠道信息（channels 为空集、primaryChannel 为 null）。 */
+    /** 兼容构造（旧 8 参签名）：不携带渠道信息（channels 为空集、primaryChannel 为 null）、无请求身份。 */
     CapturedExchange(String method, String url, String pattern, Map<String, String> requestHeaders,
                      String postDataPreview, long requestTimeNanos, Integer expectStatus, long monitorTimeoutMs) {
         this(method, url, pattern, requestHeaders, postDataPreview, requestTimeNanos, expectStatus,
-                monitorTimeoutMs, null, null);
+                monitorTimeoutMs, null, null, null);
     }
 
     CapturedExchange(String method, String url, String pattern, Map<String, String> requestHeaders,
                      String postDataPreview, long requestTimeNanos, Integer expectStatus, long monitorTimeoutMs,
-                     java.util.Set<String> channels, String primaryChannel) {
+                     java.util.Set<String> channels, String primaryChannel,
+                     com.microsoft.playwright.Request request) {
         this.method = method;
         this.url = url;
         this.pattern = pattern;
         this.requestHeaders = Collections.unmodifiableMap(new LinkedHashMap<>(requestHeaders));
         this.postDataPreview = postDataPreview;
+        this.request = request;
         this.requestTimeNanos = requestTimeNanos;
         this.expectStatus = expectStatus;
         this.monitorTimeoutMs = monitorTimeoutMs;
@@ -139,6 +146,11 @@ public final class CapturedExchange {
 
     public String postDataPreview() {
         return postDataPreview;
+    }
+
+    /** 请求身份（route 分发入口的 {@link Request} 引用；响应侧按此精确配对，非 URL/pattern 匹配）。 */
+    public com.microsoft.playwright.Request request() {
+        return request;
     }
 
     public Integer expectStatus() {
@@ -194,6 +206,19 @@ public final class CapturedExchange {
         Response r = heldResponse;
         heldResponse = null;
         return r;
+    }
+
+    /**
+     * 存入"到达即读"预取的 body 快照（业务线程 main drain 收尾调用；取走句柄后生成）。
+     * 存入后 body 断言消费本快照而非活句柄，消除"持有句柄→延迟读取"的驱逐窗口。
+     */
+    void prefetchBody(BodySnapshot snapshot) {
+        this.prefetchedBody = snapshot;
+    }
+
+    /** 预取的 body 快照（无则为 null；此时 body 断言回退到从持有句柄现读）。 */
+    BodySnapshot prefetchedBody() {
+        return prefetchedBody;
     }
 
     /** 标记 body 断言待业务线程结算（有 body 断言且响应已到达；轮询线程不读 body）。 */
@@ -396,8 +421,9 @@ public final class CapturedExchange {
         String preview = postData == null ? null
                 : (postData.length() > POST_DATA_PREVIEW_MAX ? postData.substring(0, POST_DATA_PREVIEW_MAX) + "...[truncated]" : postData);
         // 分渠道标注：把命中规则的渠道集合与主渠道一次带进快照（后续 dump/peek 与 View 转换直接可用）。
+        // 连同请求身份（request 引用）一并带入，供响应侧按"同一请求"精确配对。
         return new CapturedExchange(request.method(), request.url(), spec.pattern(),
                 request.headers(), preview, System.nanoTime(), spec.expectStatus(), spec.monitorTimeoutMs(),
-                spec.activeChannels(), spec.primaryChannel());
+                spec.activeChannels(), spec.primaryChannel(), request);
     }
 }

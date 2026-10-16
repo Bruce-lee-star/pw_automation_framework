@@ -190,7 +190,7 @@ public final class RouteEngine {
      *
      * <p>与 {@link #shutdown(BrowserContext)} 的区别：{@code shutdown} 关闭整个 runtime
      * （下一次注册会重建）；本方法只退役规则 —— runtime 及其线程池、Context 及其登录态都保留，
-     * 适合 feature 模式"跨 scenario 复用 Context、但要求规则确定性清空"的场景。</p>
+     * 用于同 Context 内中途确定性清空规则（下一 scenario 重建 Context 时规则随 Context 原生释放）。</p>
      *
      * <p>幂等；该 context 从未注册过规则（无 runtime）时返回 0 且<b>不创建</b> runtime。
      * 驱动侧撤销为异步可确证路径，结论见 {@link RouteRuntime#isClean()}。</p>
@@ -206,7 +206,7 @@ public final class RouteEngine {
     /**
      * 【档 B】纯内存解绑：只清规则表，保留驱动侧绑定与 runtime（<b>零协议调用</b>）。
      *
-     * <p>用于「Context 仍存活」的用例 / feature 边界清理 —— 取代原先"拆 runtime + 逐条 unroute"的
+     * <p>用于「Context 仍存活」的用例内规则清理 —— 取代原先"拆 runtime + 逐条 unroute"的
      * 收尾，消除 FIX_PLAN §4.1 定位的失败引信。Context 即将关闭请用
      * {@link #shutdown(BrowserContext, boolean)}（{@code true}）。
      *

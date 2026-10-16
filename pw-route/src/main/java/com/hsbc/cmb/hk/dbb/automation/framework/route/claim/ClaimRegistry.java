@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.claim;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dispatch.RouteAction;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.RouteClaim;
 import com.microsoft.playwright.Route;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,6 +87,14 @@ public final class ClaimRegistry {
             if (!claim.isIoAwait()) {
                 continue;
             }
+            if (claim.isIssued()) {
+                // 已向上游发出业务请求（MOCK intercept 的 fetch / resume 转发），owner 将自行
+                // fulfill / resume 落定；sweep 强行 fallback 会与已发出请求叠加成重复发送，故跳过
+                // （fetch 自身有超时，请求不会永久悬挂）。
+                LOGGER.debug("[Route] sweep: skip issued IO_AWAIT claim (owner will settle), url='{}'",
+                        claim.route().request().url());
+                continue;
+            }
             if (now - claim.createdAtNanos() <= ioAwaitTimeoutNanos) {
                 continue;
             }
@@ -93,7 +102,7 @@ public final class ClaimRegistry {
                 LOGGER.warn("[Route] sweep: force fallback for stale IO_AWAIT claim, url='{}'",
                         claim.route().request().url());
                 try {
-                    RouteAction.fallback(claim.route());
+                    RouteAction.fallback(claim, claim.route());
                 } catch (Exception e) {
                     LOGGER.warn("[Route] sweep: fallback failed for url='{}': {}",
                             claim.route().request().url(), e.toString());
@@ -107,7 +116,8 @@ public final class ClaimRegistry {
         for (RouteClaim claim : claims.values()) {
             if (markTerminal(claim, false)) {
                 try {
-                    RouteAction.fallback(claim.route());
+                    // 已 issued 的 claim 不能 fallback（会重复发送），跳过放行、交由已发出的请求自然落定
+                    RouteAction.fallback(claim, claim.route());
                 } catch (Exception ignored) {
                     LOGGER.trace("[Route] closeAll fallback ignored for url='{}': {}",
                             claim.route().request().url(), ignored.toString());

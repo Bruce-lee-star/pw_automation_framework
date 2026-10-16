@@ -200,7 +200,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
         ExecutorService fresh = newDriverExecutor();
         if (DRIVER.compareAndSet(current, fresh)) {
             long resets = POISON_RESETS.incrementAndGet();
-            LOGGER.error("[Route] route-v2 driver thread RESET after '{}' timed out {}ms — in-flight call confirmed "
+            LOGGER.error("[Route] route driver thread RESET after '{}' timed out {}ms — in-flight call confirmed "
                             + "stopped within {}ms, so no orphan pump is left on the connection (reset#={}, epoch -> {}, "
                             + "Context/Page untouched)",
                     opName, boundMs, POISON_DRAIN_MS, resets, DRIVER_EPOCH.get());

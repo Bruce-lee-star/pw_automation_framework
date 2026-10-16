@@ -27,9 +27,9 @@ import static org.mockito.Mockito.when;
 /**
  * P1 + P2 验收：
  * <ul>
- *   <li><b>P1</b>：{@code context.onClose}（运行在 Playwright 消息泵线程）路径只做内存收尾 —— 不发起任何
- *       unroute，因为 context 销毁时驱动侧 route handler 由 Playwright 一并释放；而显式 shutdown
- *       （context 仍存活）仍逐条 unroute（不回归）。</li>
+ *   <li><b>P1</b>：teardown 统一不发起 unroute —— 无论 {@code context.onClose}（运行在 Playwright 消息泵线程）
+ *       路径还是显式 shutdown（context 仍存活）路径，都只做内存收尾；驱动侧 handler 由 Playwright 随
+ *       {@code context.close()} 原生释放（本框架每 case 重建 Context，不变式 I-1）。</li>
  *   <li><b>P2</b>：注册失败不得在内存规则表留下"无绑定的幽灵规则"；句柄关闭必须同时摘掉内存条目；
  *       且旧句柄<b>不得</b>摘掉同 pattern 的新规则（令牌化）。</li>
  * </ul>
@@ -84,7 +84,7 @@ public class RuntimeCloseAndRegisterConsistencyTest {
     }
 
     @Test
-    public void explicitShutdownStillUnroutesOwnedBindings() throws Exception {
+    public void explicitShutdownDoesNotUnrouteOwnedBindings() throws Exception {
         BrowserContext ctx = mockContext();
         registerMockRule(ctx, "/api/b");
 
@@ -92,7 +92,7 @@ public class RuntimeCloseAndRegisterConsistencyTest {
 
         assertEquals(0, RouteEngine.activeRuntimes());
         for (AutoCloseable handle : driverHandles) {
-            verify(handle, atLeastOnce()).close();
+            verify(handle, never()).close();
         }
     }
 

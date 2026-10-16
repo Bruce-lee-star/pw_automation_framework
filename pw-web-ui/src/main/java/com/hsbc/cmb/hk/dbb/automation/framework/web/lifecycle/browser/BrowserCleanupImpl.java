@@ -473,7 +473,10 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
                     //  「context 关闭 → 所有活动立即停止」：先停该 context 引擎（置关闭标记 + 取消在途任务
                     //  + 关 per-context 调度器），再关采集，最后关 Context 本身。
                     PlaywrightRuntime.instance().browserCleanup.safeClean(
-                            "RouteEngine.stopContextEngine", () -> RouteLifecycleRegistry.get().stopContextEngine(bc));
+                            "RouteEngine.stopContextEngine",
+                            // bc 紧接着就在下方被 closeContext(bc) 关闭：传 true 让底层跳过逐条 unroute
+                            // （随 context.close() 原生释放），避免关闭前多余的同步协议往返 + 竞态（T8-5）。
+                            () -> RouteLifecycleRegistry.get().stopContextEngine(bc, true));
                     PlaywrightRuntime.instance().browserCleanup.safeClean(
                             "ApiCaptureContext.stop", () -> RouteLifecycleRegistry.get().stopCaptureFor(bc));
                     try {

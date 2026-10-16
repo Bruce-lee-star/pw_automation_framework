@@ -34,7 +34,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * （本仓库实测：会话校验导航被炸 → 误判会话失效 → 每轮全量重登）。故本类<b>不订阅</b>该事件：
  * 由 {@code RouteRuntimeImpl} 在 route 分发入口拿到 {@link Request} 后，于调度线程轮询
  * {@link Request#existingResponse()}（请求本地字段、零协议往返、不触碰对象表），命中即以
- * {@link #onResponseForSpec(ApiSpec, Response)} 按 <b>spec 精确配对</b>投递。
+ * {@link #onResponseForSpec(ApiSpec, Request, Response)} 按<b>请求身份</b>精确配对投递
+ * （而非 FIFO 队首，避免同 pattern 并发请求错配）。
  *
  * <p>并发模型（<b>快照-断言两阶段</b>，2026-09-28 修正 + 2026-10-10 同步化）：
  * <ul>
@@ -299,7 +300,7 @@ public final class MonitorSink {
      * @param spec     该请求在 dispatch 时命中的规则（与 recordRequest 同一实例）
      * @param response 已到达的真实响应（本地持有）；null 安全（忽略）
      */
-    public void onResponseForSpec(ApiSpec spec, Response response) {
+    public void onResponseForSpec(ApiSpec spec, Request request, Response response) {
         if (spec == null || response == null) {
             return;
         }
@@ -311,9 +312,9 @@ public final class MonitorSink {
         if (pending == null) {
             return;
         }
-        CapturedExchange exchange = pending.poll();
+        CapturedExchange exchange = matchByRequest(pending, request);
         if (exchange == null) {
-            return; // 无配对请求快照（已被 drain 定案 / auto-stop 未记录）→ 忽略
+            return; // 无配对请求快照（已被 drain 定案 / auto-stop 未记录 / 身份不匹配）→ 忽略
         }
         exchange.markResponse(response.status(), response.headers());
         // 结果证据要能展示响应体：即便本规则没有 body 断言，也在句柄存活时读一份前缀
@@ -359,23 +360,38 @@ public final class MonitorSink {
         exchange.holdResponse(response);
         exchange.markBodyAssertionPending();
     }
+
     /**
-     * body 快照（{@code headers()} + {@code body()} 的即时副本）。
-     *
-     * <p>{@code headers()} 是客户端本地快照、{@code body()} 是协议调用——两者都在拿到句柄的同一时刻
-     * 取走，之后断言只依赖本对象，<b>不再触碰驱动句柄</b>。</p>
-     *
-     * @param bytes              响应体字节（快照失败 / 跳过时为 null）
-     * @param headerNames        响应 header <b>名</b>清单（小写去重；只暴露名字不暴露值，防泄露）
-     * @param contentType        content-type 原值（可能为 null）
-     * @param inconclusiveReason 非 null 表示快照失败（句柄不可用），原因文本
-     * @param preview            响应体前缀（已按 {@value #PREVIEW_MAX_CHARS} 字符截断；供证据展示）
-     * @param bodySkipped        是否<b>刻意跳过</b>读体（流式端点：读体会永久阻塞观测线程）
+     * 响应侧投递（向后兼容 / 防御性兜底：不传请求身份时退化为 FIFO 队首配对）。
+     * 新调用方应使用 {@link #onResponseForSpec(ApiSpec, Request, Response)} 以按请求身份精确配对。
      */
-    private record BodySnapshot(byte[] bytes, List<String> headerNames, String contentType,
-                                String inconclusiveReason, String preview, boolean bodySkipped) {
+    public void onResponseForSpec(ApiSpec spec, Response response) {
+        onResponseForSpec(spec, null, response);
     }
 
+    /**
+     * 在 {@code pending} 队列中按<b>请求身份</b>精确取出交换；{@code request == null} 时退化为 FIFO {@code poll()}。
+     *
+     * <p>身份判定：遍历队列寻找 {@code CapturedExchange#request()} 引用与 {@code request} 相等者，
+     * 用 {@link ConcurrentLinkedQueue#remove(Object)}（默认按对象身份）摘除同一实例；
+     * 若已被 drain 并发移除（返回 false）则回退 null，本次投递跳过——绝不误结算他人交换。</p>
+     */
+    private CapturedExchange matchByRequest(ConcurrentLinkedQueue<CapturedExchange> pending, Request request) {
+        if (request == null) {
+            return pending.poll();
+        }
+        CapturedExchange matched = null;
+        for (CapturedExchange e : pending) {
+            if (e.request() != null && e.request() == request) {
+                matched = e;
+                break;
+            }
+        }
+        if (matched == null) {
+            return null; // 响应早于记录到达（理论不应发生）→ 跳过，交由超时定案
+        }
+        return pending.remove(matched) ? matched : null;
+    }
     /**
      * 是否为"体不会结束"的流式响应（SSE 等）：这类端点调 {@code response.body()} 会一直挂到流关闭，
      * 等于把观测线程钉死，故<b>刻意不读体</b>（只按 status 定案，并在证据里注明原因）。
@@ -546,6 +562,32 @@ public final class MonitorSink {
         }
     }
 
+    /**
+     * <b>到达即读</b>（业务线程 main drain 收尾调用）：对"有 body 断言、响应已到达、未结算"的 exchange，
+     * 就地读 body 成快照存入 exchange 并释放句柄——body 断言随后在 {@link #settleBodyAssertionNow}
+     * 消费快照而非活句柄，消除"持有句柄→延迟读取"的驱逐窗口（对齐《网络API分层指南》"立即读、自己存"）。
+     *
+     * <p>与本类既有约定一致：<b>只读 body（{@link #takeBodySnapshot}），不在本方法跑断言</b>；
+     * body() 是协议调用，故必须由业务线程调用（{@code RouteRuntimeImpl.drainMainThreadActions} 收尾）。
+     * 幂等：已结算 / 已预取 / 非 body 断言 pending 的 exchange 一律跳过；句柄为空则留给结算回退判 inconclusive。
+     * 3xx / 流式 / 读取失败由 {@code takeBodySnapshot} 归一为快照内的结论，计数仍在结算处发生（不重复计）。</p>
+     */
+    public void materializeArrivedBodies() {
+        for (CapturedExchange exchange : exchanges) {
+            if (!exchange.isBodyAssertionPending() || exchange.isBodyAssertionSettled()) {
+                continue;
+            }
+            if (exchange.prefetchedBody() != null) {
+                continue; // 已预取：幂等，避免重复读 body
+            }
+            Response held = exchange.takeHeldResponse();
+            if (held == null) {
+                continue; // 句柄已不在：留给 settleBodyAssertionNow 回退判 inconclusive
+            }
+            exchange.prefetchBody(takeBodySnapshot(held));
+        }
+    }
+
     /** 单条延迟结算（业务线程）：读 body → 快照 → 断言 → 结算/上报。异常绝不逃逸。 */
     private void settleBodyAssertionNow(CapturedExchange exchange) {
         exchange.markBodyAssertionSettled(); // 幂等：先标记，任何异常也不重复结算
@@ -553,20 +595,25 @@ public final class MonitorSink {
         if (spec == null || exchange.responseStatus() == null || exchange.responseTimedOut()) {
             return; // 无规则 / 响应未到 / 已超时：不结算（超时由 drain 扫描路径处理）
         }
-        Response held = exchange.takeHeldResponse();
-        if (held == null) {
-            // 句柄已不可用（页面跳转 / 驱动回收）：body 无法判定 → inconclusive，绝不判失败
-            String reason = "handle-reclaimed: response handle reclaimed (deferred read)";
-            exchange.markBodyAssertionInconclusive(reason);
-            inconclusiveBodyReads.incrementAndGet();
-            handleReclaimedBodyReads.incrementAndGet();
-            LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
-                            + "pattern='{}' url='{}': {}",
-                    spec.pattern(), exchange.url(), reason);
-            reportOutcome(exchange); // 结果进报告（标注"未判定"，与"通过/失败"区分开）
-            return;
+        // 到达即读：优先消费预取快照（drain 收尾已读入 body、句柄已释放）；无预取则回退现读持有句柄
+        // （首轮 dispatch 线程交付未及预取等边缘路径——行为与历史一致，绝不因此漏判）。
+        BodySnapshot snapshot = exchange.prefetchedBody();
+        if (snapshot == null) {
+            Response held = exchange.takeHeldResponse();
+            if (held == null) {
+                // 句柄已不可用（页面跳转 / 驱动回收）：body 无法判定 → inconclusive，绝不判失败
+                String reason = "handle-reclaimed: response handle reclaimed (deferred read)";
+                exchange.markBodyAssertionInconclusive(reason);
+                inconclusiveBodyReads.incrementAndGet();
+                handleReclaimedBodyReads.incrementAndGet();
+                LOGGER.warn("[Route] monitor body assertion INCONCLUSIVE (response handle unavailable) "
+                                + "pattern='{}' url='{}': {}",
+                        spec.pattern(), exchange.url(), reason);
+                reportOutcome(exchange); // 结果进报告（标注"未判定"，与"通过/失败"区分开）
+                return;
+            }
+            snapshot = takeBodySnapshot(held);
         }
-        BodySnapshot snapshot = takeBodySnapshot(held);
         if (snapshot.preview() != null) {
             exchange.markResponseBody(snapshot.preview()); // 结果证据展示用（内部再脱敏 + 截断）
         }

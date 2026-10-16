@@ -38,7 +38,7 @@ public class RouteAssertionFailureSurfacesToScenarioTest {
         final List<Throwable> failures = new ArrayList<>();
 
         CapturingListener() {
-            super(new File("target/routev2-assertion-surface-test"));
+            super(new File("target/route-assertion-surface-test"));
         }
 
         @Override
@@ -64,7 +64,7 @@ public class RouteAssertionFailureSurfacesToScenarioTest {
     }
 
     @Test
-    public void routeV2AssertionFailureFailsStepAndIsIdempotent() {
+    public void routeAssertionFailureFailsStepAndIsIdempotent() {
         CapturingListener listener = new CapturingListener();
         StepEventBus.getEventBus().registerListener(listener);
         RouteAssertionRegistry.register(new FailingProbe());
@@ -99,7 +99,7 @@ public class RouteAssertionFailureSurfacesToScenarioTest {
     }
 
     @Test
-    public void routeV2AssertionFailureMarksScenarioResultAsFailed() {
+    public void routeAssertionFailureMarksScenarioResultAsFailed() {
         TestOutcome outcome = new TestOutcome("demo scenario");
         RouteAssertionRegistry.register(new FailingProbe());
         try {

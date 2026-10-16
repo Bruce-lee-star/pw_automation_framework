@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +60,7 @@ public final class SummaryResultReporter implements ResultReporter {
     private static final int TOP_SLOWEST = 10;
     private static final int MAX_LISTED_FAILURES = 100;
     private static final DateTimeFormatter TS =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT);
 
     /** 场景记录（不可变小载体）。 */
     private static final class ScenarioRecord {

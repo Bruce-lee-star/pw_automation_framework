@@ -36,6 +36,11 @@ import java.util.function.Consumer;
  *       {@link RouteDelayScheduler} daemon 递归调度），不额外派发 IO 池，
  *       事件线程返回 pending（驱动返回 PendingHandler，请求挂起）；</li>
  *   <li><b>单所有权</b>：{@link RouteClaim} CAS 保证每个 Route 恰好一个终结者；</li>
+ *   <li><b>转发状态保护</b>：MOCK intercept 的 {@code route.fetch()} 或 MODIFY/resume 一旦把业务请求
+ *       真正发出，{@link RouteClaim#markIssued()} 置位；此后任何 {@code fallback()}（= 再次放行到真实网络）
+ *       都被抑制（{@link com.hsbc.cmb.hk.dbb.automation.framework.route.dispatch.RouteAction#fallback
+ *       RouteClaim, Route}），防异常路径（fulfill 失败 / sweep 超时兜底 / 运行时关闭）重复发业务请求
+ *       （重复下单 / 重复副作用）；宁可 fail-closed（请求短暂悬挂）也绝不重复发送；</li>
  *   <li><b>匹配条件链式裁决</b>：规则匹配条件（method/resourceType/header/query/body…）不满足时
  *       {@code fallback}（驱动级 Fallback，不置 handled），Router 自动把请求交给下一个匹配
  *       pattern 的 handler；全部不满足时驱动自动 resume——请求永不悬挂；</li>
@@ -52,20 +57,23 @@ public final class RouteDispatcher {
     private static final long MAX_DELAY_MS = 30_000L;
 
     /**
-     * 方案 B 可选启用开关（2026-10-11）：DELAY 到点交付模式。
+     * DELAY 到点交付模式（2026-10-11 定稿；2026-10-15 默认翻为 main 队列）。
      *
-     * <p>false（默认）=<b>直发</b>：到点回调在调度线程直接 resume/fulfill（sendMessageAsync，不泵连接）。
-     * UI 及时性优先 —— E2E 三连绿实证；调度线程与 main 并发写 Connection 存在理论窗口（文档化接受）。</p>
-     *
-     * <p>true =<b>main 队列</b>：到点回调只入队（{@code RouteRuntime.enqueueMainAction}），由 main
-     * 业务线程 drain 执行 —— 协议调用 100% 收敛到 main（零并发写 Connection）。
+     * <p>true（<b>默认</b>）=<b>main 队列</b>：到点回调只入队（{@code RouteRuntime.enqueueMainAction}），
+     * 由 main 业务线程 drain 执行 —— 协议调用 100% 收敛到 main（零并发写 Connection，消除调度线程
+     * 与 main 竞争同一 Playwright 连接的窗口）。
      * <b>配套约束</b>：启用后业务 UI 等待必须改用 {@code RouteDsl.waitForUiFunction(...)}
      * （内部循环 drain + 短窗口 waitForFunction）——继续用原生 {@code page.waitForFunction} 会因
      * main 阻塞在等待中无人 drain 而挂死（E2E run-b 实证 15s 超时）。</p>
+     *
+     * <p>false（<b>opt-out</b>）=<b>直发</b>：仅用于"必须原生 {@code page.waitForFunction} 且接受
+     * 理论并发窗口"的 UI 及时性关键场景。到点回调在调度线程直接 resume/fulfill（sendMessageAsync，
+     * 不泵连接）；调度线程与 main 并发写 Connection 存在理论窗口，E2E 三连绿实证低概率，文档化接受
+     * （fail-open 兜底），但不再作为默认。</p>
      */
-    private static volatile boolean delayDeliveryMainQueue = false;
+    private static volatile boolean delayDeliveryMainQueue = true;
 
-    /** 启用「main 队列」DELAY 交付（方案 B 可选通道）；默认直发。见 {@link #delayDeliveryMainQueue}。 */
+    /** 切换 DELAY 交付模式：true=main 队列（默认），false=直发 opt-out（仅 UI 及时性关键场景）。见 {@link #delayDeliveryMainQueue}。 */
     public static void setDelayDeliveryMainQueue(boolean enabled) {
         delayDeliveryMainQueue = enabled;
     }
@@ -80,7 +88,7 @@ public final class RouteDispatcher {
     /** T1 度量基线：真正命中规则条件并触发能力的请求数（<= 下发次数，即"路由命中数"）。 */
     private final AtomicLong hitCount = new AtomicLong(0);
     /**
-     * DELAY 到点后<b>直接</b>在调度线程 resume / fulfill 的交付次数（P0-1 度量；对应 {@link #delayDeliveryMainQueue()} 默认 false）。
+     * DELAY 到点后<b>直接</b>在调度线程 resume / fulfill 的交付次数（P0-1 度量；对应 {@link #delayDeliveryMainQueue()} 默认 true 时的 opt-out false）。
      * 与 {@link #queuedDeliveries()} 之和 = DELAY 终结总数；两者比例反映"直发 vs main 队列"的实际占比。
      */
     private final AtomicLong directedDeliveries = new AtomicLong(0);
@@ -108,7 +116,7 @@ public final class RouteDispatcher {
         if (spec == null) {
             // 规则已退役（代际切换 / 注销竞态窗口）→ fail-open
             runtime.claims().markTerminal(claim, false);
-            RouteAction.fallback(route);
+            RouteAction.fallback(claim, route);
             return;
         }
 
@@ -116,7 +124,7 @@ public final class RouteDispatcher {
         ApiMatcher matcher = matcherCache.computeIfAbsent(spec, ApiMatcher::from);
         if (!matcher.matches(route.request())) {
             runtime.claims().markTerminal(claim, false);
-            RouteAction.fallback(route);
+            RouteAction.fallback(claim, route);
             return;
         }
 
@@ -138,7 +146,7 @@ public final class RouteDispatcher {
             // 无任何活跃能力位（全部停止或纯无观测）→ 链式裁决交给下一个 pattern / 真实网络
             // （对齐旧 stop 语义：已停止能力位不作用于请求；能力未停止的 MONITOR/capture 才放行）。
             runtime.claims().markTerminal(claim, false);
-            RouteAction.fallback(route);
+            RouteAction.fallback(claim, route);
             return;
         }
 
@@ -187,7 +195,7 @@ public final class RouteDispatcher {
             LOGGER.warn("[Route] dispatch failed for url='{}', pattern='{}': {}",
                     route.request().url(), pattern, t.toString());
             try {
-                RouteAction.fallback(route);
+                RouteAction.fallback(claim, route);
             } catch (Exception ignored) {
                 LOGGER.trace("[Route] fallback after dispatch error ignored: {}", ignored.toString());
             }
@@ -207,13 +215,17 @@ public final class RouteDispatcher {
             dispatchMock(route, spec, claim, runtime, trace);
         } else if (spec.hasModifyFields() || modifiedBody != null) {
             // MODIFY 改了 headers/method/body → 经 ResumeOptions 上路（无修改则等价放行）。
-            RouteAction.resume(route, spec, modifiedBody);
+            if (RouteAction.resume(route, spec, modifiedBody)) {
+                claim.markIssued(); // 浏览器请求已转发真实网络；此后 fallback 必须抑制，防重复发送
+            }
             runtime.claims().markTerminal(claim, true);
             reportOutcome(spec.capability().name() + " RESULT", spec, request, null, null, null,
                     "resume real network; " + modifyLine(spec, modifiedBody), trace);
         } else {
             // 纯放行（DELAY/MONITOR/无修改）：与原 MONITOR/DELAY 行为一致 = route.resume() 无参。
-            RouteAction.resume(route);
+            if (RouteAction.resume(route)) {
+                claim.markIssued(); // 浏览器请求已转发真实网络；此后 fallback 必须抑制，防重复发送
+            }
             runtime.claims().markTerminal(claim, true);
             if (spec.capability() == RouteCapability.DELAY) {
                 reportOutcome("DELAY RESULT", spec, request, null, null, null,
@@ -437,7 +449,7 @@ public final class RouteDispatcher {
         }
         // 需要 IO：intercept fetch（无静态体）或 字段替换（静态体 / 真实响应）
         if (!acquireIoSlot(claim, runtime)) {
-            RouteAction.fallback(route);
+            RouteAction.fallback(claim, route);
             runtime.claims().markTerminal(claim, false);
             return;
         }
@@ -514,11 +526,12 @@ public final class RouteDispatcher {
                 if (response.isEmpty()) {
                     // fetch 失败 / 预算耗尽 → fail-open（若尚未被巡检兜底）
                     if (!claim.isTerminal()) {
-                        RouteAction.fallback(route);
+                        RouteAction.fallback(claim, route);
                         runtime.claims().markTerminal(claim, false);
                     }
                     return;
                 }
+                claim.markIssued(); // 业务请求已通过 route.fetch() 发往上游客栈；此后 fallback 必须抑制，防重复发送
                 APIResponse apiResponse = response.get();
                 try {
                     if (spec.mockReplacements().isEmpty()
@@ -566,7 +579,7 @@ public final class RouteDispatcher {
                 LOGGER.warn("[Route] mock task failed for url='{}', pattern='{}': {}",
                         route.request().url(), spec.pattern(), t.toString());
                 if (!claim.isTerminal()) {
-                    RouteAction.fallback(route);
+                    RouteAction.fallback(claim, route);
                     runtime.claims().markTerminal(claim, false);
                 }
             }
@@ -649,7 +662,7 @@ public final class RouteDispatcher {
             return;
         }
         if (!acquireIoSlot(claim, runtime)) {
-            RouteAction.fallback(route);
+            RouteAction.fallback(claim, route);
             runtime.claims().markTerminal(claim, false);
             return;
         }
@@ -682,7 +695,7 @@ public final class RouteDispatcher {
                         route.request().url(), spec.pattern(), t.toString());
                 if (!claim.isTerminal()) {
                     try {
-                        RouteAction.fallback(route);
+                        RouteAction.fallback(claim, route);
                     } catch (Exception ignored) {
                         LOGGER.trace("[Route] fallback ignored: {}", ignored.toString());
                     }
@@ -719,7 +732,7 @@ public final class RouteDispatcher {
     private void dispatchDelayChain(Route route, ApiSpec spec, RouteClaim claim, RouteRuntime runtime,
                                     Runnable afterDelay, HitTrace trace) {
         if (!acquireIoSlot(claim, runtime)) {
-            RouteAction.fallback(route);
+            RouteAction.fallback(claim, route);
             runtime.claims().markTerminal(claim, false);
             return;
         }
@@ -752,13 +765,14 @@ public final class RouteDispatcher {
                         return; // sweep already settled (fallback resumed)
                     }
                     trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
-                    //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b>（组合 1 行为）—— delay 到点回调在
-                    //  调度线程直接 resume（sendMessageAsync，不泵连接）。UI 及时性优先：入队+main drain
-                    //  与「delay + 原生 waitForFunction」硬冲突（main 阻塞在等待中无人 drain → UI 15s 超时，
-                    //  E2E run-b 实证）。Connection 写入无锁 ⇒ 直发存在理论并发窗口，但 E2E 三连绿实证
-                    //  低概率；Java Playwright 无 async handler API 的固有代价，文档化接受（fail-open 兜底）。
-                    //  可选：setDelayDeliveryMainQueue(true) + 业务 UI 等待改 RouteDsl.waitForUiFunction
-                    //  ⇒ 到点回调只入队（零非 main 协议调用），resume 由 main drain 串行执行。
+                    //  2026-10-15 定稿（默认 main 队列）：默认走下方 if 分支 —— 到点回调只入队
+                    //  （enqueueMainAction），resume 由 main drain 串行执行（零非 main 协议调用，
+                    //  消除调度线程写 Connection 的并发窗口）。UI 及时性约束：业务 UI 等待须改用
+                    //  RouteDsl.waitForUiFunction（循环 drain + 短窗口 waitForFunction）；继续用原生
+                    //  page.waitForFunction 会因 main 阻塞在等待中无人 drain 而挂死（E2E run-b 实证 15s 超时）。
+                    //  opt-out（setDelayDeliveryMainQueue(false)）：调度线程直发 resume/fulfill（sendMessageAsync，
+                    //  不泵连接）；Connection 写入无锁 ⇒ 直发存在理论并发窗口，E2E 三连绿实证低概率，
+                    //  Java Playwright 无 async handler API 的固有代价，文档化接受（fail-open 兜底）。
                     if (delayDeliveryMainQueue) {
                         queuedDeliveries.incrementAndGet();
                         runtime.enqueueMainAction(() -> {
@@ -787,12 +801,13 @@ public final class RouteDispatcher {
         if (materialized.isEmpty()) {
             // 物化失败 / 预算耗尽 → fail-open
             if (!claim.isTerminal()) {
-                RouteAction.fallback(route);
+                RouteAction.fallback(claim, route);
                 runtime.claims().markTerminal(claim, false);
             }
             return;
         }
         final MaterializedResponse mat = materialized.get();
+        claim.markIssued(); // 物化阶段已 route.fetch() 发往上游客栈；deliver 将 fulfill，fallback 必须抑制
         // P1-4：DELAY 调度本身 O(1)，不再经 io 池中转（同 dispatchDelayChain）。RouteDelayScheduler.delay fail-open。
         if (claim.isTerminal()) {
             return; // sweep 已兜底
@@ -804,10 +819,10 @@ public final class RouteDispatcher {
                         return; // sweep already settled (fallback resumed)
                     }
                     trace.markDelay(requestedMs, (System.nanoTime() - scheduledNs) / 1_000_000L);
-                    //  2026-10-11 定稿（E2E 实证）：默认<b>直发</b> fulfillWithBody（组合 1 行为，
-                    //  与 dispatchDelayChain 同理由 —— UI 及时性优先，见该处注释）。
-                    //  可选 main 队列：setDelayDeliveryMainQueue(true) ⇒ 到点只入队，main drain 交付。
-                    //  交付段：纯 sendMessageAsync（fulfillWithBody），零同步驱动调用 —— 不泵连接。
+                    //  2026-10-15 定稿（默认 main 队列）：默认走下方 if 分支 —— 到点只入队（enqueueMainAction），
+                    //  fulfillWithBody 由 main drain 串行执行（零非 main 协议调用，消除调度线程写 Connection 并发窗口）。
+                    //  opt-out（setDelayDeliveryMainQueue(false)）：调度线程直发 fulfillWithBody（sendMessageAsync，
+                    //  不泵连接）。交付段：纯 sendMessageAsync（fulfillWithBody），零同步驱动调用 —— 不泵连接。
                     Runnable deliver = () -> {
                         if (claim.isTerminal()) {
                             return;

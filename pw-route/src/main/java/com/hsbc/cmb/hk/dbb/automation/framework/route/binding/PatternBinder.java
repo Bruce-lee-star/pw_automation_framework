@@ -175,29 +175,6 @@ public final class PatternBinder implements AutoCloseable {
         return Boolean.TRUE.equals(ack);
     }
 
-    /**
-     * 重发一次撤销（<b>自愈 / 重同步</b>，2026-09-29）。
-     *
-     * <p><b>为什么重发就能自愈</b>：客户端每次 {@code route()} / {@code unroute()} 下发的都是
-     * <b>本地 Router 的全量快照</b>（{@code BrowserContextImpl.updateInterceptionPatterns()}），
-     * 且单连接 FIFO 有序 ⇒ 只要<b>任意一次</b>下发拿到 ack，驱动侧拦截列表就重新与客户端一致。
-     * 因此"未确证"的撤销只需<b>重发一次</b>即可修复状态分叉，<b>无需重建 Context</b>
-     * （重建会破坏 feature/session 不变式 I-1：同一 sessionKey 不重建）。</p>
-     *
-     * <p>幂等：{@code unroute} 一个已被移除的 pattern 在客户端是本地空操作，但仍会触发全量快照下发
-     * —— 这正是所需的"重同步"；{@code nativeHandle.close()} 亦幂等。</p>
-     *
-     * @return {@code true}=本次重发已确证（状态已重同步）；{@code false}=仍未收到 ack
-     */
-    public boolean retryUnroute() {
-        Object ack = GuardedDriverCallRegistry.instance().guarded("unroute-retry:" + pattern,
-                GuardedDriverCall.unrouteBoundMs(), GuardedDriverCall.OnTimeout.WARN_AND_ABANDON, () -> {
-                    nativeHandle.close();
-                    return Boolean.TRUE;
-                });
-        return Boolean.TRUE.equals(ack);
-    }
-
     @Override
     public String toString() {
         return "PatternBinder{pattern='" + pattern + "', closed=" + closed.get()

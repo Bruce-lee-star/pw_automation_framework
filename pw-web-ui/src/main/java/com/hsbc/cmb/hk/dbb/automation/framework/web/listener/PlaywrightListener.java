@@ -350,14 +350,16 @@ public class PlaywrightListener implements StepListener {
     }
 
     /**
-     * 异常/跳过路径的幂等清理。Serenity 不保证 skipped、ignored 或 step error
-     * 一定随后触发完整的 testFinished，因此这些入口必须主动释放路由、采集和线程状态。
+     * 异常/跳过路径的幂等清理。<b>仅用于场景级异常终止（当前仅 testSkipped）</b>——
+     * 步骤级失败（stepFailed / lastStepFailed / stepIgnored）<b>不再</b>走此方法：场景尚未结束，
+     * 过早拆除 Context/Page 会丢收尾截图、滋生 about:blank 新 tab、并与场景收尾二次拆除（2026-10-16）。
      *
-     * <p><b>2026-09-28 决策</b>：只清<b>用例级</b>资源；<b>同一 sessionKey 下不重建、不关闭
-     * Context/Page</b>（失败不会污染会话，只有 sessionKey 变化才重建）。判据与语义见
-     * {@link PlaywrightManager#clearThreadResourcesOnCaseAbort()}。
+     * <p>Serenity 不保证 skipped 一定随后触发完整的 testFinished，故 skip 入口主动释放资源。
+     * 拆除须<b>对称</b>：{@link PlaywrightManager#clearThreadResourcesOnCaseAbort()} 内的 closeContext
+     * 会清掉自定义 storageState，但不清会话键——这里补 {@link SessionManager#resetCurrentSession()}，
+     * 避免"context 已关、storageState 已清、会话键仍在"的组合生命周期半清状态（2026-10-16）。</p>
      *
-     * <p>G4：全程<b>线程级</b>清理（不调全局 resetAll），绝不触碰其它 worker 的状态。
+     * <p>G4：全程<b>线程级</b>清理（不调全局 resetAll），绝不触碰其它 worker 的状态。</p>
      */
     private void cleanupAfterAbnormalTermination(String reason) {
         try {
@@ -366,6 +368,9 @@ public class PlaywrightListener implements StepListener {
             logger.debug("clearThreadResourcesOnCaseAbort() on abnormal termination ({}) failed: {}",
                     reason, e.getMessage());
         }
+        // 对称清理：拆除 context 后重置会话键（与 closeContext 内的 storageState 清除配对），
+        // 防组合生命周期残留"context 没了但会话键还绑着"的不一致。
+        SessionManager.resetCurrentSession();
         cleanupThreadLocals();
     }
 
@@ -663,7 +668,10 @@ public class PlaywrightListener implements StepListener {
         }
 
         recordTestData("stepFailureStackTrace", getStackTrace(failure.getException()));
-        cleanupAfterAbnormalTermination("stepFailed");
+        // 2026-10-16：步骤失败【不】在此拆除 Context/Page——场景尚未结束，过早关闭会致：
+        // ① stepFinished 的收尾截图拿不到 page（静默丢失）；② 后续步骤 getPage() 重建出
+        // about:blank 新 tab；③ 与场景收尾二次拆除。资源一律留到场景边界（testFinished /
+        // glue @After → cleanupForScenario + cleanupThreadLocals）统一释放。
     }
 
     @Override
@@ -703,19 +711,15 @@ public class PlaywrightListener implements StepListener {
             }
         }
 
-        //  2026-09-30 收口：步骤失败走异常终止清理 —— clearThreadResourcesOnCaseAbort()
-        //  统一销毁本线程 Context/Page（scenario-scoped，失败不复用活 Context）；
-        //  登录复用走 storageState 快照注入（凭证是快照而非活体）。
-        VerboseLogging.logInfoIfVerbose(logger,
-                "Last step failed - cleaning up case-scoped resources (scenario-level restart)");
-        cleanupAfterAbnormalTermination("lastStepFailed");
+        // 2026-10-16：最后一步失败同样【不】在此拆除 Context/Page（同 stepFailed：场景收尾才拆），
+        // 失败截图已在上方捕获并交由 Serenity；资源留到场景边界统一释放。
     }
 
     @Override
     public void stepIgnored() {
         VerboseLogging.logDebugIfVerbose(logger, "Step ignored");
         recordTestData("stepIgnored", true);
-        cleanupAfterAbnormalTermination("stepIgnored");
+        // 2026-10-16：步骤被忽略【不】拆除 Context/Page——忽略≠场景结束，留到场景边界统一释放。
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.dispatch;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.RouteClaim;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.microsoft.playwright.APIRequestContext;
 import com.microsoft.playwright.APIResponse;
@@ -312,6 +313,30 @@ public final class RouteAction {
             LOGGER.warn("[Route] fallback failed for url='{}': {}", route.request().url(), e.toString());
             return false;
         }
+    }
+
+    /**
+     * 放弃处理、放行到真实后端（fail-open 出口）——<b>转发状态保护</b>版。
+     *
+     * <p>若 {@code claim} 非 null 且已 {@link RouteClaim#isIssued() 标记"业务请求已向上游发出"}，
+     * 则<b>抑制</b> {@code route.fallback()}：此刻放行会把浏览器请求再次发往真实网络，与已发出的
+     * fetch / 已转发的 resume 叠加成<b>重复发送</b>（重复下单 / 重复副作用）。抑制后记为 WARN，交由已发出
+     * 请求的自然终结（MOCK intercept 的 fulfill / MODIFY 的 resume 已生效）落定——宁可 fail-closed
+     * （请求短暂悬挂）也绝不重复发业务请求。</p>
+     *
+     * <p>{@code claim} 为 null 时退化为 {@link #fallback(Route)}（预所有权阶段无重复风险）。</p>
+     *
+     * @param claim 本 Route 的索赔（可 null）
+     * @param route 待放行的路由
+     * @return true=已放行；false=被抑制（已 issued）或放行失败
+     */
+    public static boolean fallback(RouteClaim claim, Route route) {
+        if (claim != null && claim.isIssued()) {
+            LOGGER.warn("[Route] fallback suppressed for url='{}': business request already issued upstream "
+                    + "(issued claim) — suppressing to prevent duplicate send", route.request().url());
+            return false;
+        }
+        return fallback(route);
     }
 
     /**

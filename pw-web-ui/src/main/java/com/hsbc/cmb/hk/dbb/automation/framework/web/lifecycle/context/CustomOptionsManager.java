@@ -310,7 +310,7 @@ public class CustomOptionsManager implements CustomOptions {
 
     /**
      * 与 {@link #disableCustomOptions()} 对称：仅将 {@code customContextOptionsFlag} 置位为 {@code true}，
-     * 不触发 Context 重建。供框架内部（如 Feature 模式会话保留）在 Context 已失效时标记需应用 storageState。
+     * 不触发 Context 重建。供框架内部在 Context 已失效时标记需应用 storageState。
      *
      * @return this，支持链式调用
      */
@@ -320,7 +320,7 @@ public class CustomOptionsManager implements CustomOptions {
     }
 
     /**
-     * 仅供框架内部 Feature 模式会话保留使用：原样回填 storageState 路径与内存内容，
+     * 仅供框架内部会话保留使用：原样回填 storageState 路径与内存内容，
      * 不触发 {@code customContextOptionsFlag} 置位、不触发 Context 重建（与直接 set 原 TestContext key 等价）。
      *
      * @param storageStatePath 保留的 storageState 文件路径（可空，空则不回填）

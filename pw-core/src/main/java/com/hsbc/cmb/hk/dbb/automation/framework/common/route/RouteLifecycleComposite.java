@@ -128,6 +128,22 @@ public final class RouteLifecycleComposite implements RouteLifecycle {
         forEach(r -> r.stopContextEngine(ctx));
     }
 
+    /**
+     * 带「Context 正被主动关闭」意图的停止（{@code EngineControl} 2 参重载的 Composite 透传）。
+     *
+     * <p><b>为什么必须覆写</b>：若不覆写，2 参调用落到 {@code EngineControl} 默认方法 → 退化为 1 参，
+     * {@code contextBeingClosed} 意图被丢弃，底层 runtime 收不到"即将关闭"信号，仍走逐条 unroute +
+     * 优雅等待（每场景至多 5s），并保留 sweeper/孤儿路径的同步 unroute 协议面（T8-5 修复的关键一跳）。
+     * 与 1 参版本对称：primary 先跑，additions 逐个 fail-safe。</p>
+     */
+    @Override
+    public void stopContextEngine(Object ctx, boolean contextBeingClosed) {
+        if (primary != null) {
+            primary.stopContextEngine(ctx, contextBeingClosed);
+        }
+        forEach(r -> r.stopContextEngine(ctx, contextBeingClosed));
+    }
+
     @Override
     public void stopAllContextEngines() {
         if (primary != null) {

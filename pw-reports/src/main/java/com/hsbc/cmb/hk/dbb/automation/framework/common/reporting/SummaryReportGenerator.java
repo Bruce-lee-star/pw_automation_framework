@@ -46,8 +46,13 @@ public final class SummaryReportGenerator {
     private static final String SUMMARY_FILE = "serenity-summary.html";
     private static final String CSV_FILE_PREFIX = "test-results";
     private static final String ZIP_FILE_PREFIX = "test-report";
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("EEEE MMMM dd yyyy 'at' HH:mm:ss");
-    private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+    // 钉死 Locale.SIMPLIFIED_CHINESE：EEEE/MMMM 为日/月名文本，默认 locale 会让报告头在不同机器渲染成不同语言
+    // （如 en_US → "Thursday October"、de_DE → "Donnerstag Oktober"），导致 golden 基线 / 跨机器渲染不一致。
+    // 基线是在中文默认 locale 机器上生成的（见 golden 基线 "星期四 一月"），故钉死中文使所有机器输出一致。
+    private static final DateTimeFormatter FORMATTER =
+            DateTimeFormatter.ofPattern("EEEE MMMM dd yyyy 'at' HH:mm:ss", Locale.SIMPLIFIED_CHINESE);
+    private static final DateTimeFormatter TIMESTAMP_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss", Locale.SIMPLIFIED_CHINESE);
 
     // T2-8：Freemarker 渲染配置。模板置于 src/main/resources/templates/，统一使用 .ftlh 扩展名
     // （setRecognizeStandardFileExtensions(true) → HTMLOutputFormat → 自动转义 & < > " '），
@@ -58,6 +63,9 @@ public final class SummaryReportGenerator {
     static {
         FM_CFG.setClassForTemplateLoading(SummaryReportGenerator.class, "/templates");
         FM_CFG.setDefaultEncoding("UTF-8");
+        // 钉死 Locale.SIMPLIFIED_CHINESE：模板侧若做数字/日期格式化（?string.number 等）默认取 JVM locale，
+        // 会让输出随机器漂移；与日期 formatter 同源收口为中文，使 golden 基线 / 跨机器渲染一致。
+        FM_CFG.setLocale(Locale.SIMPLIFIED_CHINESE);
         FM_CFG.setRecognizeStandardFileExtensions(true);
         FM_CFG.setLogTemplateExceptions(false);
         FM_CFG.setWrapUncheckedExceptions(true);
@@ -1292,7 +1300,7 @@ public final class SummaryReportGenerator {
             Map.Entry<String, Integer> onlyEntry = failureCounts.entrySet().iterator().next();
             double pct = (double) onlyEntry.getValue() / total * 100;
             model.put("singleColor", colors[0]);
-            model.put("singlePct", String.format("%.0f", pct));
+            model.put("singlePct", String.format(Locale.ROOT, "%.0f", pct));
         } else {
             // 多分类 → 饼图 + 底部图例
             StringBuilder gradient = new StringBuilder();
@@ -1306,13 +1314,13 @@ public final class SummaryReportGenerator {
                 // conic-gradient: color start% end% (百分比直接是 0-100)
                 if (gradient.length() > 0)  {gradient.append(", ");} 
                 gradient.append(colors[colorIdx % colors.length])
-                        .append(" ").append(String.format("%.2f", currentPct)).append("%")
-                        .append(" ").append(String.format("%.2f", currentPct + pct)).append("%");
+                        .append(" ").append(String.format(Locale.ROOT, "%.2f", currentPct)).append("%")
+                        .append(" ").append(String.format(Locale.ROOT, "%.2f", currentPct + pct)).append("%");
 
                 Map<String, Object> leg = new HashMap<>();
                 leg.put("color", colors[colorIdx % colors.length]);
                 leg.put("name", entry.getKey());
-                leg.put("pct", String.format("%.0f%%", pct));
+                leg.put("pct", String.format(Locale.ROOT, "%.0f%%", pct));
                 legend.add(leg);
 
                 currentPct += pct;

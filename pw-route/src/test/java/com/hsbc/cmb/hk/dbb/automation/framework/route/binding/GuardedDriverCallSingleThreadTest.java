@@ -22,7 +22,7 @@ import static org.junit.Assert.assertTrue;
  *
  * <p>守护三条不可回退语义：
  * <ol>
- *   <li><b>收敛</b>：所有 guarded 驱动调用在<b>专用驱动线程</b>（名称前缀 {@code route-v2-driver-}）串行执行，
+ *   <li><b>收敛</b>：所有 guarded 驱动调用在<b>专用驱动线程</b>（名称前缀 {@code route-driver-}）串行执行，
  *       任意时刻并发度 = 1（消除共享连接并发竞态，根治 {@code Object doesn't exist}）；</li>
  *   <li><b>不丢回包</b>：并发提交 N 个调用，全部拿到各自结果（无丢失 / 无静默降级）；</li>
  *   <li><b>毒化重置</b>：某调用超时（驱动无回包）→ 仅重建驱动线程（POISON_RESETS 递增），
