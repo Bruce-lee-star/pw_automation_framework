@@ -91,9 +91,9 @@ public class PageObjectFactoryRecordingTest {
 
     @Before
     public void setUp() {
-        prevLogging = System.getProperty("serenity.logging");
+        prevLogging = System.getProperty("framework.logging");
         prevProvider = PlaywrightManager.getProvider();
-        System.setProperty("serenity.logging", "VERBOSE"); // 开启录制开关
+        System.setProperty("framework.logging", "VERBOSE"); // 开启录制开关
     }
 
     @After
@@ -101,9 +101,9 @@ public class PageObjectFactoryRecordingTest {
         PlaywrightManager.setProvider(prevProvider);
         PageObjectFactory.clear(DummyManagedPage.class);
         if (prevLogging == null) {
-            System.clearProperty("serenity.logging");
+            System.clearProperty("framework.logging");
         } else {
-            System.setProperty("serenity.logging", prevLogging);
+            System.setProperty("framework.logging", prevLogging);
         }
     }
 

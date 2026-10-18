@@ -53,9 +53,8 @@
         </encoder>
     </appender>
 
-    <!-- Serenity BDD 内部库的日志级别配置 - 抑制INFO级别的警告 -->
+    <!-- 第三方库日志级别配置 - 抑制噪声 -->
     <logger name="io.cucumber" level="WARN"/>
-    <logger name="net.serenitybdd" level="WARN"/>
     <logger name="io.github.bonigarcia" level="WARN"/>
 
     <!-- 项目代码日志级别：root 默认 INFO；VerboseLogging 会按 serenity.logging(VERBOSE→DEBUG / TRACE→TRACE) 在运行时提升至对应级别 -->

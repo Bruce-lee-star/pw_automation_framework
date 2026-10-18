@@ -12,7 +12,7 @@ import java.util.Locale;
 import java.util.ServiceLoader;
 
 /**
- * 极薄配置源工具——统一"按 key 解析 + ENC(...) 透明解密"，供 Web(Serenity) 与 API(Typesafe) 两域复用，
+ * 极薄配置源工具——统一"按 key 解析 + ENC(...) 透明解密"，供 Web(框架) 与 API(Typesafe) 两域复用，
  * 避免各自重复实现解密 / 解析逻辑。
  *
  * <p>解析优先级（CORE-P0-1：core 不再耦合任何配置框架）：
@@ -20,17 +20,17 @@ import java.util.ServiceLoader;
  *   <li>实时系统属性（最高优先级）：支持运行时动态覆盖 / 测试 toggle，且保证
  *       {@code WebFrameworkConfig.setValue(key, v)}（本质是 System.setProperty）即时生效
  *       —— 即<b>「设置」永远实时</b>，不受任何框架启动期快照影响；</li>
- *   <li>环境变量：点/连字符转下划线 + 大写（与 Serenity 的 ENV 映射一致），补齐"仅直读
+ *   <li>环境变量：点/连字符转下划线 + 大写（与 框架 的 ENV 映射一致），补齐"仅直读
  *       System.getProperty 会漏掉 ENV"的缺口，使所有 WebFrameworkConfig / ApiFrameworkConfig 均支持 ENV 覆盖；</li>
  *   <li>SPI 扩展配置源：由上层模块（web）通过 JDK {@link ServiceLoader} 提供
- *       {@link ConfigResolver} 实现（如 Serenity 的 serenity.conf/private 合并源）。
- *       core 在编译期与运行期均不依赖 Serenity；无上层实现时该来源为空，自然降级；</li>
+ *       {@link ConfigResolver} 实现（如 框架 的 serenity.conf/private 合并源）。
+ *       core 在编译期与运行期均不依赖 框架；无上层实现时该来源为空，自然降级；</li>
  *   <li>默认值。</li>
  * </ol>
  *
  * <p><b>边界（实测，2026-09-28，勿踩）</b>：第 1 步只覆盖「当前存在的系统属性」——
  * <b>{@code System.clearProperty} 之后不保证回落到文件 / 默认值</b>。原因在第 3 步：SPI 源
- * （web 侧即 Serenity 合并源）是<b>启动期系统属性快照 + Typesafe {@code ConfigFactory} 静态缓存</b>，
+ * （web 侧即 框架 合并源）是<b>启动期系统属性快照 + Typesafe {@code ConfigFactory} 静态缓存</b>，
  * 某键只要在快照期存在过，之后即使清除该属性，该源仍会返回<b>旧值</b>
  * （实测：清除后 {@code getValue()} 仍为 {@code "true"}，且新建
  * {@code SystemEnvironmentVariables} 也无法刷新）。
@@ -56,7 +56,7 @@ public final class ConfigSource {
         ENVIRONMENT,
         /** 系统属性（{@code -Dkey=value}；{@code FrameworkConfig.setValue} 的落地层）。 */
         SYSTEM_PROPERTY,
-        /** 配置文件属性（SPI {@link ConfigResolver}；web 侧为 Serenity 合并源）。 */
+        /** 配置文件属性（SPI {@link ConfigResolver}；web 侧为 框架 合并源）。 */
         CONFIG_FILE,
         /** 代码内默认值（最低兜底，非"来源"而是兜底）。 */
         DEFAULT
@@ -202,7 +202,7 @@ public final class ConfigSource {
     private static String rawFrom(Layer layer, String key) {
         switch (layer) {
             case ENVIRONMENT:
-                // 与 Serenity 的 ENV 映射一致（点/连字符转下划线 + 大写）
+                // 与 框架 的 ENV 映射一致（点/连字符转下划线 + 大写）
                 return System.getenv(toEnvKey(key));
             case SYSTEM_PROPERTY:
                 // 实时系统属性：支持 FrameworkConfig.setValue(key, v) 运行期即时生效
@@ -240,8 +240,8 @@ public final class ConfigSource {
 
     /**
      * 配置键 → 环境变量名：大写，并将 {@code .} 与 {@code -} 规范为 {@code _}
-     * （与 Serenity 的 ENV 映射保持一致）。
-     * 例：{@code serenity.playwright.headless} → {@code SERENITY_PLAYWRIGHT_HEADLESS}。
+     * （与 框架 的 ENV 映射保持一致）。
+     * 例：{@code framework.playwright.headless} → {@code SERENITY_PLAYWRIGHT_HEADLESS}。
      */
     static String toEnvKey(String key) {
         return key.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');

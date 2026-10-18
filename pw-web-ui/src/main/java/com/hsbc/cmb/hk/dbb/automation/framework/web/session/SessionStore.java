@@ -87,7 +87,7 @@ final class SessionStore {
     private static final String SESSION_DIR = resolveSessionDir();
 
     private static String resolveSessionDir() {
-        String override = System.getProperty("serenity.playwright.session.dir");
+        String override = System.getProperty("framework.playwright.session.dir");
         if (override != null && !override.trim().isEmpty()) {
             return Paths.get(override).toAbsolutePath().normalize().toString();
         }

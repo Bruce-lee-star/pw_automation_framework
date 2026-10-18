@@ -24,7 +24,7 @@ import java.util.function.Supplier;
  *       {@link #getObstructingElements()} 用 actionability {@code trial} 判遮挡，
  *       {@link #getPageUrl()} / {@link #getPageTitle()} 记录失败现场；
  *       产出由 {@code ElementOperationSupport} 装配进 {@link ElementOperationException}，
- *       最终出现在 Serenity/Cucumber 报告与控制台 —— 那是本类产出的<b>唯一消费者</b>。</li>
+ *       最终出现在 框架/Cucumber 报告与控制台 —— 那是本类产出的<b>唯一消费者</b>。</li>
  *   <li><b>不做什么</b>：不等待、不重试、不做 DOM 抓取（不注入 JS、不维护属性白名单）、
  *       不解析选择器、不异步。Playwright 对象非线程安全，所有调用都在<b>场景线程</b>内同步完成
  *       （历史上"异步诊断线程池"跨线程操作 Playwright → pipe closed，已彻底移除）。</li>

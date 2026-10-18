@@ -1,0 +1,3 @@
+# v2 报告引擎 Cucumber 事件监听器（零 serenity 依赖）。
+# 随 pw-reports-v2 发布；Cucumber JUnit Platform 引擎经 ServiceLoader 自动发现，无需消费方显式声明 plugin。
+com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.PwReportPlugin

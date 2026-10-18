@@ -308,7 +308,7 @@ public class ConfigProvider {
      * Merge environment-specific configuration from config file
      * Environment configuration can override ANY configuration node, not just headers
      *
-     * Uses Serenity's SystemEnvironmentVariables to read environment configuration
+     * Uses 框架's SystemEnvironmentVariables to read environment configuration
      *
      * Example configuration structure:
      * ```

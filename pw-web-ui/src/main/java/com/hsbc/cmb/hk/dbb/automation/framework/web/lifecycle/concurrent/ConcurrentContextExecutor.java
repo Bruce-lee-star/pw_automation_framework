@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.SerenityBusBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.LifecycleBusBridge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.Collections;
@@ -13,11 +13,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ConcurrentContextOptions;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ContextTask;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ContextTaskResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.browser.BrowserCrashGuard;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.TestContextBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.TestContextBridge;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ScenarioContext;
 
@@ -39,7 +36,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 独立 {@code Browser} + {@code BrowserContext}（由 {@link PlaywrightManager} 的 per-thread 隔离保证）；
  * 任务结束后清理本线程 Context（<b>不</b>关闭本线程 Browser——Browser 生命周期由 {@code cleanupAll()} 收口）。
  * 失败 / 页面错误经结构化 {@link ContextTaskResult} 返回，<b>不在工作线程触碰
- * Serenity 事件总线</b>（桥接原则 9.3）。</p>
+ * 框架 事件总线</b>（桥接原则 9.3）。</p>
  *
  * @apiNote <b>框架内部能力</b>：仅供 {@code framework.web.lifecycle} 包树协作者与并发桥接使用；业务代码不得直接依赖。
  */
@@ -132,9 +129,9 @@ public final class ConcurrentContextExecutor {
                 }
             }
         }
-        // 在编排线程（runAll 调用方）将"崩溃恢复重跑"事件显式标注到 Serenity 报告（WEB-P1-4 验收 ②）。
-        // 工作线程从不触碰 Serenity 总线（桥接原则 9.3）；此处调用方即编排线程，安全。
-        SerenityBusBridge.recordCrashRecoveryIfAny(results);
+        // 在编排线程（runAll 调用方）将"崩溃恢复重跑"事件显式标注到 框架 报告（WEB-P1-4 验收 ②）。
+        // 工作线程从不触碰 框架 总线（桥接原则 9.3）；此处调用方即编排线程，安全。
+        LifecycleBusBridge.recordCrashRecoveryIfAny(results);
         return List.copyOf(results);
     }
 
@@ -182,7 +179,7 @@ public final class ConcurrentContextExecutor {
         boolean recovered = handleCorruption ? BrowserCrashGuard.recoverForced() : BrowserCrashGuard.recover();
         if (recovered) {
             ContextTaskResult<T> replayedResult = runOnce(task);
-            // 携带重跑标注（任务名/类型/首次失败诊断），供编排线程在 Serenity 报告显式标注（WEB-P1-4 验收 ②）。
+            // 携带重跑标注（任务名/类型/首次失败诊断），供编排线程在 框架 报告显式标注（WEB-P1-4 验收 ②）。
             return ContextTaskResult.replayed(replayedResult, type, firstMsg);
         }
         return r;
@@ -256,9 +253,9 @@ public final class ConcurrentContextExecutor {
     }
 
     /**
-     * 编排线程回放：任一失败则经 Serenity 既有通道标记并抛出（带全部失败汇总，桥接 9.3）。
+     * 编排线程回放：任一失败则经 框架 既有通道标记并抛出（带全部失败汇总，桥接 9.3）。
      */
     public static <T> void assertAllSucceeded(List<ContextTaskResult<T>> results) {
-        SerenityBusBridge.replayFailures(results);
+        LifecycleBusBridge.replayFailures(results);
     }
 }

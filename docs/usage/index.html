@@ -218,18 +218,18 @@ Feature: 用户管理
     Then 页面应显示"加载失败"提示</code></pre>
 
   <h3>② Glue 层（把 Gherkin 步骤绑到代码）</h3>
-  <p>放在 <code>glue/</code> 包（<b>Runner 的 <code>glue=</code> 就是指向它</b>）。Glue 只做两件事：<b>用 <code>@Given/@When/@Then</code> 绑定步骤文本</b>，并通过 Serenity 的 <code>@Steps</code> 把活委派给 Steps 层。它不写业务、不碰选择器。</p>
+  <p>放在 <code>glue/</code> 包（<b>Runner 的 <code>glue=</code> 就是指向它</b>）。Glue 只做两件事：<b>用 <code>@Given/@When/@Then</code> 绑定步骤文本</b>，并通过框架的 <code>@Steps</code> 把活委派给 Steps 层。它不写业务、不碰选择器。</p>
 <pre><code>package com.hsbc.cmb.hk.dbb.automation.tests.glue;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.annotations.AutoBrowser;
 import com.hsbc.cmb.hk.dbb.automation.tests.steps.UserListSteps;
 import io.cucumber.java.en.*;
-import net.serenitybdd.annotations.Steps;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.annotation.Steps;
 
 @AutoBrowser(verbose = true)                  // 浏览器自动托管：本场景用完即收
 public class UserListGlue {
 
-    @Steps                                    // Serenity 注入 Steps 实例（并纳入报告）
+    @Steps                                    // 框架注入 Steps 实例（并纳入报告）
     private UserListSteps userListSteps;
 
     @Given("打开用户列表页")
@@ -254,13 +254,13 @@ public class UserListGlue {
 }</code></pre>
 
   <h3>③ Steps 层（业务编排）</h3>
-  <p>放在 <code>steps/</code> 包，方法上打 <code>@Step</code>（会进 Serenity 报告）。Steps 只写业务动作：调用页面对象 + 断言；页面对象由 <code>PageObjectFactory.getPage(...)</code> 获取，框架按当前线程注入已装饰的 Page（<b>构造期不建浏览器</b>）。</p>
+  <p>放在 <code>steps/</code> 包，方法上打 <code>@Step</code>（会进框架报告）。Steps 只写业务动作：调用页面对象 + 断言；页面对象由 <code>PageObjectFactory.getPage(...)</code> 获取，框架按当前线程注入已装饰的 Page（<b>构造期不建浏览器</b>）。</p>
 <pre><code>package com.hsbc.cmb.hk.dbb.automation.tests.steps;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.factory.PageObjectFactory;
 import com.hsbc.cmb.hk.dbb.automation.tests.pages.UserListPage;
-import net.serenitybdd.annotations.Step;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.annotation.Step;
 import org.assertj.core.api.Assertions;
 
 public class UserListSteps {
@@ -959,12 +959,12 @@ public class UserApiSteps {
 playwright {
   browser { type = chromium  headless = true }
 }
-serenity.screenshot.strategy = AFTER_EACH_STEP
+framework.screenshot.strategy = AFTER_EACH_STEP
 
 # serenity.properties（等价）
 playwright.browser.type = chromium
 playwright.browser.headless = true
-serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
+framework.screenshot.strategy = AFTER_EACH_STEP</code></pre>
   </div>
   <div class="note"><b>建议</b>：统一用 <code>serenity.conf</code>（可读性好、支持分组），把通用基线写在这里即可；不要两份各写一半，避免「同键到底以谁为准」的歧义。这两份文件管的是 <b>Serenity 配置层</b>——runner 与框架行为键（<code>playwright.*</code>、<code>route.*</code>、<code>serenity.*</code>、<code>monitor.*</code>、<code>sensitive.*</code>、<code>axe.*</code>、<code>http.*</code>、<code>framework.*</code>、<code>api.*</code> 等）。</div>
   <div class="warn"><b>别和接口实体配置混为一谈</b>：接口相关的实体配置（<code>baseUri</code> / <code>headers</code> / <code>end-points</code> / 环境节点）走<b>另一套</b>文件 <code>application.conf</code> + <code>config/{entity}.conf</code>（HOCON，由 pw-api-core 的 <code>ConfigProvider</code> 读取，规则见 §9），<b>不写</b>在这两份 Serenity 文件里。</div>
@@ -991,7 +991,7 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
       <tr><td><code>playwright.driver.path</code></td><td>.playwright/driver</td><td>Playwright Driver 路径</td></tr>
       <tr><td><code>playwright.browser.downloadsPath</code></td><td>target/downloads</td><td>浏览器内下载文件落盘目录</td></tr>
       <tr><td><code>playwright.browser.download.timeout.minutes</code></td><td>5</td><td>浏览器下载超时(分钟)</td></tr>
-      <tr><td><code>serenity.playwright.window.maximize</code></td><td>true</td><td>窗口最大化</td></tr>
+      <tr><td><code>framework.playwright.window.maximize</code></td><td>true</td><td>窗口最大化</td></tr>
     </tbody>
   </table>
 
@@ -1032,7 +1032,7 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
   <table>
     <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td><code>serenity.screenshot.strategy</code></td><td>AFTER_EACH_STEP</td><td>截图策略</td></tr>
+      <tr><td><code>framework.screenshot.strategy</code></td><td>AFTER_EACH_STEP</td><td>截图策略</td></tr>
       <tr><td><code>playwright.screenshot.fullpage</code></td><td>true</td><td>是否全页截图</td></tr>
       <tr><td><code>playwright.context.trace.retention.enabled</code></td><td>true</td><td>trace 目录磁盘治理开关（自动清理上一轮旧 trace.zip）</td></tr>
       <tr><td><code>playwright.context.trace.retention.max.files</code></td><td>200</td><td>trace 目录保留文件数上限</td></tr>
@@ -1044,13 +1044,13 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
   <table>
     <thead><tr><th>键</th><th>默认</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td><code>serenity.outputDirectory</code></td><td>target/site/serenity</td><td>报告输出目录</td></tr>
-      <tr><td><code>serenity.project.name</code></td><td>Serenity Playwright Demo</td><td>报告项目名</td></tr>
-      <tr><td><code>serenity.features.root</code></td><td>src/test/resources/features</td><td>feature 根目录</td></tr>
-      <tr><td><code>serenity.logging</code></td><td>VERBOSE</td><td>日志级别（Serenity 侧）</td></tr>
+      <tr><td><code>framework.output.directory</code></td><td>target/site/serenity</td><td>报告输出目录</td></tr>
+      <tr><td><code>framework.project.name</code></td><td>框架 Playwright Demo</td><td>报告项目名</td></tr>
+      <tr><td><code>framework.features.root</code></td><td>src/test/resources/features</td><td>feature 根目录</td></tr>
+      <tr><td><code>framework.logging</code></td><td>VERBOSE</td><td>日志级别（Serenity 侧）</td></tr>
       <tr><td><code>framework.verbose.logging</code></td><td>false</td><td>框架详细日志</td></tr>
       <tr><td><code>framework.trace.logging</code></td><td>false</td><td>框架超详细日志</td></tr>
-      <tr><td><code>serenity.playwright.hang.watchdog.interval.ms</code></td><td>60000</td><td>卡住诊断看门狗采样间隔(ms)</td></tr>
+      <tr><td><code>framework.playwright.hang.watchdog.interval.ms</code></td><td>60000</td><td>卡住诊断看门狗采样间隔(ms)</td></tr>
       <tr><td><code>logging.root.level</code></td><td>INFO</td><td>根日志级别</td></tr>
     </tbody>
   </table>
@@ -1147,7 +1147,7 @@ serenity.screenshot.strategy = AFTER_EACH_STEP</code></pre>
 playwright.browser.headless = true
 playwright.page.timeout = 20000
 
-serenity.screenshot.strategy = AFTER_EACH_STEP
+framework.screenshot.strategy = AFTER_EACH_STEP
 
 framework.verbose.logging = false
 route.capture.all.type = false</code></pre>
@@ -1269,7 +1269,7 @@ sensitive.data.extra.query.keys   = sign, ts</code></pre>
   </details>
 
   <details><summary>日志太吵 / 想定位卡在哪一步？</summary>
-    <div class="body">默认 <code>framework.verbose.logging=false</code> 只留关键日志；排查时打开它，或调 <code>serenity.playwright.hang.watchdog.interval.ms</code>（用例跑太久时周期性打印线程栈，定位无日志的阻塞点）。</div>
+    <div class="body">默认 <code>framework.verbose.logging=false</code> 只留关键日志；排查时打开它，或调 <code>framework.playwright.hang.watchdog.interval.ms</code>（用例跑太久时周期性打印线程栈，定位无日志的阻塞点）。</div>
   </details>
 
   <details><summary>报告在哪？怎么只跑某几个用例？</summary>

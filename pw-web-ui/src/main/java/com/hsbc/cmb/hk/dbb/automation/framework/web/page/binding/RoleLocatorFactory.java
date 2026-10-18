@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * <p><b>为何独立成类（单一事实来源）：</b>角色定位有两个消费者——
  * <ol>
  *   <li>声明式 {@code @RoleElement} 注解字段（由 {@link RoleElementBinder} 绑定）；</li>
- *   <li>运行期 API（业务契约 {@code SerenityBasePage#elementByRole*}，经录制门面 {@code SerenityPageRecorder}）。</li>
+ *   <li>运行期 API（业务契约 {@code ManagedBasePage#elementByRole*}，经录制门面 {@code PageRecorder}）。</li>
  * </ol>
  * 二者必须共享同一份「NLS 键 → 当前语言可访问名 → 模板/可见文本归一 → byRole」语义，
  * 否则注解路径与运行期路径会在多语言值、模板值（{@code {{var}}}）与状态三态上产生行为分叉。
@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
  *
  * <p><b>边界：</b>本类为框架内部实现，业务代码不得直接调用（它返回裸 Playwright {@code Locator}，
  * 属类型泄漏，受 {@code ArchitectureTest.businessCodeMustNotUseInternalByLocators} 的同类边界约束）；
- * 业务应使用业务契约 {@code SerenityBasePage#elementByRole*}（返回框架原生
+ * 业务应使用业务契约 {@code ManagedBasePage#elementByRole*}（返回框架原生
  * {@code PageElement}/{@code PageElementList}）或 {@code @RoleElement} 注解。
  */
 public final class RoleLocatorFactory {

@@ -1,10 +1,10 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media.PlaywrightScreenshotManager;
-import net.thucydides.model.screenshots.ScreenshotAndHtmlSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,8 +14,10 @@ import java.util.regex.Pattern;
 /**
  *  收口 {@code PlaywrightListener} 的截图捕获与文件名清洗职责（原 takeScreenshot / sanitize* 簇）。
  *
- * <p>截图是监听器中最独立的子系统：仅依赖 {@link PlaywrightManager} 产出 PNG/HTML 路径并封装为
- * Serenity 的 {@link ScreenshotAndHtmlSource}。迁移后日志路由回本类 logger（保持生产溯源一致），
+ * <p>截图是监听器中最独立的子系统：仅依赖 {@link PlaywrightManager} 产出 PNG 路径并封装为
+ * 框架原生 {@link CapturedScreenshot}（不再耦合 框架 的 {@code ScreenshotAndHtmlSource}）。
+ * 实际挂载到报告由 {@code ReportingBridge}（serenity 接线层 {@code SerenityReportingBridge}）完成。
+ * 迁移后日志路由回本类 logger（保持生产溯源一致），
  * 重入守卫（takingScreenshot）经 core 的 {@code TestContext}/{@code ContextKey} 收拢为 per-thread 持有（T3-1 收口），避免污染监听器的失败守卫状态。</p>
  *
  * <p><b>线程安全：</b>{@code takingScreenshot} 为 per-thread ThreadLocal，并行 scenario 互不干扰；
@@ -35,12 +37,12 @@ final class FailureScreenshotHandler {
     }
 
     /**
-     * 截图并封装为 Serenity 对象（不注册到步骤列表，由调用方决定是否加入）。
+     * 截图并封装为框架原生 {@link CapturedScreenshot}（不注册到步骤列表，由调用方决定是否加入）。
      *
      * @param screenshotName 截图名称
      * @return 截图对象；递归重入或未生成文件时返回 null
      */
-    static ScreenshotAndHtmlSource capture(String screenshotName) {
+    static CapturedScreenshot capture(String screenshotName) {
         if (Boolean.TRUE.equals(TestContextHolder.get().get(TAKING_SCREENSHOT_KEY))) {
             VerboseLogging.logDebugIfVerbose(logger,
                     "Skipping screenshot - already taking screenshot to prevent recursion");
@@ -51,10 +53,8 @@ final class FailureScreenshotHandler {
             String screenshotPath = PlaywrightScreenshotManager.takeScreenshot(screenshotName);
             if (screenshotPath != null) {
                 File pngFile = new File(screenshotPath);
-                File htmlFile = new File(screenshotPath.replace(".png", ".html"));
                 if (pngFile.exists()) {
-                    ScreenshotAndHtmlSource result = new ScreenshotAndHtmlSource(
-                            pngFile, htmlFile.exists() && htmlFile.length() > 0 ? htmlFile : null);
+                    CapturedScreenshot result = new CapturedScreenshot(pngFile, screenshotName);
                     VerboseLogging.logDebugIfVerbose(logger, "Screenshot captured: {} -> {}",
                             screenshotName, pngFile.getName());
                     ListenerPerfStats.incrementScreenshot();

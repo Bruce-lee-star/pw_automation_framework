@@ -1,0 +1,101 @@
+package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge;
+
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * {@link com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceSink} 的 框架 实现 —— 待报告队列 + 主线程 flush（对齐 master 的
+ * {@code framework/web/route/util/SerenityReporter}）。
+ *
+ * <p><b>为什么必须入队而不是直接写</b>：内核的上报发生在 Playwright 事件线程（route 调用线程）上，
+ * 与报告引擎的测试主线程没有 ThreadLocal 关联 —— 在这些线程上直接写入报告数据会丢。故 {@link #record}
+ * 只入队（线程安全），由框架在测试主线程的收尾钩子（{@code PlaywrightLifecycleBridge.cleanupForScenario}）调用
+ * {@link #flush()} 经 {@code ReportingBridge} 批量写入。</p>
+ *
+ * <p><b>降级语义</b>：非报告环境（如纯 JUnit 单测 / 未装配报告引擎）经 {@code ReportingBridge.isReportingActive()}
+ * 短路 —— 此时直接清空队列并静默返回，绝不产生 ERROR 噪音、也不积压。队列上限 {@code serenity.route.maxPendingRecords}
+ * （默认 500），超限丢最旧并 WARN。</p>
+ */
+public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceSink {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(RouteEvidenceSink.class);
+
+    /** 单次待报告上限：防极端场景积压（丢最旧，与 master 同策略）。 */
+    private static final int MAX_PENDING =
+            Integer.getInteger("serenity.route.maxPendingRecords", 500);
+
+    /** 待报告记录：{operation, 脱敏 url, detail}。 */
+    private static final Queue<String[]> PENDING = new ConcurrentLinkedQueue<>();
+
+    /** 待报告条数（O(1) 近似值，仅用于上限判定与日志）。 */
+    private static final AtomicInteger PENDING_COUNT = new AtomicInteger(0);
+
+    @Override
+    public void record(String operation, String url, String detail) {
+        try {
+            if (PENDING_COUNT.incrementAndGet() > MAX_PENDING) {
+                PENDING.poll();
+                PENDING_COUNT.decrementAndGet();
+                LOGGER.warn("[Route] pending evidence queue exceeded {} records — dropping the oldest "
+                        + "(is a flush missing?)", MAX_PENDING);
+            }
+            PENDING.offer(new String[] {operation == null ? "-" : operation, maskUrl(url), detail});
+        } catch (Exception e) {
+            // 上报是旁路：入队失败绝不影响路由主流程
+            LOGGER.debug("[Route] evidence enqueue skipped: {}", e.toString());
+        }
+    }
+
+    @Override
+    public void flush() {
+        if (PENDING.isEmpty()) {
+            return;
+        }
+        if (!ReportingBridgeRegistry.get().isReportingActive()) {
+            // 非 框架 环境（纯单测）：清空避免积压，且不触发 ERROR 日志
+            int drained = 0;
+            while (PENDING.poll() != null) {
+                drained++;
+            }
+            PENDING_COUNT.set(0);
+            LOGGER.debug("[Route] evidence flush skipped (no 框架 listener), drained {} record(s)", drained);
+            return;
+        }
+        String[] item;
+        int written = 0;
+        while ((item = PENDING.poll()) != null) {
+            PENDING_COUNT.decrementAndGet();
+            try {
+                ReportingBridgeRegistry.get().recordReportData(
+                        String.format("[Route %s] %s", item[0], item[1]), item[2]);
+                written++;
+            } catch (Exception e) {
+                LOGGER.debug("[Route] evidence write skipped: {}", e.toString());
+            }
+        }
+        if (written > 0) {
+            // 仅在真的写了东西时记录（步骤级 flush 大多为空）：便于回答"证据是在哪一步落进报告的"
+            LOGGER.info("[Route] route evidence written to report: {} record(s)", written);
+        }
+    }
+
+    /**
+     * 报告<b>标题</b>的 URL 脱敏：整段丢弃 query（只留 path）。
+     *
+     * <p>刻意比 {@code SensitiveDataSanitizer.sanitizeUrl}（正文/日志侧用：仅当命中敏感 query 键/值
+     * 才丢整个 query）更严 —— 标题是报告的"门面"，宁可过度遮蔽。正文那侧由
+     * {@code RouteDsl.describeCaptured} 统一收口，两处都脱敏、口径各自说明。</p>
+     */
+    private static String maskUrl(String url) {
+        if (url == null) {
+            return "-";
+        }
+        int queryAt = url.indexOf('?');
+        return queryAt < 0 ? url : url.substring(0, queryAt) + "?***";
+    }
+}

@@ -10,7 +10,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions;
  *
  * <p>故超时默认<b>失败快</b>：抛出本异常，由调用方（登录边界 / 并发用例执行）如实判为该场景失败。
  * 需要退回旧行为时显式配置
- * {@code serenity.playwright.concurrent.partition.fail.closed=false}（逃生舱）。</p>
+ * {@code framework.playwright.concurrent.partition.fail.closed=false}（逃生舱）。</p>
  */
 public class ConcurrencyGateTimeoutException extends FrameworkException {
 

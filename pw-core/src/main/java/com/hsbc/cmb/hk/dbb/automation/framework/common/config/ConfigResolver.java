@@ -3,9 +3,9 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
 /**
  * 配置解析器抽象（依赖倒置点，CORE-P0-1）。
  *
- * <p>core 仅定义本接口，不依赖任何具体配置框架（Serenity / Typesafe）。
+ * <p>core 仅定义本接口，不依赖任何具体配置框架（框架 / Typesafe）。
  * 上层模块（web）通过 JDK {@link java.util.ServiceLoader} 在 {@code META-INF/services/} 下
- * 注册实现，使 core 在编译期与运行期均不耦合 Serenity。借此打破 core 对 Serenity 的
+ * 注册实现，使 core 在编译期与运行期均不耦合 框架。借此打破 core 对 框架 的
  * 编译期强依赖，让"core 是纯净底座"在 classpath 层面成立。</p>
  *
  * <p>语义约定：{@link #resolve(String)} 返回该来源解析出的配置值；若该来源无此键则返回

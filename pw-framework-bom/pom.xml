@@ -29,135 +29,18 @@
         </dependency>
 
         <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-model</artifactId>
-            <version>${serenity.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>commons-logging</groupId>
-                    <artifactId>commons-logging</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.cucumber</groupId>
-                    <artifactId>cucumber-core</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.cucumber</groupId>
-                    <artifactId>cucumber-java</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-core</artifactId>
-            <version>${serenity.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-java</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-api</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-support</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-chrome-driver</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-firefox-driver</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-edge-driver</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-ie-driver</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>htmlunit3-driver</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.htmlunit</groupId>
-                    <artifactId>htmlunit</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.httpcomponents</groupId>
-                    <artifactId>httpclient</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>commons-logging</groupId>
-                    <artifactId>commons-logging</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-cucumber</artifactId>
-            <version>${serenity.cucumber.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-java</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.seleniumhq.selenium</groupId>
-                    <artifactId>selenium-api</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.cucumber</groupId>
-                    <artifactId>cucumber-core</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.cucumber</groupId>
-                    <artifactId>cucumber-java</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.cucumber</groupId>
-                    <artifactId>cucumber-junit</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-junit</artifactId>
-            <version>${serenity.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
 
+        <!-- M3：纯 RestAssured（去 Serenity）。pw-api-core 代码已用 io.restassured.*（非 SerenityRest），
+             版本对齐此前经 serenity-rest-assured 传入的 5.5.6，避免切换期版本 skew。 -->
         <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-screenplay</artifactId>
-            <version>${serenity.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-rest-assured</artifactId>
-            <version>${serenity.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>commons-logging</groupId>
-                    <artifactId>commons-logging</artifactId>
-                </exclusion>
-            </exclusions>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <version>5.5.6</version>
         </dependency>
 
         <dependency>
@@ -325,6 +208,11 @@
                 <groupId>io.cucumber</groupId>
                 <artifactId>datatable</artifactId>
                 <version>${cucumber.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+                <artifactId>pw-reports-v2</artifactId>
+                <version>1.0.1</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

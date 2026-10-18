@@ -5,6 +5,9 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.listener.ListenerRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,7 +17,7 @@ import org.slf4j.LoggerFactory;
  * 管理Playwright生命周期
  *
  * 注意：监听器通过 SPI 机制自动注册（ThucydidesStepsListenerAdapter）
- * 不需要手动注册 Serenity 监听器
+ * 不需要手动注册 框架 监听器
  */
 public class FrameworkCore {
     private static final Logger logger = LoggerFactory.getLogger(FrameworkCore.class);
@@ -44,7 +47,7 @@ public class FrameworkCore {
                 com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator.ORDER_FRAMEWORK_CORE,
                 "pw-core", () -> {
                     //  W-1：JVM 退出期收口浏览器资源，避免硬杀留下孤儿浏览器进程（CI runner 堆积、内存耗尽）。
-                    //  2026-09-27 强化（日志实证：Serenity testSuiteFinished 在 Cucumber 编排下不触发，
+                    //  2026-09-27 强化（日志实证：框架 testSuiteFinished 在 Cucumber 编排下不触发，
                     //  本 hook 是 JVM 正常退出的最后兜底）：
                     //  ① Route 引擎（v1+v2 线程）先行关闭 —— 与浏览器无关，即使 cleanupAll 被并发窗口
                     //     拒绝，线程也不残留；
@@ -104,6 +107,8 @@ public class FrameworkCore {
     // 初始化框架
     public void initialize() {
         try {
+            // DEV-V5 去 Serenity 适配器：把 framework.* 配置回填给 serenity.* 系统属性，避免 Serenity-core 报告/浏览器行为回归
+            com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig.publishSerenityCompatibility();
             if (frameworkState.isInitialized()) {
                 VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is already initialized");
                 return;
@@ -133,9 +138,35 @@ public class FrameworkCore {
         }
     }
     
+    /**
+     * 并发安全地确保框架已全局初始化（框架 {@code getDriver} 式懒加载）。
+     *
+     * <p>供运行时 accessor（{@code getContext/getPage/getBrowser} 等）在 {@code !isInitialized} 时
+     * <b>自初始化</b>，消除"漏触发生命周期回调即抛 not initialized"的脆弱性——不再强依赖
+     * {@code onTestRunStarted/onScenarioStarted} 先行初始化。</p>
+     *
+     * <p><b>双检锁</b>：快路径读 {@link FrameworkState#isInitialized()}（AtomicBoolean，volatile 语义）；
+     * 慢路径在 {@code synchronized(FrameworkCore.class)} 内再检，仅一个线程执行 {@link #initialize()}，
+     * 其余线程出锁后即见 initialized=true。{@link #initialize()} 自身亦幂等；初始化失败抛
+     * {@link InitializationException}（isInitialized 保持 false，下次访问重试）。</p>
+     */
+    public void ensureInitialized() {
+        if (frameworkState.isInitialized()) {
+            return;
+        }
+        synchronized (FrameworkCore.class) {
+            if (frameworkState.isInitialized()) {
+                return;
+            }
+            initialize();
+        }
+    }
+
     // 初始化框架（带自定义监听器包）
     public void initialize(String... listenerPackages) {
         try {
+            // DEV-V5 去 Serenity 适配器：把 framework.* 配置回填给 serenity.* 系统属性，避免 Serenity-core 报告/浏览器行为回归
+            com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig.publishSerenityCompatibility();
             if (frameworkState.isInitialized()) {
                 VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is already initialized");
                 return;
@@ -305,7 +336,7 @@ public class FrameworkCore {
      * （凭证是快照而非活体），"保留活 Context 延续登录态"已被废除。
      *
      * <p>实测（test-automation/1.txt 2026-09-26）框架的<b>实际收尾入口</b>是 glue 的 {@code @After}
-     * → 本方法（它先于 Serenity {@code testFinished} 执行，且 glue 包内的 {@code @Before/@After} 对
+     * → 本方法（它先于 框架 {@code testFinished} 执行，且 glue 包内的 {@code @Before/@After} 对
      * <b>全部</b> scenario 生效）；而 {@code PlaywrightListener.testFinished} 在该运行下未被派发，
      * 故"结果"必须由 glue 从 cucumber 侧传入（{@code Scenario.isFailed()} 是权威来源）。
      *
@@ -325,6 +356,23 @@ public class FrameworkCore {
             VerboseLogging.logErrorIfVerbose(logger, " Failed to cleanup after test", e);
             frameworkState.setLastException(e);
             // 不抛出异常，避免影响测试报告
+        }
+
+        //  浏览器日志 flush：把本用例收集到的 page console / page-error 写入报告 outcome。
+        //  独立于 failOnError 开关；flush 失败绝不影响用例收尾（R4）。
+        try {
+            ReportBus bus = ReportBus.getDefault();
+            StepHandle h = bus.currentHandle();
+            if (h != null && !h.isNoop()) {
+                for (String l : PageEventMonitor.drainPendingBrowserConsole()) {
+                    bus.appendBrowserConsole(h, false, l);
+                }
+                for (String l : PageEventMonitor.drainPendingBrowserErrors()) {
+                    bus.appendBrowserConsole(h, true, l);
+                }
+            }
+        } catch (Throwable ignore) {
+            VerboseLogging.logDebugIfVerbose(logger, "browser log flush skipped: {}", ignore.getMessage());
         }
     }
     

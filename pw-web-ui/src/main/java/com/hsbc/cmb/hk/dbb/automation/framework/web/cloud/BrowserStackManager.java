@@ -375,7 +375,7 @@ public class BrowserStackManager {
         caps.put("osVersion", getStringValue(WebFrameworkConfig.BROWSERSTACK_OS_VERSION, "11"));
 
         // 项目信息
-        caps.put("projectName", getStringValue(WebFrameworkConfig.SERENITY_PROJECT_NAME, "Automation Project"));
+        caps.put("projectName", getStringValue(WebFrameworkConfig.FRAMEWORK_PROJECT_NAME, "Automation Project"));
         caps.put("buildName", "Build-" + System.currentTimeMillis());
 
         // 会话名称

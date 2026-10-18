@@ -22,12 +22,12 @@ import static org.junit.Assert.assertTrue;
  *       <b>不再</b>由 {@code serenity.logging} 决定；</li>
  *   <li>提级只作用于<b>本项目包</b> logger，<b>绝不动 root</b>（旧实现抬 root ⇒ 第三方 DEBUG 全量刷屏）；</li>
  *   <li>录制开关（{@code isRecordingEnabled}）与日志门控<b>解耦</b>，仍按 {@code serenity.logging} 判定
- *       —— 否则关日志会连带停掉 Serenity 报告的动作录制。</li>
+ *       —— 否则关日志会连带停掉 框架 报告的动作录制。</li>
  * </ol>
  */
 public class VerboseLoggingGateTest {
 
-    private static final String SERENITY_LOGGING = ConfigKeys.WEB_SERENITY_LOGGING.key();
+    private static final String FRAMEWORK_LOGGING = ConfigKeys.WEB_FRAMEWORK_LOGGING.key();
     private static final String FRAMEWORK_VERBOSE = ConfigKeys.WEB_FRAMEWORK_VERBOSE_LOGGING.key();
     private static final String FRAMEWORK_TRACE = ConfigKeys.WEB_FRAMEWORK_TRACE_LOGGING.key();
     private static final String PROJECT_LOGGER = "com.hsbc.cmb.hk.dbb.automation";
@@ -40,7 +40,7 @@ public class VerboseLoggingGateTest {
 
     @Before
     public void setUp() {
-        prevSerenity = System.getProperty(SERENITY_LOGGING);
+        prevSerenity = System.getProperty(FRAMEWORK_LOGGING);
         prevVerbose = System.getProperty(FRAMEWORK_VERBOSE);
         prevTrace = System.getProperty(FRAMEWORK_TRACE);
         VerboseLogging.resetForTests();
@@ -52,7 +52,7 @@ public class VerboseLoggingGateTest {
 
     @After
     public void tearDown() {
-        restore(SERENITY_LOGGING, prevSerenity, ConfigKeys.WEB_SERENITY_LOGGING.defaultValue());
+        restore(FRAMEWORK_LOGGING, prevSerenity, ConfigKeys.WEB_FRAMEWORK_LOGGING.defaultValue());
         restore(FRAMEWORK_VERBOSE, prevVerbose, ConfigKeys.WEB_FRAMEWORK_VERBOSE_LOGGING.defaultValue());
         restore(FRAMEWORK_TRACE, prevTrace, ConfigKeys.WEB_FRAMEWORK_TRACE_LOGGING.defaultValue());
         VerboseLogging.isVerboseEnabled(); // 让级别按恢复后的配置重新同步
@@ -61,7 +61,7 @@ public class VerboseLoggingGateTest {
         VerboseLogging.resetForTests();
     }
 
-    /** 刻意用 setProperty 而非 clearProperty：清除会落到 Serenity 启动期快照，值不确定（既有教训）。 */
+    /** 刻意用 setProperty 而非 clearProperty：清除会落到 框架 启动期快照，值不确定（既有教训）。 */
     private static void restore(String key, String value, String fallback) {
         System.setProperty(key, value != null ? value : fallback);
     }
@@ -77,11 +77,11 @@ public class VerboseLoggingGateTest {
     @Test
     // @DisplayName: "门控键：framework.verbose.logging 决定日志；serenity.logging 只决定录制（两者解耦）"
     public void gate_followsFrameworkKeys_notSerenity() {
-        System.setProperty(SERENITY_LOGGING, "VERBOSE");
+        System.setProperty(FRAMEWORK_LOGGING, "VERBOSE");
         System.setProperty(FRAMEWORK_VERBOSE, "false");
         System.setProperty(FRAMEWORK_TRACE, "false");
-        assertFalse("serenity.logging=VERBOSE 不得再开启详细日志", VerboseLogging.isVerboseEnabled());
-        assertTrue("录制语义必须保持：serenity.logging=VERBOSE ⇒ 录制开", VerboseLogging.isRecordingEnabled());
+        assertFalse("framework.logging=VERBOSE 不得再开启详细日志", VerboseLogging.isVerboseEnabled());
+        assertTrue("录制语义必须保持：framework.logging=VERBOSE ⇒ 录制开", VerboseLogging.isRecordingEnabled());
 
         System.setProperty(FRAMEWORK_VERBOSE, "true");
         assertTrue("framework.verbose.logging=true ⇒ 详细日志开", VerboseLogging.isVerboseEnabled());
@@ -92,8 +92,8 @@ public class VerboseLoggingGateTest {
         assertTrue("framework.trace.logging=true ⇒ trace 开", VerboseLogging.isTraceEnabled());
         assertTrue("trace 蕴含 verbose", VerboseLogging.isVerboseEnabled());
 
-        System.setProperty(SERENITY_LOGGING, "QUIET");
-        assertFalse("serenity.logging=QUIET ⇒ 录制关（既有语义）", VerboseLogging.isRecordingEnabled());
+        System.setProperty(FRAMEWORK_LOGGING, "QUIET");
+        assertFalse("framework.logging=QUIET ⇒ 录制关（既有语义）", VerboseLogging.isRecordingEnabled());
         assertTrue("录制开关不得反过来影响日志门控（已解耦）", VerboseLogging.isVerboseEnabled());
     }
 

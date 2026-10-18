@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * {@link EnvironmentUtils} 单测（评审 P-2 补测）。
  *
- * <p>为什么值得测：该类是 Serenity 已弃用 API（{@code SystemEnvironmentVariables}）的替代入口，
+ * <p>为什么值得测：该类是 框架 已弃用 API（{@code SystemEnvironmentVariables}）的替代入口，
  * 被配置解析链直接消费（如 {@code ConfigProvider} 读取当前环境名）。契约是
  * 「<b>系统属性读写往返一致 + 缺失返回 null / 显式默认值</b>」。测试使用自建探针键并在结束前清理，
  * 避免污染同 JVM 的其它用例。

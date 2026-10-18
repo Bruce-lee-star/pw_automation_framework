@@ -9,13 +9,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * {@link ResultReporter} 注册表与广播门面 —— D4-2。
  *
- * <p>框架产出的结果经本类广播给所有已注册的上报实现（当前为 Serenity 适配器，
+ * <p>框架产出的结果经本类广播给所有已注册的上报实现（当前为 框架 适配器，
  * 未来可并行接入其它报告引擎）。
  *
  * <p><b>异常隔离</b>：任一上报实现抛异常只记录日志，不影响其它实现与主流程 ——
  * 报告属可观测设施，它的故障不应让测试跑不起来。
  *
- * <p><b>无实现时静默 no-op</b>：纯单测 / 非 Serenity 环境下没有任何上报实现，
+ * <p><b>无实现时静默 no-op</b>：纯单测 / 非 框架 环境下没有任何上报实现，
  * 调用应安全空转，而不是抛异常。
  */
 public final class ResultReporters {

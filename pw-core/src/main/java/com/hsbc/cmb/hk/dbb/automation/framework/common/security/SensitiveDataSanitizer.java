@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  *  P0 合规：敏感数据脱敏 —— 金融级数据安全要求。<b>全框架脱敏的统一入口（门面）。</b>
  *
  * <p><b>设计原则：脱敏是数据出域的强制收口，不是可选装饰。</b>
- * 任何把请求/响应数据写出进程边界的 sink（数据库、本地文件、Serenity 报告、
+ * 任何把请求/响应数据写出进程边界的 sink（数据库、本地文件、框架 报告、
  * 失败报告、日志）都<b>必须</b>先经本类处理。
  *
  * <h3>本类职责</h3>
@@ -48,7 +48,7 @@ import java.util.regex.Pattern;
  * 信用卡轨道数据），见 {@link SensitiveValueRecognizer} 与 {@link BuiltinValueRecognizers}。
  * 银行卡 CVV 无校验位，按<b>字段名</b>识别，避免裸 3~4 位数字值级误报。识别器经 SPI 可扩展；
  * 全部脱敏为定长掩码，不泄露原值亦不泄露长度。</p>
- * <p><b>配置项</b>（系统属性优先，回退 Serenity 配置源 {@code serenity.conf}）：</p>
+ * <p><b>配置项</b>（系统属性优先，回退 框架 配置源 {@code serenity.conf}）：</p>
  * <ul>
  *   <li>{@code sensitive.data.rules.profile}：市场 profile 名（默认 {@code defaults}）。</li>
  *   <li>{@code sensitive.data.profile.<P>.{header,body,query}.keys}：某 profile 下附加敏感键

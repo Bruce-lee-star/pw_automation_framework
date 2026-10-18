@@ -14,7 +14,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * <p><b>与硬断言的差异</b>：{@link FrameworkAssertions} 首次失败即抛，后续校验不再执行，
  * 一次运行只能暴露一个问题；软断言把失败<b>收集</b>起来继续执行，在场景结束时
- * （由 Serenity 监听器调用 {@link #assertAll()}）一次性抛出聚合错误 ——
+ * （由 框架 监听器调用 {@link #assertAll()}）一次性抛出聚合错误 ——
  * 一个用例能同时暴露全部不符项，减少"改一个跑一次"的返工。
  *
  * <p><b>线程模型（关键）</b>：失败收集器是 {@code ThreadLocal}，
@@ -45,7 +45,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * SoftAssertions.assertAll();   // 场景末：有失败则抛聚合错误
  * }</pre>
  *
- * <p>本类<b>不依赖任何测试引擎</b>（纯 JDK），Serenity 侧的上报由 web 监听器完成。
+ * <p>本类<b>不依赖任何测试引擎</b>（纯 JDK），框架 侧的上报由 web 监听器完成。
  */
 public final class SoftAssertions {
 
@@ -196,7 +196,7 @@ public final class SoftAssertions {
 
     /**
      * 把当前线程的失败渲染为可读报告（<b>不清空、不抛出</b>）。
-     * <p>供 Serenity 报告与日志复用，保证"报告里看到的"与"抛出的"是同一份内容。
+     * <p>供 框架 报告与日志复用，保证"报告里看到的"与"抛出的"是同一份内容。
      */
     public static String renderFailures() {
         List<AssertionFailure> failures = failuresForCurrentThread();

@@ -455,7 +455,7 @@ public class PageObjectFactory {
      *
      * <p><b>现实现</b>优先取用例级身份（{@link ScenarioContext#currentScenarioId()}，由框架在用例开始时绑定），
      * 无绑定（如纯逻辑单测）时才回退到线程身份。作用域因此与<b>用例</b>对齐，并由
-     * {@link #endRequestScope()}（用例收尾调用，见 {@code PlaywrightSerenityBridge.cleanupForScenario}）
+     * {@link #endRequestScope()}（用例收尾调用，见 {@code PlaywrightLifecycleBridge.cleanupForScenario}）
      * 回收，避免实例随用例数累积。
      *
      * @return 请求作用域键（{@code scenario:<id>} 或 {@code thread:<tid>}）

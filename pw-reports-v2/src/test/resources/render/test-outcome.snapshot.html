@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    
+    <title>User logs in with valid credentials</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
+    <link rel="stylesheet" href="assets/report-v2.css"/>
+    <style>
+        /* 新设计 CSS 未覆盖的局部样式（证据 / 附件 / 截图 / 未定义结果） */
+        .evidence { margin: 6px 0; padding-left: 20px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+        .attachment { margin: 6px 0; }
+        .attachment > summary { cursor: pointer; color: var(--text-2); font-size: 12px; }
+        .att-text, .att-html { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; }
+        /* 截图：悬浮放大（2 倍，左上角为锚点，压在其它内容之上，不改变布局） */
+        .shot { position: relative; overflow: visible; }
+        .shot img {
+            max-width: 320px; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px;
+            cursor: zoom-in; transition: transform .15s ease; transform-origin: top left;
+        }
+        .shot img:hover {
+            transform: scale(2); z-index: 20; position: relative;
+            box-shadow: 0 8px 28px rgba(31, 45, 61, .28);
+        }
+        .step-note { font-size: 12px; color: var(--failure); margin-top: 4px; }
+        .step-actions { margin-top: 4px; }
+        .b-UNDEFINED { background: var(--skipped); }
+        .step-table { margin: 8px 0 2px; font-size: 12px; }
+        .step-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
+        .step-table tr:first-child td { font-weight: 600; background: #f8fafc; }
+        .step-docstring { margin: 8px 0 2px; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Scenario <a href="feature-authentication.html" style="color:#fff;text-decoration:none;font-size:14px;font-weight:400">← back to Authentication</a></h1>
+  <div class="meta">Authentication<br>reportVersion <V></div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <div class="crumbs"><a href="index.html">Overview</a><span class="sep">›</span><a href="feature-authentication.html">Authentication</a><span class="sep">›</span><b>User logs in with valid credentials</b></div>
+    <div class="case-head">
+      <span class="badge b-FAILURE" style="padding:4px 14px;font-size:14px">Failed</span>
+      <div class="case-title">User logs in with valid credentials</div>
+    </div>
+    <div class="case-meta">
+      <span class="chip">1.3s</span>
+      <span class="chip">started <TS></span>
+      <span class="chip">Automated</span>
+      <span class="chip tag">smoke</span><span class="chip tag">login</span>
+    </div>
+  </div>
+
+
+
+  <div class="card">
+    <h3><span class="icon"></span>Execution steps</h3>
+    <ul class="steps" id="steps">        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">open the login page</span>
+                <span class="step-time"><D> ms</span>
+            </div>
+            
+                <div class="shot"><img src="login-12-user-logs-in-with-valid-credentials/screenshots/step-<N>.png" alt="screenshot"/></div>
+                <ul class="steps">        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">enter username</span>
+                <span class="step-time"><D> ms</span>
+            </div>
+            
+        </li>
+        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">enter password</span>
+                <span class="step-time"><D> ms</span>
+            </div>
+            
+                <ul class="evidence"><li>password field masked</li></ul>
+        </li>
+</ul>
+        </li>
+        <li class="st-FAILURE">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">click sign in</span>
+                <span class="step-time">1,<D> ms</span>
+            </div>
+            
+                <div class="shot"><img src="login-12-user-logs-in-with-valid-credentials/screenshots/step-<N>.png" alt="screenshot"/></div>
+                <div class="step-note">FAILURE: expected status 200 but was 401</div>
+                    <details class="step-stack"><summary>Exception details</summary><pre>java.lang.AssertionError: expected status 200 but was 401
+	at com.hsbc.cmb.hk.dbb.automation.framework.report.render.OutcomeFixtures.full(OutcomeFixtures.java:1)</pre></details>
+                <ul class="evidence"><li>POST /api/session?token=*** -&gt; 401</li></ul>
+        </li>
+        <li class="st-SKIP">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">cleanup session</span>
+                <span class="step-time"><D> ms</span>
+            </div>
+            
+        </li>
+</ul>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Evidence</h3>
+    <ul class="evidence"><li>WARNING: hook failed: teardown timed out</li></ul>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>API operations (2)</h3>
+    <ul class="api-lines"><li>GET /api/health 200</li><li>POST /api/session 401</li></ul>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Route registrations (2)</h3>
+    <ul class="route-lines"><li>[Route] register GET route for &#39;/api/health&#39; (monitor: timeout=30s)</li><li>[Route] register POST route for &#39;/api/session&#39; (mock: status=200 intercept=REPLACE)</li></ul>
+  </div>
+
+
+
+
+
+  <footer>Scenario page · reportVersion <V> · outcomeId login-12-user-logs-in-with-valid-credentials</footer>
+</div>
+
+<script>
+(function(){
+  var OUTCOME_ID = "login-12-user-logs-in-with-valid-credentials";
+  window.__doPatch = function(files) {
+    if (!files || !files.length) return;
+    var results = [];
+    var readers = [];
+    for (var i = 0; i < files.length; i++) {
+      (function(f) {
+        readers.push(new Promise(function(resolve) {
+          var r = new FileReader();
+          r.onload = function() { results.push({filename: f.name, dataBase64: r.result.split(',')[1]}); resolve(); };
+          r.readAsDataURL(f);
+        }));
+      })(files[i]);
+    }
+    Promise.all(readers).then(function() {
+      var payload = JSON.stringify({outcomeId: OUTCOME_ID, screenshots: results});
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/patch', {method: 'POST', body: payload})
+          .then(function(r){ return r.json(); })
+          .then(function(d){ if (d.ok) { alert('Uploaded ' + results.length + ' screenshot(s), reloading...'); setTimeout(function(){location.reload()}, 800); } else { alert('Failed: ' + (d.error || 'unknown')); } })
+          .catch(function(e){ alert('Upload failed: ' + e); });
+      } else {
+        var blob = new Blob([payload], {type: 'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = OUTCOME_ID + '.patch.json';
+        a.click();
+        alert('Patch downloaded: ' + a.download + '\nApply locally with ManualCaseRecorder --apply-patch ' + a.download);
+      }
+    });
+  };
+})();
+</script>
+</body>
+</html>

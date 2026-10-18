@@ -7,7 +7,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.EnvironmentUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.domain.enums.ConfigKeys;
 import com.typesafe.config.Config;
-import net.serenitybdd.rest.SerenityRest;
+import io.restassured.RestAssured;
 import io.restassured.config.HttpClientConfig;
 import io.restassured.config.LogConfig;
 import io.restassured.config.RestAssuredConfig;
@@ -35,8 +35,8 @@ public abstract class AbstractRestJob {
     private ValidatableResponse validatableResponse;
 
     static {
-        // 仅做纯对象装配（ConfigProvider / RestAssuredConfig），**不**触碰 SerenityRest —— 原因见
-        // ensureSslPolicyApplied()：副作用一旦留在静态块，"类一加载"就等于"依赖 Serenity/Cucumber 运行栈"。
+        // 仅做纯对象装配（ConfigProvider / RestAssuredConfig），**不**提前触碰 RestAssured 全局默认配置副作用 —— 原因见
+        // ensureSslPolicyApplied()：副作用一旦留在静态块，"类一加载"就等于"强写 RestAssured.config"，干扰纯 JUnit 单测。
         initializeRestAssuredConfig();
     }
 
@@ -49,12 +49,12 @@ public abstract class AbstractRestJob {
      * 默认【严格校验】（RestAssured 原生默认行为：校验证书链 + 主机名）。
      * 仅当配置显式声明 {@code http.ssl.relax-validation=true} 时才放宽。
      * <p>
-     * 原实现无条件调用 {@code SerenityRest.useRelaxedHTTPSValidation()}，对所有经
-     * SerenityRest/RestAssured 发出的 API 调用永久关闭证书校验（MITM 风险），
+     * 原实现经 {@code SerenityRest} 无条件放宽 TLS 校验，对所有经
+     * RestAssured 发出的 API 调用永久关闭证书校验（MITM 风险），
      * 并令 {@link ApiFrameworkConfig#isSslRelaxValidation()}（默认 false）形同虚设。
      * <p>
      * 说明：RestAssured 5.x 未提供 {@code useStrictHTTPSValidation()}，恢复严格校验的
-     * 正确方式是显式装配一个默认 {@link SSLConfig} 并写回 Serenity 的 default config。
+     * 正确方式是显式装配一个默认 {@link SSLConfig} 并写回 RestAssured 的默认 config。
      * <p>
      * 安全审计：放宽时登记 {@link SecurityAudit#recordRelaxedTls(String, String)}（可观测、
      * 可被测试断言）；若检测到生产（prod）环境仍放宽，则 fail-fast 拒绝启动，防止生产
@@ -65,7 +65,7 @@ public abstract class AbstractRestJob {
         SSLConfig sslConfig = relax
                 ? SSLConfig.sslConfig().relaxedHTTPSValidation()
                 : SSLConfig.sslConfig();
-        SerenityRest.setDefaultConfig(SerenityRest.getDefaultConfig().sslConfig(sslConfig));
+        RestAssured.config = RestAssured.config().sslConfig(sslConfig);
 
         if (relax) {
             String environment = EnvironmentUtils.currentEnvironment().getEnvironmentName();
@@ -82,12 +82,10 @@ public abstract class AbstractRestJob {
     /**
      * 惰性应用 SSL/TLS 策略（幂等、线程安全）。
      *
-     * <p><b>为什么不放在静态块</b>：{@link #applySslPolicy()} 会调用 {@code SerenityRest.setDefaultConfig}，
-     * 即「类一加载就依赖 Serenity 运行栈（StepEventBus → Cucumber）」。于是纯 JUnit 单测（如只验证重试编排的
-     * {@code AbstractRestJobRetryLoopTest}）仅仅 {@code new RestGetJob()} 就会把整条 Serenity/Cucumber 初始化
-     * 拖进来，在未声明 Cucumber 的模块 classpath 上直接 {@code NoClassDefFoundError}。
-     * 把该副作用推迟到「真正要发请求」的唯一入口后，单测覆写 {@link #buildRequestSpecification(Entity)}
-     * 即可完全绕开，本类因而可在纯 JUnit 下测试。</p>
+     * <p><b>为什么不放在静态块</b>：{@link #applySslPolicy()} 会写回 {@code RestAssured.config}
+     * （RestAssured 的静态全局配置）。若放在静态块，则「类一加载」就强写该全局配置，可能干扰纯 JUnit 单测
+     * （如只验证重试编排的 {@code AbstractRestJobRetryLoopTest}）。把该副作用推迟到「真正要发请求」的唯一入口后，
+     * 单测覆写 {@link #buildRequestSpecification(Entity)} 即可完全绕开，本类因而可在纯 JUnit 下测试。</p>
      *
      * <p>策略放宽时的安全审计与生产 fail-fast 语义不变，仅触发时点从「类加载」变为「首次发请求」。</p>
      */
@@ -194,7 +192,13 @@ public abstract class AbstractRestJob {
         ValidatableResponse last = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                ValidatableResponse response = invoker.apply(buildRequestSpecification(entity));
+                RequestSpecification requestSpecification = buildRequestSpecification(entity);
+                // 请求转储只在首次尝试输出：重试每轮都会重新构建规格，逐次打印会让同一请求在报告里
+                // 出现多份（2026-10-18 用户反馈 "Method 出现两次"）；重试事实由下方 WARN 记录。
+                if (attempt == 1) {
+                    logRequestOnce(requestSpecification, entity);
+                }
+                ValidatableResponse response = invoker.apply(requestSpecification);
                 int status = response.extract().statusCode();
                 if (shouldRetry(status, idempotent, attempt, maxAttempts)) {
                     logger.warn("API 请求返回 5xx（{}），幂等方法第 {}/{} 次将重试（退避 {}ms）: {}",
@@ -242,10 +246,10 @@ public abstract class AbstractRestJob {
         return idempotent && statusCode >= 500 && statusCode <= 599 && attempt < maxAttempts;
     }
 
-    /** 构建请求规格（base 信息 → 参数 → body → 代理 → 请求日志）。 */
+    /** 构建请求规格（base 信息 → 参数 → body → 代理）。请求日志由调用方统一输出，见 {@link #logRequestOnce}。 */
     protected RequestSpecification buildRequestSpecification(Entity entity) {
         ensureSslPolicyApplied();
-        final RequestSpecification requestSpecification = SerenityRest.given()
+        final RequestSpecification requestSpecification = RestAssured.given()
                 .baseUri(entity.getBaseUri())
                 .basePath(entity.getBasePath())
                 .config(AbstractRestJob.getRestAssuredConfig())
@@ -263,11 +267,19 @@ public abstract class AbstractRestJob {
             requestSpecification.proxy(entity.getProxyHost(), entity.getProxyPort(), entity.getProxySchema());
         }
 
-        if (entity.isApiRequestResponseLogsEnabled()) {
-            requestSpecification.log().all();
-        }
-
         return requestSpecification;
+    }
+
+    /**
+     * 输出请求转储（受 {@code api.request.response.logging.enabled} 控制）。
+     *
+     * <p>抽成独立方法是为了把「构建」与「日志」解耦：规格每次重试都要重建，而同一请求的转储
+     * 只需输出一次，否则重试会让报告里出现多份完全相同的 “Request method/URI” 块。</p>
+     */
+    private static void logRequestOnce(RequestSpecification spec, Entity entity) {
+        if (spec != null && entity.isApiRequestResponseLogsEnabled()) {
+            spec.log().all();
+        }
     }
 
     /** 将响应回写到 Entity（状态码、cookie、body、headers）。 */

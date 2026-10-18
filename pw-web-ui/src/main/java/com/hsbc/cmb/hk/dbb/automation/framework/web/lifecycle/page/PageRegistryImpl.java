@@ -1,5 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.page;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkState;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkCore;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.lock.LifecycleLockMediator;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
@@ -26,7 +26,7 @@ public final class PageRegistryImpl implements PageRegistry {
     /**
      * 本线程当前 Page —— <b>线程级</b>持有，独立于用例级的 {@link PlaywrightManager#PAGE_KEY}。
      *
-     * <p>与 Context 同因（Cucumber {@code @After} 清用例级存储早于 Serenity {@code testFinished}）：
+     * <p>与 Context 同因（Cucumber {@code @After} 清用例级存储早于 框架 {@code testFinished}）：
      * 使收尾可靠关闭本线程 Page，并让用例级键暂缺时能回退到线程级记录。
      */
     private static final ThreadLocal<Page> CURRENT_PAGE_BY_THREAD = new ThreadLocal<>();
@@ -37,9 +37,9 @@ public final class PageRegistryImpl implements PageRegistry {
     public Page getPage() {
         //  @AutoBrowser 检测已迁至 PlaywrightListener.stepStarted（逐步骤、直接取 step 类，
         //  不在最热的 getPage 上高频扫描）。此处不再触发，避免日志刷屏与重复栈遍历。
-        if (!FrameworkState.getInstance().isInitialized()) {
-            throw new IllegalStateException("Playwright environment not initialized. Call FrameworkCore.initialize() first.");
-        }
+        //  懒加载（框架 getDriver 式）：未初始化则自初始化，不再抛"not initialized"——
+        //  初始化不再强依赖 onTestRunStarted/onScenarioStarted 先行（双检锁、幂等、并发安全）。
+        FrameworkCore.getInstance().ensureInitialized();
 
         //  韧性：浏览器已断开则快速失败，给出语义化异常而非底层 NPE/StateError
         if (PlaywrightRuntime.instance().browserCleanup.isCurrentBrowserDisconnected()) {

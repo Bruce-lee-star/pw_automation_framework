@@ -11,7 +11,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent;
  * {@code META-INF/services} SPI 自动发现（推荐，零注册代码）。框架的并发 glue 在编排线程经
  * {@link ConcurrentCaseActions#require()} 取得该动作并以并发方式驱动。</p>
  *
- * <p>⚠️ 实现约定（桥接原则 9.3）：本动作在<b>独立 worker 线程</b>执行，禁止直接触碰 Serenity
+ * <p>⚠️ 实现约定（桥接原则 9.3）：本动作在<b>独立 worker 线程</b>执行，禁止直接触碰 框架
  * {@code StepEventBus} 报告 API；失败经异常返回，由 {@link ConcurrentScenarioExecutor} 在编排线程统一回放。</p>
  */
 @FunctionalInterface

@@ -16,18 +16,18 @@ import java.util.function.Supplier;
  * 而非 110——真正消解了 Layer B 的继承面。
  *
  * <p><b>组合而非继承上帝类：</b>本类自身不继承 {@code BasePage}，仅<b>持有</b>一个 {@code BasePage}
- * 实例作为委托；所有 Layer B 方法经 {@link SerenityBasePage}（实现收敛于 {@link SerenityBasePageImpl}）转发到该委托，录制、
+ * 实例作为委托；所有 Layer B 方法经 {@link ManagedBasePage}（实现收敛于 {@link ManagedBasePageImpl}）转发到该委托，录制、
  * iframe/shadow 路由、可观测性、错误处理与原「继承 BasePage」路径逐字一致（零新逻辑）。
- * 这消除了旧设计中 {@code AbstractManagedPage} 对 {@link SerenityBasePageImpl} 的约 80 行逐行重复转发。
+ * 这消除了旧设计中 {@code AbstractManagedPage} 对 {@link ManagedBasePageImpl} 的约 80 行逐行重复转发。
  *
  * <p><b>原生操作（Layer A）：</b>业务页经 {@link #getPage()} 拿到 {@code RecordingPageProxy} 装饰的
  * Page，直接调用 {@code click/fill/navigate/...} 即由代理自动录制，不经本类。
  *
- * @apiNote 业务 Page 应 {@code extends AbstractManagedPage}（即 {@code implements ManagedPageAware, SerenityBasePage}）。
+ * @apiNote 业务 Page 应 {@code extends AbstractManagedPage}（即 {@code implements ManagedPageAware, ManagedBasePage}）。
  *       本类是框架内部组合基，非业务应扩展的"能力基类"。
  */
-public abstract class AbstractManagedPage extends SerenityBasePageImpl
-        implements ManagedPageAware, SerenityBasePage {
+public abstract class AbstractManagedPage extends ManagedBasePageImpl
+        implements ManagedPageAware, ManagedBasePage {
 
     /** 内部委托：页面上下文宿主（iframe/shadow/ensure/@Element 绑定均落在此实例）。 */
     private final BasePage page;

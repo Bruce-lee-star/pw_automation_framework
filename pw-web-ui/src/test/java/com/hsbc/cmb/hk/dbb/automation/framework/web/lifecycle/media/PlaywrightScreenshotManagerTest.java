@@ -14,7 +14,7 @@ public class PlaywrightScreenshotManagerTest {
 
     @Test
     public void takeScreenshot_returnsNullWhenNoPage() {
-        // 当前线程无绑定页面，Serenity PNG 链路应安全降级返回 null（不抛 NPE/不初始化浏览器）
+        // 当前线程无绑定页面，框架 PNG 链路应安全降级返回 null（不抛 NPE/不初始化浏览器）
         assertNull(PlaywrightScreenshotManager.takeScreenshot("no-page"));
     }
 }

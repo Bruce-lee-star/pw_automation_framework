@@ -1,0 +1,5 @@
+# 框架原生 Cucumber 事件适配器（DEV-V5 · 去 Serenity）。
+# ⚠️ 仅在 JUnit Platform 引擎（cucumber-junit-platform-engine）下经 ServiceLoader 自动发现；
+#    JUnit4 @RunWith(Cucumber.class) 不做插件 SPI 发现（2026-10-17 实测），故当前必须由消费方
+#    在 @CucumberOptions(plugin=...) 显式声明本 FQCN。本文件为将来迁移到 JUnit Platform 引擎预留。
+com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkCucumberEventListener

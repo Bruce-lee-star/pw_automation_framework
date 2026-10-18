@@ -7,10 +7,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 官方 Adapter：把 Serenity 生命周期事件桥接到 {@link FrameworkListener} —— D4-1。
+ * 官方 Adapter：把 框架 生命周期事件桥接到 {@link FrameworkListener} —— D4-1。
  *
- * <p><b>职责</b>：业务只实现 {@link FrameworkListener}（纯框架接口，不碰 Serenity），
- * 由本类在 Serenity 回调点统一转发。换测试引擎时只需替换本 Adapter，业务监听器不动。
+ * <p><b>职责</b>：业务只实现 {@link FrameworkListener}（纯框架接口，不碰 框架），
+ * 由本类在 框架 回调点统一转发。换测试引擎时只需替换本 Adapter，业务监听器不动。
  *
  * <p><b>异常隔离（关键）</b>：任一监听器回调抛异常都在此被捕获并记录，
  * <b>绝不影响其它监听器，也绝不中断主流程</b> —— 对齐 W-16「单点失败不拖垮全盘」：

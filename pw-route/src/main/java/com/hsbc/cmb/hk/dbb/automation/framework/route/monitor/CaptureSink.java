@@ -398,7 +398,7 @@ public final class CaptureSink {
         recordVersion.incrementAndGet();
         recordArrival.release(recordArrival.getQueueLength() + 1);
         count.incrementAndGet();
-        // 捕获结果 → Serenity 报告：报告要能回答"采到了什么、成功没"。**纯采集规则没有响应侧期望**，
+        // 捕获结果 → 框架 报告：报告要能回答"采到了什么、成功没"。**纯采集规则没有响应侧期望**，
         // 不进入 MonitorSink 的观测队列，其结果只能从这里出来，故不能省。
         // 明细渲染成本 = 头脱敏 + 体脱敏 + JSON pretty，**每次命中只渲染一遍**：
         // 原实现在同一次命中里渲染两遍（日志一遍 call.detail()、报告一遍 call.detailWith(...)，

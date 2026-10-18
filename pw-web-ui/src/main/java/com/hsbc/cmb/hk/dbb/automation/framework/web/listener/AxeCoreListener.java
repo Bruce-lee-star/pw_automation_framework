@@ -4,38 +4,32 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.accessibility.AxeCoreScanner
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
-import net.thucydides.model.domain.DataTable;
-import net.thucydides.model.domain.Story;
-import net.thucydides.model.domain.TestOutcome;
-import net.thucydides.model.domain.TestResult;
-import net.thucydides.model.screenshots.ScreenshotAndHtmlSource;
-import net.thucydides.model.steps.ExecutedStepDescription;
-import net.thucydides.model.steps.StepFailure;
-import net.thucydides.model.steps.StepListener;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkLifecycleListener;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioInfo;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepInfo;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.ZonedDateTime;
-import java.util.List;
-import java.util.Map;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
 /**
- * Axe-core Accessibility Test Listener
- * Automatically integrates with Serenity BDD test lifecycle
+ * Axe-core 无障碍扫描监听器（企业级 · 去 框架 专项 DEV-V5）。
+ *
+ * <p>原为 框架 {@code StepListener}，现改为原生 {@link FrameworkLifecycleListener}：
+ * <ul>
+ *   <li>{@code onTestRunStarted} 等价原 {@code testSuiteStarted} ⇒ {@link #initializeIfNeeded()}；</li>
+ *   <li>{@code onTestRunFinished} 等价原 {@code testSuiteFinished}/{@code testRunFinished} 兜底 ⇒
+ *       {@link #generateFinalReport()} + {@link #cleanupResources()}。</li>
+ * </ul>
+ * 扫描 API（{@link #scanCurrentPage}/{@link #scanElement}）保持静态、供业务 glue 直接调用，签名零变更。
  */
-public class AxeCoreListener implements StepListener {
+public final class AxeCoreListener implements FrameworkLifecycleListener {
 
-    /**
-     * Serenity 4.3.4 新增回调：外部录制截图后通知。本框架截图由 Playwright 自身管理，
-     * 不依赖 Serenity 截图流水线，故空实现（保持接口契约完整）。
-     */
-    @Override
-    public void recordScreenshot(String screenshotName, byte[] screenshotBytes) {
-        // 框架截图链路与 Serenity 无关：PlaywrightListener 在 step 失败/结束时自行截图并附加报告。
-    }
-
+    /** 单例（与原 {@code FrameworkLifecycleBus} 注册语义一致）。 */
+    public static final AxeCoreListener INSTANCE = new AxeCoreListener();
 
     private static final Logger logger = LoggerFactory.getLogger(AxeCoreListener.class);
 
@@ -61,7 +55,7 @@ public class AxeCoreListener implements StepListener {
     }
 
     /**
-     * Initialize before test suite
+     * Initialize before test suite / run
      */
     public static void initializeIfNeeded() {
         if (!AxeCoreScanner.isInitialized()) {
@@ -145,7 +139,7 @@ public class AxeCoreListener implements StepListener {
             logger.debug("Report already generated, skipping");
             return;
         }
-        
+
         if (AxeCoreScanner.isInitialized()) {
             try {
                 AxeCoreScanner.generateReport();
@@ -155,9 +149,9 @@ public class AxeCoreListener implements StepListener {
             }
         }
     }
-    
+
     /**
-     * Cleanup resources (ThreadLocal and AxeCoreScanner)
+     * Cleanup resources (AxeCoreScanner)
      */
     private static void cleanupResources() {
         try {
@@ -180,113 +174,40 @@ public class AxeCoreListener implements StepListener {
         return isAxeEnabled();
     }
 
-    // ==================== StepListener Implementation ====================
-    // 注意：AxeCoreListener 仅在测试套件级别工作（初始化/报告生成），不需要逐步骤追踪。
-    // 以下空方法体均为 StepListener 接口强制要求的实现，故意留空。
+    // ==================== FrameworkLifecycleListener Implementation ====================
+    // Axe-core 仅在测试运行级别工作（初始化/报告生成），不需要逐步骤追踪。
 
     @Override
-    public void testSuiteStarted(Class<?> storyClass) { initializeIfNeeded(); }
-
-    @Override
-    public void testSuiteStarted(Story story) { initializeIfNeeded(); }
-
-    @Override
-    public void testSuiteFinished() {
-        if (isAxeEnabled()) { generateFinalReport(); cleanupResources(); }
+    public void onTestRunStarted() {
+        initializeIfNeeded();
     }
 
     @Override
-    public void testStarted(String description) { /* axe-core 不需要逐测试跟踪 */ }
-
-    @Override
-    public void testStarted(String description, String id) { /* axe-core 不需要逐测试跟踪 */ }
-
-    @Override
-    public void testStarted(String description, String id, ZonedDateTime startTime) { /* no-op */ }
-
-    @Override
-    public void testFinished(TestOutcome result) { /* 报告在 testSuiteFinished 统一生成 */ }
-
-    @Override
-    public void testFinished(TestOutcome testOutcome, boolean b, ZonedDateTime time) { /* no-op */ }
-
-    @Override
-    public void testRetried() { /* no-op */ }
-
-    @Override
-    public void stepStarted(ExecutedStepDescription executedStepDescription) { /* no-op */ }
-
-    @Override
-    public void skippedStepStarted(ExecutedStepDescription executedStepDescription) { /* no-op */ }
-
-    @Override
-    public void stepFailed(StepFailure stepFailure) { /* no-op */ }
-
-    @Override
-    public void stepFailed(StepFailure failure, List<ScreenshotAndHtmlSource> sources, boolean b, ZonedDateTime time) { /* no-op */ }
-
-    @Override
-    public void lastStepFailed(StepFailure stepFailure) { /* no-op */ }
-
-    @Override
-    public void stepIgnored() { /* no-op */ }
-
-    @Override
-    public void stepPending() { /* no-op */ }
-
-    @Override
-    public void stepPending(String message) { /* no-op */ }
-
-    @Override
-    public void stepFinished() { /* no-op */ }
-
-    @Override
-    public void stepFinished(List<ScreenshotAndHtmlSource> sources, ZonedDateTime time) { /* no-op */ }
-
-    @Override
-    public void testFailed(TestOutcome outcome, Throwable throwable) { /* no-op */ }
-
-    @Override
-    public void testIgnored() { /* no-op */ }
-
-    @Override
-    public void testSkipped() { /* no-op */ }
-
-    @Override
-    public void testPending() { /* no-op */ }
-
-    @Override
-    public void testIsManual() { /* no-op */ }
-
-    @Override
-    public void notifyScreenChange() { /* no-op */ }
-
-    @Override
-    public void useExamplesFrom(DataTable table) { /* no-op */ }
-
-    @Override
-    public void addNewExamplesFrom(DataTable table) { /* no-op */ }
-
-    @Override
-    public void exampleStarted(Map<String, String> data) { /* no-op */ }
-
-    @Override
-    public void exampleFinished() { /* no-op */ }
-
-    @Override
-    public void assumptionViolated(String message) { /* no-op */ }
-
-    @Override
-    public void testRunFinished() {
-        // 兜底：确保即使 testSuiteFinished 未被调用也能清理资源
-        if (isAxeEnabled()) { logger.debug("testRunFinished fallback - performing final cleanup"); generateFinalReport(); cleanupResources(); }
+    public void onTestRunFinished() {
+        // 等价原 testSuiteFinished + testRunFinished 兜底：确保资源清理与报告生成
+        if (isAxeEnabled()) {
+            generateFinalReport();
+            cleanupResources();
+        }
     }
 
     @Override
-    public void takeScreenshots(List<ScreenshotAndHtmlSource> sources) { /* no-op */ }
+    public void onScenarioStarted(LifecycleScenarioInfo info) {
+        // axe-core 不需要逐场景跟踪
+    }
 
     @Override
-    public void takeScreenshots(TestResult result, List<ScreenshotAndHtmlSource> sources) { /* no-op */ }
+    public void onScenarioFinished(LifecycleScenarioResult result) {
+        // 报告在 onTestRunFinished 统一生成
+    }
 
+    @Override
+    public void onStepStarted(LifecycleStepInfo step) {
+        // no-op
+    }
 
+    @Override
+    public void onStepFinished(LifecycleStepResult stepResult) {
+        // no-op
+    }
 }

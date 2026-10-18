@@ -101,7 +101,7 @@ public class SessionStoreSessionExpiryTest {
 
     /** 与 {@code SessionStore.resolveSessionDir()} 同源解析；若不一致，本类正例会失败（故自检）。 */
     private static Path sessionDir() {
-        String override = System.getProperty("serenity.playwright.session.dir");
+        String override = System.getProperty("framework.playwright.session.dir");
         if (override != null && !override.trim().isEmpty()) {
             return Paths.get(override).toAbsolutePath().normalize();
         }

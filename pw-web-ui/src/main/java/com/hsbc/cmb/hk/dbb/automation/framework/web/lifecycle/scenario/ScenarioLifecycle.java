@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.scenario;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.PlaywrightSerenityBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
@@ -11,7 +11,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Scenario / Feature 级生命周期编排（WEB-P1-1 Step 7）：从 {@code PlaywrightManager} 下沉。
  *
- * <p>承载 scenario 级清理的<b>顺序敏感</b>编排：清理动作分布在 Serenity 桥的前后两侧，
+ * <p>承载 scenario 级清理的<b>顺序敏感</b>编排：清理动作分布在 框架 桥的前后两侧，
  * 顺序一旦颠倒会造成真实浏览器资源泄漏或登录态保留优化被静默绕过（详见方法注释）。
  *
  * @apiNote 包级私有：仅供 {@code framework.web.lifecycle} 同包协作，非对外 API。
@@ -58,7 +58,7 @@ public final class ScenarioLifecycle {
     public static void cleanupForScenario(boolean scenarioFailed) {
         TestContextHolder.get().remove(PlaywrightManager.CURRENT_CONFIG_ID_KEY);
 
-        PlaywrightSerenityBridge.cleanupForScenario(scenarioFailed);
+        PlaywrightLifecycleBridge.cleanupForScenario(scenarioFailed);
 
         // 桥已返回：Page/Context 已真正关闭，且桥已读完 customStorageStatePath，
         // 此时再清理当前线程的资源型与自定义选项 ThreadLocal 引用。
@@ -73,9 +73,9 @@ public final class ScenarioLifecycle {
     }
 
     /**
-     * Feature 级别的清理（委托给 {@link PlaywrightSerenityBridge}）。
+     * Feature 级别的清理（委托给 {@link PlaywrightLifecycleBridge}）。
      */
     public static void cleanupForFeature() {
-        PlaywrightSerenityBridge.cleanupForFeature();
+        PlaywrightLifecycleBridge.cleanupForFeature();
     }
 }

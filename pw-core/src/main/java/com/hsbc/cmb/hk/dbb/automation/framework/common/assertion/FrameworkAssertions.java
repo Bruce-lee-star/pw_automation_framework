@@ -8,14 +8,14 @@ import java.util.Objects;
  * <p><b>为什么需要它</b>：业务代码此前直接依赖 JUnit / Hamcrest / TestNG 的断言类，
  * 导致三后果：
  * <ul>
- *   <li>断言实现绑死在某个测试引擎上，换引擎或复用到非测试语境（如 Serenity step 库）即失效；</li>
+ *   <li>断言实现绑死在某个测试引擎上，换引擎或复用到非测试语境（如 框架 step 库）即失效；</li>
  *   <li>失败信息格式不统一，"expected/actual" 有的有、有的没有，排障成本由每个用例各自承担；</li>
  *   <li>框架无法在断言失败时挂自己的钩子（埋点 / 报告 / 失败传播）。</li>
  * </ul>
  *
  * <p>本门面只依赖 JDK + 本包 {@link FrameworkAssertionError}，<b>core 零测试引擎耦合</b>；
  * 失败一律抛 {@link FrameworkAssertionError}（继承 {@link AssertionError}），
- * 因此 JUnit / Cucumber / Serenity 仍能正确识别为"断言失败"而非"错误"。
+ * 因此 JUnit / Cucumber / 框架 仍能正确识别为"断言失败"而非"错误"。
  *
  * <p>用法：
  * <pre>{@code

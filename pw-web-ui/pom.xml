@@ -21,9 +21,11 @@
             <artifactId>pw-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- 报告引擎（v2，零 serenity 依赖）：提供 ReportingBridge SPI 实现，经 ReportingBridgeRegistry 自动发现。
+             替代原 pw-reports（Serenity 适配器）。 -->
         <dependency>
             <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-            <artifactId>pw-reports</artifactId>
+            <artifactId>pw-reports-v2</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -34,15 +36,15 @@
             <artifactId>guava</artifactId>
         </dependency>
 
+        <!-- M1a：FileConfigResolver 读取 HOCON 配置（serenity.conf / pw.conf）。
+             版本由根 dependencyManagement 统一管理（与 pw-api-core 同）；显式声明而非依赖
+             serenity-core 的传递链（去 Serenity 后仍成立）。 -->
+        <dependency>
+            <groupId>com.typesafe</groupId>
+            <artifactId>config</artifactId>
+        </dependency>
+
         <!-- ENG-P0-2锛歸eb 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-model</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-core</artifactId>
-        </dependency>
         <dependency>
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
@@ -66,10 +68,14 @@
 
         <!-- 娴嬭瘯鏈熶緷璧栵紙JUnit 4锛氫笌 runner 渚х粺涓€锛涘師鍏堢殑 JUnit5 濂椾欢鏀跺熬璁炬柦
              SuiteTeardownListener / junit-platform-launcher 宸查殢涔嬬Щ闄わ級 -->
+        <!-- JUnit 4，与 runner 体系统一（原先的 JUnit5 套件收尾设施 SuiteTeardownListener /
+             junit-platform-launcher 已随之移除）。
+             scope=provided 而非 test：src/main 的 CucumberWithPw 是 JUnit Runner，编译期需要
+             org.junit.*；provided 同样在 test classpath 上（本模块单测不受影响），且不向业务传递版本。 -->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
         
         <dependency>
@@ -113,6 +119,17 @@
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>datatable</artifactId>
+        </dependency>
+        <!-- 依赖治理：本项与上面的 junit（均已置 provided）一起，为 src/main 里的
+             CucumberWithPw（框架自带的 JUnit4 Runner）提供编译期符号。
+             均为 provided：
+               - 不向业务传递，避免与业务自己声明的 junit / cucumber-junit 版本打架（enforcer 上界检查）；
+               - provided 仍在本模块的 compile 与 test classpath，故本模块可编译并单测该 Runner。
+             业务侧使用 @RunWith(CucumberWithPw.class) 时，其自身必然已具备 junit + cucumber-junit。 -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-junit</artifactId>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 </project>

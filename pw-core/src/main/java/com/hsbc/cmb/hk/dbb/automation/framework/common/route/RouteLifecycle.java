@@ -64,7 +64,7 @@ public interface RouteLifecycle extends CaptureControl, RegistryControl, EngineC
 
     /**
      * 方案 B（2026-10-11）：main 业务 seam —— 执行<b>指定 context</b> 已入队的延迟协议动作
-     * （DELAY resume/fulfill）。供 Serenity step 边界（{@code PlaywrightListener.stepStarted}）
+     * （DELAY resume/fulfill）。供 框架 step 边界（{@code PlaywrightListener.stepStarted}）
      * 等 main 线程钩子调用：使 delay 到点后的 resume/fulfill 在下一次 UI 操作前已在 main 串行执行
      * （协议调用 100% 收敛到 main —— {@code Connection.internalSendMessage} 无锁，任何非 main
      * 线程发消息都是并发写）。

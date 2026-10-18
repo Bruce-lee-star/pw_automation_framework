@@ -5,10 +5,10 @@ import java.util.concurrent.CompletionException;
 import java.util.List;
 
 /**
- * 单任务执行结果（结构化，避免工作线程触碰 Serenity 事件总线）。
+ * 单任务执行结果（结构化，避免工作线程触碰 框架 事件总线）。
  *
  * <p>编排线程在 {@code runAll} 返回后遍历结果，对失败项调用 {@link #valueOrThrow()} 即可在
- * 自身线程上抛出，由既有 Serenity 步骤失败通道统一标记（设计文档 9.3 桥接原则）。</p>
+ * 自身线程上抛出，由既有 框架 步骤失败通道统一标记（设计文档 9.3 桥接原则）。</p>
  *
  * @apiNote <b>框架内部能力</b>：仅供 {@code framework.web.lifecycle} 包树协作者与并发桥接使用；业务代码不得直接依赖。
  */

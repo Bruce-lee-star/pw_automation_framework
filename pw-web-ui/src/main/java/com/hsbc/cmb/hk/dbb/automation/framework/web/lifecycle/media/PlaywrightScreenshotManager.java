@@ -41,7 +41,7 @@ public class PlaywrightScreenshotManager {
     // ==================== 文件名生成 ====================
 
     /**
-     * 生成 SHA-256 哈希值，用于创建类似 Serenity HTML 文件的截图文件名
+     * 生成 SHA-256 哈希值，用于创建类似 框架 HTML 文件的截图文件名
      */
     private static String generateHash(String input) {
         try {
@@ -201,7 +201,7 @@ public class PlaywrightScreenshotManager {
     // ==================== 截图入口 ====================
 
     /**
-     * 截图并返回截图文件路径（核心实现，<b>PNG，喂给 Serenity 报告</b>）。
+     * 截图并返回截图文件路径（核心实现，<b>PNG，喂给 框架 报告</b>）。
      *
      * <p>全页/视口模式统一由全局配置 {@code config.isFullPageScreenshot()} 决定。
      * 截图具备以下健壮性保障：
@@ -213,15 +213,15 @@ public class PlaywrightScreenshotManager {
      *       再用更短超时重试一次视口截图，尽量为失败场景保留一张图。</li>
      * </ul>
      *
-     * @apiNote 落盘目录固定为 {@code target/site/serenity}（Serenity 报告目录），后缀 {@code .png}。
-     *          Serenity 4.2.0 对截图后缀/格式有内部假设，必须保持 PNG。
+     * @apiNote 落盘目录固定为 {@code target/site/serenity}（框架 报告目录），后缀 {@code .png}。
+     *          框架 4.2.0 对截图后缀/格式有内部假设，必须保持 PNG。
      */
     public static String takeScreenshot(String title) {
         Page page = PlaywrightManager.getPageThreadLocal();
         if (page == null || page.isClosed()) {
             return null;
         }
-        // 目录（Serenity 标准）
+        // 目录（框架 标准）
         Path screenshotDir = Paths.get("target/site/serenity");
         try {
             Files.createDirectories(screenshotDir);

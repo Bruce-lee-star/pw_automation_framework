@@ -158,7 +158,7 @@ public class RoleElementBinder {
                 AriaRole role = a.role();
                 if (role != AriaRole.NONE) {
                     // 角色定位（role + 字面 name 或 nls key）：定位语义统一收敛于 RoleLocatorFactory，
-                    // 与运行期 API（SerenityBasePage#elementByRole*）共用同一份实现，避免两条路径行为分叉。
+                    // 与运行期 API（ManagedBasePage#elementByRole*）共用同一份实现，避免两条路径行为分叉。
                     final String literalName = a.name();
                     if (literalName != null && !literalName.isEmpty()) {
                         // name 字面量覆盖：该元素名称不在 nls 中（页面上少数找不到 key 的元素），

@@ -42,7 +42,7 @@
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.binding.RoleElementBinder"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.binding.RoleElementBinder"/><Bug pattern="REC_CATCH_EXCEPTION"/></Match>
 
-    <!-- ===== web.lifecycle (PlaywrightManager/PlaywrightRuntime/PlaywrightInitializer/PlaywrightConfigManager/CustomOptionsManager/SerenityBusBridge/ContextTaskResult, 9 条) | owner: @web-core | SLA: 2026-Q4~2027-Q1 | 方式: 单例构造私有化 + 返回值消费 + EI/MS 封装 + NP 判空 + 测试断言豁免 ===== -->
+    <!-- ===== web.lifecycle (PlaywrightManager/PlaywrightRuntime/PlaywrightInitializer/PlaywrightConfigManager/CustomOptionsManager/LifecycleBusBridge/ContextTaskResult, 9 条) | owner: @web-core | SLA: 2026-Q4~2027-Q1 | 方式: 单例构造私有化 + 返回值消费 + EI/MS 封装 + NP 判空 + 测试断言豁免 ===== -->
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager"/><Bug pattern="MS_EXPOSE_REP"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime"/><Bug pattern="SING_SINGLETON_HAS_NONPRIVATE_CONSTRUCTOR"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.PlaywrightInitializer"/><Bug pattern="REC_CATCH_EXCEPTION"/></Match>
@@ -51,7 +51,7 @@
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager"/><Bug pattern="MS_EXPOSE_REP"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ContextTaskResult"/><Bug pattern="EI_EXPOSE_REP"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ContextTaskResultTest"/><Bug pattern="JUA_DONT_ASSERT_INSTANCEOF_IN_TESTS"/></Match>
-    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.SerenityBusBridge"/><Bug pattern="NP_NONNULL_PARAM_VIOLATION"/></Match>
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.LifecycleBusBridge"/><Bug pattern="NP_NONNULL_PARAM_VIOLATION"/></Match>
 
     <!-- ===== web.listener (PlaywrightListener/ThucydidesStepsListenerAdapter/BadLoadListener/测试, 7 条) | owner: @web-core/@web-test | SLA: 2026-Q4 | 方式: 并发可见性改造(AT/ST) + 冗余 null 清理 + 测试断言豁免 ===== -->
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.PlaywrightListener"/><Bug pattern="AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE"/></Match>
@@ -89,11 +89,11 @@
          | owner: @web-core | SLA: 2027-Q1 | 方式: 评估后保留（非"未处理"，而是架构决定的共享引用）
          | 说明：这三条均属「框架受管对象/内部门面的引用按设计必须持有」，删除引用即破坏 G1 组合式 Page 设计：
          |   ① BasePage.attachManagedPage(Page)：把框架受管的（已装饰录制）Page 注入组合式委托，是本设计的注入点本身；
-         |   ② SerenityBasePageImpl(BasePage)：同上，持有委托 BasePage 引用；
-         |   ③ SerenityPageRecorder.recorder()：框架内部录制门面向 BasePage 暴露 per-page 状态（测试亦依赖其"每页独立"语义）。
+         |   ② ManagedBasePageImpl(BasePage)：同上，持有委托 BasePage 引用；
+         |   ③ PageRecorder.recorder()：框架内部录制门面向 BasePage 暴露 per-page 状态（测试亦依赖其"每页独立"语义）。
          | 与该组既有 <BasePage,EI_EXPOSE_REP> 同族，故按同一 owner/SLA 登记。 -->
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
-    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.base.SerenityBasePageImpl"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
-    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.recording.SerenityPageRecorder"/><Bug pattern="EI_EXPOSE_REP"/></Match>
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.base.ManagedBasePageImpl"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.recording.PageRecorder"/><Bug pattern="EI_EXPOSE_REP"/></Match>
 
 </FindBugsFilter>

@@ -14,6 +14,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
+import java.util.Locale;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
@@ -224,6 +225,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
                 Browser browser = setupBrowser(playwright, browserType, launchOptions);
                 PlaywrightRuntime.instance().browserCleanup.registerBrowserDisconnectGuard(browser);
                 PlaywrightRuntime.instance().state.putBrowser(PlaywrightRuntime.instance().browserRegistry.keyFor(configId), browser);
+                recordBrowserForReport(browser, browserType);
 
                 long elapsed = System.currentTimeMillis() - initStart;
                 VerboseLogging.logInfoIfVerbose(logger, "[Browser Init] Browser initialized in {}ms: {} for config: {}",
@@ -255,6 +257,43 @@ public final class BrowserStartupImpl implements BrowserStartup {
             }
         }
         throw new BrowserException("Failed to initialize Browser for config: " + configId, lastException);
+    }
+
+    /**
+     * 把本次运行的浏览器类型与真实版本写入报告环境（{@code pw.report.browsers}），
+     * 供报告首页 / 邮件的 Browsers 区块展示；该区块原本因框架从未设置该属性而恒为空、被模板隐藏。
+     * 同名浏览器只保留最新版本；任意异常一律静默忽略，绝不影响浏览器启动。
+     */
+    private void recordBrowserForReport(Browser browser, String browserType) {
+        try {
+            String channel = PlaywrightManager.config().getBrowserChannel();
+            String rawName = (channel != null && !channel.trim().isEmpty()) ? channel : browserType;
+            String displayName = rawName.substring(0, 1).toUpperCase(Locale.ROOT) + rawName.substring(1);
+            String version = browser.version();
+            String merged = mergeBrowserEntry(System.getProperty("pw.report.browsers", ""), displayName, version);
+            System.setProperty("pw.report.browsers", merged);
+        } catch (Throwable ignored) {
+            // 报告环境信息为可观测性增强，缺失不影响执行
+        }
+    }
+
+    /**
+     * 把 {@code name:version} 合并进既有的浏览器 CSV，按名字（忽略大小写）覆盖旧版本并保持插入顺序。
+     * 纯函数，便于单测；空段与首尾空白一律剔除。
+     */
+    static String mergeBrowserEntry(String existingCsv, String name, String version) {
+        LinkedHashSet<String> set = new LinkedHashSet<>();
+        if (existingCsv != null) {
+            for (String part : existingCsv.split(",")) {
+                if (!part.trim().isEmpty()) {
+                    set.add(part.trim());
+                }
+            }
+        }
+        // 同名浏览器只保留最新版本（覆盖旧 entry）
+        set.removeIf(p -> p.split(":", 2)[0].equalsIgnoreCase(name));
+        set.add(name + ":" + version);
+        return String.join(",", set);
     }
 
     /**

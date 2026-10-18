@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
  * <p>JDK 动态代理实现 {@link Page}（及递归包装的 {@link Locator}/{@link Frame}/{@link ElementHandle}/
  * {@link Response}/{@link Request}/{@link APIResponse}/{@link APIRequest}），对原生操作
  * （navigate / click / fill / getByRole / locator(...) 等）在委托真实受管 Page 前刷新待报告 API 数据并录制动作，
- * 使业务 Page 经持有的装饰 Page 透明获得 Serenity 录制，无需继承庞大的 {@code BasePage} 基类。
+ * 使业务 Page 经持有的装饰 Page 透明获得 框架 录制，无需继承庞大的 {@code BasePage} 基类。
  *
  * <p><b>边界</b>（见设计 15）：
  * <ul>
@@ -40,7 +40,7 @@ import org.slf4j.LoggerFactory;
  *       受管 Page 生命周期由框架托管，业务不得经装饰 Page 关闭，否则破坏场景生命周期与并发隔离。</li>
  * </ul>
  *
- * <p>业务 Page 录制通过持有的装饰 Page 透明获得，录制失败不得影响业务（降级由 {@link SerenityRecorder} 处理）。
+ * <p>业务 Page 录制通过持有的装饰 Page 透明获得，录制失败不得影响业务（降级由 {@link Recorder} 处理）。
  */
 public final class RecordingPageProxy {
 
@@ -72,7 +72,7 @@ public final class RecordingPageProxy {
      * 包装受管 Page。录制关闭或入参为空时返回裸 Page（零开销，D4）。
      */
     public static Page wrap(Page real) {
-        if (real == null || !SerenityRecorder.isEnabled()) {
+        if (real == null || !Recorder.isEnabled()) {
             return real;
         }
         if (PlaywrightManager.getProvider().isTestDouble()) {
@@ -89,7 +89,7 @@ public final class RecordingPageProxy {
      */
     @SuppressWarnings("unchecked")
     public static <T> T wrapIfRecordable(Object ret, Class<T> iface) {
-        if (ret == null || !SerenityRecorder.isEnabled()) {
+        if (ret == null || !Recorder.isEnabled()) {
             return (T) ret;
         }
         if (PlaywrightManager.getProvider().isTestDouble()) {
@@ -159,8 +159,8 @@ public final class RecordingPageProxy {
             if (method.getName().startsWith("on")) {
                 return method.invoke(target, args);
             }
-            // Layer A 录制：刷新待报告 API 数据 + 录制动作，再委托真实对象（flush 在 op 前，与 SerenityRecorder.record 一致）
-            SerenityRecorder.recordNative(method.getName(), summarize(args), null);
+            // Layer A 录制：刷新待报告 API 数据 + 录制动作，再委托真实对象（flush 在 op 前，与 Recorder.record 一致）
+            Recorder.recordNative(method.getName(), summarize(args), null);
             Object result;
             try {
                 result = method.invoke(target, args);

@@ -31,8 +31,8 @@ import java.util.concurrent.atomic.AtomicReference;
  *       既让 {@code logDebugIfVerbose} 真正可见，又不放第三方噪音进来。</li>
  * </ol>
  *
- * <p><b>与"录制开关"解耦</b>：{@code SerenityRecorder.isEnabled()} 等<b>行为开关</b>绝不能跟着日志门控
- * 一起关（否则只是关日志却把 Serenity 报告的动作录制也停了）。该历史语义
+ * <p><b>与"录制开关"解耦</b>：{@code Recorder.isEnabled()} 等<b>行为开关</b>绝不能跟着日志门控
+ * 一起关（否则只是关日志却把 框架 报告的动作录制也停了）。该历史语义
  * （{@code serenity.logging} 是否为 VERBOSE/TRACE）保留在 {@link #isRecordingEnabled()}。
  */
 public final class VerboseLogging {
@@ -43,7 +43,7 @@ public final class VerboseLogging {
     private static final String PROJECT_LOGGER_NAME = "com.hsbc.cmb.hk.dbb.automation";
 
     /** 历史键：{@code serenity.logging}（仅 {@link #isRecordingEnabled()} 等历史语义继续使用）。 */
-    private static final String SERENITY_LOGGING_KEY = "serenity.logging";
+    private static final String FRAMEWORK_LOGGING_KEY = "framework.logging";
 
     /** 首次触碰时记录本项目包 logger 的原始级别，关闭 verbose 时还原（不抹掉 logback.xml 配置）。 */
     private static final AtomicReference<Level> ORIGINAL_PROJECT_LEVEL = new AtomicReference<>();
@@ -68,8 +68,8 @@ public final class VerboseLogging {
      * <b>录制开关（历史语义，与日志门控解耦）</b>：{@code serenity.logging} 为 {@code VERBOSE}/
      * {@code TRACE} 时为 true。
      *
-     * <p>为什么单独留一个方法：{@code SerenityRecorder.isEnabled()} 用它决定是否把原生操作写进
-     * Serenity 报告（<b>行为</b>，不是日志）。若让它跟随 {@code framework.verbose.logging}，
+     * <p>为什么单独留一个方法：{@code Recorder.isEnabled()} 用它决定是否把原生操作写进
+     * 框架 报告（<b>行为</b>，不是日志）。若让它跟随 {@code framework.verbose.logging}，
      * 业务一旦把 verbose 关掉就会连带丢掉报告里的动作记录 —— 静默回归。
      * （既有 5 个录制相关单测正是用 {@code serenity.logging} 开/关录制的，语义必须保持。）</p>
      */
@@ -100,8 +100,8 @@ public final class VerboseLogging {
     }
 
     private static String serenityLoggingLevel() {
-        // 经 core 统一配置源解析（与框架其它配置读取一致，收敛原先直读 Serenity 环境变量的逻辑）
-        return ConfigSource.resolve(SERENITY_LOGGING_KEY, "").trim();
+        // 经 core 统一配置源解析（与框架其它配置读取一致，收敛原先直读 框架 环境变量的逻辑）
+        return ConfigSource.resolve(FRAMEWORK_LOGGING_KEY, "").trim();
     }
 
     /**

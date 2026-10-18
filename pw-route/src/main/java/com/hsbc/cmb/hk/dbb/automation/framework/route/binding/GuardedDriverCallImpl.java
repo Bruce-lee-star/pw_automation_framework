@@ -267,7 +267,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
      *
      * <p><b>为什么需要区分</b>：{@code resetChannel()} 的 ERROR/WARN 是"换连接后对齐"的<b>恢复动作</b>
      * （真信号）；而套件收尾时多个钩子（{@code stopAllContextEngines}/{@code drainForSuiteTeardown}/
-     * Serenity 收尾）会幂等重复触发 {@code shutdownAll}，每次都换线程 + 报 ERROR —— 把<b>例行清理</b>
+     * 框架 收尾）会幂等重复触发 {@code shutdownAll}，每次都换线程 + 报 ERROR —— 把<b>例行清理</b>
      * 伪装成故障信号，污染真实诊断（E2E 实证：单轮 1 ERROR + 3 WARN，epoch 2→5）。本方法只保留
      * 换线程 + 清除不可用标记的实际效果，记录降为 TRACE。</p>
      */

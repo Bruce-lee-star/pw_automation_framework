@@ -75,6 +75,11 @@ final class ListenerGuard {
         private boolean stepFinishReentrant;
         private boolean apiFailureAlreadyHandled;
 
+        // ═══ 原生生命周期闩锁（按场景 / 步骤维度，跨步骤 / 场景边界自动复位）═══
+        private boolean scenarioActive;
+        private boolean scenarioFinished;
+        private int stepDepth;
+
         boolean isFailureScreenshotsAlreadySent() {
             return failureScreenshotsAlreadySent;
         }
@@ -105,6 +110,72 @@ final class ListenerGuard {
 
         void setApiFailureAlreadyHandled(boolean v) {
             apiFailureAlreadyHandled = v;
+        }
+
+        // ── 场景维度 ──
+        /**
+         * 场景开始闩锁。
+         * @return {@code true}＝已处于场景中（重入，应跳过初始化）；{@code false}＝首次进入（继续处理）
+         */
+        boolean scenarioStarted() {
+            if (scenarioActive) {
+                return true;
+            }
+            scenarioActive = true;
+            scenarioFinished = false;
+            stepDepth = 0;
+            return false;
+        }
+
+        /**
+         * 场景结束闩锁（防双重结束）。
+         * @return {@code true}＝场景结束已处理（重复，应跳过）；{@code false}＝首次结束（继续处理）
+         */
+        boolean scenarioFinished() {
+            if (scenarioFinished) {
+                return true;
+            }
+            scenarioFinished = true;
+            return false;
+        }
+
+        /** 当前是否处于进行中的场景（用于判定场景级收尾是否合法）。 */
+        boolean isScenarioActive() {
+            return scenarioActive;
+        }
+
+        // ── 步骤维度 ──
+        /**
+         * 步骤开始闩锁（支持嵌套步骤）。
+         * @return {@code true}＝嵌套步骤（重入，应跳过外层级初始化）；{@code false}＝最外层步骤进入
+         */
+        boolean stepStarted() {
+            stepDepth++;
+            return stepDepth > 1;
+        }
+
+        /** 当前是否处于进行中的步骤（用于判定步骤级收尾是否被允许）。 */
+        boolean isStepActive() {
+            return stepDepth > 0;
+        }
+
+        /** 当前步骤是否为最外层（仅最外层<b>成功</b>步骤才触发收尾处理）。 */
+        boolean isOutermostStep() {
+            return stepDepth == 1;
+        }
+
+        /** 步骤结束：递减嵌套深度。 */
+        void stepFinished() {
+            if (stepDepth > 0) {
+                stepDepth--;
+            }
+        }
+
+        /** 场景边界统一复位（防跨场景残留重入 / 双重处理状态）。 */
+        void endScenario() {
+            scenarioActive = false;
+            scenarioFinished = false;
+            stepDepth = 0;
         }
     }
 }

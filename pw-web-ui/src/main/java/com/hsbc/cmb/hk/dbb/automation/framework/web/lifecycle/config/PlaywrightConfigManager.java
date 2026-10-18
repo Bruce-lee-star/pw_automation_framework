@@ -330,7 +330,7 @@ public class PlaywrightConfigManager {
      * 获取项目名称
      */
     public String getProjectName() {
-        return FrameworkConfigManager.getString(WebFrameworkConfig.SERENITY_PROJECT_NAME);
+        return FrameworkConfigManager.getString(WebFrameworkConfig.FRAMEWORK_PROJECT_NAME);
     }
 
     // ==================== 浏览器启动参数和路径 ====================

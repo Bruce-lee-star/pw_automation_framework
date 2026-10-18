@@ -1,5 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.state.PlaywrightRuntimeState;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.provider.DefaultRuntimeProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ConcurrentContextExecutor;
@@ -8,7 +8,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.browser.BrowserRes
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptions;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.scenario.ScenarioLifecycle;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.PlaywrightSerenityBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.PlaywrightInitializer;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media.PlaywrightScreenshotManager;
 
@@ -55,7 +54,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
  *   <li>运行时对象获取一律经 {@code provider → PlaywrightRuntime 组合根}，组合根可整体替换（真多态）。</li>
  * </ul>
  *
- * 特性：支持 Serenity BDD 集成、线程安全（per-thread {@code ContextKey}）、灵活的浏览器生命周期管理、
+ * 特性：支持 框架 BDD 集成、线程安全（per-thread {@code ContextKey}）、灵活的浏览器生命周期管理、
  * 多级浏览器启动策略、避免静态初始化问题。
  */
 public class PlaywrightManager {
@@ -89,7 +88,7 @@ public class PlaywrightManager {
     static final FrameworkState frameworkState = FrameworkState.getInstance();
 
     // ==================== per-thread 变量（ T3-1 收拢：原 3 个 static ThreadLocal 迁入 TestContext，
-    //  均为默认 null 语义，迁移后等价；包级可见性保持不变，供同包 PlaywrightSerenityBridge 等访问） ====================
+    //  均为默认 null 语义，迁移后等价；包级可见性保持不变，供同包 PlaywrightLifecycleBridge 等访问） ====================
 
     // ---- 核心 Page/Context ----
     public static final ContextKey<BrowserContext> CONTEXT_KEY = ContextKey.of("playwrightManager.context", BrowserContext.class);
@@ -414,12 +413,12 @@ public class PlaywrightManager {
      * <b>当前线程</b>的下载目录：{@code <playwright.browser.downloadsPath>/thread-<threadId>}。
      *
      * <p><b>为什么要按线程分目录（2026-09-21）</b>：下载目录原为<b>全局单目录</b>，而每个 scenario 收尾都会
-     * 清空该目录（{@code PlaywrightSerenityBridge.cleanupTempDownloads}）⇒ 真并行下会删掉并发 scenario
+     * 清空该目录（{@code PlaywrightLifecycleBridge.cleanupTempDownloads}）⇒ 真并行下会删掉并发 scenario
      * 正在下载/刚下载的文件（跨用例干扰）。按线程分目录后，<b>某线程收尾只清自己的目录</b>，邻居不受影响 ——
      * 与「每线程独立 Browser/Context/Page」以及 per-thread 锁是同一隔离模型。</p>
      *
      * <p><b>必须共用本方法</b>：下载保存（{@code PlaywrightContextManager.registerDownloadHandler}）与收尾清理
-     * （{@code PlaywrightSerenityBridge.cleanupTempDownloads}）若各写一份命名，会漂移成「清了别人的目录」或
+     * （{@code PlaywrightLifecycleBridge.cleanupTempDownloads}）若各写一份命名，会漂移成「清了别人的目录」或
      * 「自己的目录没清」。</p>
      *
      * @return 当前线程的下载目录（不保证已存在；保存路径解析时会按需创建）
@@ -428,15 +427,15 @@ public class PlaywrightManager {
         return Paths.get(config().getBrowserDownloadsPath(), "thread-" + Thread.currentThread().threadId());
     }
 
-    // ==================== 下载附件挂 Serenity 报告 ====================
+    // ==================== 下载附件挂 框架 报告 ====================
 
     /**
-     * 把最近一次完成的下载作为<b>可下载附件</b>挂到当前 scenario 的 Serenity 报告。
+     * 把最近一次完成的下载作为<b>可下载附件</b>挂到当前 scenario 的 框架 报告。
      *
      * <p>典型位置：触发下载（点击导出等）并 {@code await*} 之后、scenario 收尾前调用。实现先等下载登记
      * （{@link #awaitLastDownloadPath(long)}，默认 15s），再把文件复制到仓库根的
      * {@code site/report-attachments/}（该目录不参与 scenario 清理、可被报告/CI 稳定引用），最后经
-     * {@code Serenity.recordReportData().withTitle(...).fromFile(...).downloadable()} 嵌入报告。
+     * {@code 框架.recordReportData().withTitle(...).fromFile(...).downloadable()} 嵌入报告。
      * 之所以要先复制出来：scenario 收尾会清本线程 {@code target/downloads/thread-<id>/}，
      * 直接引用临时下载目录 ⇒ 报告生成时文件已删 ⇒ 附件链接失效。</p>
      *
@@ -642,10 +641,10 @@ public class PlaywrightManager {
         return PlaywrightRuntime.instance().browserCleanup.closeBrowserForCurrentThread();
     }
 
-    // ==================== Serenity BDD 集成方法（委托给 PlaywrightSerenityBridge） ====================
+    // ==================== 框架 BDD 集成方法（委托给 PlaywrightLifecycleBridge） ====================
 
     public static void initializeForScenario() {
-        PlaywrightSerenityBridge.initializeForScenario();
+        PlaywrightLifecycleBridge.initializeForScenario();
     }
 
     /**
@@ -681,7 +680,7 @@ public class PlaywrightManager {
      * "保留活 Context 延续登录态"已废除。
      * 详见仓库根 {@code FIX_PLAN.md} §1.1（I-1）与 §2.0（时效声明）。</p>
      *
-     * @apiNote <b>framework-internal</b>：由 {@code PlaywrightListener} 在 Serenity {@code testFinished} 时
+     * @apiNote <b>framework-internal</b>：由 {@code PlaywrightListener} 在 框架 {@code testFinished} 时
      *          传入本用例真实结果；业务代码不得调用。
      * @param scenarioFailed 本用例是否失败（FAILURE / ERROR 视为失败）
      */
@@ -690,7 +689,7 @@ public class PlaywrightManager {
     }
 
     /**
-     * Feature 级别的清理（委托给 ScenarioLifecycle → PlaywrightSerenityBridge）
+     * Feature 级别的清理（委托给 ScenarioLifecycle → PlaywrightLifecycleBridge）
      */
     public static void cleanupForFeature() {
         ScenarioLifecycle.cleanupForFeature();
@@ -728,7 +727,7 @@ public class PlaywrightManager {
      * 获取配置管理器（提供 {@code PlaywrightManager.config().getXXX()} 风格的 API）。
      *
      * <p><b>这是受支持的、稳定的公开门面方法</b>（业务与框架代码均可使用）。它<b>不是封装缺口</b>，
-     * 而是门面刻意收敛的「唯一配置读取入口」——所有 {@code serenity.playwright.*} 配置都经此暴露，
+     * 而是门面刻意收敛的「唯一配置读取入口」——所有 {@code framework.playwright.*} 配置都经此暴露，
      * 业务侧应统一走 {@code PlaywrightManager.config().getXxx()}，不要直连 {@link PlaywrightConfigManager}。</p>
      *
      * @apiNote 稳定的公开契约；其返回对象是只读配置视图，不暴露可变状态。
@@ -752,7 +751,7 @@ public class PlaywrightManager {
     /**
      * 读取框架状态引用（{@link FrameworkState}）。
      *
-     * @apiNote <b>框架内部 seam</b>（仅同包协作者使用，如 {@code PlaywrightSerenityBridge}）；
+     * @apiNote <b>框架内部 seam</b>（仅同包协作者使用，如 {@code PlaywrightLifecycleBridge}）；
      *          不属公开契约，业务不应依赖。
      */
     public static FrameworkState getFrameworkState() {

@@ -32,7 +32,14 @@ public class ThreadLocalTestContext implements TestContext {
 
     @Override
     public <T> void set(ContextKey<T> key, T value) {
-        store.put(key, value);
+        //  CHM 不接受 null value（CORE-P0-2 由 HashMap 迁来时的潜在回归）：
+        //  「置空」语义统一为移除。get(key) 对「移除」与「存 null」均返回 null，对调用方行为透明；
+        //  并兜住所有 set(key, null) 站点（如 PlaywrightListener.resetCurrentScenarioState）免 NPE。
+        if (value == null) {
+            store.remove(key);
+        } else {
+            store.put(key, value);
+        }
     }
 
     @Override

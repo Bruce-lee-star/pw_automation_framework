@@ -53,25 +53,12 @@
         </dependency>
 
         <!-- ENG-P0-2锛歝odegen 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-model</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-core</artifactId>
-        </dependency>
+        <!-- M3：移除 vestigial serenity-model/core —— 本模块仅"生成"含 import 的代码文本（字符串字面量），
+             自身不 import serenity；生成代码的 @Step 在消费方解析到 pw-reports-v2 框架自有 @Step 注解（…report.annotation.Step）。 -->
         <!-- 渚濊禆娌荤悊锛氬師姝ゅ澹版槑 serenity-cucumber锛屼絾鏈ā鍧楀叏閲忛浂 io.cucumber / net.serenitybdd.cucumber
              寮曠敤锛堜篃涓嶈窇 Cucumber锛夛紝灞炴棤鐢ㄥ０鏄庝笖鍏?cucumber-* 浼犻€掍緷璧栧懡涓唴缃戦殧绂绘竻鍗?鈥斺€?宸茬Щ闄ゃ€?
              鑻ュ皢鏉ョ‘闇€锛堝 codegen 鑷繁瑕佽窇 Cucumber锛夛紝璇峰厛缁欏嚭鐪熷疄璋冪敤鐐瑰啀鎭㈠銆?-->
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-screenplay</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-rest-assured</artifactId>
-        </dependency>
+        <!-- M3：移除 vestigial serenity-screenplay/rest-assured（本模块零引用）。 -->
         <dependency>
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
@@ -100,6 +87,13 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- M3：补显式 mockito（原先经 serenity-core 传递引入；去 Serenity 后显式声明）。 -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

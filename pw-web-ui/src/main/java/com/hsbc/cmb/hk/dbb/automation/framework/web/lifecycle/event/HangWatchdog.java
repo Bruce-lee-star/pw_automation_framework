@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * （实测 1.txt：14:26:09 之后 6.5 分钟无任何日志），此时<b>无法判断阻塞在哪一次调用上</b>，
  * 只能事后手工 {@code jstack}，而卡住瞬间往往已经错过。
  *
- * <p><b>做法</b>：用例运行时长一旦超过 {@code serenity.playwright.hang.watchdog.interval.ms}
+ * <p><b>做法</b>：用例运行时长一旦超过 {@code framework.playwright.hang.watchdog.interval.ms}
  * （默认 60s），即由 {@link AsyncPool} 定时打印一次现场：
  * <ul>
  *   <li><b>场景线程</b>的完整栈（含 {@code at ...} 帧）—— 直接指出阻塞在哪个方法/哪一行；</li>
@@ -27,12 +27,12 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  *
  * <p><b>为什么默认开启且几乎无噪音（去误报）</b>：仅当<b>场景线程栈连续
- * {@code serenity.playwright.hang.watchdog.frozen.samples}（默认 3）次采样不变</b>才上报；
+ * {@code framework.playwright.hang.watchdog.frozen.samples}（默认 3）次采样不变</b>才上报；
  * 健康但运行久的用例其栈在推进 ⇒ 永不误报（完整 SSO 登录约 3 分钟虽久，但栈在变化，不刷屏）。
- * 关闭：{@code -Dserenity.playwright.hang.watchdog.interval.ms=0}。
+ * 关闭：{@code -Dframework.playwright.hang.watchdog.interval.ms=0}。
  *
  * <p><b>硬超时（2026-09-28 复盘 P2 升级）</b>：当用例运行超过
- * {@code serenity.playwright.hang.watchdog.hard.timeout.ms}（默认 0=禁用，保持向后兼容）即判定为挂死，
+ * {@code framework.playwright.hang.watchdog.hard.timeout.ms}（默认 0=禁用，保持向后兼容）即判定为挂死，
  * 除打印 ERROR 现场外，主动 {@code scenarioThread.interrupt()} 尝试打断（对可中断卡死有效；Playwright 原生
  * poll 不可中断，但 P1 已在协议调用层设界，二者互补），并通过 {@link #consumeHardHang()} 暴露挂死事件供
  * 收尾/报告 hook 标记 scenario 失败（测试侧消费，prod 仅提供原语）。</p>
@@ -139,7 +139,7 @@ public final class HangWatchdog {
     /** 采样间隔（≤0 = 关闭）；配置不可读时按关闭处理，绝不让诊断设施影响主流程。 */
     private static long intervalMs() {
         try {
-            return WebFrameworkConfig.SERENITY_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS.getLongValue();
+            return WebFrameworkConfig.FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS.getLongValue();
         } catch (Throwable t) {
             return 0L;
         }
@@ -206,7 +206,7 @@ public final class HangWatchdog {
     /** 冻结判定所需连续相同采样数（≤0 视为 1；默认 3）。 */
     private static long frozenSamples() {
         try {
-            return Long.getLong("serenity.playwright.hang.watchdog.frozen.samples", 3L);
+            return Long.getLong("framework.playwright.hang.watchdog.frozen.samples", 3L);
         } catch (Throwable t) {
             return 3L;
         }
@@ -226,7 +226,7 @@ public final class HangWatchdog {
         sb.append("==== [HangWatchdog] 用例 ").append(id == null ? "(未知)" : "'" + id + "'")
                 .append(" 已运行 ").append(elapsedMs).append("ms（采样间隔 ").append(interval)
                 .append("ms）—— 同栈连续多次采样无变化（疑似真卡死），以下为线程现场；")
-                .append("关闭采样：-Dserenity.playwright.hang.watchdog.interval.ms=0 ====\n");
+                .append("关闭采样：-Dframework.playwright.hang.watchdog.interval.ms=0 ====\n");
 
         sb.append("--- 场景线程 『").append(owner.getName()).append("』（state=")
                 .append(owner.getState()).append("）完整栈 ---\n");
@@ -295,7 +295,7 @@ public final class HangWatchdog {
     /** 硬超时阈值（≤0 = 禁用）；与 interval 同源系统属性，默认关闭以保持向后兼容。 */
     private static long hardTimeoutMs() {
         try {
-            return Long.getLong("serenity.playwright.hang.watchdog.hard.timeout.ms", 0L);
+            return Long.getLong("framework.playwright.hang.watchdog.hard.timeout.ms", 0L);
         } catch (Throwable t) {
             return 0L;
         }

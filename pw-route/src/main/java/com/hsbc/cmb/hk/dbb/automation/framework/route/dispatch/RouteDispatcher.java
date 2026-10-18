@@ -173,7 +173,7 @@ public final class RouteDispatcher {
 
         // 6) 上报命中证据（观测旁路）。挂点选在此处：本段"所有能力必经"—— DELAY / MODIFY_REQUEST /
         //    MOCK / MONITOR / CAPTURE 全部经过，一处即覆盖四种能力。落到哪里由 SPI 实现决定
-        //    （pw-web-ui 提供 Serenity 实现：入队 + 主线程 flush）；无实现即静默空操作。
+        //    （pw-web-ui 提供 框架 实现：入队 + 主线程 flush）；无实现即静默空操作。
         //    正文＝【完整请求信息】（方法/URL/头/体；头值脱敏、体截断）+ 规则声明；命中时刻还没有响应，
         //    响应侧与"实际做了什么"由后续「结果」证据给出（MOCK/MODIFY/DELAY 见 reportOutcome，
         //    MONITOR/CAPTURE 由各自 sink 在定案时上报）。

@@ -1,1 +1,2 @@
-com.hsbc.cmb.hk.dbb.automation.framework.web.config.SerenityConfigResolver
+com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigResolver
+com.hsbc.cmb.hk.dbb.automation.framework.web.config.FileConfigResolver

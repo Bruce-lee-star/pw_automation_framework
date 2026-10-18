@@ -1,18 +1,15 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.browser;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.browser.BrowserCleanup;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.PlaywrightSerenityBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.PlaywrightContextManager;
 
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
@@ -200,7 +197,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         PlaywrightRuntime.instance().state.clearPlaywrights();
 
         // 统一清理所有 ThreadLocal（防止线程复用/线程池场景下的内存泄漏）
-        PlaywrightSerenityBridge.cleanupThreadLocals(true);
+        PlaywrightLifecycleBridge.cleanupThreadLocals(true);
         //  最终清理：Browser 已关闭，currentConfigId 可以安全清除
         TestContextHolder.get().remove(PlaywrightManager.CURRENT_CONFIG_ID_KEY);
 
@@ -437,7 +434,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
      *
      * <p><b>要解决的问题（窗口堆积）</b>：收尾链路 {@code cleanupForScenario}/{@code cleanupForFeature}
      * 关闭 Context 依赖 {@code TestContextHolder} 的 {@code CONTEXT_KEY}；当用例级上下文已解绑
-     * （Cucumber {@code @After} 早于 Serenity {@code testFinished}）时该键取不到，{@code closeContext()}
+     * （Cucumber {@code @After} 早于 框架 {@code testFinished}）时该键取不到，{@code closeContext()}
      * 整段被静默跳过 —— Context/窗口既不关闭也不报错，跨用例持续堆积，直到套件级
      * {@link #cleanupAll()} 才随 Browser 释放（表现为"跑几十个用例后满屏浏览器窗口"）。
      *

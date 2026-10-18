@@ -37,7 +37,7 @@ public class ElementOperationException extends ElementException {
 
     @Override
     public String toString() {
-        // 简洁一行格式 — 避免 ASCII 艺术被 Serenity/Cucumber 在控制台和报告中重复输出
+        // 简洁一行格式 — 避免 ASCII 艺术被 框架/Cucumber 在控制台和报告中重复输出
         // 详细诊断信息可通过 getDiagnosticInfo() 和 getCause() 获取
         String diag = diagnosticInfo != null
             ? String.format(" exists=%s vis=%s en=%s ed=%s count=%d retries=%d",

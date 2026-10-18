@@ -302,7 +302,7 @@ public final class RoleElementStepGenerator {
         }
 
         return "package " + stepPkg + ";\n\n"
-                + "import net.serenitybdd.annotations.Step;\n"
+                + "import com.hsbc.cmb.hk.dbb.automation.framework.report.annotation.Step;\n"
                 + "import com.microsoft.playwright.Page;\n\n"
                 + "import " + packageName + "." + pageClassName + ";\n"
                 + "import com.hsbc.cmb.hk.dbb.automation.framework.web.page.factory.PageObjectFactory;\n\n"
@@ -625,7 +625,7 @@ public final class RoleElementStepGenerator {
 
         }
 
-        StringBuilder imports = new StringBuilder("import net.serenitybdd.annotations.Step;\n"
+        StringBuilder imports = new StringBuilder("import com.hsbc.cmb.hk.dbb.automation.framework.report.annotation.Step;\n"
                 + "import com.microsoft.playwright.Page;\n\n");
         for (String className : allPages) {
             imports.append("import ").append(packageName).append(".").append(className).append(";\n");
@@ -784,7 +784,7 @@ public final class RoleElementStepGenerator {
                     .append(" = PageObjectFactory.getPage(").append(className).append(".class);\n\n");
         }
 
-        StringBuilder imports = new StringBuilder("import net.serenitybdd.annotations.Step;\n"
+        StringBuilder imports = new StringBuilder("import com.hsbc.cmb.hk.dbb.automation.framework.report.annotation.Step;\n"
                 + "import com.microsoft.playwright.Page;\n\n");
         for (String className : allPages) {
             imports.append("import ").append(packageName).append(".").append(className).append(";\n");

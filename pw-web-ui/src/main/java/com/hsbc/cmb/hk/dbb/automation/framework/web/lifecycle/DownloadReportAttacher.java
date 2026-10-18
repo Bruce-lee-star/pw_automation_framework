@@ -1,7 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle;
 
-import net.serenitybdd.core.Serenity;
-import net.serenitybdd.core.reports.AndContent;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,7 +16,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * 下载附件挂 Serenity 报告 —— 内部实现收口（不对外暴露）。
+ * 下载附件挂 框架 报告 —— 内部实现收口（不对外暴露）。
  *
  * <p>为什么需要单独收口：把下载文件"附到报告"涉及两步副作用，必须一并做对：
  * <ol>
@@ -29,13 +28,12 @@ import java.util.stream.Stream;
  *       平铺共享目录 + {@code REPLACE_EXISTING} 会互相覆盖 → 一个 scenario 的附件显示成另一个的文件；
  *       按线程分目录后即使同名也互不干扰。源文件名在同线程内已通过 {@code resolveNonConflictingDownloadPath}
  *       做 {@code " (1)"/" (2)"} 序号去重，故子目录内亦不会自撞。</li>
- *   <li><b>嵌入 Serenity 报告</b>：经 {@code Serenity.recordReportData().withTitle(...).fromFile(...).downloadable()}
- *       把该持久副本登记为"可下载附件"，在报告里渲染成下载链接。这是 Serenity 4.2.0 把任意文件
- *       （pdf/xlsx/zip/csv…）附到报告的唯一稳定入口（4.2.0 没有 {@code StepEventBus.embed}）。
+ *   <li><b>嵌入报告</b>：经 {@code ReportingBridgeRegistry.get().recordDownloadableFile(...)}
+ *       把该持久副本登记为"可下载附件"（框架 构建下渲染成下载链接，v2 构建下归档到报告目录并附链接）。
  *       该调用走 ThreadLocal 事件总线，仅挂到<b>当前线程</b>的 scenario 报告，不会跨线程。</li>
  * </ol>
  *
- * <p>行为铁律：嵌入是<b>尽力而为</b>——报告挂接失败（如非 Serenity 上下文）只记 warn，不抛、不影响 case 本身；
+ * <p>行为铁律：嵌入是<b>尽力而为</b>——报告挂接失败（如非 框架 上下文）只记 warn，不抛、不影响 case 本身；
  * 持久副本复制失败才返回 false。日志路由回 {@link PlaywrightManager#class} 以保生产溯源一致。</p>
  */
 final class DownloadReportAttacher {
@@ -132,16 +130,14 @@ final class DownloadReportAttacher {
                     src.getFileName(), archive, e);
             return false;
         }
-        // 2) 嵌入 Serenity 报告（best-effort：失败不阻断 case）
+        // 2) 嵌入 框架 报告（best-effort：失败不阻断 case）
         //    注意：FromFile.fromFile(...) 返回 void，不能与 downloadable() 链式调用，须先持引用再分步调用
         try {
             String title = (caption == null || caption.isBlank()) ? fileNameOrSelf(src) : caption;
-            AndContent entry = Serenity.recordReportData().withTitle(title);
-            entry.fromFile(archive);   // 读取文件内容（checked IOException，被外层 catch 覆盖）
-            entry.downloadable();      // 标记为可下载附件
-            logger.info("Attached download '{}' to Serenity report; archived at {}", src.getFileName(), archive);
+            ReportingBridgeRegistry.get().recordDownloadableFile(title, archive);
+            logger.info("Attached download '{}' to 框架 report; archived at {}", src.getFileName(), archive);
         } catch (Exception e) {
-            logger.warn("Attached file '{}' archived at {} but Serenity embedding failed (non-fatal): {}",
+            logger.warn("Attached file '{}' archived at {} but 框架 embedding failed (non-fatal): {}",
                     src.getFileName(), archive, e.getMessage());
         }
         return true;

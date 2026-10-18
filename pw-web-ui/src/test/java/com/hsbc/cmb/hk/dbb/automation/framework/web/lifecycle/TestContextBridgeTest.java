@@ -18,7 +18,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * 页面错误汇聚单测（设计文档 9.10-⑤）：工作线程累积的未捕获页面异常，经 {@link TestContextBridge}
- * 在任务结束时 draining 并随 {@link ContextTaskResult} 回传编排线程（不在工作线程触碰 Serenity）。
+ * 在任务结束时 draining 并随 {@link ContextTaskResult} 回传编排线程（不在工作线程触碰 框架）。
  */
 public class TestContextBridgeTest {
 

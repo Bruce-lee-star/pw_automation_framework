@@ -56,7 +56,7 @@ public final class ConcurrentContextOptions {
     /**
      * 解析实际并发度：min(任务数, 并行度, 硬上限)。
      * <p>硬上限由 {@code WebFrameworkConfig.PLAYWRIGHT_CONCURRENT_MAX} 配置，可经
-     * -Dserenity.playwright.concurrent.max / serenity.properties 覆盖，默认按 CPU 核数自适应
+     * -Dframework.playwright.concurrent.max / serenity.properties 覆盖，默认按 CPU 核数自适应
      * （见 {@code WebFrameworkConfig#adaptiveConcurrentMaxDefault}）；配置误配为非正数时回退
      * {@link #FALLBACK_HARD_CAP}，保证并发度恒为正。
      */

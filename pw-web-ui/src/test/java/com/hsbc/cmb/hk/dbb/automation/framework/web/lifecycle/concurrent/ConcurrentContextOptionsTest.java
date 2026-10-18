@@ -18,7 +18,7 @@ import static org.junit.Assert.assertTrue;
  */
 public class ConcurrentContextOptionsTest {
 
-    private static final String MAX_KEY = "serenity.playwright.concurrent.max";
+    private static final String MAX_KEY = "framework.playwright.concurrent.max";
     private final String originalMax = System.getProperty(MAX_KEY);
 
     @After

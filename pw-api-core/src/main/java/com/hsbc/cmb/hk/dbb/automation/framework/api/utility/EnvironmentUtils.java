@@ -6,7 +6,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Environment utility class for retrieving environment variables and system properties
  * This class provides a unified interface for accessing environment configuration
- * and is a replacement for the deprecated SystemEnvironmentVariables in older Serenity versions
+ * and is a replacement for the deprecated SystemEnvironmentVariables in older 框架 versions
  */
 public class EnvironmentUtils {
 
@@ -74,7 +74,7 @@ public class EnvironmentUtils {
     }
 
     /**
-     * Get current environment name (for Serenity compatibility)
+     * Get current environment name (for 框架 compatibility)
      * This returns the environment from system properties
      *
      * @return the current environment name

@@ -14,7 +14,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * 政策落地验收：Route 实现必须如实回答既有 SPI 信号 {@code RouteLifecycle.isConnectionUnresponsive(ctx)}，
- * 这样 web 在<b>用例起点</b>的既有恢复入口（{@code PlaywrightSerenityBridge.recoverIfConnectionUnresponsive}）
+ * 这样 web 在<b>用例起点</b>的既有恢复入口（{@code PlaywrightLifecycleBridge.recoverIfConnectionUnresponsive}）
  * 才会对"驱动信道被污染"真正生效 —— 否则该恢复对路由实现永远不触发（默认实现恒 false）。
  *
  * <p>注意：恢复动作必须是<b>换连接</b>（重建 {@code Playwright} 实例）；只重建 Context/Browser 无效，

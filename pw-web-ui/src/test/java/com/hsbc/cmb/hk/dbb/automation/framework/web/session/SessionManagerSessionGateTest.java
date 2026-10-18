@@ -27,12 +27,12 @@ public class SessionManagerSessionGateTest {
     /** 显式开启闸门（等价于并行为真时的 auto 行为），避免依赖引擎并行开关。 */
     @Before
     public void enableGate() {
-        System.setProperty("serenity.playwright.concurrent.partition.enabled", "true");
+        System.setProperty("framework.playwright.concurrent.partition.enabled", "true");
     }
 
     @After
     public void resetGate() {
-        System.clearProperty("serenity.playwright.concurrent.partition.enabled");
+        System.clearProperty("framework.playwright.concurrent.partition.enabled");
     }
 
     /** 同 sessionKey：前者未释放时，后者必须被阻塞；前者释放后立即进入。 */

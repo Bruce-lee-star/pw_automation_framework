@@ -15,8 +15,8 @@ import static org.junit.Assert.assertTrue;
  */
 public class BrowserCrashGuardTest {
 
-    private static final String SIGNATURES_KEY = "serenity.playwright.concurrent.crash.signatures";
-    private static final String CORROBORATION_KEY = "serenity.playwright.concurrent.crash.corroboration.enabled";
+    private static final String SIGNATURES_KEY = "framework.playwright.concurrent.crash.signatures";
+    private static final String CORROBORATION_KEY = "framework.playwright.concurrent.crash.corroboration.enabled";
     private static final String MAX_REPLAY_KEY = "playwright.concurrent.crash.guard.max.replay";
 
     @After

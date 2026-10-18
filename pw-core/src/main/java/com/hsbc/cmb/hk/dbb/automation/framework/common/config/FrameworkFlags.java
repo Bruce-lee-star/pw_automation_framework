@@ -15,7 +15,7 @@ import java.util.Locale;
  *       ⇒ 框架自有开关<b>一律加 {@link #PREFIX}</b>，避免撞车。</li>
  *   <li><b>SPI 合并源会缓存属性快照，导致开关不可预期</b>：实测
  *       {@code setProperty(k,"true")} 之后再 {@code clearProperty(k)}，
- *       {@link ConfigSource} 的 Serenity SPI 源<b>仍返回旧值 "true"</b>。
+ *       {@link ConfigSource} 的 框架 SPI 源<b>仍返回旧值 "true"</b>。
  *       对"默认必须关闭"的安全 / 诊断开关，这种非确定性不可接受。
  *       ⇒ 本门面<b>只认系统属性与环境变量</b>，不经过 SPI，行为确定。</li>
  * </ol>

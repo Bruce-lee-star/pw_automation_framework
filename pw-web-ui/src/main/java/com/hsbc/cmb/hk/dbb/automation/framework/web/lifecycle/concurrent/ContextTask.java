@@ -11,9 +11,9 @@ import java.util.concurrent.Callable;
  * 共享 Browser 模式已从框架移除——Playwright for Java 非线程安全）。
  * 任务抛出的异常被捕获进 {@link ContextTaskResult}，不会污染线程池。</p>
  *
- * <p>⚠️ 不要在任务内直接调用 {@code StepEventBus.getEventBus().testFailed(...)} 一类 Serenity 报告 API：
+ * <p>⚠️ 不要在任务内直接调用 {@code StepEventBus.getEventBus().testFailed(...)} 一类 框架 报告 API：
  * 工作线程拿到的是无监听器的全新事件总线（设计文档第九节 G1）。失败应通过返回值 / 异常经
- * {@link ContextTaskResult#valueOrThrow()} 在<b>编排线程</b>回放，由既有 Serenity 通道统一标记。</p>
+ * {@link ContextTaskResult#valueOrThrow()} 在<b>编排线程</b>回放，由既有 框架 通道统一标记。</p>
  *
  * @apiNote <b>框架内部能力</b>：仅供 {@code framework.web.lifecycle} 包树协作者与并发桥接使用；业务代码不得直接依赖。
  */

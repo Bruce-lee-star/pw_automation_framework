@@ -1,14 +1,13 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
-import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Tracing;
-import net.serenitybdd.core.Serenity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,21 +49,23 @@ import java.util.concurrent.TimeUnit;
  *   <li>可通过 {@code playwright.context.trace.chunk.per.scenario=false} 回退为整段录制（逃生开关）。</li>
  * </ul>
  *
- * @apiNote framework-internal：由 Serenity 监听器 / context 生命周期调用，业务代码不得依赖。
+ * @apiNote framework-internal：由 框架 监听器 / context 生命周期调用，业务代码不得依赖。
  */
 public final class ScenarioTraceRecorder {
 
     private static final Logger logger = LoggerFactory.getLogger(ScenarioTraceRecorder.class);
 
-    /** trace 落盘目录（与 Serenity 报告同目录，报告内可直接下载）。 */
+    /** trace 落盘目录（与 框架 报告同目录，报告内可直接下载）。 */
     static final String TRACE_DIR = "target/site/serenity/traces";
 
     /** 文件名片段最大长度（防超长名，文件系统上限 255）。 */
     private static final int MAX_NAME_FRAGMENT = 120;
 
-    private static final ContextKey<Boolean> CHUNK_ACTIVE_KEY = ContextKey.of("trace.chunkActive", Boolean.class);
-    private static final ContextKey<String> SCENARIO_KEY = ContextKey.of("trace.scenarioId", String.class);
-    private static final ContextKey<Long> CHUNK_START_KEY = ContextKey.of("trace.chunkStartMs", Long.class);
+    //  线程级（非用例级 TestContextHolder）：Cucumber @After 会清空用例级 TestContextHolder，
+    //    而 Context 是线程级持有，故 trace 的 per-scenario 状态必须 thread-scoped，才能在场景收尾时可靠读取。
+    private static final ThreadLocal<Boolean> CHUNK_ACTIVE = new ThreadLocal<>();
+    private static final ThreadLocal<String> SCENARIO_ID = new ThreadLocal<>();
+    private static final ThreadLocal<Long> CHUNK_START_MS = new ThreadLocal<>();
 
     private ScenarioTraceRecorder() {
     }
@@ -107,8 +108,8 @@ public final class ScenarioTraceRecorder {
      * @param scenarioId 用例标识（由监听器显式传入，如 {@code uniqueTestName}）
      */
     public static void onScenarioStart(String scenarioId) {
-        TestContextHolder.get().set(SCENARIO_KEY, scenarioId);
-        TestContextHolder.get().set(CHUNK_START_KEY, System.currentTimeMillis());
+        SCENARIO_ID.set(scenarioId);
+        CHUNK_START_MS.set(System.currentTimeMillis());
         if (!traceEnabled() || !chunkPerScenario()) {
             return;
         }
@@ -133,8 +134,8 @@ public final class ScenarioTraceRecorder {
      * @param failed     该用例是否失败：{@code null}=未知（收尾兜底路径），写入文件名便于保留策略优先保留失败证据
      */
     public static void onScenarioEnd(String scenarioId, Boolean failed) {
-        String id = scenarioId != null ? scenarioId : TestContextHolder.get().get(SCENARIO_KEY);
-        Long startMs = TestContextHolder.get().get(CHUNK_START_KEY);
+        String id = scenarioId != null ? scenarioId : SCENARIO_ID.get();
+        Long startMs = CHUNK_START_MS.get();
         long endMs = System.currentTimeMillis();
         String outcome = failed == null ? "UNKNOWN" : (failed ? "FAIL" : "PASS");
         try {
@@ -161,8 +162,8 @@ public final class ScenarioTraceRecorder {
         }
         try {
             if (Boolean.TRUE.equals(chunkActive())) {
-                String id = TestContextHolder.get().get(SCENARIO_KEY);
-                Long startMs = TestContextHolder.get().get(CHUNK_START_KEY);
+                String id = SCENARIO_ID.get();
+                Long startMs = CHUNK_START_MS.get();
                 long endMs = System.currentTimeMillis();
                 Path file = Paths.get(TRACE_DIR,
                         traceFileName(id, startMs == null ? endMs : startMs, endMs, "ONCLOSE"));
@@ -239,9 +240,8 @@ public final class ScenarioTraceRecorder {
     }
 
     /**
-     * 把已落盘的 trace 登记进当前 Serenity 报告（W-3：改用 {@link Serenity#recordReportData()}，
-     * 因本仓 Serenity 4.2.0 的 {@code StepEventBus} 无 {@code addAttachmentToCurrentStep}）。
-     * 任何失败（非 Serenity 线程 / 步骤上下文已结束）均降级为 debug，绝不抛出。
+     * 把已落盘的 trace 登记进报告（经 {@link ReportingBridgeRegistry} 端口；框架 构建下落到 框架 报告，
+     * v2 构建下落到 v2 报告）。任何失败（非报告线程 / 步骤上下文已结束）均降级为 debug，绝不抛出。
      */
     private static void attachToReport(Path tracePath, String scenarioId, Long startMs, long endMs) {
         try {
@@ -260,8 +260,11 @@ public final class ScenarioTraceRecorder {
                         .append(" (").append(Math.max(0, endMs - startMs)).append("ms)")
                         .append("  [覆盖本用例执行窗口]");
             }
-            Serenity.recordReportData().withTitle(title).andContents(contents.toString());
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] recorded {} to Serenity report", tracePath.getFileName());
+            ReportingBridgeRegistry.get().recordReportData(title, contents.toString());
+            //  v2 报告：把 trace.zip 拷到 <outcomeId>/trace.zip 并设 tracePath，使 per-case 页出现
+            //    "Play trace" 按钮（recordReportData 仅落证据文本、不驱动该按钮）。旧报告/无活动句柄下 no-op。
+            ReportingBridgeRegistry.get().attachTrace(tracePath);
+            VerboseLogging.logDebugIfVerbose(logger, "[trace] recorded {} to 框架 report", tracePath.getFileName());
         } catch (Exception e) {
             VerboseLogging.logDebugIfVerbose(logger, "[trace] record to report skipped: {}", e.getMessage());
         }
@@ -308,22 +311,26 @@ public final class ScenarioTraceRecorder {
 
     private static BrowserContext currentContext() {
         try {
-            return TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
+            //  优先用例级 CONTEXT_KEY；Cucumber @After（ScenarioContext.end → ctx.clear()）会早于框架
+            //    场景收尾清空用例级 TestContextHolder，故 CONTEXT_KEY 此时可能为 null —— 回退到线程级记录
+            //    （ContextRegistryImpl.closeContext/getContext 同源兜底），保证 onScenarioEnd 仍能拿到本线程 Context 导出 trace。
+            BrowserContext ctx = TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
+            return ctx != null ? ctx : PlaywrightManager.currentContextForThread();
         } catch (Exception e) {
             return null;
         }
     }
 
     private static Boolean chunkActive() {
-        return TestContextHolder.get().get(CHUNK_ACTIVE_KEY);
+        return CHUNK_ACTIVE.get();
     }
 
     private static void setChunkActive(boolean active) {
-        TestContextHolder.get().set(CHUNK_ACTIVE_KEY, active);
+        CHUNK_ACTIVE.set(active);
     }
 
     private static void clearScenarioState() {
-        TestContextHolder.get().remove(SCENARIO_KEY);
-        TestContextHolder.get().remove(CHUNK_START_KEY);
+        SCENARIO_ID.remove();
+        CHUNK_START_MS.remove();
     }
 }

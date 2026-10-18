@@ -33,16 +33,16 @@ public class RecordingPageProxyTest {
 
     @Before
     public void setUp() {
-        prevLogging = System.getProperty("serenity.logging");
-        System.setProperty("serenity.logging", "VERBOSE"); // 开启录制开关使 wrap 生效
+        prevLogging = System.getProperty("framework.logging");
+        System.setProperty("framework.logging", "VERBOSE"); // 开启录制开关使 wrap 生效
     }
 
     @After
     public void tearDown() {
         if (prevLogging == null) {
-            System.clearProperty("serenity.logging");
+            System.clearProperty("framework.logging");
         } else {
-            System.setProperty("serenity.logging", prevLogging);
+            System.setProperty("framework.logging", prevLogging);
         }
     }
 
@@ -143,7 +143,7 @@ public class RecordingPageProxyTest {
 
     @Test
     public void disabledWrap_returnsRealPage_zeroOverhead() {
-        System.setProperty("serenity.logging", "QUIET"); // 关闭录制
+        System.setProperty("framework.logging", "QUIET"); // 关闭录制
         CallRecorder rec = new CallRecorder();
         Page real = fakePage(rec);
         Page proxy = RecordingPageProxy.wrap(real);

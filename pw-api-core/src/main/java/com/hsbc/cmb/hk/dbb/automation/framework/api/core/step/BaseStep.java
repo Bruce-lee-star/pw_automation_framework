@@ -115,7 +115,7 @@ public class BaseStep extends RestJobProvider {
             LOGGER.info("JSON field verification passed: field '{}' has value '{}'", fieldPath, actualValue);
 
         } catch (Exception e) {
-            //  评审 F-09 修复：失败信息会随 Serenity 报告与日志出域，响应体内可能含 token/卡号等，
+            //  评审 F-09 修复：失败信息会随 框架 报告与日志出域，响应体内可能含 token/卡号等，
             //  故必须先脱敏再拼装（原实现把完整 responseBody 原文拼进 AssertionError）。
             throw new AssertionError(String.format(
                     "JSON field verification failed: error parsing field '%s' - %s. Response body: %s",

@@ -26,7 +26,7 @@ import java.util.List;
  *       {@link ContextTask}，worker 线程持有独立 Browser 与隔离的 {@code BrowserContext}。</li>
  *   <li><b>SSO 感知互斥</b>：相同 (env, username) 身份经 {@link ConcurrencyGate} 串行、不同身份并行
  *       （总开关默认关闭 → 全 no-op 零回归）。</li>
- *   <li><b>失败回放</b>：{@link #assertAllSucceeded(List)} 在编排线程经 Serenity 既有通道回放
+ *   <li><b>失败回放</b>：{@link #assertAllSucceeded(List)} 在编排线程经 框架 既有通道回放
  *       （桥接原则 9.3：worker 线程不直接触碰 {@code StepEventBus}）。</li>
  * </ol>
  * </p>
@@ -52,7 +52,7 @@ public final class ConcurrentScenarioExecutor {
      * 因此本方法使每个 worker 线程经 {@code BrowserRegistry.keyFor()} 的 {@code "<threadId>:<configId>"} 维度
      * 拿到<b>各自独立的 Browser 实例</b>，隔离性由每线程各自的 {@code BrowserContext} 保证。这与 Node/Python
      * 单线程绑定的「单 Browser 多 Context」范式不同，后者不能直接套用到 Java。共享 Browser 模式
-     * （{@code serenity.playwright.shared.browser.enabled}）<b>已从框架彻底移除</b>，并发统一为每线程独立 Browser。</p>
+     * （{@code framework.playwright.shared.browser.enabled}）<b>已从框架彻底移除</b>，并发统一为每线程独立 Browser。</p>
      */
     public static void prepareConcurrentEnvironment() {
         FrameworkCore.getInstance().initialize();
@@ -104,7 +104,7 @@ public final class ConcurrentScenarioExecutor {
     }
 
     /**
-     * 编排线程回放：任一用例失败则经 Serenity 既有通道标记并抛出（带全部失败汇总，桥接 9.3）。
+     * 编排线程回放：任一用例失败则经 框架 既有通道标记并抛出（带全部失败汇总，桥接 9.3）。
      */
     public static <T> void assertAllSucceeded(List<ContextTaskResult<T>> results) {
         ConcurrentContextExecutor.assertAllSucceeded(results);

@@ -451,7 +451,7 @@ public class PlaywrightContextManager {
     }
 
     // ==================== Trace（已迁移）====================
-    //  文件名 sanitize 与「trace 挂进 Serenity 报告」两件事已随方案 A 迁至
+    //  文件名 sanitize 与「trace 挂进 框架 报告」两件事已随方案 A 迁至
     //  {@link com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace.ScenarioTraceRecorder}：
     //  文件名改为 {@code trace-<scenarioId>-<start>-<end>-<PASS|FAIL|ONCLOSE>.zip}（带起止时间），
     //  报告条目同时给出覆盖时间窗，便于按区间定位。

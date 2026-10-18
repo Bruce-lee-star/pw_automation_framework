@@ -1,1523 +1,650 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.SoftAssertions;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.logging.LogContext;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace.ScenarioTraceRecorder;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.SerenityReporter;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.SerenityResultAdapter;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.result.ResultReporters;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.result.StepResult;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.result.TestResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycle;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkCore;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.config.AutoBrowserProcessor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.ConcurrencyGate;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioInfo;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepInfo;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStatus;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.screenshot.strategy.ScreenshotStrategy;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
-import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.Page;
-import net.thucydides.core.steps.StepEventBus;
-import net.thucydides.model.domain.DataTable;
-import net.thucydides.model.domain.Story;
-import net.thucydides.model.domain.TestOutcome;
-import net.thucydides.model.domain.TestResult;
-import net.thucydides.model.environment.SystemEnvironmentVariables;
-import net.thucydides.model.screenshots.ScreenshotAndHtmlSource;
-import net.thucydides.model.steps.ExecutedStepDescription;
-import net.thucydides.model.steps.StepFailure;
-import net.thucydides.model.steps.StepListener;
-import net.thucydides.model.util.EnvironmentVariables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
-import java.time.ZonedDateTime;
-import java.util.*;
-import java.util.function.Consumer;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
-public class PlaywrightListener implements StepListener {
-
-    /**
-     * Serenity 4.3.4 新增回调：外部录制截图后通知。本框架截图由 Playwright 自身管理，
-     * 不依赖 Serenity 截图流水线，故空实现（保持接口契约完整）。
-     */
-    @Override
-    public void recordScreenshot(String screenshotName, byte[] screenshotBytes) {
-        // 框架截图链路与 Serenity 无关：PlaywrightListener 在 step 失败/结束时自行截图并附加报告。
-    }
-
+/**
+ * Playwright 集成主监听器（原生生命周期版，已去 框架 直接依赖）。
+ *
+ * <p><b>D4 改造：</b>本类不再实现 serenity 的 {@code StepListener}，改为实现框架原生
+ * {@link com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkLifecycleListener}，
+ * 由 {@code ThucydidesStepsListenerAdapter}（serenity → 原生翻译桥）把 serenity 事件总线上的
+ * 事件翻译成本接口的 6 个原生回调。serenity 仍作为事件机制存在（"借助 serenity 机制"），
+ * 但本类零 serenity import：报告写入经 ReportingBridge 端口（pw-reports 内的 SerenityReportingBridge 实现），
+ * 业务监听经 {@link FrameworkListenerBridge} 桥。
+ *
+ * <p>职责不变：per-thread 并发守卫、性能统计、截图采集、API/路由/页面错误失败聚合、
+ * 路由状态重置、场景级资源清理与全局 teardown、MDC 与业务监听桥接。
+ */
+public class PlaywrightListener implements
+        com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkLifecycleListener {
 
     private static final Logger logger = LoggerFactory.getLogger(PlaywrightListener.class);
 
     private final ScreenshotStrategy screenshotStrategy;
 
-    //  W-8 收拢：原裸 ThreadLocal 迁入 TestContext（per-thread 等价，清理统一走 TestContextHolder.remove）
+    // ═══════════════════════════════════════════════════════════
+    // 线程状态键（per-thread，与 框架 事件总线 ThreadLocal 对齐）
+    // ═══════════════════════════════════════════════════════════
     private static final ContextKey<TestResult> CURRENT_TEST_RESULT_KEY =
-            ContextKey.of("playwrightListener.currentTestResult", TestResult.class);
+            ContextKey.of("playwright.listener.currentTestResult", TestResult.class);
+    private static final ContextKey<String> CURRENT_STEP_KEY =
+            ContextKey.of("playwright.listener.currentStep", String.class);
+    private static final ContextKey<Long> CURRENT_TEST_START_TIME_KEY =
+            ContextKey.of("playwright.listener.testStartTime", Long.class);
+    private static final ContextKey<Long> CURRENT_STEP_START_TIME_KEY =
+            ContextKey.of("playwright.listener.stepStartTime", Long.class);
+    private static final ContextKey<Integer> CURRENT_STEP_SCREENSHOTS_TAKEN_KEY =
+            ContextKey.of("playwright.listener.stepScreenshotsTaken", Integer.class);
+    private static final ContextKey<Boolean> FAILURE_SCREENSHOTS_ALREADY_SENT_KEY =
+            ContextKey.of("playwright.listener.failureScreenshotsAlreadySent", Boolean.class);
+    private static final ContextKey<Boolean> STEP_FINISH_PROCESSED_KEY =
+            ContextKey.of("playwright.listener.stepFinishProcessed", Boolean.class);
+    private static final ContextKey<Boolean> TEARDOWN_COMPLETED_KEY =
+            ContextKey.of("playwright.listener.teardownCompleted", Boolean.class);
 
-    //  T3-1 收拢：4 个 static ThreadLocal 迁入 TestContext（原均为默认 null 语义，迁移后等价）
-    private static final ContextKey<Long> TEST_START_TIME_KEY = ContextKey.of("playwrightListener.testStartTime", Long.class);
-    private static final ContextKey<Long> STEP_START_TIME_KEY = ContextKey.of("playwrightListener.stepStartTime", Long.class);
-    private static final ContextKey<String> CURRENT_TEST_NAME_KEY = ContextKey.of("playwrightListener.currentTestName", String.class);
-    private static final ContextKey<String> CURRENT_STEP_NAME_KEY = ContextKey.of("playwrightListener.currentStepName", String.class);
+    /** 当前场景信息（onScenarioStarted 时记录，供 onScenarioFinished 在信息缺失时回退）。 */
+    private volatile LifecycleScenarioInfo currentScenarioInfo;
 
-    // 记录当前 Cucumber 级别步骤，避免为 Serenity 子步骤重复截图（ T3-1 收拢：迁入 TestContext）
-    private static final ContextKey<String> CURRENT_CUCUMBER_STEP_KEY =
-            ContextKey.of("playwrightListener.currentCucumberStep", String.class);
-
-
-    /**
-     *  失败传播机制说明（重要）。
-     *
-     * <p>Serenity listener 回调（stepFinished / testFinished）中检测到的任何失败
-     * （API 断言、元素找不到、超时等）都必须通过 <b>抛出异常</b> 的方式传播，
-     * 因为 {@code StepEventBus.testFailed()} 只影响 Serenity 报告模型，无法改变 Cucumber/JUnit4 判定。
-     *
-     * <p>关键事实：本框架的 Serenity 集成 <b>不会</b>为 {@code cucumber.properties} 注入的 glue 包
-     * 注册 Cucumber {@code @After} hook（类会被加载但不注册 hook），因此不能在测试层用 @After 抛异常。
-     * 正确做法是在已 SPI 注册的 Serenity {@code StepListener} 的 {@code stepFinished()} 回调中
-     * 直接 {@code throw}，异常沿 {@code StepInterceptor → Cucumber → JUnit4} 传播，使 IDE 正确标红。
-     *
-     * <p>详见 {@link #checkAndFailOnApiAssertions()} 中的 {@code throw} 实现。
-     */
-
-    // 存储当前步骤的截图列表
-    // （ T3-1 收拢：withInitial(ArrayList::new) 的惰性语义由 computeIfAbsent 等价保证）
-    private static final ContextKey<List> CURRENT_STEP_SCREENSHOTS_KEY =
-            ContextKey.of("playwrightListener.currentStepScreenshots", List.class);
-
-    /** 取本线程的步骤截图列表（等价原 currentStepScreenshots()，惰性创建）。 */
-    @SuppressWarnings("unchecked")
-    private static List<ScreenshotAndHtmlSource> currentStepScreenshots() {
-        return (List<ScreenshotAndHtmlSource>) TestContextHolder.get()
-                .computeIfAbsent(CURRENT_STEP_SCREENSHOTS_KEY, ArrayList::new);
-    }
-
-
-
-    // 用于防止testSuiteFinished被多次调用时重复输出日志
-    private static volatile boolean testSuiteFinishedLogged = false;
-
-    //  轮次跟踪：当前是本次 JVM 里第几次 testRunFinished（0 = 尚未结束过任何一轮，>=1 = 已结束 >=1 轮）
-    private static volatile int currentRunNumber = 0;
-    /**
-     * 本轮横幅是否已打印（每个轮次只打一次，避免同一轮重复刷屏）。
-     *
-     * <p>原字段名为 {@code rerunStartedLogged}，但它的语义从来只是"横幅已打"——名字里带 rerun
-     * 会诱导读者以为"这就是重跑"，与本类正在修正的误报同源，故一并更名。</p>
-     */
-    private static volatile boolean roundBannerLogged = false;
-
-    /**
-     *  阶段识别：Serenity CucumberWithSerenity 在 discovery 和 execution 两个阶段
-     * 各触发一次完整的 testSuiteStarted → testStarted → testSuiteFinished 事件链。
-     *
-     * <p>Discovery 阶段仅扫描 feature 文件构建 Pickle 列表，不应触发任何
-     * Playwright 资源初始化。本标记在首次 testSuiteStarted(Story) 检测到重复 story 时置为 true
-     * （同一 story 在 discovery 和 execution 各触发一次，重复出现即进入执行阶段）。
-     *
-     * <p>在 testRunFinished 时重置，以支持同 JVM 内 rerun 场景。
-     */
-    private static volatile boolean discoveryPhaseCompleted = false;
-
-    /**
-     *  阶段检测辅助集合：记录所有已见过的 Story 名称。
-     * 当同一个 Story 在 testSuiteStarted(Story) 中被第二次看到时，
-     * 说明 Serenity 已从 discovery 阶段进入 execution 阶段。
-     */
-    // WEB-C2（doc 13 P1-2）：并行执行下多个 Story 的 testSuiteStarted 可能并发进入，
-    // 普通 HashSet 在并发 add 下结构损坏；改用并发安全 Set。add 原子返回「是否已存在」，
-    // 使下方「重复 Story 即进入 execution 阶段」的判重无需额外加锁。
-    private final Set<String> seenStoryNames = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-    /**
-     * 本 JVM 内**见过一次就不再清空**的 story 名集合 —— 用于区分"同一套件重跑"与"另一个套件开始"。
-     *
-     * <p>与 {@link #seenStoryNames} 的区别：后者在 {@code testRunFinished} 时清空（它服务于
-     * discovery/execution 阶段识别），而本集合跨轮次保留。判定见 {@link #testSuiteStarted(Story)}：
-     * 同名 story 再现 ⇒ 同一套件被再次执行（**才可能**是 failsafe 的失败重跑）；新 story ⇒ 只是另一个
-     * 套件/另一个插件阶段开始，**不是重跑**。</p>
-     */
-    private final Set<String> storyNamesEverSeen = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-    /** 轮次横幅语义（包级可见：供单测直接断言，无需日志捕获夹具）。 */
-    enum RoundBanner { NONE, SAME_SUITE_RE_EXECUTED, NEW_SUITE }
-
-    /**
-     * 判定"新一轮开始"的横幅语义，并原子消费本轮横幅名额（每轮只打一次）。
-     *
-     * <p>为什么单独抽出来：原实现把判定与日志写在一处，判据既不可单测也不可复用；抽成包级方法后，
-     * 单测可直接断言语义，日志只负责呈现。</p>
-     *
-     * @param storyName 新开始的 story 名（null ⇒ 不可判定，返回 {@link RoundBanner#NONE}）
-     * @return {@link RoundBanner#NONE}＝首轮（尚未有 testRunFinished）或本轮横幅已打；
-     *         {@link RoundBanner#SAME_SUITE_RE_EXECUTED}＝同名 suite 再现（**才可能**是 failsafe 失败重跑）；
-     *         {@link RoundBanner#NEW_SUITE}＝另一个 suite 开始（**不是**重跑）
-     */
-    RoundBanner classifyRoundStart(String storyName) {
-        if (currentRunNumber <= 0 || roundBannerLogged || storyName == null) {
-            return RoundBanner.NONE;
-        }
-        roundBannerLogged = true;
-        return storyNamesEverSeen.add(storyName)
-                ? RoundBanner.NEW_SUITE : RoundBanner.SAME_SUITE_RE_EXECUTED;
-    }
-
-    /** 仅测试用：重置轮次相关静态状态（package-private；生产代码不调用）。 */
-    static void resetRoundStateForTest() {
-        currentRunNumber = 0;
-        roundBannerLogged = false;
-    }
-
-    /** scenario 标识单调序号：保证同名 scenario（如 Scenario Outline 各示例行）也拿到唯一 id，避免按用例串联时串扰。 */
-    private static final java.util.concurrent.atomic.AtomicLong SCENARIO_SEQ = new java.util.concurrent.atomic.AtomicLong();
-
+    // ═══════════════════════════════════════════════════════════
+    // 构造函数 / 初始化
+    // ═══════════════════════════════════════════════════════════
     public PlaywrightListener() {
-        // 从环境变量中读取截图策略配置
-        EnvironmentVariables environmentVariables = SystemEnvironmentVariables.currentEnvironmentVariables();
-        this.screenshotStrategy = ScreenshotStrategy.from(environmentVariables);
-
-        VerboseLogging.logInfoIfVerbose(logger, "Screenshot strategy initialized: {}", screenshotStrategy);
+        this.screenshotStrategy = ScreenshotStrategy.from();
     }
 
-    // ── D4-1：FrameworkListener 桥接所需的 per-thread 状态 ──
-    //  W-8 收拢：原裸 ThreadLocal 迁入 TestContext（per-thread 等价）。
-    //  核实 cleanupThreadLocals() 仅移除特定 ContextKey、不整上下文 reset（无 resetForCurrentThread 调用），
-    //  故此处键在 cleanupThreadLocals 之后仍可被 fireAfterScenario 读取；移除统一在 fireAfterScenario finally 进行。
-    private static final ContextKey<String> CURRENT_SCENARIO_NAME_KEY =
-            ContextKey.of("playwrightListener.currentScenarioName", String.class);
-    private static final ContextKey<String> CURRENT_STEP_TITLE_KEY =
-            ContextKey.of("playwrightListener.currentStepTitle", String.class);
-    private static final ContextKey<java.util.concurrent.atomic.AtomicBoolean> AFTER_STEP_FIRED_KEY =
-            ContextKey.of("playwrightListener.afterStepFired", java.util.concurrent.atomic.AtomicBoolean.class);
+    // ═══════════════════════════════════════════════════════════
+    // 原生生命周期事件
+    // ═══════════════════════════════════════════════════════════
 
-    /** W-8：获取或创建当前线程的"步骤已触发"标志（等价原 ThreadLocal.withInitial(AtomicBoolean::new)）。 */
-    private static java.util.concurrent.atomic.AtomicBoolean afterStepFired() {
-        java.util.concurrent.atomic.AtomicBoolean b = TestContextHolder.get().get(AFTER_STEP_FIRED_KEY);
-        if (b == null) {
-            b = new java.util.concurrent.atomic.AtomicBoolean();
-            TestContextHolder.get().set(AFTER_STEP_FIRED_KEY, b);
-        }
-        return b;
-    }
-    /** D4-2：本步骤是否发生过失败（用于产出步骤级结果）。 */
-    //  W-8 收拢：原裸 ThreadLocal 迁入 TestContext（per-thread 等价，get-or-create 等价 withInitial）。
-    private static final ContextKey<java.util.concurrent.atomic.AtomicBoolean> STEP_FAILED_KEY =
-            ContextKey.of("playwrightListener.stepFailed", java.util.concurrent.atomic.AtomicBoolean.class);
-
-    /** W-8：获取或创建当前线程的"本步骤已失败"标志（等价原 ThreadLocal.withInitial(AtomicBoolean::new)）。 */
-    private static java.util.concurrent.atomic.AtomicBoolean stepFailed() {
-        java.util.concurrent.atomic.AtomicBoolean b = TestContextHolder.get().get(STEP_FAILED_KEY);
-        if (b == null) {
-            b = new java.util.concurrent.atomic.AtomicBoolean();
-            TestContextHolder.get().set(STEP_FAILED_KEY, b);
-        }
-        return b;
-    }
-
+    /** 测试运行开始（对应 serenity testSuiteStarted）：全局一次性初始化 + 日志，不依赖 Story。 */
     @Override
-    public void testStarted(String testName) {
-        // 生成唯一名称：原名称 + 线程ID + 单调序号（保证同名 scenario 不合并、不碰撞）。
-        // 用序号而非 System.currentTimeMillis()：毫秒分辨率下，同一线程、同毫秒内启动的多个同名
-        // scenario（如 Scenario Outline 各示例行）会撞出相同 id，导致按用例串联时串扰。
-        String uniqueTestName = testName + "_" + Thread.currentThread().threadId() + "_" + SCENARIO_SEQ.incrementAndGet();
-        TestContextHolder.get().set(CURRENT_TEST_NAME_KEY,uniqueTestName);  //  修复：确保 currentTestName 被设置（与双参数版本一致）
-        //  D3-1：把 scenario 标识写入 MDC，使控制台 / 落盘日志可按用例串联（并行执行排障关键）
-        LogContext.beginScenario(uniqueTestName);
-        //  方案 A（2026-09-17）：trace 按 scenario 分段 —— 用例开始即开启（或续开）chunk，
-        //  使每个用例得到一个独立 trace 文件（时间区间 == 用例执行区间）。
-        ScenarioTraceRecorder.onScenarioStart(uniqueTestName);
-        //  D4-1：桥接业务监听器（业务只实现 FrameworkListener，不接触 Serenity 事件）
-        TestContextHolder.get().set(CURRENT_SCENARIO_NAME_KEY, uniqueTestName);
-        afterStepFired().set(false);
-        FrameworkListenerBridge.beforeScenario(uniqueTestName);
-        TestContextHolder.get().set(TEST_START_TIME_KEY,System.currentTimeMillis());
-        TestContextHolder.get().set(CURRENT_TEST_RESULT_KEY, TestResult.PENDING); // 初始化为PENDING，避免默认为SUCCESS导致统计错误
+    public void onTestRunStarted() {
+        //  全局一次性初始化（Playwright.create / 监听器注册 / frameworkState）放这里——每 run 一次，
+        //  与 javadoc 意图一致；per-scenario 的 initializeForScenario 仍留 onScenarioStarted。
+        //  幂等（isInitialized 短路）；onScenarioStarted 的 beforeTest() 仍保留 !isInitialized 兜底重试。
+        FrameworkCore.getInstance().initialize();
+        VerboseLogging.logInfoIfVerbose(logger, "Framework lifecycle: test run started");
+    }
 
-        //  新增：重置 API 监控上下文（route 未启用时整体跳过）
-        withRouteLifecycle(lc -> {
-            lc.resetCaptureCurrent();
-            //  绑定当前 scenario 名：让 API 监控失败记录能归属到具体场景
-            //   （MonitorFailureCollector 按指纹去重合并，同时累计触发该失败的场景列表）
-            lc.setMonitorScenario(testName);
-        });
-        //  丢弃上一场景残留的待报告 API 记录，避免其被写入本场景报告（跨场景串扰）
-        SerenityReporter.discardPendingApiOperations();
-        //  重置 API 失败标记（每个新 case 重新开始追踪）
-        ListenerGuard.guards().setApiFailureAlreadyHandled(false);
+    /** 场景开始（对应 serenity testStarted）：建立 MDC、重置守卫、记录起点、桥接业务监听。 */
+    @Override
+    public void onScenarioStarted(LifecycleScenarioInfo info) {
+        String scenarioName = info != null ? info.name() : "unknown";
+        this.currentScenarioInfo = info;
 
-        //  安全清理：确保上一个 scenario 的采集引擎已释放
-        withRouteLifecycle(RouteLifecycle::stopCapture);
+        //  注入当前场景标签到原生 holder（供 AutoBrowserProcessor 在 getBrowserType 时消费；去 框架 后唯一标签源）
+        AutoBrowserProcessor.setScenarioTags(info != null ? info.tags() : null);
 
-        //  阶段识别：discovery 阶段跳过 Playwright 资源初始化
-        if (!discoveryPhaseCompleted) {
-            // Discovery 阶段：只记录轻量级状态，不初始化 Playwright 资源
-            // 避免重复创建 Playwright/Browser 实例导致浏览器多开、内存飙高
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[Discovery Phase] Skipping Playwright init for test: {}", uniqueTestName);
+        // 场景开始闩锁：scenarioStarted() 返回 true＝重入（已处于场景中，跳过）；false＝首次进入（继续）。
+        // 修复 WIP 回退：此前误写 !scenarioStarted()，导致首次进入被跳过、 FrameworkCore.beforeTest() 初始化不触发。
+        if (ListenerGuard.guards().scenarioStarted()) {
             return;
         }
 
-        //  修复：补齐 FrameworkCore 初始化（与 testStarted(String,String) 保持一致）
         try {
+            //  设置 MDC 供日志追踪（保持生产溯源一致）
+            LogContext.beginScenario(scenarioName);
+
+            //  重置当前场景状态（守卫 / 计时 / 截图计数）
+            resetCurrentScenarioState();
+
+            // 记录场景开始时间（性能统计）
+            long start = System.currentTimeMillis();
+            TestContextHolder.get().set(CURRENT_TEST_START_TIME_KEY, start);
+            ListenerPerfStats.markTotal();
+
+            String uniqueName = generateUniqueScenarioName(scenarioName);
+            TestContextHolder.get().set(ListenerGuard.CURRENT_TEST_NAME_KEY, uniqueName);
+            TestContextHolder.get().set(CURRENT_TEST_RESULT_KEY, TestResult.PENDING);
+
+            //  桥接业务监听器（框架原生 FrameworkListener 接口，供业务订阅场景开始）
+            FrameworkListenerBridge.beforeScenario(uniqueName);
+
+            //  丢弃上一场景残留的待报告 API 记录，避免跨场景串扰
+            ReportingBridgeRegistry.get().discardPendingApiOperations();
+
+            //  重置当前场景的路由状态（每个场景独立隔离，关键修复越权访问）
+            resetCurrentScenarioRouteState(uniqueName);
+
+            //  关键修复：在测试开始前初始化框架（确保 PlaywrightManager 等已就绪）
             FrameworkCore.getInstance().beforeTest();
-            recordTestData("testStart", System.currentTimeMillis());
-            VerboseLogging.logInfoIfVerbose(logger, "Test initialized: {}", uniqueTestName);
-        } catch (Exception e) {
-            logger.error("Failed to initialize Playwright for test: {}", uniqueTestName, e);
-        }
 
-        // 测试开始时截图（根据策略决定）
-        if (screenshotStrategy == ScreenshotStrategy.BEFORE_AND_AFTER_EACH_STEP) {
-            takeScreenshotAndRegister("TEST_START_" + uniqueTestName);
+            //  BEFORE_AND_AFTER_EACH_STEP 策略：场景开始即截图
+            if (ScreenshotStrategy.BEFORE_AND_AFTER_EACH_STEP.equals(screenshotStrategy)) {
+                takeScreenshotAndRegister(uniqueName + "-scenario-start");
+            }
+
+            // 记录场景开始的面包屑（便于失败排障）
+            recordTestData("scenarioStartTimestamp", Instant.now().toString());
+
+            VerboseLogging.logInfoIfVerbose(logger, "Scenario started: {}", uniqueName);
+        } catch (Exception e) {
+            logger.error("Error in onScenarioStarted for: {}", scenarioName, e);
         }
     }
 
-    private void testFinishedInternal() {
-        Long startTime = TestContextHolder.get().get(TEST_START_TIME_KEY);
-        if (startTime == null) {
+    /** 步骤开始（对应 serenity stepStarted）：重置步骤级状态、桥接业务监听、按需截图。 */
+    @Override
+    public void onStepStarted(LifecycleStepInfo step) {
+        if (step == null) {
+            return;
+        }
+        String stepTitle = step.stepName() != null ? step.stepName() : "step";
+
+        // 步骤开始闩锁：stepStarted() 返回 true＝嵌套（重入，跳过）；false＝最外层（继续）。
+        // 与 onScenarioStarted 同源修复：去掉误加的反转 !，避免最外层步骤处理被跳过。
+        if (ListenerGuard.guards().stepStarted()) {
             return;
         }
 
-        //  测试计数：在 testFinished 而非 testStarted 中计数
-        // testStarted 受 discoveryPhaseCompleted 守卫影响，在 Serenity+Cucumber 场景下可能不计数
-        // testFinished 是测试真正完成的确切时刻，计数更可靠
-        ListenerPerfStats.markTotal();
-
-        // 【关键】使用 try-finally 确保 ThreadLocal 始终被清理，即使中间抛出异常
         try {
-            long duration = System.currentTimeMillis() - startTime;
-            String testName = TestContextHolder.get().get(CURRENT_TEST_NAME_KEY);
+            // 重置步骤级状态（截图计数 / 失败截图标记 / 步骤处理标记）
+            TestContextHolder.get().set(CURRENT_STEP_KEY, stepTitle);
+            TestContextHolder.get().set(CURRENT_STEP_START_TIME_KEY, System.currentTimeMillis());
+            TestContextHolder.get().set(CURRENT_STEP_SCREENSHOTS_TAKEN_KEY, 0);
+            TestContextHolder.get().set(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY, Boolean.FALSE);
+            TestContextHolder.get().set(STEP_FINISH_PROCESSED_KEY, Boolean.FALSE);
 
-            // 根据策略和测试结果决定是否截图
-            TestResult result = TestContextHolder.get().get(CURRENT_TEST_RESULT_KEY);
-            boolean shouldTakeScreenshot = screenshotStrategy.shouldTakeScreenshotFor(result);
+            //  桥接业务监听器
+            FrameworkListenerBridge.beforeStep(stepTitle);
 
-            if (shouldTakeScreenshot && screenshotStrategy != ScreenshotStrategy.DISABLED) {
-                takeScreenshotAndRegister("TEST_END_" + testName);
+            //  重置当前步骤的截图列表（步骤级隔离）
+            currentStepScreenshots().clear();
+
+            //  BEFORE_AND_AFTER_EACH_STEP：步骤开始即截图（AFTER_EACH_STEP 仅在结束截，避免截图风暴）
+            if (screenshotStrategy.shouldTakeScreenshotBeforeEachStep()) {
+                captureScreenshotAtStepLevel(stepTitle);
             }
 
-        recordTestData("testEnd", System.currentTimeMillis());
-        recordTestData("testDuration", duration);
+            // 记录步骤开始的面包屑
+            recordTestData("stepStartTimestamp", Instant.now().toString());
 
-        if (result != null) {
-            recordTestData("testResult", result);
-            if (result == TestResult.SUCCESS) {
-                ListenerPerfStats.markPassed();
-            } else  {if (result == TestResult.PENDING) {
-                // PENDING表示测试结果未知，可能是测试中途失败或超时
-                // 将其计为失败，以确保准确统计
-                logger.warn("Test result is PENDING, counting as failed: {}", testName);
-                ListenerPerfStats.markFailed();
-            } else  {if (result == TestResult.FAILURE || result == TestResult.ERROR) {
-                ListenerPerfStats.markFailed();
-            } else  {if (result == TestResult.SKIPPED) {
-                ListenerPerfStats.markSkipped();
-            }} } } 
-        } else {
-            // result为null，说明测试没有正常完成，计为失败
-            logger.warn("Test result is null, counting as failed: {}", testName);
-            ListenerPerfStats.markFailed();
-        }
-
-        VerboseLogging.logInfoIfVerbose(logger, "Test completed: {} in {}ms (Result: {})", testName, duration, result);
-        } finally {
-            //  安全清理：scenario 结束时立即停止采集引擎，而非等到下一个 scenario 开始
-            //    避免 scenario 被中断（断言失败/超时）后引擎仍在运行
-            try { withRouteLifecycle(RouteLifecycle::stopCapture); } catch (Exception e) {
-                // 清理阶段兜底：stopCapture 失败不应阻断后续 ThreadLocal 清理（D7-3：不得静默）
-                logger.debug("[PlaywrightListener] stopCapture failed during cleanup: {}", e.toString());
-            }
-
-            // 【关键】finally 保证：无论中间是否抛异常，ThreadLocal 一定会被清理
-            cleanupThreadLocals();
+            VerboseLogging.logInfoIfVerbose(logger, "Step started: {}", stepTitle);
+        } catch (Exception e) {
+            logger.error("Error in onStepStarted: {}", stepTitle, e);
         }
     }
 
+    /** 步骤结束（对应 serenity stepFinished/stepFailed/lastStepFailed/stepIgnored）。 */
     @Override
-    public void testSkipped() {
-        ListenerPerfStats.markSkipped();
-        VerboseLogging.logInfoIfVerbose(logger, "Test skipped: {}", TestContextHolder.get().get(CURRENT_TEST_NAME_KEY));
-        recordTestData("testSkipped", true);
-        cleanupAfterAbnormalTermination("testSkipped");
+    public void onStepFinished(LifecycleStepResult stepResult) {
+        if (stepResult == null) {
+            return;
+        }
+        LifecycleStatus status = stepResult.status() != null ? stepResult.status() : LifecycleStatus.PASSED;
+        boolean isSuccess = status == LifecycleStatus.PASSED || status == LifecycleStatus.SKIPPED
+                || status == LifecycleStatus.IGNORED || status == LifecycleStatus.PENDING;
+
+        //  failure 截图只需发一次（lastStepFailed 与 stepFailed 都会触发），防止重复
+        if (!isSuccess && Boolean.TRUE.equals(
+                TestContextHolder.get().get(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY))) {
+            return;
+        }
+        if (Boolean.TRUE.equals(TestContextHolder.get().get(STEP_FINISH_PROCESSED_KEY))) {
+            return;
+        }
+        if (!ListenerGuard.guards().isStepActive()) {
+            return;
+        }
+
+        String stepTitle = stepResult.stepName() != null ? stepResult.stepName()
+                : (TestContextHolder.get().get(CURRENT_STEP_KEY) != null
+                ? TestContextHolder.get().get(CURRENT_STEP_KEY) : "step");
+
+        boolean outermost = ListenerGuard.guards().isOutermostStep();
+        ListenerGuard.guards().stepFinished();
+
+        //  嵌套步骤的"成功"收尾不重复处理；失败无论嵌套层级都处理（首次）
+        if (isSuccess && !outermost) {
+            return;
+        }
+
+        try {
+            TestContextHolder.get().set(STEP_FINISH_PROCESSED_KEY, Boolean.TRUE);
+
+            //  失败：补截图 + 记录失败诊断 + 聚合框架级失败
+            if (!isSuccess) {
+                TestContextHolder.get().set(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY, Boolean.TRUE);
+                captureScreenshotOnFailure(stepResult.error());
+                logInteractionDiagnosticsOnFailure();
+                aggregateStepLevelFailures();
+            } else {
+                //  成功：AFTER_EACH_STEP / BEFORE_AND_AFTER_EACH_STEP 步骤结束截图
+                if (screenshotStrategy.shouldTakeScreenshotFor(LifecycleStepInfo.builder()
+                        .stepName(stepTitle).build())) {
+                    captureScreenshotAtStepLevel(stepTitle);
+                }
+            }
+
+            //  桥接业务监听器（afterStep）
+            FrameworkListenerBridge.afterStep(stepTitle);
+
+            //  原生挂载当前步骤截图到报告（替代 serenity StepEventBus.stepFinished）
+            List<CapturedScreenshot> screenshots = new ArrayList<>(currentStepScreenshots());
+            currentStepScreenshots().clear();
+            mergeAndAttachScreenshots(screenshots);
+
+            recordTestData("stepFinishTimestamp", String.valueOf(System.currentTimeMillis()));
+            VerboseLogging.logInfoIfVerbose(logger, "Step finished: {} (success={})",
+                    stepTitle, isSuccess);
+        } catch (Exception e) {
+            logger.error("Error in onStepFinished: {}", stepTitle, e);
+        }
     }
 
-    /**
-     * 异常/跳过路径的幂等清理。<b>仅用于场景级异常终止（当前仅 testSkipped）</b>——
-     * 步骤级失败（stepFailed / lastStepFailed / stepIgnored）<b>不再</b>走此方法：场景尚未结束，
-     * 过早拆除 Context/Page 会丢收尾截图、滋生 about:blank 新 tab、并与场景收尾二次拆除（2026-10-16）。
-     *
-     * <p>Serenity 不保证 skipped 一定随后触发完整的 testFinished，故 skip 入口主动释放资源。
-     * 拆除须<b>对称</b>：{@link PlaywrightManager#clearThreadResourcesOnCaseAbort()} 内的 closeContext
-     * 会清掉自定义 storageState，但不清会话键——这里补 {@link SessionManager#resetCurrentSession()}，
-     * 避免"context 已关、storageState 已清、会话键仍在"的组合生命周期半清状态（2026-10-16）。</p>
-     *
-     * <p>G4：全程<b>线程级</b>清理（不调全局 resetAll），绝不触碰其它 worker 的状态。</p>
-     */
-    private void cleanupAfterAbnormalTermination(String reason) {
+    /** 场景结束（对应 serenity testFinished/testSkipped/testIgnored/testFailed）。 */
+    @Override
+    public void onScenarioFinished(LifecycleScenarioResult result) {
+        LifecycleScenarioInfo info = result != null && result.info() != null
+                ? result.info() : currentScenarioInfo;
+        LifecycleStatus status = result != null && result.status() != null
+                ? result.status() : LifecycleStatus.PENDING;
+        String scenarioName = info != null && info.name() != null
+                ? info.name() : (TestContextHolder.get().get(ListenerGuard.CURRENT_TEST_NAME_KEY) != null
+                ? TestContextHolder.get().get(ListenerGuard.CURRENT_TEST_NAME_KEY) : "unknown");
+        List<String> tags = info != null ? info.tags() : null;
+
+        if (ListenerGuard.guards().scenarioFinished()) {
+            return;
+        }
+        if (!ListenerGuard.guards().isScenarioActive()) {
+            VerboseLogging.logDebugIfVerbose(logger,
+                    "Skipping onScenarioFinished - scenarioStarted was not called for: {}", scenarioName);
+            return;
+        }
+
+        long stop = System.currentTimeMillis();
+        Long start = TestContextHolder.get().get(CURRENT_TEST_START_TIME_KEY);
+        long durationMs = start != null ? (stop - start) : 0;
+
         try {
+            //  记录场景结果到上报端口（汇总报告 / 框架 桥）
+            TestResult frameworkResult = toFramework(status);
+
+            //  性能统计：按结果计数（优先于下游上报，确保即便上报 / 截图失败也能正确计入）
+            markScenarioResult(scenarioName, frameworkResult);
+
+            ResultReporters.reportScenario(scenarioName, frameworkResult, durationMs);
+
+            //  标记当前场景结果（供截图策略判断）
+            TestContextHolder.get().set(CURRENT_TEST_RESULT_KEY, frameworkResult);
+
+            //  失败场景：补截图 + 记录失败诊断
+            if (status == LifecycleStatus.FAILED) {
+                captureScreenshotAtScenarioLevel(scenarioName, frameworkResult);
+                logInteractionDiagnosticsOnFailure();
+            }
+
+            //  场景级失败聚合（API / 路由 / 软断言 / 页面错误）—— 在步骤级已抛错的兜底证据上报
+            aggregateScenarioLevelFailures(scenarioName);
+
+            //  桥接业务监听器（afterScenario 带 failed 标志）
+            FrameworkListenerBridge.afterScenario(scenarioName, status == LifecycleStatus.FAILED);
+
+            //  原生挂载场景级截图到报告
+            List<CapturedScreenshot> screenshots = new ArrayList<>(currentStepScreenshots());
+            currentStepScreenshots().clear();
+            mergeAndAttachScreenshots(screenshots);
+
+            //  清空 per-scenario 路由状态与截图守卫（场景边界统一释放）
+            TestContextHolder.get().set(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY, Boolean.FALSE);
+
+            recordTestData("scenarioFinishTimestamp", Instant.now().toString());
+            VerboseLogging.logInfoIfVerbose(logger, "Scenario finished: {} (result={}, durationMs={})",
+                    scenarioName, frameworkResult, durationMs);
+        } catch (Exception e) {
+            logger.error("Error in onScenarioFinished for: {}", scenarioName, e);
+        } finally {
+            //  场景级 teardown（关闭 Context/Page、回收残留、刷新路由命中证据、回收 PageObject、释放会话/并发闸门）
+            //  —— 去 框架 后原由 ThucydidesStepsListenerAdapter.testFinished 承担，现并入此处，
+            //     保证原生生命周期管道也正确释放每场景资源。必须在 endScenario()/LogContext.endScenario() 之前，
+            //     以保留场景标识供路由证据与 trace 收尾使用。
+            try {
+                PlaywrightLifecycleBridge.cleanupForScenario(status == LifecycleStatus.FAILED);
+            } catch (Exception e) {
+                logger.debug("cleanupForScenario encountered error", e);
+            }
+
+            //  场景边界统一复位原生生命周期闩锁 + MDC（防跨场景重入 / 双重处理残留）
+            try {
+                ListenerGuard.guards().endScenario();
+                LogContext.endScenario();
+            } catch (Exception e) {
+                logger.debug("Error during lifecycle guard/scenario reset", e);
+            }
+            //  确保 per-scenario 状态清理（避免跨场景残留）
+            try {
+                cleanupThreadLocals();
+            } catch (Exception e) {
+                logger.debug("Error during cleanupThreadLocals", e);
+            }
+            //  清除原生标签 holder（与场景边界同步释放）
+            try {
+                AutoBrowserProcessor.clearScenarioTags();
+            } catch (Exception e) {
+                logger.debug("Error during scenario tag cleanup", e);
+            }
+        }
+    }
+
+    /** 测试运行结束（对应 serenity testSuiteFinished/testRunFinished）：全局资源清理。 */
+    @Override
+    public void onTestRunFinished() {
+        try {
+            VerboseLogging.logInfoIfVerbose(logger, "Framework lifecycle: test run finished - global cleanup");
+            //  全局清理：关闭所有 Playwright 实例 + 停止路由引擎（仅一次）
+            if (!Boolean.TRUE.equals(TestContextHolder.get().get(TEARDOWN_COMPLETED_KEY))) {
+                TestContextHolder.get().set(TEARDOWN_COMPLETED_KEY, Boolean.TRUE);
+                try {
+                    PlaywrightManager.cleanupAll();
+                } catch (Exception e) {
+                    logger.warn("PlaywrightManager.cleanupAll() failed during run finish", e);
+                }
+                try {
+                    RouteLifecycle routeLifecycle = RouteLifecycleRegistry.get();
+                    if (routeLifecycle != null) {
+                        routeLifecycle.stopAllContextEngines();
+                        routeLifecycle.drainForSuiteTeardown();
+                    }
+                } catch (Exception e) {
+                    logger.debug("Route engine stop skipped/failed", e);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error in onTestRunFinished", e);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 失败聚合（步骤级 / 场景级）—— 委托 StepFailureAggregator
+    // ═══════════════════════════════════════════════════════════
+
+    /** 步骤级失败聚合：API / 路由 / 页面错误断言（即时抛错使场景判红）。 */
+    private void aggregateStepLevelFailures() {
+        try {
+            StepFailureAggregator.checkAndFailOnApiAssertions();
+        } catch (AssertionError ae) {
+            throw ae; // 透传：使步骤失败信号沿调用链上抛
+        } catch (Exception e) {
+            logger.debug("checkAndFailOnApiAssertions unexpected", e);
+        }
+        try {
+            StepFailureAggregator.checkAndFailOnRouteAssertions();
+        } catch (AssertionError ae) {
+            throw ae;
+        } catch (Exception e) {
+            logger.debug("checkAndFailOnRouteAssertions unexpected", e);
+        }
+        try {
+            StepFailureAggregator.checkAndFailOnPageErrors();
+        } catch (AssertionError ae) {
+            throw ae;
+        } catch (Exception e) {
+            logger.debug("checkAndFailOnPageErrors unexpected", e);
+        }
+    }
+
+    /** 场景级失败聚合兜底：API / 路由 / 软断言证据上报（不抛错，标记已由步骤级抛错完成）。 */
+    private void aggregateScenarioLevelFailures(String scenarioName) {
+        StepFailureAggregator.checkAndMarkApiAssertionFailures(scenarioName);
+        StepFailureAggregator.checkAndMarkRouteAssertionFailures();
+        StepFailureAggregator.checkAndMarkSoftAssertionFailures();
+    }
+
+    private void logInteractionDiagnosticsOnFailure() {
+        StepFailureAggregator.logInteractionDiagnosticsOnFailure();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 截图采集（原生 CapturedScreenshot）
+    // ═══════════════════════════════════════════════════════════
+
+    private List<CapturedScreenshot> currentStepScreenshots() {
+        ContextKey<List<CapturedScreenshot>> key = ContextKey.of(
+                "playwright.listener.currentStepScreenshots", (Class<List<CapturedScreenshot>>) (Class<?>) List.class);
+        List<CapturedScreenshot> list = TestContextHolder.get().get(key);
+        if (list == null) {
+            list = new ArrayList<>();
+            TestContextHolder.get().set(key, list);
+        }
+        return list;
+    }
+
+    private void mergeAndAttachScreenshots(List<CapturedScreenshot> screenshots) {
+        try {
+            if (screenshots != null && !screenshots.isEmpty()) {
+                ReportingBridge bridge = ReportingBridgeRegistry.get();
+                for (CapturedScreenshot shot : screenshots) {
+                    bridge.attachScreenshot(shot);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to attach screenshots", e);
+        }
+    }
+
+    private void takeScreenshotAndRegister(String description) {
+        try {
+            CapturedScreenshot screenshot = FailureScreenshotHandler.capture(description);
+            if (screenshot != null) {
+                currentStepScreenshots().add(screenshot);
+                recordScreenshotCount(description);
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to take screenshot: {}", description, e);
+        }
+    }
+
+    private void captureScreenshotAtStepLevel(String stepTitle) {
+        takeScreenshotAndRegister(stepTitle);
+    }
+
+    private void captureScreenshotAtScenarioLevel(String scenarioName, TestResult result) {
+        if (screenshotStrategy.shouldTakeScreenshotFor(result)) {
+            takeScreenshotAndRegister(scenarioName + "-scenario-complete");
+        }
+    }
+
+    private void captureScreenshotOnFailure(Throwable throwable) {
+        try {
+            String uniqueName = String.format("%s-failure-%d",
+                    FailureScreenshotHandler.sanitizeFilename(
+                            TestContextHolder.get().get(ListenerGuard.CURRENT_TEST_NAME_KEY) != null
+                                    ? TestContextHolder.get().get(ListenerGuard.CURRENT_TEST_NAME_KEY) : "scenario"),
+                    System.currentTimeMillis());
+            CapturedScreenshot screenshot = FailureScreenshotHandler.capture(uniqueName);
+            if (screenshot != null) {
+                currentStepScreenshots().add(screenshot);
+                recordScreenshotCount(uniqueName);
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to take failure screenshot", e);
+        }
+    }
+
+    private void recordScreenshotCount(String description) {
+        Integer count = TestContextHolder.get().get(CURRENT_STEP_SCREENSHOTS_TAKEN_KEY);
+        count = count == null ? 1 : count + 1;
+        TestContextHolder.get().set(CURRENT_STEP_SCREENSHOTS_TAKEN_KEY, count);
+        recordTestData("screenshotsTaken", String.valueOf(count));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 路由状态 / 场景重置
+    // ═══════════════════════════════════════════════════════════
+
+    private void resetCurrentScenarioRouteState(String scenarioName) {
+        //  ROUTE-P0-1：每个场景独立隔离路由状态，防止跨场景越权访问（关键安全修复）
+        try {
+            RouteLifecycle lifecycle = RouteLifecycleRegistry.get();
+            if (lifecycle != null) {
+                lifecycle.resetCaptureCurrent();
+                lifecycle.stopCapture();
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to reset route state for scenario: {}", scenarioName, e);
+        }
+    }
+
+    private void clearCurrentThreadResources(boolean contextHoldsLogin) {
+        try {
+            if (contextHoldsLogin) {
+                //  仅做用例级清理，保留 Context+Page（避免跨场景串扰）
+                PlaywrightManager.clearCurrentThreadRouteState();
+            } else {
+                //  彻底拆除
+                PlaywrightManager.clearThreadResourcesOnCaseAbort();
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to clear thread resources", e);
+        }
+    }
+
+    private void cleanupAfterAbnormalTermination(String scenarioName) {
+        VerboseLogging.logInfoIfVerbose(logger,
+                "Scenario aborted abnormally - cleaning up: {}", scenarioName);
+        try {
+            //  步骤级失败不拆资源（2026-10-16 修正），仅 testSkipped 等异常终止路径走此清理
+            SessionManager.resetCurrentSession();
+            PlaywrightManager.clearCurrentThreadRouteState();
+            clearCurrentThreadResources(false);
             PlaywrightManager.clearThreadResourcesOnCaseAbort();
         } catch (Exception e) {
-            logger.debug("clearThreadResourcesOnCaseAbort() on abnormal termination ({}) failed: {}",
-                    reason, e.getMessage());
-        }
-        // 对称清理：拆除 context 后重置会话键（与 closeContext 内的 storageState 清除配对），
-        // 防组合生命周期残留"context 没了但会话键还绑着"的不一致。
-        SessionManager.resetCurrentSession();
-        cleanupThreadLocals();
-    }
-
-    /**
-     *  核心修复：强制清空当前步骤截图列表（彻底杜绝残留）
-     * 
-     * 问题根因：ThreadLocal.remove() 只移除引用，不清除列表内容。
-     * 如果外部代码在 remove 前拿到了列表引用，remove 后旧数据仍可通过该引用访问，
-     * 导致 A 步骤的截图被 B 步骤拿到 → 报告错乱。
-     * 
-     * 正确做法：先清空内容 + 再移除引用，双保险。
-     */
-    private void clearStepScreenshotsImmediately() {
-        try {
-            List<ScreenshotAndHtmlSource> screenshots = currentStepScreenshots();
-            if (screenshots != null && !screenshots.isEmpty()) {
-                logger.debug("Force clearing {} leftover screenshot(s)", screenshots.size());
-                screenshots.clear(); // 先清空内容（断开所有元素引用）
-            }
-        } catch (Exception e) {
-            logger.debug("Error while clearing step screenshots", e);
+            logger.debug("cleanupAfterAbnormalTermination encountered error", e);
         } finally {
-            TestContextHolder.get().remove(CURRENT_STEP_SCREENSHOTS_KEY); // 再移除 ThreadLocal 引用
-        }
-    }
-
-    @Override
-    public void stepStarted(ExecutedStepDescription step) {
-        if (step == null)  {return;} 
-
-
-
-        //  第一步（最关键）：强制清空上一步骤残留的所有截图，根治脏数据
-        clearStepScreenshotsImmediately();
-
-        // 重置所有防双重处理标志
-        ListenerGuard.guards().setStepFinishProcessed(false);
-        ListenerGuard.guards().setFailureScreenshotsAlreadySent(false);
-        ListenerGuard.guards().setStepFinishReentrant(false);
-
-        // 用全新 ArrayList 替换旧列表（彻底断开任何外部引用）
-        currentStepScreenshots().clear();
-
-        TestContextHolder.get().set(STEP_START_TIME_KEY,System.currentTimeMillis());
-        TestContextHolder.get().set(CURRENT_STEP_NAME_KEY,step.getTitle());
-        VerboseLogging.logDebugIfVerbose(logger, "Step started: {}", step.getTitle());
-
-        //  R4: 标记步骤起始时间戳，使 waitForApi/getLastApiCall 等查询
-        // 只匹配本步骤内的 API 调用，隔离同一 Scenario 内跨 Step 的串扰。
-        //  【修复"每个步骤刷两条 WARN"】getCurrentCapture() 在【未开启采集会话】时返回 null
-        //  （绝大多数非 route 用例就是这种情况，pw-route 的集成测试也断言"无采集 ⇒ null 等价降级"），
-        //  原写法直接 .markStepStart() 会 NPE 并被下方 catch 记成
-        //  "markStepStart failed: ... getCurrentCapture() is null" —— 每步两条噪声告警。
-        //  此处显式判空：无采集上下文即跳过（语义与"未启用采集"一致），仅真实异常才告警。
-        try {
-            withRouteLifecycle(lc -> {
-                com.hsbc.cmb.hk.dbb.automation.framework.common.route.CaptureContext capture =
-                        (lc == null) ? null : lc.getCurrentCapture();
-                if (capture != null) {
-                    capture.markStepStart();
-                }
-            });
-        } catch (Exception e) {
-            logger.warn("[PlaywrightListener] markStepStart failed: {}", e.getMessage());
-        }
-
-        //  方案 B（2026-10-11）：main 业务 seam —— step 开始前执行 DELAY 到点的协议动作（resume/fulfill）。
-        //  DELAY 到点回调（RouteDelayScheduler 线程）只把协议动作入队；此处（main 线程）串行 drain，
-        //  使 delay 后的下一步骤 UI 操作前挂起请求已恢复 —— 协议调用 100% 收敛到 main（零并发写 Connection）。
-        //  经 common SPI（RouteLifecycle.drainMainThreadActions）桥接，避免 web→route 直接依赖；
-        //  只 drain 当前线程（worker）的 context —— 绝不跨 worker drain。
-        try {
-            withRouteLifecycle(lc -> lc.drainMainThreadActions(
-                    PlaywrightRuntime.instance().contextRegistry.getCurrentContext()));
-        } catch (Exception e) {
-            logger.debug("[PlaywrightListener] drainMainThreadActions skipped: {}", e.getMessage());
-        }
-
-        // 标记当前步骤为 Cucumber 步骤
-        TestContextHolder.get().set(CURRENT_CUCUMBER_STEP_KEY, step.getTitle());
-
-        // BEFORE_AND_AFTER_EACH_STEP 策略：在 Cucumber 步骤开始时截图
-        if (screenshotStrategy == ScreenshotStrategy.BEFORE_AND_AFTER_EACH_STEP) {
-            takeScreenshotAndRegister("STEP_BEFORE_" + step.getTitle());
-        }
-
-        //  D4-1：桥接业务监听器的步骤开始回调
-        TestContextHolder.get().set(CURRENT_STEP_TITLE_KEY, step.getTitle());
-        afterStepFired().set(false);
-        FrameworkListenerBridge.beforeStep(step.getTitle());
-
-        recordTestData("stepStart_" + step.getTitle(), System.currentTimeMillis());
-    }
-
-    /**
-     * D4-1：触发 {@code afterStep} 回调，<b>每个步骤只触发一次</b>。
-     * <p>Serenity 有多个 {@code stepFinished} 重载，同一事件可能落到不同分支，
-     * 故用 per-thread 标志幂等，避免业务监听器收到重复通知。
-     */
-    private static void fireAfterStep() {
-        if (!afterStepFired().compareAndSet(false, true)) {
-            return;
-        }
-        FrameworkListenerBridge.afterStep(TestContextHolder.get().get(CURRENT_STEP_TITLE_KEY));
-
-        //  路由命中证据 → Serenity 报告：内核只在 Playwright 事件线程（route 调用线程）入队（那些线程直接
-        //  写报告数据会丢），真正的写入必须回到测试主线程。本方法是"步骤结束"的主线程钩子 ——
-        //  Serenity 每个步骤必经此处（已由运行日志逐步骤证实），在此刷入即让证据<b>归属当前步骤</b>，
-        //  而不是像原先那样全场景证据都堆在最后一步（实测：DELAY 场景的断言步下面挂着登录流程自己的
-        //  auth/assert、profile/list 命中，与 DELAY 无关，极易误读）。
-        //  为什么不走 FrameworkListener.afterStep：那条路依赖 ListenerRegistry 已登记监听器，
-        //  而 E2E runner 下 ListenerRegistry 从未 initialize（实测全程无其任何日志）⇒ SPI 监听器是死的。
-        //  场景收尾（PlaywrightSerenityBridge.cleanupForScenario）另保留一次兜底 flush，
-        //  接住最后一步之后才产生的异步命中。
-        RouteEvidenceRegistry.flush();
-
-        //  D4-2：产出步骤级结果（模型为框架自有类型，与报告引擎解耦）
-        Long stepStart = TestContextHolder.get().get(STEP_START_TIME_KEY);
-        boolean failed = stepFailed().getAndSet(false);
-        ResultReporters.reportStep(new StepResult(
-                TestContextHolder.get().get(CURRENT_STEP_TITLE_KEY),
-                failed
-                        ? com.hsbc.cmb.hk.dbb.automation.framework.common.result.TestResult.FAILURE
-                        : com.hsbc.cmb.hk.dbb.automation.framework.common.result.TestResult.SUCCESS,
-                stepStart == null ? 0L : stepStart,
-                stepStart == null ? 0L : System.currentTimeMillis() - stepStart,
-                null));
-    }
-
-    /**
-     * D4-1：触发 {@code afterScenario} 并清理桥接 per-thread 状态。
-     * <p>必须放在 {@code testFinished} 的 finally —— 无论正常 / 异常收尾都要通知业务监听器，
-     * 且线程池复用前必须 remove，杜绝跨用例串扰。
-     */
-    private static void fireAfterScenario(boolean failed) {
-        String scenarioName = TestContextHolder.get().get(CURRENT_SCENARIO_NAME_KEY);
-        try {
-            FrameworkListenerBridge.afterScenario(scenarioName, failed);
-        } finally {
-            TestContextHolder.get().remove(CURRENT_SCENARIO_NAME_KEY);
-            TestContextHolder.get().remove(CURRENT_STEP_TITLE_KEY);
-            TestContextHolder.get().remove(AFTER_STEP_FIRED_KEY);
-            // 防御性兜底：scenario 结束显式清交互监控状态，防 worker 线程复用跨用例堆积导航轨迹/未受管弹窗
-            PageInteractionMonitor.resetForThread();
-        }
-    }
-
-    @Override
-    public void stepFinished() {
-        //  防递归重入：StepEventBus.stepFinished() 会重新触发事件分发
-        if (ListenerGuard.guards().isStepFinishReentrant()) {
-            return;
-        }
-        fireAfterStep();
-        ListenerGuard.guards().setStepFinishReentrant(true);
-
-        //  防双重处理：如果参数化版 stepFinishedInternal 已经处理过，跳过
-        if (ListenerGuard.guards().isStepFinishProcessed()) {
-            VerboseLogging.logDebugIfVerbose(logger, "stepFinished() skipped - already processed by stepFinishedInternal");
-            ListenerGuard.guards().setStepFinishReentrant(false);
-            return;
-        }
-
-        Long startTime = TestContextHolder.get().get(STEP_START_TIME_KEY);
-        if (startTime == null) {
-            ListenerGuard.guards().setStepFinishReentrant(false);
-            return;
-        }
-
-        long duration = System.currentTimeMillis() - startTime;
-        recordTestData("stepDuration", duration);
-        VerboseLogging.logDebugIfVerbose(logger, "Step completed in {}ms", duration);
-
-        // 只为 Cucumber 级别步骤截图
-        String stepName = TestContextHolder.get().get(CURRENT_STEP_NAME_KEY);
-        String cucumberStep = TestContextHolder.get().get(CURRENT_CUCUMBER_STEP_KEY);
-
-        if (stepName != null && !stepName.isEmpty() && stepName.equals(cucumberStep)) {
-            if (screenshotStrategy == ScreenshotStrategy.AFTER_EACH_STEP) {
-                takeScreenshotAndRegister("STEP_" + FailureScreenshotHandler.sanitizeName(stepName));
-            } else  {if (screenshotStrategy == ScreenshotStrategy.BEFORE_AND_AFTER_EACH_STEP) {
-                takeScreenshotAndRegister("STEP_AFTER_" + FailureScreenshotHandler.sanitizeName(stepName));
-            }} 
-            // 清除 Cucumber 步骤记录
-            TestContextHolder.get().remove(CURRENT_CUCUMBER_STEP_KEY);
-        }
-
-        // 手动调用 StepEventBus 的 stepFinished 方法来传递截图（仅在 stepFailed 未发送过时）
-        List<ScreenshotAndHtmlSource> stepScreenshots = currentStepScreenshots();
-        if (stepScreenshots != null && !stepScreenshots.isEmpty() && !ListenerGuard.guards().isFailureScreenshotsAlreadySent()) {
-            VerboseLogging.logDebugIfVerbose(logger, "Manually calling StepEventBus.stepFinished() with {} screenshots", stepScreenshots.size());
+            TestContextHolder.resetForCurrentThread();
             try {
-                //  防残留：传递新 list 副本，避免之后 clear() 影响 Serenity 保留的引用
-                StepEventBus.getEventBus().stepFinished(new ArrayList<>(stepScreenshots), ZonedDateTime.now());
-                VerboseLogging.logDebugIfVerbose(logger, "Successfully called StepEventBus.stepFinished() with screenshots");
-                // 清空截图列表，避免重复添加
-                stepScreenshots.clear();
-                // 标记已处理，防止参数化版本重复处理
-                ListenerGuard.guards().setStepFinishProcessed(true);
+                SessionManager.releaseSessionGate();
             } catch (Exception e) {
-                logger.error("Failed to call StepEventBus.stepFinished() with screenshots", e);
+                logger.debug("releaseSessionGate failed", e);
             }
-        } else  {if (ListenerGuard.guards().isFailureScreenshotsAlreadySent()) {
-            VerboseLogging.logDebugIfVerbose(logger, "Skipping StepEventBus.stepFinished() - already sent by stepFailed");
-            if (stepScreenshots != null)  {stepScreenshots.clear();} 
-            ListenerGuard.guards().setStepFinishProcessed(true);
-        } else {
-            VerboseLogging.logDebugIfVerbose(logger, "No screenshots to pass to StepEventBus.stepFinished()");
-        }} 
-
-        // 重置标志供下一个步骤使用
-        //  不再 remove stepFinishProcessed 和 failureScreenshotsAlreadySent
-        // 改为在 stepStarted 中重置为 false，防止步骤间窗口期注入脏数据
-        ListenerGuard.guards().setFailureScreenshotsAlreadySent(false);
-        ListenerGuard.guards().setStepFinishProcessed(false);
-        ListenerGuard.guards().setStepFinishReentrant(false);
-
-        //  框架级 API 断言检查（每个步骤结束时兜底执行）
-        checkAndFailOnApiAssertions();
-
-        checkAndFailOnRouteAssertions();
-        //  框架级未捕获页面异常检查（开关受 playwright.page.error.failOnError 控制）
-        checkAndFailOnPageErrors();
-    }
-
-    @Override
-    public void stepFailed(StepFailure failure) {
-        if (failure == null)  {return;} 
-
-        //  D4-2：标记本步骤失败，供步骤级结果使用（在防重入判断之前，确保一定被记录）
-        stepFailed().set(true);
-
-        //  防重复：如果已经发送过失败截图（如 stepFailed param 版已处理），直接跳过
-        if (ListenerGuard.guards().isFailureScreenshotsAlreadySent()) {
-            logger.debug("stepFailed: screenshots already sent by previous handler, skipping");
-            return;
-        }
-
-        //  无论成功失败，先强制清空残留截图（防止异常场景污染下一步骤）
-        clearStepScreenshotsImmediately();
-        currentStepScreenshots().clear();  // 重新初始化供本步骤使用
-
-        // 截断为第一行，避免 buildDetailedErrorMessage 的多段落诊断输出污染日志
-        String fullMsg = failure.getException().getMessage();
-        String shortMsg = fullMsg;
-        if (fullMsg != null) {
-            int newlineIdx = fullMsg.indexOf('\n');
-            if (newlineIdx > 0) {
-                shortMsg = fullMsg.substring(0, newlineIdx).trim();
-            }
-            // 进一步限制长度，防止超长单行
-            if (shortMsg.length() > 200) {
-                shortMsg = shortMsg.substring(0, 197) + "...";
-            }
-        }
-        //  B（2026-10-09）：失败链含 Playwright 异常 ⇒ 单向告知 route"本场景驱动连接已不可信"，
-        //  使其收尾跳过 unroute 等待（route 看不到 UI 的失败；且不依赖 context 是否已关闭的时序）。
-        reportDriverFailureIfPlaywright(failure.getException());
-        //  去重：同一异常实例只完整打印一次，后续任何级别均静默（不降级也不打 debug）
-        if (ListenerGuard.shouldReportFailure(failure.getException(), shortMsg)) {
-            logger.error("Step failure detected: {}", shortMsg);
-        }
-        recordTestData("stepFailure", fullMsg);
-        recordTestData("stepFailureCause", failure.getException().getClass().getSimpleName());
-
-        // 失败交互诊断：回放导航轨迹 + 未受管弹窗，补充失败上下文（纯观测，不标记失败）
-        logInteractionDiagnosticsOnFailure();
-
-        //  关键修复：无论什么策略，都在步骤失败瞬间截图
-        // 这确保捕获的是失败时的真实页面状态（错误信息、弹窗等）
-        // BEFORE_AND_AFTER_EACH_STEP / AFTER_EACH_STEP：补充一张 FAILURE 截图
-        // FOR_FAILURES：正常走失败截图逻辑
-        if (screenshotStrategy != ScreenshotStrategy.DISABLED) {
-            String stepName = TestContextHolder.get().get(CURRENT_STEP_NAME_KEY);
-            String sanitized = FailureScreenshotHandler.sanitizeFilename(stepName);
-            takeScreenshotAndRegister("FAILURE_" + (sanitized != null ? sanitized : "step"));
-            logger.info("Failure screenshot captured at step failure moment for: {}", stepName);
-        }
-
-        // 步骤失败时，将截图传递给 Serenity（仅一次）
-        List<ScreenshotAndHtmlSource> stepScreenshots = currentStepScreenshots();
-        if (stepScreenshots != null && !stepScreenshots.isEmpty()) {
-            VerboseLogging.logDebugIfVerbose(logger, "Manually calling StepEventBus.stepFinished() with {} screenshots after step failure", stepScreenshots.size());
             try {
-                //  防残留：传递新 list 副本
-                StepEventBus.getEventBus().stepFinished(new ArrayList<>(stepScreenshots), ZonedDateTime.now());
-                VerboseLogging.logDebugIfVerbose(logger, "Successfully called StepEventBus.stepFinished() with failure screenshots");
-                // 标记已发送，防止后续 stepFinished() / lastStepFailed 重复调用
-                ListenerGuard.guards().setFailureScreenshotsAlreadySent(true);
-                // 清空截图列表，避免重复处理
-                stepScreenshots.clear();
+                ConcurrencyGate.releaseAllForCurrentThread();
             } catch (Exception e) {
-                logger.error("Failed to call StepEventBus.stepFinished() with failure screenshots", e);
+                logger.debug("ConcurrencyGate release failed", e);
             }
-        }
-
-        recordTestData("stepFailureStackTrace", getStackTrace(failure.getException()));
-        // 2026-10-16：步骤失败【不】在此拆除 Context/Page——场景尚未结束，过早关闭会致：
-        // ① stepFinished 的收尾截图拿不到 page（静默丢失）；② 后续步骤 getPage() 重建出
-        // about:blank 新 tab；③ 与场景收尾二次拆除。资源一律留到场景边界（testFinished /
-        // glue @After → cleanupForScenario + cleanupThreadLocals）统一释放。
-    }
-
-    @Override
-    public void lastStepFailed(StepFailure failure) {
-        //  最优先检查：如果 stepFailed 已经发送过截图和报告，全部跳过（零开销）
-        if (ListenerGuard.guards().isFailureScreenshotsAlreadySent()) {
-            logger.debug("lastStepFailed: screenshots already sent by stepFailed, skipping all work");
-            return;
-        }
-
-        //  无论成功失败，先强制清空残留截图（防止异常场景污染下一步骤/下一用例）
-        clearStepScreenshotsImmediately();
-        currentStepScreenshots().clear();
-
-        String errorMsg = failure != null ? failure.getException().getMessage() : "Unknown";
-        //  去重：与主 stepFailed / testFailed 共享同一异常实例判定，避免同一失败多次打印
-        if (ListenerGuard.shouldReportFailure(failure != null ? failure.getException() : null, errorMsg)) {
-            VerboseLogging.logErrorIfVerbose(logger, "Last step failed: {}", errorMsg);
-        }
-        recordTestData("lastStepFailure", errorMsg);
-
-        takeScreenshotAndRegister("FINAL_FAILURE");
-
-        // 步骤失败时，将截图传递给 Serenity
-        List<ScreenshotAndHtmlSource> stepScreenshots = currentStepScreenshots();
-        if (stepScreenshots != null && !stepScreenshots.isEmpty()) {
-            VerboseLogging.logDebugIfVerbose(logger, "Manually calling StepEventBus.stepFinished() with {} screenshots after last step failure", stepScreenshots.size());
-            try {
-                //  防残留：传递新 list 副本
-                StepEventBus.getEventBus().stepFinished(new ArrayList<>(stepScreenshots), ZonedDateTime.now());
-                VerboseLogging.logDebugIfVerbose(logger, "Successfully called StepEventBus.stepFinished() with last step failure screenshots");
-                ListenerGuard.guards().setFailureScreenshotsAlreadySent(true);  //  标记已发送，防止后续重复
-                // 清空截图列表，避免重复处理
-                stepScreenshots.clear();
-            } catch (Exception e) {
-                logger.error("Failed to call StepEventBus.stepFinished() with last step failure screenshots", e);
-            }
-        }
-
-        // 2026-10-16：最后一步失败同样【不】在此拆除 Context/Page（同 stepFailed：场景收尾才拆），
-        // 失败截图已在上方捕获并交由 Serenity；资源留到场景边界统一释放。
-    }
-
-    @Override
-    public void stepIgnored() {
-        VerboseLogging.logDebugIfVerbose(logger, "Step ignored");
-        recordTestData("stepIgnored", true);
-        // 2026-10-16：步骤被忽略【不】拆除 Context/Page——忽略≠场景结束，留到场景边界统一释放。
-    }
-
-    /**
-     * 截图并添加到当前步骤的截图列表
-     *
-     * @param screenshotName 截图名称
-     * @return 截图对象
-     */
-    /**
-     * 截图并添加到当前步骤的截图列表（捕获逻辑见 {@link FailureScreenshotHandler}）。
-     *
-     * @param screenshotName 截图名称
-     */
-    private void takeScreenshotAndRegister(String screenshotName) {
-        ScreenshotAndHtmlSource screenshot = FailureScreenshotHandler.capture(screenshotName);
-        if (screenshot != null) {
-            currentStepScreenshots().add(screenshot);
-            VerboseLogging.logDebugIfVerbose(
-                    logger, "Screenshot added to step: {}", screenshotName);
-        }
-    }
-
-    private void takeFailureScreenshot(ExecutedStepDescription step) {
-        String stepName = (step != null && step.getTitle() != null) ? step.getTitle() : "unknown_step";
-        String sanitizedStepName = FailureScreenshotHandler.sanitizeFilename(stepName);
-        String screenshotName = "FAILURE_" + (sanitizedStepName != null ? sanitizedStepName : "step");
-        // 失败/异常场景也遵循全局 fullPage 配置；无限滚动卡死问题已由稳定化逻辑解决，
-        // 不再强制视口（强制视口会丢失全页截图信息）。
-        takeScreenshotAndRegister(screenshotName);
-    }
-
-    private void recordTestData(String key, Object value) {
-        ListenerPerfStats.record(TestContextHolder.get().get(CURRENT_TEST_NAME_KEY), key, value);
-    }
-    /**
-     *  自动清理当前线程的 RouteRegistry 条目（防内存泄漏 + 跨用例路由污染）。
-     *
-     * <p>在 testFinished 中调用，清理当前线程 Page / Context 对应的路由层资源
-     * （停止 MonitorSession、unroute、清理注册表与防重门控）。
-     *
-     * <p><b>⚠️ 必须使用「不创建」的访问器</b>：本方法在 {@code testFinished} 中执行，此时
-     * {@code cleanupForScenario()} 往往已关闭 Context/Page。若用创建型
-     * {@code PlaywrightManager.getPage()/getContext()}，会<b>重新建出</b>一个 Context +
-     * {@code about:blank} Page —— 这正是实测「测试过程中不断冒出 about:blank 新 tab」的根因
-     * （每次 testFinished 都多建一个 Context+Page，@route 组 24 个场景实测建了 171 个 Context）。
-     *
-     * <p>Context 已被关闭时无需再清：其路由/防重门控随 {@code closeContext} 一并清理。
-     */
-    private void cleanupRouteRegistryForCurrentThread() {
-        try {
-            Page page = PlaywrightManager.currentPageForThread();
-            BrowserContext context = PlaywrightManager.currentContextForThread();
-            if (page == null && context == null) {
-                // 无存活 Page/Context → 无路由层资源可清，且绝不能为清理而创建
-                return;
-            }
-            //  统一走 RouteRegistry 释放路由层资源（停止 MonitorSession、unroute、清理注册表与防重门控）
-            withRouteLifecycle(lc -> {
-                if (page != null) {
-                    lc.clearContext(page);
-                }
-                if (context != null) {
-                    lc.clearContext(context);
-                }
-            });
-        } catch (Exception e) {
-            logger.debug("RouteRegistry cleanup for current thread skipped: {}", e.getMessage());
         }
     }
 
     private void cleanupThreadLocals() {
-        //  最关键：先强制清空截图内容（防止残留），再移除所有 ThreadLocal
-        clearStepScreenshotsImmediately();
-
-        TestContextHolder.get().remove(TEST_START_TIME_KEY);
-        TestContextHolder.get().remove(CURRENT_TEST_NAME_KEY);
-        TestContextHolder.get().remove(CURRENT_TEST_RESULT_KEY);
-        TestContextHolder.get().remove(STEP_START_TIME_KEY);
-        TestContextHolder.get().remove(CURRENT_STEP_NAME_KEY);
-        TestContextHolder.get().remove(CURRENT_CUCUMBER_STEP_KEY);
-        TestContextHolder.get().remove(STEP_FAILED_KEY);
-        //  并行语义收口：释放本 scenario 持有的「同 sessionKey 互斥」闸门（未持有则 no-op）。
-        //   必须在测试结束路径无条件执行——否则同 sessionKey 的后续场景将永久阻塞。
-        SessionManager.releaseSessionGate();
-        //  兜底（实测死锁根治）：无条件归还<b>本线程</b>持有的全部闸门许可。
-        //   覆盖调用方（框架会话路径 / 测试侧 Glue 的 @After）因异常/中断而未配对释放的情况 ——
-        //   许可一旦泄漏，同身份后续场景会永久 park，整套无进展。
-        ConcurrencyGate.releaseAllForCurrentThread();
-        //  清理收拢后的守卫标志与失败日志去重记录（防双重处理 / 重入 / API 失败），避免跨 scenario 残留
-        ListenerGuard.clearForThread();
-        //  清理 per-thread 截图重入标记
-        FailureScreenshotHandler.clearThreadState();
-        // currentStepScreenshots 已由 clearStepScreenshotsImmediately() 处理
-
-        //  修复 M1：清理 API 监控失败归集器的 scenario/feature ThreadLocal，
-        //    避免线程池复用时失败被错误归因到上一个 scenario（陈旧 ThreadLocal 残留）。
-        withRouteLifecycle(lc -> {
-            lc.clearMonitorScenario();
-            lc.clearMonitorFeature();
-            //  新增：清理 API 捕获上下文
-            lc.resetCaptureCurrent();
-        });
-    }
-
-    /**
-     * 安全执行 route 生命周期操作。
-     *
-     * <p>route 模块可能不在 classpath（纯 web 测试，如 {@code framework-web} 单测）——
-     * 此时 {@link RouteLifecycleRegistry#get()} 按设计返回 {@code null}
-     * （见其 Javadoc：「调用方应做空判断或忽略」）。此处集中空值守卫，
-     * 避免各生命周期回调裸调用导致 NPE；web 侧无 route 时整体跳过清理，语义与既有空判断一致。
-     */
-    private static void withRouteLifecycle(Consumer<RouteLifecycle> action) {
-        RouteLifecycle routeLifecycle = RouteLifecycleRegistry.get();
-        if (routeLifecycle != null) {
-            action.accept(routeLifecycle);
-        }
-    }
-
-    private String getStackTrace(Throwable throwable) {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            throwable.printStackTrace(new java.io.PrintStream(baos, true, java.nio.charset.StandardCharsets.UTF_8));
-            return baos.toString(java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return "Failed to get stack trace: " + e.getMessage();
-        }
-    }
-
-    @Override
-    public void stepFinished(List<ScreenshotAndHtmlSource> screenshots) {
-        stepFinishedInternal(screenshots, null);
-    }
-
-    @Override
-    public void stepFinished(List<ScreenshotAndHtmlSource> screenshots, ZonedDateTime timestamp) {
-        stepFinishedInternal(screenshots, timestamp);
-    }
-
-    private void stepFinishedInternal(List<ScreenshotAndHtmlSource> screenshots, ZonedDateTime timestamp) {
-        //  防递归重入：StepEventBus.stepFinished() 会触发事件重新分发到本监听器，
-        // 导致 stepFinishedInternal() → StepEventBus.stepFinished() → stepFinishedInternal() → ... 无限递归
-        if (ListenerGuard.guards().isStepFinishReentrant()) {
-            return;
-        }
-        ListenerGuard.guards().setStepFinishReentrant(true);
-        fireAfterStep();
-
-        //  防双重处理：如果无参版 stepFinished() 已经处理过，跳过截图和发送
-        boolean alreadyProcessed = ListenerGuard.guards().isStepFinishProcessed();
-
-        Long startTime = TestContextHolder.get().get(STEP_START_TIME_KEY);
-        if (startTime == null) {
-            // 即使没有 startTime 也要清理标志
-            ListenerGuard.guards().setStepFinishProcessed(false);
-            ListenerGuard.guards().setStepFinishReentrant(false);
-            return;
-        }
-
-        long duration = System.currentTimeMillis() - startTime;
-        recordTestData("stepDuration", duration);
-        if (timestamp != null) {
-            recordTestData("stepFinishTimestamp", timestamp.toInstant().toEpochMilli());
-        }
-
-        // 根据截图策略在步骤结束时截图（ 仅未处理时，防止与 stepFinished() 无参版重复）
-        String stepName = TestContextHolder.get().get(CURRENT_STEP_NAME_KEY);
-        String cucumberStep = TestContextHolder.get().get(CURRENT_CUCUMBER_STEP_KEY);
-
-        // 只为 Cucumber 级别步骤截图
-        if (!alreadyProcessed && stepName != null && !stepName.isEmpty() && stepName.equals(cucumberStep)) {
-            if (screenshotStrategy == ScreenshotStrategy.AFTER_EACH_STEP) {
-                takeScreenshotAndRegister("STEP_" + FailureScreenshotHandler.sanitizeName(stepName));
-            } else  {if (screenshotStrategy == ScreenshotStrategy.BEFORE_AND_AFTER_EACH_STEP) {
-                takeScreenshotAndRegister("STEP_AFTER_" + FailureScreenshotHandler.sanitizeName(stepName));
-            }} 
-            // 清除 Cucumber 步骤记录
-            TestContextHolder.get().remove(CURRENT_CUCUMBER_STEP_KEY);
-        }
-
-        // 将当前步骤的截图合并到 Serenity 传入的截图列表中
-        List<ScreenshotAndHtmlSource> stepScreenshots = currentStepScreenshots();
-        
-        //  防残留（修复）：不再直接 addAll 到 Serenity 的 list（避免跨步骤共享 list 导致累积）。
-        // 改为创建全新的 list，杜绝对 Serenity 内部数据结构的污染。
-        List<ScreenshotAndHtmlSource> mergedScreenshots = null;
-        if (stepScreenshots != null && !stepScreenshots.isEmpty()) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Before merge: stepScreenshots.size={}, Serenity screenshots.size={}",
-                    stepScreenshots.size(), screenshots != null ? screenshots.size() : 0);
-
-            // 创建全新 list，合并 Serenity 传入的 + 当前步骤产生的截图
-            int totalSize = stepScreenshots.size() + (screenshots != null ? screenshots.size() : 0);
-            mergedScreenshots = new ArrayList<>(totalSize);
-            if (screenshots != null && !screenshots.isEmpty()) {
-                mergedScreenshots.addAll(screenshots);  // 先加 Serenity 的
-            }
-            mergedScreenshots.addAll(stepScreenshots);  // 再加当前步骤的
-            
-            VerboseLogging.logDebugIfVerbose(
-                    logger, "After merge: new mergedScreenshots.size={}", mergedScreenshots.size());
-            
-            // 清空当前步骤的截图列表，避免影响下一个步骤（防残留核心）
-            stepScreenshots.clear();
-            VerboseLogging.logDebugIfVerbose(
-                    logger, "Cleared stepScreenshots after merging");
-        } else  {if (screenshots != null && !screenshots.isEmpty()) {
-            // 当前步骤没有截图，但 Serenity 有 → 也用新 list 封装（避免直接传递 Serenity 的可变 list）
-            mergedScreenshots = new ArrayList<>(screenshots);
-        } else {
-            VerboseLogging.logDebugIfVerbose(
-                    logger, "No step screenshots to merge (list is empty or null)");
-        }} 
-
-        //  防双重发送：仅当无参版 stepFinished() 未处理时才发送 StepEventBus
-        if (!alreadyProcessed && mergedScreenshots != null && !mergedScreenshots.isEmpty() && !ListenerGuard.guards().isFailureScreenshotsAlreadySent()) {
-            recordTestData("stepScreenshotsCount", mergedScreenshots.size());
-            // 手动调用 StepEventBus 的 stepFinished 方法来传递截图
-            VerboseLogging.logDebugIfVerbose(
-                    logger, "Manually calling StepEventBus.stepFinished() with {} screenshots", mergedScreenshots.size());
-            try {
-                StepEventBus.getEventBus().stepFinished(mergedScreenshots, ZonedDateTime.now());
-                VerboseLogging.logDebugIfVerbose(
-                        logger, "Successfully called StepEventBus.stepFinished() with screenshots");
-                // 标记已处理，防止无参版 stepFinished() 重复处理
-                ListenerGuard.guards().setStepFinishProcessed(true);
-            } catch (Exception e) {
-                logger.error("Failed to call StepEventBus.stepFinished() with screenshots", e);
-            }
-        } else  {if (ListenerGuard.guards().isFailureScreenshotsAlreadySent()) {
-            VerboseLogging.logDebugIfVerbose(logger, "Skipping StepEventBus.stepFinished() in stepFinishedInternal - already sent by stepFailed");
-            //  防残留：清空 Serenity 传入的 list
-            if (screenshots != null)  {screenshots.clear();} 
-        } else {
-            VerboseLogging.logDebugIfVerbose(
-                    logger, "Serenity screenshot list is empty or null");
-        }} 
-
-        // 重置标志供下一个步骤使用
-        //  不再 remove stepFinishProcessed 和 failureScreenshotsAlreadySent
-        // 改为在 stepStarted 中重置为 false，防止步骤间窗口期注入脏数据
-        ListenerGuard.guards().setFailureScreenshotsAlreadySent(false);
-        ListenerGuard.guards().setStepFinishProcessed(false);
-        ListenerGuard.guards().setStepFinishReentrant(false);
-
-        //  框架级 API 断言检查（每个 Cucumber 步骤结束时自动执行）
-        checkAndFailOnApiAssertions();
-
-        checkAndFailOnRouteAssertions();
-        //  框架级未捕获页面异常检查（开关受 playwright.page.error.failOnError 控制）
-        checkAndFailOnPageErrors();
-
-        VerboseLogging.logDebugIfVerbose(logger, "Step completed in {}ms", duration);
-    }
-
-    @Override
-    public void takeScreenshots(List<ScreenshotAndHtmlSource> screenshots) {
-        VerboseLogging.logDebugIfVerbose(logger, "takeScreenshots called with {} screenshots",
-                screenshots != null ? screenshots.size() : 0);
-
-        // 将当前步骤的截图添加到传入的列表中（仅在当前步骤活跃时，防止残留）
-        List<ScreenshotAndHtmlSource> stepScreenshots = currentStepScreenshots();
-        if (stepScreenshots != null && !stepScreenshots.isEmpty() && screenshots != null && TestContextHolder.get().get(STEP_START_TIME_KEY) != null) {
-            screenshots.addAll(stepScreenshots);
-            VerboseLogging.logDebugIfVerbose(logger, "Added {} screenshots from currentStepScreenshots to takeScreenshots list", stepScreenshots.size());
-            // 合并后立即清空，防止重复注入
-            stepScreenshots.clear();
-        }
-    }
-
-    @Override
-    public void takeScreenshots(TestResult result, List<ScreenshotAndHtmlSource> screenshots) {
-        VerboseLogging.logDebugIfVerbose(logger, "takeScreenshots called with result {} and {} screenshots",
-                result, screenshots != null ? screenshots.size() : 0);
-
-        // 将当前步骤的截图添加到传入的列表中（仅在当前步骤活跃时）
-        List<ScreenshotAndHtmlSource> stepScreenshots = currentStepScreenshots();
-        if (stepScreenshots != null && !stepScreenshots.isEmpty() && screenshots != null && TestContextHolder.get().get(STEP_START_TIME_KEY) != null) {
-            screenshots.addAll(stepScreenshots);
-            VerboseLogging.logDebugIfVerbose(logger, "Added {} screenshots from currentStepScreenshots to takeScreenshots list (result: {})",
-                    stepScreenshots.size(), result);
-            // 合并后立即清空
-            stepScreenshots.clear();
-        }
-    }
-
-
-
-    @Override
-    public void testSuiteStarted(Class<?> testClass) {
-        VerboseLogging.logDebugIfVerbose(logger, "Test suite started for class: {}", testClass);
-        //  重置：允许新 suite 再次触发清理
-        testSuiteFinishedLogged = false;
-    }
-
-    /**
-     * 失败链中含 Playwright 异常时，向 route 上报"驱动连接已不可信"（单向信号；幂等）。
-     *
-     * <p>只上报、不清零：清零发生在<b>场景边界</b>（{@code ScenarioLifecycle.cleanupForScenario} 统一
-     * reset，覆盖"失败 case 未注册 route 无 runtime 消费"的情形）与 route runtime 收尾
-     * （{@code RouteRuntimeImpl.close()} 消费即清零）——故本类无需"每场景清零"钩子。</p>
-     *
-     * @param t 步骤失败的异常（可为 null）
-     */
-    private static void reportDriverFailureIfPlaywright(Throwable t) {
-        //  按【类型】判定，**不做错误串匹配**：文本匹配会假阳性（消息里恰好含该字样 ⇒ 污染信号、
-        //  使 route 少做一次收尾确证、掩盖真问题），也会假阴性（包装链路未保留类名时漏报）。
-        //  更精确的上报点是"捕获该异常的层"（见 PageElement）；此处为兜住其它路径的保险丝。
-        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
-            if (c instanceof com.microsoft.playwright.PlaywrightException) {
-                com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal.report();
-                return;
-            }
-        }
-    }
-
-    @Override
-    public void testSuiteStarted(Story story) {
-        VerboseLogging.logDebugIfVerbose(
-                logger, "Test suite started for story: {}", story.getStoryName());
-
-        //  阶段检测：当同一个 Story 在 discovery 阶段被注册过，再次出现时说明进入 execution
-        String storyName = story.getStoryName();
-        if (!discoveryPhaseCompleted && !seenStoryNames.add(storyName)) {
-            // 重复的 story → 已进入 execution phase
-            discoveryPhaseCompleted = true;
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "Execution phase detected (duplicate story: {}), enabling Playwright init and cross-feature cleanup", storyName);
-        }
-
-        //  跨 Feature Context 清理：新 Story 启动时关闭上一个 Story 的 Context
-        // 仅在 execution 阶段执行清理，避免 discovery 阶段误关 Context
-        if (discoveryPhaseCompleted) {
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "New story starting: {} - closing previous story's Context (cross-feature cleanup)", story.getStoryName());
-            try {
-                PlaywrightManager.cleanupForFeature();
-            } catch (Exception e) {
-                logger.warn("Failed to cleanup context at feature boundary for new story: {} - {}",
-                        story.getStoryName(), e.getMessage());
-            }
-        }
-
-        //  2026-09-30 收口：不再区分 feature / scenario 模式，原「按 feature 隔离的会话缓存」已移除，
-        //  此处无需再设置当前 feature 标识；cross-feature 清理已由上方 cleanupForFeature() 完成。
-
-        //  重置：允许新 suite 再次触发清理
-        testSuiteFinishedLogged = false;
-
-        //  轮次横幅（只有观测事实，不断言原因）。
-        //
-        //  修正由来（2026-10-09 实测）：原实现把"testRunFinished 之后**任意** suite 开始"一律记为
-        //  "RERUN STARTING - Round N (Maven Failsafe rerunFailingTestsCount)"。但同一 JVM 里
-        //  testRunFinished 会因多种原因发生：① 另一个 IT 套件开始（如 surefire 阶段之后再跑 failsafe，
-        //  或另一个测试类）；② 另一个插件阶段；③ 真正的 failsafe 失败重跑（rerunFailingTestsCount）。
-        //  原文案把三者一律说成"失败重跑"，实际排障中已把"另一个套件开始"误读为"有失败被重跑"。
-        //  现按 story 名判别，只陈述可观测事实：
-        //    - 同名 story 再次出现 ⇒ 同一套件被再次执行（**可能**是 failsafe 重跑，需看构建输出确认）；
-        //    - 新 story ⇒ 只是另一个套件开始，**不是**重跑。
-        RoundBanner banner = classifyRoundStart(storyName);
-        if (banner != RoundBanner.NONE) {
-            logger.info("==========================================================================");
-            if (banner == RoundBanner.SAME_SUITE_RE_EXECUTED) {
-                logger.info("  SUITE RE-EXECUTED - Round {} for '{}' (same suite seen before;"
-                        + " consistent with a failsafe rerun, confirm from the build output)",
-                        currentRunNumber, storyName);
-            } else {
-                logger.info("  NEW SUITE STARTING - Round {} for '{}' (different suite; this is NOT a rerun)",
-                        currentRunNumber, storyName);
-            }
-            logger.info("==========================================================================");
-        }
-    }
-
-    @Override
-    public void testSuiteFinished() {
-        //  阶段识别：首次 testSuiteFinished 标志 discovery 阶段结束
-        discoveryPhaseCompleted = true;
-
-        logger.info("Test suite finished");
-
-        // 使用原子操作确保只清理一次
-        synchronized (PlaywrightListener.class) {
-            if (testSuiteFinishedLogged) {
-                return; // 已清理过，直接返回
-            }
-            testSuiteFinishedLogged = true;
-        }
-        
-        //  2026-09-27 强化：Serenity 挂点若触发，做【套件级确定性收尾】（与 SuiteTeardownListener /
-        //  FrameworkCore shutdown hook 三路互补、均幂等）：
-        //  ① Route 引擎（v1+v2 线程）先行关闭 —— 与浏览器无关，任何时刻安全；
-        //  ② PlaywrightManager.cleanupAll() 全局关闭（page/context/browser/Playwright + v1+v2 route 兜底）；
-        //  ③ 并发窗口拒绝（防御性设计，防误关邻居线程浏览器）→ 降级 cleanupForFeature + WARN（非 verbose）。
         try {
-            RouteLifecycleRegistry.get().stopAllContextEngines();
-            RouteLifecycleRegistry.get().drainForSuiteTeardown();
+            //  释放会话闸门 + 并发闸门（场景收口统一释放，防泄漏）
+            SessionManager.releaseSessionGate();
+            ConcurrencyGate.releaseAllForCurrentThread();
+            //  重置 per-thread 截图重入标记
+            FailureScreenshotHandler.clearThreadState();
         } catch (Exception e) {
-            com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator
-                    .recordFailure("web/listener/testSuiteFinished/routeEngines", e);
+            logger.debug("cleanupThreadLocals encountered error", e);
         }
+    }
+
+    private void resetCurrentScenarioState() {
+        String testName = TestContextHolder.get().get(ListenerGuard.CURRENT_TEST_NAME_KEY);
+        TestContextHolder.get().set(CURRENT_TEST_RESULT_KEY, TestResult.PENDING);
+        TestContextHolder.get().set(CURRENT_STEP_KEY, null);
+        TestContextHolder.get().set(CURRENT_TEST_START_TIME_KEY, null);
+        TestContextHolder.get().set(CURRENT_STEP_START_TIME_KEY, null);
+        TestContextHolder.get().set(CURRENT_STEP_SCREENSHOTS_TAKEN_KEY, 0);
+        if (testName != null) {
+            recordTestData("testName", testName);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 名称唯一化 / 性能统计 / 上报辅助
+    // ═══════════════════════════════════════════════════════════
+
+    private static final Map<String, AtomicInteger> SCENARIO_NAME_COUNTERS = new ConcurrentHashMap<>();
+
+    private String generateUniqueScenarioName(String baseName) {
+        if (baseName == null || baseName.trim().isEmpty()) {
+            baseName = "unnamed-scenario";
+        }
+        AtomicInteger counter = SCENARIO_NAME_COUNTERS.computeIfAbsent(baseName, k -> new AtomicInteger(0));
+        int count = counter.incrementAndGet();
+        if (count == 1) {
+            return baseName; // 首次出现无需后缀
+        }
+        return baseName + "-" + count;
+    }
+
+    private void markScenarioResult(String scenarioName, TestResult result) {
+        if (result == TestResult.SUCCESS) {
+            ListenerPerfStats.markPassed();
+        } else if (result == TestResult.FAILURE) {
+            ListenerPerfStats.markFailed();
+        } else if (result == TestResult.ERROR) {
+            ListenerPerfStats.markFailed();
+        } else if (result == TestResult.PENDING) {
+            ListenerPerfStats.markSkipped();
+        } else if (result == TestResult.SKIPPED) {
+            ListenerPerfStats.markSkipped();
+        }
+    }
+
+    /** 原生 LifecycleStatus → 框架 TestResult（用于上报端口与性能统计）。 */
+    private static TestResult toFramework(LifecycleStatus status) {
+        if (status == null) {
+            return TestResult.PENDING;
+        }
+        switch (status) {
+            case PASSED:
+                return TestResult.SUCCESS;
+            case FAILED:
+                return TestResult.FAILURE;
+            case SKIPPED:
+            case IGNORED:
+                return TestResult.SKIPPED;
+            case PENDING:
+                return TestResult.PENDING;
+            case AMBIGUOUS:
+            default:
+                return TestResult.UNKNOWN;
+        }
+    }
+
+    private void recordTestData(String key, String value) {
         try {
-            PlaywrightManager.cleanupAll();
-            logger.info("Global cleanup completed at test suite finish");
-        } catch (IllegalStateException e) {
-            logger.warn("Global suite cleanup skipped (concurrent mode active): {} — "
-                    + "falling back to per-thread cleanup", e.getMessage());
-            try {
-                PlaywrightManager.cleanupForFeature();
-            } catch (Exception ex) {
-                com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator
-                        .recordFailure("web/listener/testSuiteFinished/fallbackCleanupForFeature", ex);
-            }
+            TestContextHolder.get().set(ContextKey.of(key, String.class), value);
         } catch (Exception e) {
-            //  N-06（doc 21 HIGH）：套件收尾的清理失败不得只留 verbose 日志（默认日志级别零输出）——
-            //  失败即可能残留浏览器 / 上下文 / 线程，必须 ERROR + 计入统一失败计数（可被套件末尾 / CI 断言）。
-            com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator
-                    .recordFailure("web/listener/testSuiteFinished/cleanupAll", e);
+            logger.debug("Failed to record test data: {} = {}", key, value, e);
         }
     }
 
-    @Override
-    public void testStarted(String testName, String testMethod) {
-        //  阶段识别：discovery 阶段跳过 Playwright 资源初始化
-        if (!discoveryPhaseCompleted) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[Discovery Phase] Skipping Playwright init for test: {} (method: {})", testName, testMethod);
-            return;
-        }
-
-        String uniqueTestName = testName + "_" + Thread.currentThread().threadId();
-        TestContextHolder.get().set(CURRENT_TEST_NAME_KEY,uniqueTestName);
-        TestContextHolder.get().set(TEST_START_TIME_KEY,System.currentTimeMillis());
-
-        //  新增：重置 API 捕获上下文（route 未启用时整体跳过）
-        withRouteLifecycle(lc -> {
-            lc.resetCaptureCurrent();
-            //  绑定当前 scenario 名：让 API 监控失败记录能归属到具体场景
-            lc.setMonitorScenario(testName);
-        });
-        //  丢弃上一场景残留的待报告 API 记录，避免其被写入本场景报告（跨场景串扰）
-        SerenityReporter.discardPendingApiOperations();
-        //  重置 API 失败标记（每个新 case 重新开始追踪）
-        ListenerGuard.guards().setApiFailureAlreadyHandled(false);
-
-        //  安全清理：确保上一个 scenario 的采集引擎已释放
-        withRouteLifecycle(RouteLifecycle::stopCapture);
-
-        try {
-            FrameworkCore.getInstance().beforeTest();
-            recordTestData("testStart", System.currentTimeMillis());
-            recordTestData("testMethod", testMethod);
-            logger.info("Test initialized: {} (method: {})", uniqueTestName, testMethod);
-        } catch (Exception e) {
-            logger.error("Failed to initialize Playwright for test: {}", uniqueTestName, e);
-        }
-    }
-
-    @Override
-    public void testStarted(String testName, String testMethod, ZonedDateTime startTime) {
-        //  阶段识别：discovery 阶段跳过 Playwright 资源初始化
-        if (!discoveryPhaseCompleted) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[Discovery Phase] Skipping Playwright init for test: {} (method: {}, time: {})",
-                    testName, testMethod, startTime);
-            return;
-        }
-
-        // 生成唯一名称：原名称 + 线程ID（保证同名 scenario 不合并）
-        String uniqueTestName = testName + "_" + Thread.currentThread().threadId();
-        TestContextHolder.get().set(CURRENT_TEST_NAME_KEY,uniqueTestName);
-        TestContextHolder.get().set(TEST_START_TIME_KEY,startTime != null ? startTime.toInstant().toEpochMilli() : System.currentTimeMillis());
-
-        //  新增：重置 API 捕获上下文（route 未启用时整体跳过）
-        withRouteLifecycle(lc -> {
-            lc.resetCaptureCurrent();
-            //  绑定当前 scenario 名：让 API 监控失败记录能归属到具体场景
-            lc.setMonitorScenario(testName);
-        });
-        //  丢弃上一场景残留的待报告 API 记录，避免其被写入本场景报告（跨场景串扰）
-        SerenityReporter.discardPendingApiOperations();
-        //  重置 API 失败标记（每个新 case 重新开始追踪）
-        ListenerGuard.guards().setApiFailureAlreadyHandled(false);
-
-        //  安全清理：确保上一个 scenario 的采集引擎已释放
-        withRouteLifecycle(RouteLifecycle::stopCapture);
-
-        try {
-            FrameworkCore.getInstance().beforeTest();
-            long start = startTime != null ? startTime.toInstant().toEpochMilli() : System.currentTimeMillis();
-            recordTestData("testStart", start);
-            recordTestData("testMethod", testMethod);
-            recordTestData("startTimeZoned", startTime);
-            logger.info("Test initialized: {} (method: {}, startTime: {})", uniqueTestName, testMethod, startTime);
-        } catch (Exception e) {
-            logger.error("Failed to initialize Playwright for test: {}", uniqueTestName, e);
-        }
-    }
-
-    @Override
-    public void testFinished(TestOutcome result) {
-        try {
-            logger.info("Test finished: {}", result);
-            //  新增：检查 API 断言失败并标记测试结果
-            checkAndMarkApiAssertionFailures(result);
-
-            checkAndMarkRouteAssertionFailures(result);
-            //  D3-2：软断言收集到的失败在场景末统一上报（先于结果落定，确保计入本场景）
-            StepFailureAggregator.checkAndMarkSoftAssertionFailures(result);
-            // 更新当前测试结果
-            if (result != null && result.getResult() != null) {
-                TestContextHolder.get().set(CURRENT_TEST_RESULT_KEY, result.getResult());
-            }
-            testFinishedInternal();
-
-            //  新增：自动清理当前线程的 RouteRegistry（防内存泄漏 + 跨用例污染）
-            cleanupRouteRegistryForCurrentThread();
-
-            // 2026-09-30 收口：不再区分 feature/scenario/credential，统一为 scenario 级重建（实际关闭在桥内）
-            logger.info("Cleaning up Playwright resources (scenario-level restart)");
-            //  方案 A（2026-09-17）：先导出本用例 trace chunk（含真实 pass/fail 标注），再清理/关闭 context。
-            //  必须在 cleanupForScenario()（会关闭 context）之前；与桥内的兜底调用幂等，先到者生效。
-            boolean scenarioFailed = result != null && result.getResult() != null
-                    && (result.getResult() == TestResult.FAILURE || result.getResult() == TestResult.ERROR);
-            ScenarioTraceRecorder.onScenarioEnd(LogContext.currentScenarioId(), scenarioFailed);
-            //  把本用例真实结果告知收尾链路（2026-09-30 收口）：无论成败、是否承载登录态，
-            //  统一销毁本 case 的 Context/Page（scenario-scoped）；登录复用走 storageState 快照注入。
-            //  详见仓库根 FIX_PLAN.md §1.1（I-1）与 §2.0（时效声明）。
-            PlaywrightManager.cleanupForScenario(scenarioFailed);
-
-            //  采集管道清理（G4 修复）：只停本线程各 context 的采集，不再全局 stopCapture()，
-            //    避免并行下误清其它 worker 线程的采集状态。
-            PlaywrightManager.stopCaptureForCurrentThread();
-        } catch (Exception e) {
-            //  testFinished 属收尾回调：清理阶段异常不应上抛中断 Serenity 收尾流程。
-            // 仅记录日志 + 兜底清空防重门控，ThreadLocal 与 API 上下文清理交由 finally 保证。
-            logger.error("Error in testFinished, forcing cleanup", e);
-            try {
-                PlaywrightManager.clearCurrentThreadRouteState();
-            } catch (Exception re) {
-                logger.debug("clearDispatchedRoutes on error path failed: {}", re.getMessage());
-            }
-        } finally {
-            // 确保异常和正常路径均清理 ThreadLocal 和 API 捕获上下文
-            cleanupThreadLocals();
-            //  D3-1：解绑 MDC 中的 scenario 标识（Cucumber 线程会被线程池复用，不解绑会串扰下一用例）
-            LogContext.endScenario();
-            //  D3-2：兜底清空软断言收集器（防止未走上报路径时把失败带到下一场景）
-            SoftAssertions.clearForCurrentThread();
-            //  D4-1：通知业务监听器场景结束（放在 finally，异常收尾也要通知）
-            fireAfterScenario(result != null && result.getResult() != null
-                    && (result.getResult() == TestResult.FAILURE
-                        || result.getResult() == TestResult.ERROR));
-            withRouteLifecycle(RouteLifecycle::resetCaptureCurrent);
-        }
-    }
-
-    @Override
-    public void testFinished(TestOutcome result, boolean isInDataDrivenTest, ZonedDateTime finishTime) {
-        if (result == null) {
-            VerboseLogging.logWarnIfVerbose(logger, "TestOutcome is null in testFinished with time, skipping processing");
-            return;
-        }
-
-        try {
-            VerboseLogging.logDebugIfVerbose(logger, "Test finished: {}, isDataDriven: {}, finishTime: {}", result, isInDataDrivenTest, finishTime);
-
-            //  新增：检查 API 断言失败并标记测试结果
-            checkAndMarkApiAssertionFailures(result);
-
-            checkAndMarkRouteAssertionFailures(result);
-            //  D3-2：软断言收集到的失败在场景末统一上报（Cucumber 实际走本重载）
-            StepFailureAggregator.checkAndMarkSoftAssertionFailures(result);
-
-            //  将本场景产生的 API 记录刷入 Serenity 报告。必须在 Serenity 仍关联本场景时执行，
-            //    否则残留会滞留在队列中，被下一场景的 flush 带走造成跨场景串扰。
-            SerenityReporter.flushPendingApiOperations();
-
-            Long startTime = TestContextHolder.get().get(TEST_START_TIME_KEY);
-            if (startTime == null) {
-                return;
-            }
-
-            long duration = System.currentTimeMillis() - startTime;
-            String testName = TestContextHolder.get().get(CURRENT_TEST_NAME_KEY);
-
-            //  测试计数：在 testFinished(TestOutcome,boolean,ZonedDateTime) 中计数
-            // Serenity+Cucumber 实际调用这个重载而非 testFinished(TestOutcome)
-            ListenerPerfStats.markTotal();
-
-            recordTestData("testEnd", finishTime != null ? finishTime.toInstant().toEpochMilli() : System.currentTimeMillis());
-            recordTestData("testDuration", duration);
-            //  D4-2：结果经框架自有模型广播（框架只认 ResultReporter 端口，
-            //  由 SerenityResultAdapter 收敛引擎方言 —— 换报告引擎时此处无需改动）
-            ResultReporters.reportScenario(testName,
-                    SerenityResultAdapter.toFramework(result.getResult()), duration);
-            recordTestData("isDataDrivenTest", isInDataDrivenTest);
-
-            if (result != null && result.getResult() != null) {
-                recordTestData("testResult", result.toString());
-
-                switch (result.getResult()) {
-                    case SUCCESS:
-                        ListenerPerfStats.markPassed();
-                        break;
-                    case PENDING:
-                        VerboseLogging.logWarnIfVerbose(logger, "Test result is PENDING, counting as failed: {}", testName);
-                        ListenerPerfStats.markFailed();
-                        break;
-                    case FAILURE:
-                    case ERROR:
-                    case UNDEFINED:
-                        ListenerPerfStats.markFailed();
-                        break;
-                    case SKIPPED:
-                        ListenerPerfStats.markSkipped();
-                        break;
-                    default:
-                        VerboseLogging.logWarnIfVerbose(logger, "Unknown test result: {}", result.getResult());
-                        break;
-                }
-            } else {
-                VerboseLogging.logWarnIfVerbose(logger, "Test result is null, counting as failed: {}", testName);
-                ListenerPerfStats.markFailed();
-            }
-
-            VerboseLogging.logInfoIfVerbose(logger, "Test completed: {} in {}ms (DataDriven: {}, Result: {})", testName, duration, isInDataDrivenTest, result);
-        } catch (Exception e) {
-            //  收尾回调异常不向上抛出，避免中断 Serenity 收尾流程；防重门控清空交由 finally 兜底。
-            logger.error("Error in testFinished with time, forcing cleanup", e);
-            try {
-                PlaywrightManager.clearCurrentThreadRouteState();
-            } catch (Exception re) {
-                logger.debug("clearDispatchedRoutes on error path failed: {}", re.getMessage());
-            }
-        } finally {
-            // 【关键】finally 保证：无论中间是否抛异常，ThreadLocal 一定会被清理
-            cleanupThreadLocals();
-            //  D3-1：解绑 MDC 中的 scenario 标识（Cucumber 实际走本重载；线程复用必须解绑）
-            LogContext.endScenario();
-            //  D3-2：兜底清空软断言收集器（含 startTime 为 null 等提前 return 路径）
-            SoftAssertions.clearForCurrentThread();
-            //  D4-1：通知业务监听器场景结束（Cucumber 实际走本重载）
-            boolean scenarioFailedForCleanup = result != null && result.getResult() != null
-                    && (result.getResult() == TestResult.FAILURE
-                        || result.getResult() == TestResult.ERROR);
-            fireAfterScenario(scenarioFailedForCleanup);
-            //  解绑当前线程的 scenario 归属：Cucumber 执行线程会被线程池复用，
-            //   不 remove 会把上一个 scenario 名带到下一个用例（MonitorFailureCollector 归属串扰）
-            withRouteLifecycle(RouteLifecycle::clearMonitorScenario);
-            //  新增：自动清理当前线程的 RouteRegistry（防内存泄漏 + 跨用例污染）
-            cleanupRouteRegistryForCurrentThread();
-
-            //  修复：补齐 Playwright 资源清理（与 testFinished(TestOutcome) 保持一致）
-            // 统一调用 cleanupForScenario()：内部统一为 scenario-scoped 销毁（每 case 重建并销毁 Context）
-            // 不能只调 cleanupPageState()，否则 customContextOptionsFlag 泄漏
-            try {
-                //  2026-09-30 政策：无论是否承载登录态都销毁 Context 与 Page（不复用活 Context）；
-                //  登录复用以 storageState 快照注入新建 Context，由 SessionManager.restoreSession 完成。
-                PlaywrightManager.cleanupForScenario(scenarioFailedForCleanup);
-                //  采集管道清理：确保 scenario 结束时采集引擎释放（route 未启用时跳过）
-                withRouteLifecycle(RouteLifecycle::stopCapture);
-            } catch (Exception e) {
-                logger.error("Failed to clean up Playwright resources after test: {}", e.getMessage());
-            }
-        }
-    }
-
-    @Override
-    public void testRetried() {
-        logger.debug("Test retried");
-    }
-
-    @Override
-    public void skippedStepStarted(ExecutedStepDescription step) {
-        logger.debug("Skipped step started: {}", step);
-    }
-
-    @Override
-    public void stepFailed(StepFailure failure, List<ScreenshotAndHtmlSource> screenshots,
-                           boolean takeScreenshotOnFailure, ZonedDateTime timestamp) {
-        //  防重复 + 委托：统一交给无参 stepFailed(StepFailure) 处理截图和报告发送
-        // 避免两个方法维护几乎相同逻辑导致的 drift 风险
-        if (failure == null || ListenerGuard.guards().isFailureScreenshotsAlreadySent())  {return;} 
-
-        if (timestamp != null) {
-            recordTestData("stepFailureTimestamp", timestamp.toInstant().toEpochMilli());
-        }
-
-        // Serenity 要求的 takeScreenshotOnFailure 标志处理
-        if (takeScreenshotOnFailure) {
-            takeFailureScreenshot(null);
-        }
-
-        // 委托给核心失败处理逻辑（截图 + StepEventBus 发送 + 标记已发送）
-        stepFailed(failure);
-    }
-
-    @Override
-    public void stepPending() {
-        logger.debug("Step pending");
-    }
-
-    @Override
-    public void stepPending(String description) {
-        logger.debug("Step pending: {}", description);
-    }
-
-    @Override
-    public void testFailed(TestOutcome result, Throwable throwable) {
-        // 简洁输出：仅显示测试名 + 异常消息第一行，不打印完整堆栈（由 Serenity 报告保留）
-        String testTitle = result != null ? result.getTitle() : "unknown";
-        //  D4-1：把真实异常桥接给业务监听器（换引擎时业务代码无需改动）
-        FrameworkListenerBridge.onFailure(TestContextHolder.get().get(CURRENT_SCENARIO_NAME_KEY), throwable);
-        String errorMsg = throwable != null ? throwable.getMessage() : "Unknown error";
-        if (errorMsg != null && errorMsg.contains("\n")) {
-            errorMsg = errorMsg.substring(0, errorMsg.indexOf('\n')).trim();
-        }
-        //  去重：同一异常若已在 stepFailed / lastStepFailed 打印过，此处完全静默（不论日志级别）
-        if (ListenerGuard.shouldReportFailure(throwable, errorMsg)) {
-            logger.error("Test failed: {} - {}", testTitle, errorMsg);
-        }
-
-        //  新增：检查 API 断言失败
-        checkAndMarkApiAssertionFailures(result);
-
-        checkAndMarkRouteAssertionFailures(result);
-
-        // 注意：不在 testFailed 中 increment failedTests，避免与 testFinished 重复计数
-        // 测试失败统计由 testFinished 统一处理
-        // 重试能力由 Maven Failsafe Plugin 的 rerunFailingTestsCount 提供
-    }
-
-    @Override
-    public void testIgnored() {
-        logger.debug("Test ignored");
-        ListenerPerfStats.markSkipped();
-    }
-
-    @Override
-    public void testPending() {
-        logger.debug("Test pending");
-    }
-
-    @Override
-    public void testIsManual() {
-        logger.debug("Test is manual");
-    }
-
-    @Override
-    public void notifyScreenChange() {
-        //  禁用 SCREEN_CHANGE 截图 — 报告变长的最大元凶
-        // Serenity 报告是纵向堆叠所有截图，每次页面变化（弹窗、动画、滚动、hover等）
-        // 都会触发此回调 → 每个步骤产生 3~10 张 SCREEN_CHANGE 截图 → 报告巨长不可读
-        //
-        // 如果未来需要重新启用（仅用于调试特定场景），取消下面的注释即可：
-        // if (TestContextHolder.get().get(STEP_START_TIME_KEY) != null && !ListenerGuard.guards().isStepFinishProcessed() && TestContextHolder.get().get(CURRENT_STEP_NAME_KEY) != null) {
-        //     takeScreenshotAndRegister("SCREEN_CHANGE");
-        // }
-        VerboseLogging.logDebugIfVerbose(logger, "SCREEN_CHANGE screenshot disabled (report length optimization)");
-    }
-
-    @Override
-    public void useExamplesFrom(DataTable dataTable) {
-        logger.debug("Using examples from data table with {} rows", dataTable.getRows().size());
-    }
-
-    @Override
-    public void addNewExamplesFrom(DataTable dataTable) {
-        logger.debug("Adding new examples from data table with {} rows", dataTable.getRows().size());
-    }
-
-    @Override
-    public void exampleStarted(Map<String, String> data) {
-        logger.debug("Example started with data: {}", data);
-    }
-
-    @Override
-    public void exampleFinished() {
-        logger.debug("Example finished");
-    }
-
-    @Override
-    public void assumptionViolated(String message) {
-        logger.debug("Assumption violated: {}", message);
-    }
-
-    @Override
-    public void testRunFinished() {
-        //  阶段识别：重置 discovery 标记和 story 集合，支持同 JVM rerun 时识别新 discovery 阶段
-        discoveryPhaseCompleted = false;
-        seenStoryNames.clear();
-
-        logger.info(getPerformanceStats());
-
-        //  标记当前 run 结束（下一轮开始时才可能打印轮次横幅；不代表发生了重跑）
-        currentRunNumber++;
-        roundBannerLogged = false;
-    }
+    // ═══════════════════════════════════════════════════════════
+    // 公开门面（性能统计，零变更）
+    // ═══════════════════════════════════════════════════════════
 
     public static String getPerformanceStats() {
         return ListenerPerfStats.getPerformanceStats();
@@ -1525,78 +652,5 @@ public class PlaywrightListener implements StepListener {
 
     public static void resetStats() {
         ListenerPerfStats.resetStats();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  API 监控断言集成
-    // ═══════════════════════════════════════════════════════════════════
-
-    /**
-     *  核心方法：检查 API 断言失败并标记测试结果为失败
-     *
-     * <p>在测试结束时调用，等待所有异步 API 请求完成（最多 5 秒），
-     * 如果 MonitorHandler 标记了断言失败，则强制设置 TestResult.FAILURE。
-     */
-    private void checkAndMarkApiAssertionFailures(TestOutcome result) {
-        StepFailureAggregator.checkAndMarkApiAssertionFailures(
-                result, TestContextHolder.get().get(CURRENT_TEST_NAME_KEY));
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  框架级 API 断言自动检查
-    // ═══════════════════════════════════════════════════════════════════
-
-    /**
-     *  框架级：在每个步骤结束时自动检查 API 断言是否失败。
-     *
-     * <p><b>通过 StepEventBus 即时标记失败</b>：
-     * 使用 {@code apiFailureAlreadyHandled} ThreadLocal 标记防止同一 case 内
-     * StepEventBus 回调链的递归重入（死循环）。
-     *
-     * <p>防重入机制：
-     * <ol>
-     *   <li>步骤结束 → checkAndFailOnApiAssertions() → set flag → StepEventBus.testFailed()</li>
-     *   <li>→ PlaywrightListener.testFailed(TestOutcome,Throwable) → checkAndMarkApiAssertionFailures() ✅</li>
-     *   <li>后续步骤结束 → checkAndFailOnApiAssertions() → flag already set → return ✅</li>
-     * </ol>
-     *
-     * <p>标记在下一个 test/scenario 的 testStarted / stepStarted 中重置，
-     * 确保不影响后续 Scenario 的执行。
-     *
-     * <p>同时 {@link #checkAndMarkApiAssertionFailures(TestOutcome)} 在 testFinished
-     * 中作为兜底，再次通过 {@code result.setResult(TestResult.FAILURE)} 确保标记生效。
-     */
-    /**
-     *  框架级未捕获页面异常检查（每个步骤结束时兜底执行）。
-     * 仅当 {@code playwright.page.error.failOnError=true} 时生效：将 {@link PageEventMonitor}
-     * 收集的未捕获 JS 异常经 Serenity 标记测试失败并抛出，使前端脚本错误即时暴露。
-     * 默认关闭（仅记录日志），不影响既有行为；drain 即清空，天然幂等，不会跨步骤/跨 scenario 重复触发。
-     */
-    private void checkAndFailOnPageErrors() {
-        StepFailureAggregator.checkAndFailOnPageErrors();
-    }
-
-    private void logInteractionDiagnosticsOnFailure() {
-        StepFailureAggregator.logInteractionDiagnosticsOnFailure();
-    }
-
-    private void checkAndFailOnApiAssertions() {
-        StepFailureAggregator.checkAndFailOnApiAssertions();
-    }
-
-    /**
-     * Route：步骤结束时检查 MONITOR 断言失败（抛 AssertionError 判红）。
-     * 消费式 drain 天然幂等——同一场景后续步骤/用例收尾不会重复上报。
-     */
-    private void checkAndFailOnRouteAssertions() {
-        StepFailureAggregator.checkAndFailOnRouteAssertions();
-    }
-
-    /**
-     * Route：用例收尾兜底——检查 MONITOR 断言失败并标记 FAILURE（不抛）。
-     * 若步骤结束路径已抛过，此处 drain 到空列表自然跳过。
-     */
-    private void checkAndMarkRouteAssertionFailures(TestOutcome result) {
-        StepFailureAggregator.checkAndMarkRouteAssertionFailures(result);
     }
 }

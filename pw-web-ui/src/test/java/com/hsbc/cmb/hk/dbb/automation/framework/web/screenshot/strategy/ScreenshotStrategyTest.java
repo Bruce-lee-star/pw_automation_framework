@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.screenshot.strategy;
 
-import net.thucydides.model.domain.TestResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.result.TestResult;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -10,14 +10,14 @@ import static org.junit.Assert.assertTrue;
 /**
  * 截图策略解析验证。
  *
- * <p><b>本类钉住的回归</b>：配置 {@code serenity.screenshot.strategy} 同时被 Serenity 生态使用，
+ * <p><b>本类钉住的回归</b>：配置 {@code serenity.screenshot.strategy} 同时被 框架 生态使用，
  * 官方名 {@code AFTER_FAILING_STEP}（只失败时截图）不在框架枚举名里。原实现 {@code valueOf} 抛异常后
  * <b>静默</b>退回 {@code AFTER_EACH_STEP}，于是「只失败时截图」实际变成「每步都截」——
  * 一轮 E2E 因此产出 85 张截图，且因兜底值与 {@code ConfigKeys} 默认值相同而长期无人察觉。</p>
  */
 public class ScreenshotStrategyTest {
 
-    /** Serenity 官方名必须被识别为"仅失败时截图"，且<b>不在步骤结束时</b>截图。 */
+    /** 框架 官方名必须被识别为"仅失败时截图"，且<b>不在步骤结束时</b>截图。 */
     @Test
     public void serenityAfterFailingStepMeansFailuresOnly() {
         ScreenshotStrategy strategy = ScreenshotStrategy.resolve("AFTER_FAILING_STEP");
@@ -30,7 +30,7 @@ public class ScreenshotStrategyTest {
         assertFalse("成功结果不截图", strategy.shouldTakeScreenshotFor(TestResult.SUCCESS));
     }
 
-    /** 大小写与空白不敏感；框架既有名与 Serenity 别名都要认。 */
+    /** 大小写与空白不敏感；框架既有名与 框架 别名都要认。 */
     @Test
     public void acceptsBothNamingStylesCaseInsensitively() {
         assertEquals((Object) ScreenshotStrategy.AFTER_EACH_STEP,

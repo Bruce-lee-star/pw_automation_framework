@@ -75,18 +75,18 @@ public enum ConfigKeys {
 
     // ===================== Web（对应 WebFrameworkConfig）=====================
 
-    WEB_SERENITY_PROJECT_NAME(
-        "serenity.project.name",
-        "Serenity Playwright Demo",
+    WEB_FRAMEWORK_PROJECT_NAME(
+        "framework.project.name",
+        "框架 Playwright Demo",
         "项目名称"
     ),
-    WEB_SERENITY_ENCODING(
-        "serenity.encoding",
+    WEB_FRAMEWORK_ENCODING(
+        "framework.encoding",
         "UTF-8",
         "编码设置"
     ),
-    WEB_SERENITY_REPORT_ENCODING(
-        "serenity.report.encoding",
+    WEB_FRAMEWORK_REPORT_ENCODING(
+        "framework.report.encoding",
         "UTF-8",
         "报告编码设置"
     ),
@@ -327,57 +327,57 @@ public enum ConfigKeys {
         "BrowserStack CDP WebSocket 端点域名"
     ),
     WEB_PLAYWRIGHT_WINDOW_MAXIMIZE(
-        "serenity.playwright.window.maximize",
+        "framework.playwright.window.maximize",
         "true",
         "窗口最大化"
     ),
     WEB_PLAYWRIGHT_WINDOW_MAXIMIZE_ARGS(
-        "serenity.playwright.window.maximize.args",
+        "framework.playwright.window.maximize.args",
         "--disable-infobars,--no-first-run,--no-default-browser-check",
         "窗口最大化参数"
     ),
     WEB_PLAYWRIGHT_CONCURRENT_PARALLELISM(
-        "serenity.playwright.concurrent.parallelism",
+        "framework.playwright.concurrent.parallelism",
         "4",
         "并发上下文执行器并行度（同时运行的独立 BrowserContext 任务数）"
     ),
     WEB_PLAYWRIGHT_CONCURRENT_TASK_TIMEOUT_SECONDS(
-        "serenity.playwright.concurrent.task.timeout.seconds",
+        "framework.playwright.concurrent.task.timeout.seconds",
         "60",
         "并发执行器单任务超时（秒）"
     ),
     WEB_PLAYWRIGHT_CONCURRENT_USE_VIRTUAL_THREADS(
-        "serenity.playwright.concurrent.use.virtual.threads",
+        "framework.playwright.concurrent.use.virtual.threads",
         "false",
         "并发执行器启用虚拟线程（JDK 21+，启用前审计 BasePage pinning）"
     ),
     WEB_CONCURRENCY_PARTITION_ENABLED(
-        "serenity.playwright.concurrent.partition.enabled",
+        "framework.playwright.concurrent.partition.enabled",
         "auto",
         "SSO 感知并发：按身份分区互斥（相同身份串行、不同身份并行）。auto=引擎级并行为真时自动启用"
     ),
     WEB_CONCURRENCY_PARTITION_MAX_WAIT_MS(
-        "serenity.playwright.concurrent.partition.max.wait.ms",
+        "framework.playwright.concurrent.partition.max.wait.ms",
         "180000",
         "进入并发闸门的最大等待（毫秒）；0 表示无限等待（旧行为，不推荐）"
     ),
     WEB_CONCURRENCY_PARTITION_PER_KEY_PERMITS(
-        "serenity.playwright.concurrent.partition.per.key.permits",
+        "framework.playwright.concurrent.partition.per.key.permits",
         "1",
         "每个并发分区键的并发许可数（>1 表示允许同身份 N 路并发）"
     ),
     WEB_CONCURRENCY_PARTITION_FAIL_CLOSED(
-        "serenity.playwright.concurrent.partition.fail.closed",
+        "framework.playwright.concurrent.partition.fail.closed",
         "true",
         "闸门等待超时后的行为：true=失败快（该场景判失败，默认；避免串行化静默失效导致随机 401）；false=放行但失效（逃生舱）"
     ),
     WEB_CONCURRENCY_BROWSER_CRASH_GUARD_ENABLED(
-        "serenity.playwright.concurrent.browser.crash.guard.enabled",
+        "framework.playwright.concurrent.browser.crash.guard.enabled",
         "true",
         "浏览器崩溃韧性守卫：共享 Browser 崩溃时单飞重建并重跑失败任务"
     ),
     WEB_PLAYWRIGHT_CONCURRENT_CRASH_CORROBORATION_ENABLED(
-        "serenity.playwright.concurrent.crash.corroboration.enabled",
+        "framework.playwright.concurrent.crash.corroboration.enabled",
         "true",
         "崩溃识别启用「异常类型 + Playwright 断开事件」双重佐证（消息签名仍为主信号）"
     ),
@@ -566,8 +566,8 @@ public enum ConfigKeys {
         "15000",
         "页面稳定化等待超时"
     ),
-    WEB_SERENITY_SCREENSHOT_STRATEGY(
-        "serenity.screenshot.strategy",
+    WEB_FRAMEWORK_SCREENSHOT_STRATEGY(
+        "framework.screenshot.strategy",
         "AFTER_EACH_STEP",
         "截图策略"
     ),
@@ -586,20 +586,20 @@ public enum ConfigKeys {
         "12000",
         "全页截图最大滚动高度（像素），<=0 表示不限制"
     ),
-    WEB_SERENITY_REPORTS_SCREENSHOTS_DIRECTORY(
-        "serenity.reports.screenshots.directory",
+    WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY(
+        "framework.reports.screenshots.directory",
         "target/site/serenity",
-        "Serenity 报告截图目录"
+        "框架 报告截图目录"
     ),
-    WEB_SERENITY_SCREENSHOTS_DIRECTORY(
-        "serenity.screenshots.directory",
+    WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY(
+        "framework.screenshots.directory",
         "target/site/serenity",
-        "Serenity 截图目录"
+        "框架 截图目录"
     ),
-    WEB_SERENITY_LOGGING(
-        "serenity.logging",
+    WEB_FRAMEWORK_LOGGING(
+        "framework.logging",
         "VERBOSE",
-        "日志级别（Serenity 侧；本框架的详细日志改由 framework.verbose.logging 决定，"
+        "日志级别（框架 侧；本框架的详细日志改由 framework.verbose.logging 决定，"
             + "本键仅保留录制开关等历史语义）"
     ),
     WEB_FRAMEWORK_VERBOSE_LOGGING(
@@ -613,56 +613,56 @@ public enum ConfigKeys {
         "false",
         "框架超详细日志（默认 false）：等同于 framework.verbose.logging，并额外开启 trace 档"
     ),
-    WEB_SERENITY_OUTPUT_DIRECTORY(
-        "serenity.outputDirectory",
+    WEB_FRAMEWORK_OUTPUT_DIRECTORY(
+        "framework.output.directory",
         "target/site/serenity",
         "报告输出目录"
     ),
-    WEB_SERENITY_FEATURES_ROOT(
-        "serenity.features.root",
+    WEB_FRAMEWORK_FEATURES_ROOT(
+        "framework.features.root",
         "src/test/resources/features",
         "特性文件根目录"
     ),
-    WEB_SERENITY_REQUIREMENTS_BASE(
-        "serenity.requirements.base",
+    WEB_FRAMEWORK_REQUIREMENTS_BASE(
+        "framework.requirements.base",
         "src/test/resources/features",
         "需求根目录"
     ),
-    WEB_SERENITY_BROWSER(
-        "serenity.browser",
+    WEB_FRAMEWORK_BROWSER(
+        "framework.browser",
         "playwright",
         "浏览器配置"
     ),
 
-    WEB_SERENITY_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS(
-        "serenity.playwright.hang.watchdog.interval.ms",
+    WEB_FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS(
+        "framework.playwright.hang.watchdog.interval.ms",
         "60000",
         "卡住诊断看门狗采样间隔（毫秒，≤0 关闭）。用例运行超过该时长后，每间隔打印一次场景线程栈 + 其它线程概览，用于定位无日志的阻塞点"
     ),
 
 
-    WEB_SERENITY_RERUN_FAILURES_WAIT_TIME(
-        "serenity.rerun.failures.wait.time",
+    WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME(
+        "framework.rerun.failures.wait.time",
         "1000",
         "失败测试重跑等待时间（毫秒）"
     ),
-    WEB_SERENITY_RETRY_DELAY_STRATEGY(
-        "serenity.retry.delay.strategy",
+    WEB_FRAMEWORK_RETRY_DELAY_STRATEGY(
+        "framework.retry.delay.strategy",
         "fixed",
         "重试延迟策略（fixed, exponential）"
     ),
-    WEB_SERENITY_RETRY_DELAY_BASE(
-        "serenity.retry.delay.base",
+    WEB_FRAMEWORK_RETRY_DELAY_BASE(
+        "framework.retry.delay.base",
         "1000",
         "指数退避基础延迟（毫秒）"
     ),
-    WEB_SERENITY_RETRY_DELAY_MAX(
-        "serenity.retry.delay.max",
+    WEB_FRAMEWORK_RETRY_DELAY_MAX(
+        "framework.retry.delay.max",
         "30000",
         "指数退避最大延迟（毫秒）"
     ),
-    WEB_SERENITY_RETRY_DELAY_MULTIPLIER(
-        "serenity.retry.delay.multiplier",
+    WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER(
+        "framework.retry.delay.multiplier",
         "2.0",
         "指数退避乘数"
     ),
@@ -844,10 +844,10 @@ public enum ConfigKeys {
     /**
      * 并发执行器硬上限（HARD CAP）：同时运行任务数的绝对上限。
      * <p>默认为<b>运行期自适应值</b>——CPU 核数 / 2，钳制于 [2, 32]（见 {@link #adaptiveConcurrentMaxValue()}），
-     * 可经 {@code -Dserenity.playwright.concurrent.max} / serenity.properties 覆盖。
+     * 可经 {@code -Dframework.playwright.concurrent.max} / serenity.properties 覆盖。
      */
     WEB_PLAYWRIGHT_CONCURRENT_MAX(
-        "serenity.playwright.concurrent.max",
+        "framework.playwright.concurrent.max",
         adaptiveConcurrentMaxValue(),
         "并发执行器硬上限（HARD CAP）：同时运行任务数的绝对上限，按 CPU 核数自适应，可经 -D / serenity.properties 覆盖"
     ),
@@ -857,7 +857,7 @@ public enum ConfigKeys {
      * <p>仅列入明确的浏览器/进程崩溃信号，不含会被正常业务流程触发的内容，避免误判掩盖真实缺陷。
      */
     WEB_PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES(
-        "serenity.playwright.concurrent.crash.signatures",
+        "framework.playwright.concurrent.crash.signatures",
         "target crashed|browser has been closed|browser is closed|target page, context or browser has been closed"
             + "|target closed|connection closed|connection prematurely closed|playwright has been closed|browser disconnected|browser crashed",
         "崩溃型失败消息特征白名单（| 分隔，大小写不敏感），用于崩溃识别"
@@ -945,15 +945,15 @@ public enum ConfigKeys {
         "1000",
         "测试重试延迟（毫秒）"
     ),
-    API_SERENITY_OUTPUT_DIRECTORY(
-        "serenity.output-directory",
+    API_FRAMEWORK_OUTPUT_DIRECTORY(
+        "framework.output-directory",
         "target/site/serenity",
-        "Serenity 输出目录"
+        "框架 输出目录"
     ),
-    API_SERENITY_HISTORY_FOLDER(
-        "serenity.history.folder",
+    API_FRAMEWORK_HISTORY_FOLDER(
+        "framework.history.folder",
         "target/site/serenity/history",
-        "Serenity 历史目录"
+        "框架 历史目录"
     ),
     API_API_REQUEST_RESPONSE_LOGS_ENABLED(
         "api.request.response.logging.enabled",

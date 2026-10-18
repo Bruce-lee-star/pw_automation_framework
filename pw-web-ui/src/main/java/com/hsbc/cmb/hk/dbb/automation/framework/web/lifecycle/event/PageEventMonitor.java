@@ -24,7 +24,7 @@ import java.util.WeakHashMap;
  * <p><b>定位</b>：集中注册 Playwright {@link Page} / {@link BrowserContext} 的<b>诊断类</b>事件
  * （未捕获 JS 异常、控制台错误/警告、网络请求失败、页面崩溃），并将其路由到框架 logger，
  * 提升运行时可观测性。本类<b>不</b>处理 API 抓包（{@code route} 模块的 {@code ApiCaptureLifecycle} 负责）
- * 与测试报告（{@code PlaywrightListener} / Serenity 负责），职责隔离清晰。
+ * 与测试报告（{@code PlaywrightListener} / 框架 负责），职责隔离清晰。
  *
  * <p><b>为何不放进 {@code BasePage} / 页面能力契约接口</b>：页面对象是业务层，且多个 BasePage 实例共享同一底层
  * {@code Page}；把横切的可观测性塞进 page-object 既违反单一职责，又会让本就超大的基类进一步膨胀。
@@ -64,10 +64,20 @@ public final class PageEventMonitor {
     private static final java.util.concurrent.atomic.AtomicBoolean FAIL_ON_ERROR_WARNED =
             new java.util.concurrent.atomic.AtomicBoolean(false);
 
-    /** 当前测试线程待上报的未捕获页面异常集合（步骤结束时经 Serenity 检查消费并清空）。 */
+    /** 当前测试线程待上报的未捕获页面异常集合（步骤结束时经 框架 检查消费并清空）。 */
     @SuppressWarnings("unchecked")
     private static final ContextKey<List> PENDING_PAGE_ERRORS_KEY =
             ContextKey.of("pageEventMonitor.pendingPageErrors", List.class);
+
+    /** 当前测试线程待写入报告的浏览器控制台行（page console error/warning，去噪后）。 */
+    @SuppressWarnings("unchecked")
+    private static final ContextKey<List> PENDING_BROWSER_CONSOLE_KEY =
+            ContextKey.of("pageEventMonitor.pendingBrowserConsole", List.class);
+
+    /** 当前测试线程待写入报告的未捕获页面异常（page-error，去噪后）。 */
+    @SuppressWarnings("unchecked")
+    private static final ContextKey<List> PENDING_BROWSER_ERRORS_KEY =
+            ContextKey.of("pageEventMonitor.pendingBrowserErrors", List.class);
 
     /**
      * 已注册上下文/页面集合（弱引用键，不阻止 GC 堆积；与 {@code PlaywrightManager.CLOSING_BROWSERS} 同款模式）。
@@ -210,13 +220,15 @@ public final class PageEventMonitor {
         }
     }
 
-    /** 未捕获 JS 异常：记录错误级日志；开启"页面异常即失败"开关时收集，待步骤结束上报 Serenity。 */
+    /** 未捕获 JS 异常：记录错误级日志；开启"页面异常即失败"开关时收集，待步骤结束上报 框架。 */
     private static void handlePageError(String error) {
         if (isThirdPartyError(error)) {
             logger.trace("[page-error-noise-suppressed] {}", error);
             return;
         }
         logger.error("[page-error] Uncaught page exception: {}", error);
+        // 始终记入报告浏览器错误缓冲（与 failOnError 开关解耦；开关只控制是否令场景失败）
+        pendingBrowserErrors().add(error);
         if (WebFrameworkConfig.PLAYWRIGHT_PAGE_ERROR_FAIL.getBooleanValue()) {
             pendingPageErrors().add(error);
         }
@@ -228,14 +240,50 @@ public final class PageEventMonitor {
         return (List<String>) TestContextHolder.get().computeIfAbsent(PENDING_PAGE_ERRORS_KEY, ArrayList::new);
     }
 
+    /** 当前测试线程的待写入报告浏览器控制台行（惰性创建）。 */
+    @SuppressWarnings("unchecked")
+    private static List<String> pendingBrowserConsole() {
+        return (List<String>) TestContextHolder.get().computeIfAbsent(PENDING_BROWSER_CONSOLE_KEY, ArrayList::new);
+    }
+
+    /** 当前测试线程的待写入报告浏览器错误列表（惰性创建）。 */
+    @SuppressWarnings("unchecked")
+    private static List<String> pendingBrowserErrors() {
+        return (List<String>) TestContextHolder.get().computeIfAbsent(PENDING_BROWSER_ERRORS_KEY, ArrayList::new);
+    }
+
     /**
-     * 取出并清空当前测试线程收集的未捕获页面异常（幂等消费，供 Serenity 失败传播）。
+     * 取出并清空当前测试线程收集的未捕获页面异常（幂等消费，供 框架 失败传播）。
      *
      * @return 异常文本快照；无则为空列表（永不返回 null）
      */
     @SuppressWarnings("unchecked")
     public static List<String> drainPendingPageErrors() {
         List<String> errors = (List<String>) TestContextHolder.get().get(PENDING_PAGE_ERRORS_KEY);
+        if (errors == null || errors.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> snapshot = new ArrayList<>(errors);
+        errors.clear();
+        return snapshot;
+    }
+
+    /** 取出并清空当前测试线程的浏览器控制台行（幂等消费，供报告 flush）。 */
+    @SuppressWarnings("unchecked")
+    public static List<String> drainPendingBrowserConsole() {
+        List<String> lines = (List<String>) TestContextHolder.get().get(PENDING_BROWSER_CONSOLE_KEY);
+        if (lines == null || lines.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> snapshot = new ArrayList<>(lines);
+        lines.clear();
+        return snapshot;
+    }
+
+    /** 取出并清空当前测试线程的未捕获页面异常（幂等消费，供报告 flush）。 */
+    @SuppressWarnings("unchecked")
+    public static List<String> drainPendingBrowserErrors() {
+        List<String> errors = (List<String>) TestContextHolder.get().get(PENDING_BROWSER_ERRORS_KEY);
         if (errors == null || errors.isEmpty()) {
             return Collections.emptyList();
         }
@@ -256,6 +304,10 @@ public final class PageEventMonitor {
             logger.error("[console-error] {}", message.text());
         } else if ("warning".equals(type)) {
             logger.warn("[console-warning] {}", message.text());
+        }
+        // 去噪后的 console error/warning 一律记入报告浏览器日志缓冲（与页面异常解耦）
+        if ("error".equals(type) || "warning".equals(type)) {
+            pendingBrowserConsole().add(message.text());
         }
     }
 

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>测试报告 · 总览</title>
+<link rel="stylesheet" href="assets/report.css?v=4">
+</head>
+<body>
+
+<div class="topbar">
+  <h1>📊 Serenity 测试报告 <span style="font-weight:400;font-size:13px;opacity:.85">· 增强版模板</span></h1>
+  <div class="meta">构建 #1024 · 2026-10-18 02:45<br>分支 master · 环境 staging</div>
+</div>
+
+<div class="wrap">
+
+  <!-- ============ KPI ============ -->
+  <div class="kpis">
+    <div class="kpi" style="--c:var(--primary)">
+      <div class="label">Scenario 总数</div><div class="num">28</div><div class="pct">覆盖 4 个 Feature</div>
+    </div>
+    <div class="kpi" style="--c:var(--primary)">
+      <div class="label">自动化用例</div><div class="num" id="kpi-auto">26</div><div class="pct" id="kpi-auto-pct">92.9%</div>
+    </div>
+    <div class="kpi" style="--c:var(--manual)">
+      <div class="label">手工用例</div><div class="num" id="kpi-manual" style="color:var(--manual)">2</div><div class="pct" id="kpi-manual-pct">7.1%</div>
+    </div>
+    <div class="kpi" style="--c:var(--success)">
+      <div class="label">通过率</div><div class="num" style="color:var(--success)">85.7%</div><div class="pct">24 / 28</div>
+    </div>
+    <div class="kpi" style="--c:var(--failure)">
+      <div class="label">失败 / 出错</div><div class="num" style="color:var(--failure)">3</div><div class="pct">2 失败 · 1 出错</div>
+    </div>
+  </div>
+
+  <!-- ============ 构成 / 结果分布 / 环境 ============ -->
+  <div class="grid-3">
+    <div class="card">
+      <h3><span class="icon"></span>自动化 / 手工构成</h3>
+      <div class="donut-box">
+        <div class="donut-wrap" id="chart-mix"></div>
+        <ul class="legend">
+          <li><span class="dot" style="background:#3b82f6"></span>自动化<span class="v" id="lg-auto">26</span><span class="p" id="lg-auto-p">92.9%</span></li>
+          <li><span class="dot" style="background:#0d9488"></span>手工<span class="v" id="lg-manual">2</span><span class="p" id="lg-manual-p">7.1%</span></li>
+        </ul>
+      </div>
+      <div class="donor-note">类型由用例定义决定：自动化用例由脚本执行，手工用例由人工执行并上传复核截图。</div>
+    </div>
+
+    <!-- 结果分布：环形图 + 堆叠条 + 明细 -->
+    <div class="card">
+      <h3><span class="icon"></span>结果分布</h3>
+      <div class="donut-box">
+        <div class="donut-wrap" id="chart-result"></div>
+        <ul class="dist-list">
+          <li><span class="dot" style="background:#16a34a;width:10px;height:10px;border-radius:3px;display:inline-block"></span>通过<span class="n">24</span><span class="pct2">85.7%</span></li>
+          <li><span style="background:#dc2626;width:10px;height:10px;border-radius:3px;display:inline-block"></span>失败<span class="n">2</span><span class="pct2">7.1%</span></li>
+          <li><span style="background:#ea580c;width:10px;height:10px;border-radius:3px;display:inline-block"></span>出错<span class="n">1</span><span class="pct2">3.6%</span></li>
+          <li><span style="background:#d97706;width:10px;height:10px;border-radius:3px;display:inline-block"></span>待定<span class="n">1</span><span class="pct2">3.6%</span></li>
+        </ul>
+      </div>
+      <div class="stack-bar">
+        <i style="width:85.7%;background:#16a34a"></i><i style="width:7.1%;background:#dc2626"></i>
+        <i style="width:3.6%;background:#ea580c"></i><i style="width:3.6%;background:#d97706"></i>
+      </div>
+      <div class="donor-note">异常集中在「交易 · 订单」与「支付 · 回调」，其中 1 条已由人工复核标记通过。</div>
+    </div>
+
+    <!-- 运行环境 -->
+    <div class="card">
+      <h3><span class="icon"></span>运行环境</h3>
+      <div class="env-item"><span class="k">JDK</span><span class="v">OpenJDK 17.0.10 (Temurin)</span></div>
+      <div class="env-item"><span class="k">构建工具</span><span class="v">Maven 3.9.6 · Gradle 8.7</span></div>
+      <div class="env-item"><span class="k">测试框架</span><span class="v">Serenity BDD 4.x · JUnit 5</span></div>
+      <div class="env-item"><span class="k">浏览器驱动</span><span class="v">Playwright 1.44 · Chromium 124</span></div>
+      <div class="env-item"><span class="k">操作系统</span><span class="v">Ubuntu 22.04 执行节点 ×3</span></div>
+      <div class="env-item"><span class="k">被测环境</span><span class="v">https://staging.example.com</span></div>
+      <div class="sub" style="margin-top:12px">浏览器分布</div>
+      <div class="browser-bar">
+        <i style="width:70%;background:#3b82f6"></i><i style="width:20%;background:#0ea5e9"></i><i style="width:10%;background:#f59e0b"></i>
+      </div>
+      <div class="browser-legend">
+        <span>Chromium <b>124</b> · 70%</span><span>Chrome <b>120</b> · 20%</span><span>Firefox <b>121</b> · 10%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Feature 总览（位于图表之下、Scenario 列表之上） ============ -->
+  <div class="card">
+    <h3><span class="icon"></span>Feature 总览<span class="aside">Feature → Scenario 两级结构 · 点击进入</span></h3>
+    <table class="tbl">
+      <thead><tr>
+        <th>Feature</th><th class="num-cell">Scenario</th><th>自动化 / 手工</th>
+        <th class="num-cell">通过</th><th class="num-cell">异常</th><th>通过率</th><th style="width:90px"></th>
+      </tr></thead>
+      <tbody>
+        <tr class="clickable" onclick="location.href='feature.html'">
+          <td class="link-cell"><span class="link">交易 · 订单</span><span class="link-arrow">→</span><div class="sub">#order #regression</div></td>
+          <td class="num-cell">14</td>
+          <td><span class="badge b-auto">12 自动化</span> <span class="badge b-manual">2 手工</span></td>
+          <td class="num-cell">12</td><td class="num-cell" style="color:var(--failure)">2</td>
+          <td><div class="bar-mini"><i style="width:85.7%;background:var(--success)"></i><i style="width:14.3%;background:var(--failure)"></i></div>85.7%</td>
+          <td><a class="btn sm" href="feature.html">查看 →</a></td>
+        </tr>
+        <tr class="clickable" onclick="location.href='feature.html'">
+          <td class="link-cell"><span class="link">支付 · 回调</span><span class="link-arrow">→</span><div class="sub">#payment #callback</div></td>
+          <td class="num-cell">7</td>
+          <td><span class="badge b-auto">7 自动化</span> <span class="badge b-manual">0 手工</span></td>
+          <td class="num-cell">6</td><td class="num-cell" style="color:var(--error)">1 出错</td>
+          <td><div class="bar-mini"><i style="width:85.7%;background:var(--success)"></i><i style="width:14.3%;background:var(--error)"></i></div>85.7%</td>
+          <td><a class="btn sm" href="feature.html">查看 →</a></td>
+        </tr>
+        <tr class="clickable" onclick="location.href='feature.html'">
+          <td class="link-cell"><span class="link">库存 · 预占</span><span class="link-arrow">→</span><div class="sub">#stock</div></td>
+          <td class="num-cell">4</td>
+          <td><span class="badge b-auto">4 自动化</span> <span class="badge b-manual">0 手工</span></td>
+          <td class="num-cell">4</td><td class="num-cell">0</td>
+          <td><div class="bar-mini"><i style="width:100%;background:var(--success)"></i></div>100%</td>
+          <td><a class="btn sm" href="feature.html">查看 →</a></td>
+        </tr>
+        <tr class="clickable" onclick="location.href='feature.html'">
+          <td class="link-cell"><span class="link">手工测试集（兼容性 / 弱网）</span><span class="link-arrow">→</span><div class="sub">#manual</div></td>
+          <td class="num-cell">3</td>
+          <td><span class="badge b-auto">3 自动化</span> <span class="badge b-manual">0 手工</span></td>
+          <td class="num-cell">2</td><td class="num-cell" style="color:var(--pending)">1 待定</td>
+          <td><div class="bar-mini"><i style="width:66.7%;background:var(--success)"></i><i style="width:33.3%;background:var(--pending)"></i></div>66.7%</td>
+          <td><a class="btn sm" href="feature.html">查看 →</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============ 全部 Scenario ============ -->
+  <div class="card">
+    <h3><span class="icon"></span>全部 Scenario（28）
+      <span class="aside">总览仅展示结果，点击行进入详情页可上传截图与标记结论</span></h3>
+
+    <div class="toolbar">
+      <label class="sub" for="flt-result">结果：</label>
+      <select id="flt-result" onchange="renderList()">
+        <option value="all">全部</option><option value="bad">仅异常</option>
+        <option value="pass">仅通过</option>
+      </select>
+      <label class="sub" for="flt-type" style="margin-left:8px">类型：</label>
+      <select id="flt-type" onchange="renderList()">
+        <option value="all">全部</option><option value="auto">仅自动化</option>
+        <option value="manual">仅手工</option>
+      </select>
+      <label class="sub" for="flt-feat" style="margin-left:8px">Feature：</label>
+      <select id="flt-feat" onchange="renderList()">
+        <option value="all">全部 Feature</option>
+        <option value="order">交易 · 订单</option>
+        <option value="pay">支付 · 回调</option>
+        <option value="stock">库存 · 预占</option>
+        <option value="manual">手工测试集</option>
+      </select>
+      <span class="sub" id="shown" style="margin-left:10px"></span>
+    </div>
+
+    <table class="tbl">
+      <thead><tr>
+        <th style="width:88px">结果</th><th>Scenario</th><th style="width:110px">类型</th>
+        <th style="width:130px">Feature</th>
+        <th style="width:130px">人工结论</th>
+        <th class="num-cell" style="width:78px">耗时</th>
+      </tr></thead>
+      <tbody id="sc-body"></tbody>
+    </table>
+  </div>
+
+  <footer>Serenity BDD 增强报告模板 · 全部用例可见 · 截图上传标记 · 手工标记 · Trace · 运行环境</footer>
+</div>
+
+<script src="assets/report.js?v=4"></script>
+<script>
+const FEATURE_NAME = { order:'交易 · 订单', pay:'支付 · 回调', stock:'库存 · 预占', manual:'手工测试集' };
+const RESULT_LABEL = { PASS:'通过', FAILURE:'失败', ERROR:'出错', PENDING:'待定', SKIPPED:'跳过' };
+const SCENARIOS = [
+  { id:'order-login',    title:'已登录用户进入下单页',     feature:'order', result:'PASS',    dur:2.1,  auto:true,  trace:false },
+  { id:'order-empty',    title:'购物车为空时提交订单被拦截',feature:'order', result:'PASS',    dur:3.4,  auto:true,  trace:false },
+  { id:'order-create',   title:'正常下单并生成订单号',     feature:'order', result:'PASS',    dur:5.8,  auto:true,  trace:true  },
+  { id:'order-discount', title:'订单满减金额计算错误',     feature:'order', result:'FAILURE', dur:12.4, auto:true,  trace:true,  detail:true },
+  { id:'order-coupon',   title:'优惠券与满减叠加计算',     feature:'order', result:'PASS',    dur:8.2,  auto:true,  trace:false },
+  { id:'order-round',    title:'订单金额四舍五入校验',     feature:'order', result:'PASS',    dur:4.6,  auto:true,  trace:false },
+  { id:'order-stock',    title:'下单时校验可售库存',       feature:'order', result:'PASS',    dur:6.0,  auto:true,  trace:false },
+  { id:'order-addr',     title:'收货地址信息完整性校验',   feature:'order', result:'PASS',    dur:3.1,  auto:true,  trace:false },
+  { id:'order-cancel',   title:'取消订单并返还优惠券',     feature:'order', result:'PASS',    dur:7.7,  auto:true,  trace:false },
+  { id:'order-timeout',  title:'订单超时未支付自动关闭',   feature:'order', result:'PASS',    dur:65.3, auto:true,  trace:true  },
+  { id:'order-split',    title:'拆单场景下的金额校验',     feature:'order', result:'PASS',    dur:10.4, auto:true,  trace:false },
+  { id:'order-invoice',  title:'订单发票信息开具',         feature:'order', result:'PENDING', dur:0,    auto:true,  trace:false },
+  { id:'order-manual-1', title:'线下合同下单流程（人工）', feature:'order', result:'PASS',    dur:180,  auto:false, trace:false },
+  { id:'order-manual-2', title:'发票打印版式走查（人工）', feature:'order', result:'FAILURE', dur:240,  auto:false, trace:false, detail:true },
+  { id:'pay-sign',       title:'支付签名校验',             feature:'pay',   result:'PASS',    dur:3.2,  auto:true,  trace:false },
+  { id:'pay-callback',   title:'支付回调接口超时',         feature:'pay',   result:'ERROR',   dur:31.2, auto:true,  trace:true,  detail:true },
+  { id:'pay-idem',       title:'回调幂等性校验',           feature:'pay',   result:'PASS',    dur:5.5,  auto:true,  trace:false },
+  { id:'pay-refund',     title:'退款流程',                 feature:'pay',   result:'PASS',    dur:18.9, auto:true,  trace:false },
+  { id:'pay-retry',      title:'支付重试与降级',           feature:'pay',   result:'PASS',    dur:12.3, auto:true,  trace:false },
+  { id:'pay-notify',     title:'支付结果通知推送',         feature:'pay',   result:'PASS',    dur:6.7,  auto:true,  trace:false },
+  { id:'pay-close',      title:'支付关闭订单',             feature:'pay',   result:'PASS',    dur:4.1,  auto:true,  trace:false },
+  { id:'stock-reserve',  title:'库存预占成功',             feature:'stock', result:'PASS',    dur:2.9,  auto:true,  trace:false },
+  { id:'stock-release',  title:'预占超时释放',             feature:'stock', result:'PASS',    dur:8.8,  auto:true,  trace:false },
+  { id:'stock-conc',     title:'并发扣减不超卖',           feature:'stock', result:'PASS',    dur:14.2, auto:true,  trace:false },
+  { id:'stock-sync',     title:'库存同步到搜索',           feature:'stock', result:'PASS',    dur:7.6,  auto:true,  trace:false },
+  { id:'m-compat',       title:'浏览器兼容性巡检',         feature:'manual',result:'PASS',    dur:600,  auto:true,  trace:false },
+  { id:'m-weaks',        title:'弱网加载表现验证',         feature:'manual',result:'PENDING', dur:0,    auto:true,  trace:false },
+  { id:'m-ui',           title:'关键页面 UI 走查',         feature:'manual',result:'PASS',    dur:300,  auto:true,  trace:false }
+];
+
+/* ---------- 列表渲染（总览页只读，操作在详情页完成） ---------- */
+function renderList(){
+  const fr = document.getElementById('flt-result').value;
+  const ft = document.getElementById('flt-type').value;
+  const ff = document.getElementById('flt-feat').value;
+  const rows = SCENARIOS.filter(s => {
+    if (fr === 'bad'  && ['PASS','SKIPPED','IGNORED'].indexOf(s.result) >= 0) return false;
+    if (fr === 'pass' && s.result !== 'PASS') return false;
+    if (ft === 'manual' && s.auto) return false;
+    if (ft === 'auto'   && !s.auto) return false;
+    if (ff !== 'all'   && s.feature !== ff) return false;
+    return true;
+  });
+  const tb = document.getElementById('sc-body');
+  tb.innerHTML = '';
+  rows.forEach(s => {
+    const verdict = ReportState.meta(s.id).verdict || '';
+    const tr = document.createElement('tr');
+    /* 整行可点：进入详情页进行截图上传与结论标记 */
+    tr.className = 'clickable';
+    tr.onclick = () => { location.href = s.detail ? 'test-result.html' : 'feature.html'; };
+
+    /* 人工结论：只读展示，未标记且无需复核时显示 — */
+    const needReview = !s.auto || s.result !== 'PASS';
+    let verdictHtml;
+    if (!needReview) verdictHtml = '<span class="sub">—</span>';
+    else if (verdict === 'pass') verdictHtml = '<span class="verdict-pill vp-pass">✓ 复核通过</span>';
+    else if (verdict === 'fail') verdictHtml = '<span class="verdict-pill vp-fail">✕ 仍失败</span>';
+    else verdictHtml = '<span class="verdict-pill vp-todo">待确认</span>';
+
+    tr.innerHTML =
+      '<td><span class="badge b-' + s.result + '">' + (RESULT_LABEL[s.result] || s.result) + '</span></td>' +
+      '<td class="link-cell"><span class="link">' + s.title + '</span><span class="link-arrow">→</span></td>' +
+      /* 类型：用例固有属性，只读展示 */
+      '<td>' + (s.auto ? '<span class="badge b-auto">自动化</span>' : '<span class="badge b-manual">手工</span>') + '</td>' +
+      '<td class="sub">' + FEATURE_NAME[s.feature] + '</td>' +
+      /* 人工结论：只读 */
+      '<td>' + verdictHtml + '</td>' +
+      /* 耗时（最后一列） */
+      '<td class="num-cell sub">' + (s.dur ? s.dur + 's' : '—') + '</td>';
+
+    tb.appendChild(tr);
+  });
+  document.getElementById('shown').textContent = '显示 ' + rows.length + ' / ' + SCENARIOS.length;
+}
+
+/* ---------- 构成环形图（数据驱动） ---------- */
+function refreshMix(){
+  const total = SCENARIOS.length;
+  const auto = SCENARIOS.filter(s => s.auto).length;
+  const manual = total - auto;
+  const pct = Math.round(auto / total * 1000) / 10;
+  ReportState.donut(document.getElementById('chart-mix'),
+    [{ value:auto, color:'#3b82f6' }, { value:manual, color:'#0d9488' }],
+    pct + '%', '自动化占比');
+  document.getElementById('kpi-auto').textContent = auto;
+  document.getElementById('kpi-manual').textContent = manual;
+  document.getElementById('kpi-auto-pct').textContent = pct + '%';
+  document.getElementById('kpi-manual-pct').textContent = (100 - pct).toFixed(1) + '%';
+  document.getElementById('lg-auto').textContent = auto;
+  document.getElementById('lg-manual').textContent = manual;
+  document.getElementById('lg-auto-p').textContent = pct + '%';
+  document.getElementById('lg-manual-p').textContent = (100 - pct).toFixed(1) + '%';
+}
+
+/* ---------- 结果分布环形图 ---------- */
+ReportState.donut(document.getElementById('chart-result'),
+  [{ value:24, color:'#16a34a' }, { value:2, color:'#dc2626' },
+   { value:1, color:'#ea580c' }, { value:1, color:'#d97706' }],
+  '85.7%', '通过率');
+
+renderList();
+refreshMix();
+</script>
+</body>
+</html>

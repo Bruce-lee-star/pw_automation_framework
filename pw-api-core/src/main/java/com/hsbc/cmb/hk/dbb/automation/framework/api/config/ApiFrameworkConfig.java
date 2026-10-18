@@ -83,11 +83,11 @@ public class ApiFrameworkConfig {
     /** 测试重试延迟（毫秒）。 */
     public static final ConfigKey TEST_RETRY_DELAY = ConfigKeys.API_TEST_RETRY_DELAY.toConfigKey();
 
-    /** Serenity 输出目录。 */
-    public static final ConfigKey SERENITY_OUTPUT_DIRECTORY = ConfigKeys.API_SERENITY_OUTPUT_DIRECTORY.toConfigKey();
+    /** 框架 输出目录。 */
+    public static final ConfigKey FRAMEWORK_OUTPUT_DIRECTORY = ConfigKeys.API_FRAMEWORK_OUTPUT_DIRECTORY.toConfigKey();
 
-    /** Serenity 历史目录。 */
-    public static final ConfigKey SERENITY_HISTORY_FOLDER = ConfigKeys.API_SERENITY_HISTORY_FOLDER.toConfigKey();
+    /** 框架 历史目录。 */
+    public static final ConfigKey FRAMEWORK_HISTORY_FOLDER = ConfigKeys.API_FRAMEWORK_HISTORY_FOLDER.toConfigKey();
 
     /**
      * API 请求/响应日志是否启用。
@@ -354,27 +354,27 @@ public class ApiFrameworkConfig {
     }
 
     // ========================================
-    // Serenity Configuration
+    // 框架 Configuration
     // ========================================
 
     /**
-     * 获取 Serenity 输出目录。
+     * 获取 框架 输出目录。
      * @return 输出目录路径
      */
     public static String getSerenityOutputDirectory() {
-        return config().hasPath(SERENITY_OUTPUT_DIRECTORY.key())
-            ? config().getString(SERENITY_OUTPUT_DIRECTORY.key())
-            : SERENITY_OUTPUT_DIRECTORY.defaultValue();
+        return config().hasPath(FRAMEWORK_OUTPUT_DIRECTORY.key())
+            ? config().getString(FRAMEWORK_OUTPUT_DIRECTORY.key())
+            : FRAMEWORK_OUTPUT_DIRECTORY.defaultValue();
     }
 
     /**
-     * 获取 Serenity 历史目录。
+     * 获取 框架 历史目录。
      * @return 历史目录路径
      */
     public static String getSerenityHistoryFolder() {
-        return config().hasPath(SERENITY_HISTORY_FOLDER.key())
-            ? config().getString(SERENITY_HISTORY_FOLDER.key())
-            : SERENITY_HISTORY_FOLDER.defaultValue();
+        return config().hasPath(FRAMEWORK_HISTORY_FOLDER.key())
+            ? config().getString(FRAMEWORK_HISTORY_FOLDER.key())
+            : FRAMEWORK_HISTORY_FOLDER.defaultValue();
     }
 
     // ========================================

@@ -27,23 +27,23 @@ import java.util.function.Function;
  */
 public enum WebFrameworkConfig {
 
-    // ==================== Serenity 核心配置 ====================
+    // ==================== 框架 核心配置 ====================
 
     /**
      * 项目名称
      */
-    SERENITY_PROJECT_NAME(ConfigKeys.WEB_SERENITY_PROJECT_NAME),
+    FRAMEWORK_PROJECT_NAME(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME),
 
 
     /**
      * 编码设置
      */
-    SERENITY_ENCODING(ConfigKeys.WEB_SERENITY_ENCODING),
+    FRAMEWORK_ENCODING(ConfigKeys.WEB_FRAMEWORK_ENCODING),
 
     /**
      * 报告编码设置
      */
-    SERENITY_REPORT_ENCODING(ConfigKeys.WEB_SERENITY_REPORT_ENCODING),
+    FRAMEWORK_REPORT_ENCODING(ConfigKeys.WEB_FRAMEWORK_REPORT_ENCODING),
 
     // ==================== Playwright 浏览器配置 ====================
 
@@ -58,7 +58,7 @@ public enum WebFrameworkConfig {
     /**
      * 页面未捕获 JS 异常（page.onPageError）是否触发测试失败。
      * 默认 false：仅记录 error 级日志；设为 true 时，未捕获异常会在步骤结束时经
-     * Serenity StepListener 标记测试失败并抛出，便于前端脚本错误即时暴露。
+     * 框架 StepListener 标记测试失败并抛出，便于前端脚本错误即时暴露。
      */
     PLAYWRIGHT_PAGE_ERROR_FAIL(ConfigKeys.WEB_PLAYWRIGHT_PAGE_ERROR_FAIL),
 
@@ -339,7 +339,7 @@ public enum WebFrameworkConfig {
      * 与 {@link #PLAYWRIGHT_CONCURRENT_PARALLELISM} 同为并发度闸门：
      * {@code ConcurrentContextOptions#resolvedParallelism} 取 min(taskCount, parallelism, max)。
      * <p>默认按 CPU 核数自适应（核/2，下限 2、上限 32），可经 serenity.properties 或
-     * -Dserenity.playwright.concurrent.max 覆盖；CI 低核机应显式调小以防资源耗尽。
+     * -Dframework.playwright.concurrent.max 覆盖；CI 低核机应显式调小以防资源耗尽。
      */
     PLAYWRIGHT_CONCURRENT_MAX(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_MAX),
 
@@ -624,7 +624,7 @@ public enum WebFrameworkConfig {
      * FOR_FAILURES - 仅失败时截图
      * DISABLED - 禁用截图
      */
-    SERENITY_SCREENSHOT_STRATEGY(ConfigKeys.WEB_SERENITY_SCREENSHOT_STRATEGY),
+    FRAMEWORK_SCREENSHOT_STRATEGY(ConfigKeys.WEB_FRAMEWORK_SCREENSHOT_STRATEGY),
 
     /**
      * 全页截图配置
@@ -647,14 +647,14 @@ public enum WebFrameworkConfig {
     PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT(ConfigKeys.WEB_PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT),
 
     /**
-     * Serenity 报告截图目录
+     * 框架 报告截图目录
      */
-    SERENITY_REPORTS_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_SERENITY_REPORTS_SCREENSHOTS_DIRECTORY),
+    FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY),
 
     /**
-     * Serenity 截图目录
+     * 框架 截图目录
      */
-    SERENITY_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_SERENITY_SCREENSHOTS_DIRECTORY),
+    FRAMEWORK_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY),
 
     // ==================== 日志配置 ====================
 
@@ -664,14 +664,14 @@ public enum WebFrameworkConfig {
      * NORMAL - 正常日志
      * VERBOSE - 详细日志
      */
-    SERENITY_LOGGING(ConfigKeys.WEB_SERENITY_LOGGING),
+    FRAMEWORK_LOGGING(ConfigKeys.WEB_FRAMEWORK_LOGGING),
 
     // ==================== 报告配置 ====================
 
     /**
      * 报告输出目录
      */
-    SERENITY_OUTPUT_DIRECTORY(ConfigKeys.WEB_SERENITY_OUTPUT_DIRECTORY),
+    FRAMEWORK_OUTPUT_DIRECTORY(ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY),
 
 
     // ==================== 测试执行配置 ====================
@@ -679,17 +679,17 @@ public enum WebFrameworkConfig {
     /**
      * 特性文件根目录
      */
-    SERENITY_FEATURES_ROOT(ConfigKeys.WEB_SERENITY_FEATURES_ROOT),
+    FRAMEWORK_FEATURES_ROOT(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT),
 
     /**
      * 需求根目录
      */
-    SERENITY_REQUIREMENTS_BASE(ConfigKeys.WEB_SERENITY_REQUIREMENTS_BASE),
+    FRAMEWORK_REQUIREMENTS_BASE(ConfigKeys.WEB_FRAMEWORK_REQUIREMENTS_BASE),
 
     /**
      * 浏览器配置（Playwright 原生配置）
      */
-    SERENITY_BROWSER(ConfigKeys.WEB_SERENITY_BROWSER),
+    FRAMEWORK_BROWSER(ConfigKeys.WEB_FRAMEWORK_BROWSER),
 
 
 
@@ -705,10 +705,10 @@ public enum WebFrameworkConfig {
      * <b>场景线程完整栈 + 其它线程概览</b>（含 Playwright 驱动线程），把"静默阻塞"变成可定位证据。
      * 健康用例通常远短于 60s，故<b>正常情况下零输出</b>；仅完整 SSO 登录（约 3 分钟）会产生数次采样。
      *
-     * <p>关闭方式：{@code -Dserenity.playwright.hang.watchdog.interval.ms=0}。
+     * <p>关闭方式：{@code -Dframework.playwright.hang.watchdog.interval.ms=0}。
      */
-    SERENITY_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS(
-            ConfigKeys.WEB_SERENITY_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS),
+    FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS(
+            ConfigKeys.WEB_FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS),
 
 
 
@@ -718,27 +718,27 @@ public enum WebFrameworkConfig {
     /**
      * 失败测试重跑等待时间（毫秒）
      */
-    SERENITY_RERUN_FAILURES_WAIT_TIME(ConfigKeys.WEB_SERENITY_RERUN_FAILURES_WAIT_TIME),
+    FRAMEWORK_RERUN_FAILURES_WAIT_TIME(ConfigKeys.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME),
 
     /**
      * 重试延迟策略（fixed, exponential）
      */
-    SERENITY_RETRY_DELAY_STRATEGY(ConfigKeys.WEB_SERENITY_RETRY_DELAY_STRATEGY),
+    FRAMEWORK_RETRY_DELAY_STRATEGY(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY),
 
     /**
      * 指数退避基础延迟（毫秒）
      */
-    SERENITY_RETRY_DELAY_BASE(ConfigKeys.WEB_SERENITY_RETRY_DELAY_BASE),
+    FRAMEWORK_RETRY_DELAY_BASE(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_BASE),
 
     /**
      * 指数退避最大延迟（毫秒）
      */
-    SERENITY_RETRY_DELAY_MAX(ConfigKeys.WEB_SERENITY_RETRY_DELAY_MAX),
+    FRAMEWORK_RETRY_DELAY_MAX(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MAX),
 
     /**
      * 指数退避乘数
      */
-    SERENITY_RETRY_DELAY_MULTIPLIER(ConfigKeys.WEB_SERENITY_RETRY_DELAY_MULTIPLIER),
+    FRAMEWORK_RETRY_DELAY_MULTIPLIER(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER),
 
 
 
@@ -944,7 +944,7 @@ public enum WebFrameworkConfig {
 
     /**
      * 附加敏感请求/响应头名（逗号分隔），叠加在内置脱敏清单之上。
-     * <p>由 {@code common.security.SensitiveDataSanitizer} 经 Serenity 配置体系读取，
+     * <p>由 {@code common.security.SensitiveDataSanitizer} 经 框架 配置体系读取，
      * 键名走规范化匹配（忽略大小写与 _ - . 空格）。
      */
     SENSITIVE_DATA_EXTRA_HEADER_KEYS(ConfigKeys.WEB_SENSITIVE_DATA_EXTRA_HEADER_KEYS),
@@ -1008,6 +1008,72 @@ public enum WebFrameworkConfig {
     /** 是否订阅 {@code page.onCrash}（页面崩溃诊断）。<b>默认关闭</b>。 */
     PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED);
 
+    // ==================== Serenity 兼容性回填（DEV-V5 去 Serenity 适配器）====================
+    // 框架已把 serenity.* 配置命名空间收敛到 framework.*（见 core ConfigKeys 中的 framework.* 键）。
+    // 但 Serenity-core 仍经 CucumberWithSerenity 生成 index.html，并直接读取 serenity.* 系统属性
+    // （如 serenity.browser 默认 firefox、serenity.project.name 默认 "Serenity"），故报告/浏览器行为
+    // 会回落到 Serenity 原生默认值。为避免回归，初始化时把 framework.* 的解析值回填给 serenity.*
+    // 系统属性；仅当 serenity.* 未被 -D 显式覆盖时回填，保留运维手动 override 的能力。
+    private static final java.util.Map<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys, String> SERENITY_COMPAT_KEYS =
+            java.util.Map.ofEntries(
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME, "serenity.project.name"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_ENCODING, "serenity.encoding"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REPORT_ENCODING, "serenity.report.encoding"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_SCREENSHOT_STRATEGY, "serenity.screenshot.strategy"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY, "serenity.reports.screenshots.directory"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY, "serenity.screenshots.directory"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.outputDirectory"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REQUIREMENTS_BASE, "serenity.requirements.base"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME, "serenity.rerun.failures.wait.time"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY, "serenity.retry.delay.strategy"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_BASE, "serenity.retry.delay.base"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MAX, "serenity.retry.delay.max"),
+                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier"),
+                    java.util.Map.entry(ConfigKeys.API_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.output-directory"),
+                    java.util.Map.entry(ConfigKeys.API_FRAMEWORK_HISTORY_FOLDER, "serenity.history.folder")
+            );
+
+    /**
+     * 把 framework.* 配置回填给 Serenity-core 使用的 serenity.* 系统属性（见 {@link #SERENITY_COMPAT_KEYS}）。
+     * 解析值优先级：{@code -D framework.*} / 环境变量 / {@code serenity.properties} 中对应 framework.* 条目 /
+     * {@link com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys} 内置默认值；
+     * 仅当 serenity.* 未被 -D 显式覆盖时回填。
+     */
+    public static void publishSerenityCompatibility() {
+        java.util.Properties fileProps = loadSerenityProperties();
+        for (java.util.Map.Entry<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys, String> e : SERENITY_COMPAT_KEYS.entrySet()) {
+            com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys fwKey = e.getKey();
+            String serenityKey = e.getValue();
+            if (System.getProperty(serenityKey) != null) {
+                continue;
+            }
+            String frameworkKey = fwKey.key();
+            String fallback = (fileProps != null && fileProps.containsKey(frameworkKey))
+                    ? fileProps.getProperty(frameworkKey)
+                    : fwKey.defaultValue();
+            String value = ConfigSource.resolve(frameworkKey, fallback);
+            if (value != null && !value.isEmpty()) {
+                System.setProperty(serenityKey, value);
+            }
+        }
+    }
+
+    private static java.util.Properties loadSerenityProperties() {
+        try (java.io.InputStream in = WebFrameworkConfig.class.getClassLoader()
+                .getResourceAsStream("serenity.properties")) {
+            if (in == null) {
+                return null;
+            }
+            java.util.Properties p = new java.util.Properties();
+            p.load(in);
+            return p;
+        } catch (java.io.IOException | java.lang.SecurityException ex) {
+            return null;
+        }
+    }
 
     private final String key;
     private final String defaultValue;

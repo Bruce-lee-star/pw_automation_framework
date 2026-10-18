@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import net.thucydides.model.screenshots.ScreenshotAndHtmlSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
 import org.junit.Test;
 
 import java.util.concurrent.ExecutorService;
@@ -23,7 +23,7 @@ public class FailureScreenshotHandlerTest {
     /** 无浏览器 / 无 Page 时 takeScreenshot 返回 null，capture 须安全返回 null 且不抛（守卫路径不 NPE）。 */
     @Test
     public void captureReturnsNullSafelyWhenScreenshotUnavailable() {
-        ScreenshotAndHtmlSource result = FailureScreenshotHandler.capture("someName");
+        CapturedScreenshot result = FailureScreenshotHandler.capture("someName");
         assertNull(result);
     }
 

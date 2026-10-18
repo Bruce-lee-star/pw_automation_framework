@@ -222,7 +222,7 @@ final class ElementOperationSupport {
 
     private static String buildDetailedErrorMessage(String operation, Exception lastEx,
             ElementDiagnosticsCollector dc, int maxRetry, String elementState, String selector) {
-        // 简洁一行格式 — 详细诊断信息（DOM context, HTML snippet 等）可到 Serenity 报告查看
+        // 简洁一行格式 — 详细诊断信息（DOM context, HTML snippet 等）可到 框架 报告查看
         String cause = lastEx instanceof TimeoutError ? "TimeoutError"
             : (lastEx != null ? lastEx.getClass().getSimpleName() : "unknown");
         return String.format("[%s] %s failed after %d attempts on '%s' | page=%s title=%s obstruction=%s | cause=%s",

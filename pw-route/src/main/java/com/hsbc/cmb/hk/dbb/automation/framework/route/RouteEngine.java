@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentMap;
  * </ul>
  *
  * <p>生命周期 SPI：本类静态块触发 {@code RouteLifecycleImpl} 自注册（追加到核心层
- * {@code RouteLifecycleRegistry}），使 Serenity / web 侧统一收尾动作（stopContextEngine /
+ * {@code RouteLifecycleRegistry}），使 框架 / web 侧统一收尾动作（stopContextEngine /
  * stopAllContextEngines / shutdownRouteEngine / drainForSuiteTeardown）同步驱动各运行时关闭，
  * runtime 不再"孤儿"。
  */
@@ -87,7 +87,7 @@ public final class RouteEngine {
      *
      * <p><b>幂等、不创建</b>：仅当该 context 已有 runtime 时才 drain（{@code RUNTIMES.get} 而非
      * {@code computeIfAbsent}——否则 step 边界会对每个 context 无谓创建 runtime）。
-     * 供 Serenity step 边界（{@code PlaywrightListener.stepStarted}）等 main 线程钩子调用：
+     * 供 框架 step 边界（{@code PlaywrightListener.stepStarted}）等 main 线程钩子调用：
      * 使 delay 到点后的 resume/fulfill 在下一次 UI 操作前已在 main 串行执行（零并发写 Connection）。</p>
      */
     public static void drainMainThreadActions(BrowserContext context) {
@@ -291,7 +291,7 @@ public final class RouteEngine {
         }
         //  套件收尾：连同驱动信道一起复位 —— 若此前有在途调用未收尾，信道会一直被标记不可用；
         //  不复位会让同一 JVM 内的后续套件全部失去路由能力。
-        //  2026-10-10：收尾的多个钩子（stopAllContextEngines/drainForSuiteTeardown/Serenity 收尾）会幂等
+        //  2026-10-10：收尾的多个钩子（stopAllContextEngines/drainForSuiteTeardown/框架 收尾）会幂等
         //  重复触发本方法，每次无条件换驱动线程 + 报 ERROR 会把例行清理伪装成故障（E2E 实证单轮
         //  1 ERROR + 3 WARN、epoch 2→5）。故：runtime 关闭仍每次执行（幂等无害），驱动信道复位走
         //  teardown 专用入口（TRACE 静默）并做 1s 窗口去重 —— 真信号（换连接后的显式 reset）不受影响。

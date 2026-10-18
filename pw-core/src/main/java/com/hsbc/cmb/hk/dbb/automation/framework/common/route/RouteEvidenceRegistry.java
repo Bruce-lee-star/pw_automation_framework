@@ -69,8 +69,13 @@ public final class RouteEvidenceRegistry {
                     return candidate;
                 }
             }
-        } catch (Exception | LinkageError e) {
-            LOGGER.debug("[Route] evidence sink SPI not available: {}", e.toString());
+        } catch (Throwable t) {
+            // 注意：ServiceLoader 在「服务文件存在但实现类不可加载」时抛的是 ServiceConfigurationError——
+            // 它是 Error 子类而【不是】LinkageError，故 catch (Exception | LinkageError) 抓不住，
+            // 会让异常逃出本方法、使本类 <clinit> 失败，此后每次访问都抛
+            // NoClassDefFoundError("Could not initialize class ...")，且真实原因被掩盖。
+            // SPI 发现本就是尽力而为（无实现即不上报），故一律 fail-open。
+            LOGGER.debug("[Route] evidence sink SPI not available: {}", t.toString());
         }
         return null;
     }

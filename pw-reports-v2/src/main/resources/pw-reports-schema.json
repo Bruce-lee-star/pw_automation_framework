@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.hsbc/pw-reports/pw-reports-schema.json",
+  "title": "pw-reports per-case outcome JSON contract",
+  "description": "Public contract for per-case JSON files produced by pw-reports (DR-1: mirrors Serenity field names; reportVersion=1; additive-only evolution).",
+  "type": "object",
+  "required": ["reportVersion", "outcomeId", "name", "result", "duration", "testSteps"],
+  "properties": {
+    "reportVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Contract version (additive-only; breaking divergence requires a new major version with dual-write transition)."
+    },
+    "outcomeId": {
+      "type": "string",
+      "description": "Unique id: slug(feature)-line-slug(scenario), conflict suffix -2/-3. Used for JSON/HTML file names and cross-links."
+    },
+    "name": { "type": "string" },
+    "title": { "type": "string" },
+    "description": { "type": ["string", "null"] },
+    "userStory": {
+      "type": ["object", "null"],
+      "properties": {
+        "storyName": { "type": "string" },
+        "displayName": { "type": "string" },
+        "path": { "type": ["string", "null"] },
+        "type": { "type": "string" }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "result": {
+      "type": "string",
+      "enum": ["SUCCESS", "FAILURE", "ERROR", "SKIPPED", "PENDING", "UNDEFINED", "IGNORED", "UNKNOWN"]
+    },
+    "startTime": { "type": ["string", "null"], "description": "ISO-8601 offset date-time" },
+    "endTime": { "type": ["string", "null"], "description": "ISO-8601 offset date-time" },
+    "duration": { "type": "integer", "minimum": 0, "description": "Milliseconds (Serenity 4.3.4 unit)" },
+    "testSteps": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/testStep" }
+    },
+    "testFailureCause": {
+      "type": ["object", "null"],
+      "properties": {
+        "message": { "type": "string" },
+        "errorType": { "type": "string" }
+      }
+    },
+    "testFailureClassname": { "type": ["string", "null"] },
+    "testFailureMessage": { "type": ["string", "null"] },
+    "testFailureSummary": { "type": ["string", "null"], "description": "Scrubbed stack trace" },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Case-level evidence, scrubbed, max 50 lines"
+    },
+    "apiOperations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "API operation records, scrubbed, max 500 entries"
+    },
+    "apiMonitorFailures": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "API monitor failure entries, scrubbed, max 200 entries; source of monitor-failures.html"
+    },
+    "routeRegistrations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "RouteDsl route registrations (API registration lines, e.g. '[Route] register GET route for ...'), scrubbed; additive-only"
+    },
+    "attachments": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/attachment" },
+      "description": "Business-layer free-form attachments (HTML/text blocks), scrubbed"
+    },
+    "consoleOutput": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Case-level captured stdout (scrubbed, line-capped); sourced from hook output etc."
+    },
+    "consoleError": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Case-level captured stderr (scrubbed, line-capped)"
+    },
+    "browserConsole": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Browser page console messages (console.error/warning), de-duplicated; enables Browser logs section"
+    },
+    "browserErrors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Browser page-error (uncaught exceptions), de-duplicated"
+    },
+    "tracePath": {
+      "type": ["string", "null"],
+      "description": "Relative path to Playwright trace.zip (<outcomeId>/trace.zip); enables Open Trace Viewer button"
+    },
+    "manual": {
+      "type": "boolean",
+      "description": "True if this is a manually-executed case"
+    },
+    "manualNote": {
+      "type": ["string", "null"],
+      "description": "Free-text note for manually-executed cases"
+    },
+    "scenarioOutline": {
+      "type": ["boolean", "null"],
+      "description": "additive: true when this is a Scenario Outline (aggregated parent or a row)"
+    },
+    "outlineKey": {
+      "type": ["string", "null"],
+      "description": "additive: grouping key 'feature/scenario' used to fold Scenario Outline rows"
+    },
+    "exampleHeaders": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "additive: Scenario Outline example table header (column names)"
+    },
+    "exampleValues": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "additive: Scenario Outline example row values (aligned with exampleHeaders)"
+    },
+    "exampleRowNumber": {
+      "type": ["integer", "null"],
+      "description": "additive: Scenario Outline row number (1-based); -1 = unnumbered"
+    },
+    "examples": {
+      "type": ["array", "null"],
+      "items": { "type": "object" },
+      "description": "additive: on an aggregated Scenario Outline parent, one child outcome per row"
+    }
+  },
+  "definitions": {
+    "attachment": {
+      "type": "object",
+      "required": ["name", "contentType", "content"],
+      "properties": {
+        "name": { "type": "string" },
+        "contentType": { "type": "string", "enum": ["text/html", "text/plain", "text/xml"] },
+        "content": { "type": "string" }
+      }
+    },
+    "testStep": {
+      "type": "object",
+      "required": ["stepId", "description"],
+      "properties": {
+        "stepId": { "type": "string", "description": "Handle target within the outcome (s1, s2, ...)" },
+        "description": { "type": "string" },
+        "result": {
+          "type": ["string", "null"],
+          "enum": ["SUCCESS", "FAILURE", "ERROR", "SKIPPED", "PENDING", "UNDEFINED", "IGNORED", null]
+        },
+        "duration": { "type": "integer", "minimum": 0, "description": "Milliseconds" },
+        "startTime": { "type": ["string", "null"] },
+        "lineNumber": { "type": ["integer", "null"] },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/testStep" }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "screenshot": {
+          "type": ["string", "null"],
+          "description": "Relative file name step-NNN.png under <outcomeId>/screenshots/"
+        },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/attachment" }
+        },
+        "consoleOutput": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Step-level captured stdout (scrubbed, line-capped)"
+        },
+        "consoleError": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Step-level captured stderr (scrubbed, line-capped)"
+        },
+        "exception": {
+          "type": ["object", "null"],
+          "properties": {
+            "message": { "type": "string" },
+            "errorType": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

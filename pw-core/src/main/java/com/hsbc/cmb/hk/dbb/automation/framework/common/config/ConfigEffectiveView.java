@@ -30,7 +30,7 @@ public final class ConfigEffectiveView {
         SYSTEM_PROPERTY,
         /** 环境变量（键名经 {@link FrameworkFlags#toEnvKey} 归一）。 */
         ENVIRONMENT,
-        /** 配置文件属性（SPI 配置源，如 Serenity 合并源）。 */
+        /** 配置文件属性（SPI 配置源，如 框架 合并源）。 */
         CONFIG_FILE,
         /** {@link ConfigKeys} 注册表默认值（未配置时）。 */
         REGISTRY_DEFAULT

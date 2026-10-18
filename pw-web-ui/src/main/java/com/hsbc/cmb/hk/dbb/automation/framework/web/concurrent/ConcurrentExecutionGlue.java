@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  *   Then 全部并发执行成功
  * </pre>
  * 并发默认即<b>每线程独立 Browser</b> 模型（共享 Browser 模式已从框架移除），无需额外开关；
- * 开启 {@code -Dserenity.playwright.concurrent.partition.enabled=true} 后相同身份被 SSO 闸门串行化。</p>
+ * 开启 {@code -Dframework.playwright.concurrent.partition.enabled=true} 后相同身份被 SSO 闸门串行化。</p>
  */
 public class ConcurrentExecutionGlue {
 

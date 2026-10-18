@@ -21,7 +21,7 @@ import org.slf4j.MDC;
  * （与 {@code ThreadLocal} 串扰同源）。因此场景收尾必须调用 {@link #endScenario()}，
  * 而 {@link #clear()} 用于彻底重置当前线程（套件结束 / 线程归还前）。
  *
- * @apiNote framework-internal：由框架生命周期（Serenity 监听器）调用，业务代码一般无需直接使用；
+ * @apiNote framework-internal：由框架生命周期（框架 监听器）调用，业务代码一般无需直接使用；
  *          如需为自定义异步线程补齐上下文，可调用 {@link #beginScenario(String)} / {@link #clear()}。
  */
 public final class LogContext {

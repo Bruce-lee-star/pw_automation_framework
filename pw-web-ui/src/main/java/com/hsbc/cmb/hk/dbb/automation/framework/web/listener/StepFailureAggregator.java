@@ -1,20 +1,17 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.SoftAssertions;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.CaptureContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycle;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
-import net.serenitybdd.core.Serenity;
-import net.thucydides.core.steps.StepEventBus;
-import net.thucydides.model.domain.TestOutcome;
-import net.thucydides.model.domain.TestResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +24,12 @@ import java.util.List;
  * <p>这三方法是 B 改造中在步骤结束时兜底抛 AssertionError、使 IDE 正确标红的核心 seam，
  * 与监听器的生命周期编排正交。迁出后监听器只负责事件路由，失败聚合逻辑在此单一收敛，
  * 并复用 {@link ListenerGuard} 的 apiFailureAlreadyHandled 守卫与 {@link ListenerPerfStats} 的数据记录，
- * 保证与原实现行为完全等价（含防重入死循环与防重复打印）。</p>
+ * 保证与原实现行为完全等价（含防重入死循环与防重复打印）。
+ *
+ * <p><b>去 框架 改造（D4）：</b>本类不再依赖 框架 类型——证据经 ReportingBridge 端口
+ * （由 pw-reports 的 SerenityReportingBridge 实现）写入报告；失败标记不再调用 {@code StepEventBus.testFailed}
+ * 或置位 {@code TestOutcome}，统一由"抛 AssertionError"完成（serenity 事件总线会把该异常回传
+ * 使场景判红），与步骤级失败传播语义一致。</p>
  */
 final class StepFailureAggregator {
 
@@ -37,12 +39,14 @@ final class StepFailureAggregator {
     }
 
     /**
-     * 核心方法：检查 API 断言失败并标记测试结果为失败（testFinished 兜底路径）。
+     * 核心方法：检查 API 断言失败并上报证据（testFinished 兜底路径）。
      *
-     * @param result   当前测试产出（失败时置 FAILURE）
+     * <p>失败标记已由步骤级 {@link #checkAndFailOnApiAssertions()} 的抛错完成，此处仅做证据记录；
+     * 原生环境无 框架 {@code TestOutcome} 可置位，故不再调用 {@code result.setResult}。
+     *
      * @param testName 当前测试名（用于报告归属）
      */
-    static void checkAndMarkApiAssertionFailures(TestOutcome result, String testName) {
+    static void checkAndMarkApiAssertionFailures(String testName) {
         // ROUTE-P0-1：用 resolveFailureCapture() 兜底解析失败上下文（优先 per-context，否则 SHARED），
         // 避免 route 事件线程经 SHARED 记录的失败标志被漏检。
         RouteLifecycle lifecycle = RouteLifecycleRegistry.get();
@@ -68,8 +72,8 @@ final class StepFailureAggregator {
         }
 
         if (context.hasAssertionFailures()) {
-            //  防重复：若 checkAndFailOnApiAssertions 已在步骤结束时经 StepEventBus 触发过一次，
-            // 则跳过详细日志与 Serenity 记录，避免 testFailed 回调与 testFinished 各调一次导致重复打印。
+            //  防重复：若 checkAndFailOnApiAssertions 已在步骤结束时触发过一次，
+            // 则跳过详细日志与报告记录，避免 stepFailed 回调与 testFinished 各调一次导致重复打印。
             boolean alreadyHandledAtStep = ListenerGuard.guards().isApiFailureAlreadyHandled();
 
             if (!alreadyHandledAtStep) {
@@ -82,34 +86,20 @@ final class StepFailureAggregator {
                         "API assertions failed during test execution");
                 ListenerPerfStats.record(testName, "apiAssertionFailureDetails", failureReport);
 
-                try {
-                    Serenity.recordReportData()
-                            .withTitle("API ASSERTION FAILURES DETECTED")
-                            .andContents(failureReport);
-                } catch (Exception e) {
-                    logger.debug("Failed to record API assertion failure to Serenity report", e);
-                }
+                ReportingBridgeRegistry.get().recordReportData("API ASSERTION FAILURES DETECTED", failureReport);
             }
-
-            //  无论如何都确保 result 被标记为 FAILURE（兜底安全网）
-            if (result != null) {
-                result.setResult(TestResult.FAILURE);
-            }
+            //  失败标记已由步骤级抛错完成（原生环境无 框架 TestOutcome 可置位）。
         }
     }
 
     /**
-     * D3-2：场景末统一上报<b>软断言</b>失败（collect → assertAll 入 Serenity）。
+     * D3-2：场景末统一上报<b>软断言</b>失败（collect → assertAll 入报告）。
      *
-     * <p>与 {@link #checkAndMarkApiAssertionFailures} 走<b>同一 seam</b>：
-     * {@code StepEventBus.testFailed(AssertionError)} + Serenity 报告 + {@code result} 置 FAILURE。
-     *
-     * <p>设计取舍：此处<b>只标记不抛出</b> —— 本方法在 {@code testFinished} 收尾阶段执行，
-     * 抛异常会打断 Serenity 自身的收尾流程（资源清理 / 报告落盘），得不偿失；
-     * 而 {@code result.setResult(FAILURE)} 已足以让用例判红。
-     * 需要立即中断的场景请使用 {@link FrameworkAssertions} 硬断言。
+     * <p>与 {@link #checkAndMarkApiAssertionFailures} 走<b>同一 seam</b>。原生环境下，软断言失败必须在此
+     * 抛出 AssertionError 才能使场景判红（不再依赖 框架 的 result 置位）。抛错发生在场景收尾，
+     * 由适配器经 serenity 事件总线回传，框架 / IDE runner 据此标红。</p>
      */
-    static void checkAndMarkSoftAssertionFailures(TestOutcome result) {
+    static void checkAndMarkSoftAssertionFailures() {
         if (!SoftAssertions.hasFailures()) {
             return;
         }
@@ -118,24 +108,14 @@ final class StepFailureAggregator {
         SoftAssertions.clearForCurrentThread();
 
         logger.error("Soft assertion failures detected at scenario end:\n{}", details);
+        ReportingBridgeRegistry.get().recordReportData("Soft Assertion Failures", details);
 
-        try {
-            StepEventBus.getEventBus().testFailed(new AssertionError(details));
-            Serenity.recordReportData()
-                    .withTitle("Soft Assertion Failures")
-                    .andContents(details);
-        } catch (Exception e) {
-            logger.error("Failed to report soft assertion failures to Serenity", e);
-        }
-
-        //  无论如何都确保 result 被标记为 FAILURE（兜底安全网）
-        if (result != null) {
-            result.setResult(TestResult.FAILURE);
-        }
+        //  原生环境：抛出以使场景判红（assertAll 语义）
+        throw new AssertionError("Soft assertion failures detected at scenario end:\n" + details);
     }
 
     /**
-     * 框架级：每个步骤结束时自动检查 API 断言是否失败，经 StepEventBus 即时标记失败。
+     * 框架级：每个步骤结束时自动检查 API 断言是否失败，即时抛 AssertionError 使场景判红。
      * 通过 apiFailureAlreadyHandled 守卫防止同一 case 内回调链递归重入（死循环）。
      */
     static void checkAndFailOnApiAssertions() {
@@ -155,7 +135,7 @@ final class StepFailureAggregator {
             return;
         }
 
-        //  防重入：同一 case 里只通过 StepEventBus 标记一次，防止回调链路再次进入此方法。
+        //  防重入：同一 case 里只标记一次，防止回调链路再次进入此方法。
         if (ListenerGuard.guards().isApiFailureAlreadyHandled()) {
             return;
         }
@@ -173,24 +153,16 @@ final class StepFailureAggregator {
             }
         }
 
-        //  标记已处理，必须在调用 StepEventBus 之前设置（防回调重入）。
+        //  标记已处理，必须在调用之前设置（防回调重入）。
         ListenerGuard.guards().setApiFailureAlreadyHandled(true);
 
         String report = context.buildFailureReport();
         String details = context.buildFailureDetails();
-        logger.error("API assertions failed during step - marking test as failed via StepEventBus:\n{}", report);
-
-        try {
-            StepEventBus.getEventBus().testFailed(new AssertionError(details));
-            Serenity.recordReportData()
-                    .withTitle("API Assertion Failures")
-                    .andContents(details);
-        } catch (Exception e) {
-            logger.error("Failed to call StepEventBus.testFailed() for API assertion failure", e);
-        }
+        logger.error("API assertions failed during step - failing scenario:\n{}", report);
+        ReportingBridgeRegistry.get().recordReportData("API Assertion Failures", details);
 
         //  关键：直接在 stepFinished 回调中抛 AssertionError，使异常沿
-        //   StepInterceptor → Cucumber → JUnit4 传播，令 IDE runner 正确标红。
+        //   StepInterceptor → Cucumber → JUnit 传播，令 IDE runner 正确标红。
         throw new AssertionError("API assertion failures detected — failing scenario:\n" + details);
     }
 
@@ -202,8 +174,8 @@ final class StepFailureAggregator {
      * 空判断跳过，不改变既有行为。
      *
      * <p>幂等性：探针的 {@code drainAndResolveFailures()} 是<b>消费式</b>——失败被取走即清空，
-     * 因此本方法（步骤结束抛错）与 {@link #checkAndMarkRouteAssertionFailures(TestOutcome)}
-     * （用例收尾标记）天然防重，无需额外的防重入标志；且不会把失败带到下一场景。
+     * 因此本方法（步骤结束抛错）与 {@link #checkAndMarkRouteAssertionFailures()}
+     * （用例收尾标记）天然防重，无需额外的防重入标志；且不会把失败带到下一场景。</p>
      */
     static void checkAndFailOnRouteAssertions() {
         RouteAssertionProbe probe = RouteAssertionRegistry.get();
@@ -217,32 +189,20 @@ final class StepFailureAggregator {
         }
         String report = buildRouteFailureReport(failures);
         logger.error("Route API assertions failed during step - failing scenario:\n{}", report);
-        try {
-            // 与老版 checkAndFailOnApiAssertions 同序：先经 StepEventBus 即时标记失败（即使
-            // 下方异常未被 Cucumber/JUnit4 捕获，testFailed 事件也已发出），再记录报告、再抛。
-            StepEventBus.getEventBus().testFailed(new AssertionError(report));
-            Serenity.recordReportData()
-                    .withTitle("Route API ASSERTION FAILURES DETECTED")
-                    .andContents(report);
-        } catch (Exception e) {
-            logger.debug("Failed to record Route assertion failure to Serenity report", e);
-        }
+        ReportingBridgeRegistry.get().recordReportData("Route API ASSERTION FAILURES DETECTED", report);
         // 直接在 stepFinished 回调中抛 AssertionError，使异常沿
         //  StepInterceptor → Cucumber → JUnit4 传播，令 IDE runner 正确标红。
         throw new AssertionError("Route API assertion failures detected — failing scenario:\n" + report);
     }
 
     /**
-     * Route：用例收尾兜底——检查 MONITOR 断言失败并标记测试结果为 FAILURE。
+     * Route：用例收尾兜底——检查 MONITOR 断言失败并上报证据。
      *
      * <p>与老版 {@link #checkAndMarkApiAssertionFailures} 同一 seam 语义：本方法在
-     * {@code testFinished} 收尾阶段执行，<b>只标记不抛出</b>（抛异常会打断 Serenity 自身的
-     * 资源清理 / 报告落盘）。若步骤结束路径已抛过 AssertionError，本方法 drain 到空列表
-     * 自然跳过——消费式语义保证两条路径不会重复打印或重复标记。
-     *
-     * @param result 当前测试产出（失败时置 FAILURE；null 安全）
+     * 场景收尾阶段执行，仅上报证据（不抛错）；若步骤结束路径已抛过 AssertionError，
+     * 本方法 drain 到空列表自然跳过——消费式语义保证两条路径不会重复打印或重复标记。</p>
      */
-    static void checkAndMarkRouteAssertionFailures(TestOutcome result) {
+    static void checkAndMarkRouteAssertionFailures() {
         RouteAssertionProbe probe = RouteAssertionRegistry.get();
         if (probe == null) {
             return;
@@ -253,17 +213,7 @@ final class StepFailureAggregator {
         }
         String report = buildRouteFailureReport(failures);
         logger.error("Route API assertions failed at scenario end:\n{}", report);
-        try {
-            Serenity.recordReportData()
-                    .withTitle("Route API ASSERTION FAILURES DETECTED")
-                    .andContents(report);
-        } catch (Exception e) {
-            logger.debug("Failed to record Route assertion failure to Serenity report", e);
-        }
-        // 兜底安全网：无论如何确保 result 被标记为 FAILURE
-        if (result != null) {
-            result.setResult(TestResult.FAILURE);
-        }
+        ReportingBridgeRegistry.get().recordReportData("Route API ASSERTION FAILURES DETECTED", report);
     }
 
     /** 构建 V2 断言失败明细（每条一行 summary）。 */
@@ -278,7 +228,7 @@ final class StepFailureAggregator {
     /**
      * 框架级未捕获页面异常检查（每个步骤结束时兜底执行）。
      * 仅当 playwright.page.error.failOnError=true 时生效：将 PageEventMonitor 收集的未捕获 JS 异常
-     * 经 Serenity 标记失败并抛出。默认关闭（仅记录日志）；drain 即清空，天然幂等。
+     * 经 框架 标记失败并抛出。默认关闭（仅记录日志）；drain 即清空，天然幂等。
      */
     static void checkAndFailOnPageErrors() {
         if (!WebFrameworkConfig.PLAYWRIGHT_PAGE_ERROR_FAIL.getBooleanValue()) {
@@ -289,15 +239,8 @@ final class StepFailureAggregator {
             return;
         }
         String details = String.join("\n", errors);
-        logger.error("Uncaught page errors detected during step - marking test as failed via StepEventBus:\n{}", details);
-        try {
-            StepEventBus.getEventBus().testFailed(new AssertionError(details));
-            Serenity.recordReportData()
-                    .withTitle("Uncaught Page Errors")
-                    .andContents(details);
-        } catch (Exception e) {
-            logger.error("Failed to call StepEventBus.testFailed() for page errors", e);
-        }
+        logger.error("Uncaught page errors detected during step - failing scenario:\n{}", details);
+        ReportingBridgeRegistry.get().recordReportData("Uncaught Page Errors", details);
         throw new AssertionError("Uncaught page errors detected — failing scenario:\n" + details);
     }
 
@@ -324,12 +267,6 @@ final class StepFailureAggregator {
         }
         String report = sb.toString();
         logger.warn("[interaction-diagnostics] 步骤失败交互诊断:\n{}", report);
-        try {
-            Serenity.recordReportData()
-                    .withTitle("Interaction Diagnostics (Failure)")
-                    .andContents(report);
-        } catch (Exception e) {
-            logger.debug("Failed to record interaction diagnostics to Serenity report", e);
-        }
+        ReportingBridgeRegistry.get().recordReportData("Interaction Diagnostics (Failure)", report);
     }
 }

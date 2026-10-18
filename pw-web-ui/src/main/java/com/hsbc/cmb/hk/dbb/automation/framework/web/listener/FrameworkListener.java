@@ -7,17 +7,17 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
  * 作为监听器发现的<b>主路径</b>；原 {@code Class.forName} 全量包扫描降级为<b>容错回退</b>。任一实现类
  * 加载 / 实例化失败仅跳过该类并记 WARN，<b>不影响其它监听器</b>（根治 W-16「单点失败全盘失败」）。</p>
  *
- * <p>监听器若需接入 Serenity 事件总线，仍自行经 {@code StepEventBus.registerListener} 注册
- * （Serenity 自带 {@code StepListener} SPI 负责接线）；本接口仅作为「可被框架发现」的 SPI 契约，
- * 与 Serenity 的注册机制互不耦合。</p>
+ * <p>监听器若需接入 框架 事件总线，仍自行经 {@code StepEventBus.registerListener} 注册
+ * （框架 自带 {@code StepListener} SPI 负责接线）；本接口仅作为「可被框架发现」的 SPI 契约，
+ * 与 框架 的注册机制互不耦合。</p>
  *
  * <p><b>D4-1：生命周期方法</b>：本接口不再是纯标记接口，提供
  * {@code before/after Scenario/Step} 与 {@code onFailure} 五个钩子，<b>全部为 default 空实现</b> ——
  * 业务只实现自己关心的回调，无需空实现一堆方法；既有纯标记实现（如仅用于 SPI 发现的类）
  * <b>零改动仍可编译</b>。
  *
- * <p>业务侧<b>只依赖本接口</b>，不接触 Serenity 的 {@code StepListener}；
- * Serenity 事件到本接口的桥接由官方 Adapter {@link FrameworkListenerBridge} 完成，
+ * <p>业务侧<b>只依赖本接口</b>，不接触 框架 的 {@code StepListener}；
+ * 框架 事件到本接口的桥接由官方 Adapter {@link FrameworkListenerBridge} 完成，
  * 换测试引擎时业务代码无需改动。
  *
  * <p><b>异常隔离</b>：任一监听器的回调抛异常由 {@link FrameworkListenerBridge} 捕获并记录，

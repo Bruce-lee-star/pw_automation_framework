@@ -80,7 +80,7 @@ public class BrowserOverrideManager {
 
     // 多浏览器标签时的确定性优先级（数值越小优先级越高）。
     // 用于保证 scenario 同时带多个浏览器标签时，"只运行第一个"在任何运行下都得到一致结果，
-    // 不依赖 Serenity TestOutcome.getTags()（本质为 Set）的遍历顺序。
+    // 不依赖 框架 TestOutcome.getTags()（本质为 Set）的遍历顺序。
     private static final List<String> BROWSER_PRIORITY = Arrays.asList("chromium", "firefox", "webkit");
     
     /**
@@ -202,7 +202,7 @@ public class BrowserOverrideManager {
      * 
      * 支持两种格式的标签：
      * - 带 @ 前缀：@firefox, @chrome
-     * - 不带 @ 前缀：firefox, chrome（Serenity 返回的格式）
+     * - 不带 @ 前缀：firefox, chrome（框架 返回的格式）
      * 
      * @param tags Cucumber tags 数组
      * @return 浏览器类型，如果没有浏览器标签则返回 null

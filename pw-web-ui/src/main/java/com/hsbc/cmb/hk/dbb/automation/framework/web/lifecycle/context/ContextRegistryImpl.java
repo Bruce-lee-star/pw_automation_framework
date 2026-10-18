@@ -1,11 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkState;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkCore;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.lock.LifecycleLockMediator;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.ContextRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.serenity.PlaywrightSerenityBridge;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.PlaywrightContextManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.CloseGuard;
 
@@ -14,12 +12,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegis
 
 
 import com.microsoft.playwright.*;
-import com.microsoft.playwright.options.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.*;
-import java.util.concurrent.*;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
@@ -37,7 +31,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
      * {@link PlaywrightManager#CONTEXT_KEY}。
      *
      * <p><b>为什么需要它（窗口堆积根因）</b>：Cucumber 下 {@code TestContextHolder} 解析为<b>用例级</b>，
-     * 而 Cucumber {@code @After}（{@code ScenarioContext.end} → {@code ctx.clear()}）早于 Serenity
+     * 而 Cucumber {@code @After}（{@code ScenarioContext.end} → {@code ctx.clear()}）早于 框架
      * {@code testFinished}，故收尾时 {@code CONTEXT_KEY} 已不存在 → 原 {@code closeContext()} 整段被
      * 静默跳过，BrowserContext（headed 下即 OS 窗口）泄漏并跨用例堆积。本线程级记录不受用例边界影响，
      * 使收尾能可靠拿到并关闭本线程 Context；同时供孤儿回收<b>保护在用 Context</b>。
@@ -48,9 +42,9 @@ public final class ContextRegistryImpl implements ContextRegistry {
     }
 
     public BrowserContext getContext() {
-        if (!FrameworkState.getInstance().isInitialized()) {
-            throw new IllegalStateException("Playwright environment not initialized. Call FrameworkCore.initialize() first.");
-        }
+        //  懒加载（框架 getDriver 式）：未初始化则自初始化，不再抛"not initialized"——
+        //  初始化不再强依赖 onTestRunStarted/onScenarioStarted 先行（双检锁、幂等、并发安全）。
+        FrameworkCore.getInstance().ensureInitialized();
 
         //  修复 1.2：若本线程的 configId 已被标记为废弃（其它线程正在切换浏览器类型），
         // 强制清理本地 Context/Page，避免绑定到即将被关闭的旧 Browser。
@@ -323,10 +317,10 @@ public final class ContextRegistryImpl implements ContextRegistry {
     }
 
     /**
-     * 创建新的 Context 和 Page（委托给 PlaywrightSerenityBridge）
+     * 创建新的 Context 和 Page（委托给 PlaywrightLifecycleBridge）
      */
     public void createNewContextAndPage() {
-        PlaywrightSerenityBridge.createNewContextAndPage();
+        PlaywrightLifecycleBridge.createNewContextAndPage();
     }
 
     /**

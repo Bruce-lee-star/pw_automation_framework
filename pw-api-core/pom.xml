@@ -21,24 +21,12 @@
             <artifactId>pw-core</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-            <artifactId>pw-reports</artifactId>
-            <version>${project.version}</version>
-        </dependency>
 
         <!-- ENG-P0-2锛歛pi 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
+        <!-- M3：纯 RestAssured（代码已用 io.restassured.*，非 SerenityRest；去 serenity-model/core/rest-assured 与 legacy pw-reports）。 -->
         <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-model</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.serenity-bdd</groupId>
-            <artifactId>serenity-rest-assured</artifactId>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>

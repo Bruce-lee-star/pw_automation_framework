@@ -1,1 +1,7 @@
-com.hsbc.cmb.hk.dbb.automation.framework.web.listener.ThucydidesStepsListenerAdapter
+# FrameworkListener 实现主发现路径（ServiceLoader）。
+# 业务 / 框架内实现 FrameworkListener 的 provider 类名登记于此（每行一个 FQN）。
+# 注：原 ThucydidesStepsListenerAdapter（Serenity 适配器）已于 DEV-V5 去 Serenity 专项中删除，
+# 其注册行一并移除；框架生命周期改由 FrameworkCucumberEventListener → FrameworkLifecycleBus 驱动。
+#
+# 框架内置实现（业务可继续在下方追加自有 FrameworkListener 实现 FQN）：
+com.hsbc.cmb.hk.dbb.automation.framework.web.listener.ReportBusLifecycleListener

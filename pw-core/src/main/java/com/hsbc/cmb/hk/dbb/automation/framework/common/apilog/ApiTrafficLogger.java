@@ -49,7 +49,7 @@ public final class ApiTrafficLogger {
      * 开关配置键（默认 false）。
      *
      * <p><b>必须用 {@code framework.} 前缀</b>：实测裸键 {@code api.traffic.log.enabled} 会被
-     * Serenity 合并配置源解析出非预期值（true），而 {@code framework.api.traffic.log.enabled}
+     * 框架 合并配置源解析出非预期值（true），而 {@code framework.api.traffic.log.enabled}
      * 与 {@code api.something.else.enabled} 均正确回落默认值。
      * 框架自有开关统一加前缀，避免与业务 / 上游配置键撞车。
      */
@@ -88,7 +88,7 @@ public final class ApiTrafficLogger {
      * 当前是否启用（实时读取，便于测试与运行期开关）。
      *
      * <p><b>为什么直读系统属性 / 环境变量，而不走 {@link ConfigSource}</b>：
-     * {@code ConfigSource} 的第 3 优先级是 SPI 合并源（web 提供的 Serenity 源），
+     * {@code ConfigSource} 的第 3 优先级是 SPI 合并源（web 提供的 框架 源），
      * 实测该源会<b>缓存</b>系统属性快照 —— 一旦某处 {@code setProperty(key,"true")}
      * 之后再 {@code clearProperty}，SPI 仍返回旧值 "true"，使开关行为不可预期
      * （对"默认必须关闭"的安全开关是不可接受的非确定性）。

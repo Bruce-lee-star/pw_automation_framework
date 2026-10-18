@@ -59,7 +59,7 @@ public final class RoleElementAssertionGenerator {
         String className = assertionsClassNameOf(pageClassName);
         StringBuilder out = new StringBuilder();
         out.append("package ").append(packageName).append(ASSERTIONS_SUBPACKAGE).append(";\n\n");
-        out.append("import net.serenitybdd.annotations.Step;\n\n");
+        out.append("import com.hsbc.cmb.hk.dbb.automation.framework.report.annotation.Step;\n\n");
         java.util.Map<String, String> vars = (pageVars == null || pageVars.isEmpty())
                 ? java.util.Collections.singletonMap(pageClassName, pageVarOf(pageClassName))
                 : pageVars;

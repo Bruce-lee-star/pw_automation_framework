@@ -145,8 +145,8 @@ public final class ConcurrencyGate {
 
     /**
      * 实时解析启用开关：优先读 {@code System.getProperty}（命令行 {@code -D} 与单测即时切换均生效），
-     * 回退 {@link WebFrameworkConfig}（经 Serenity 配置体系，含 serenity.conf）。
-     * 双重读取规避 Serenity {@code SystemEnvironmentVariables} 单例缓存导致的运行期不可见问题。
+     * 回退 {@link WebFrameworkConfig}（经 框架 配置体系，含 serenity.conf）。
+     * 双重读取规避 框架 {@code SystemEnvironmentVariables} 单例缓存导致的运行期不可见问题。
      */
     private static boolean isEnabledLive() {
         String override = System.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_ENABLED.getKey());
@@ -207,7 +207,7 @@ public final class ConcurrencyGate {
      * {@link WebFrameworkConfig}（默认 {@code true}）。
      *
      * <p>默认 fail-closed：把「未能取得闸门」如实判为该场景失败；设
-     * {@code serenity.playwright.concurrent.partition.fail.closed=false} 可退回 fail-open 放行。</p>
+     * {@code framework.playwright.concurrent.partition.fail.closed=false} 可退回 fail-open 放行。</p>
      */
     private static boolean failClosedLive() {
         String override = System.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_FAIL_CLOSED.getKey());

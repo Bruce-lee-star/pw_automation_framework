@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.dsl;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteRuntime;
@@ -416,8 +417,17 @@ public final class RouteDsl {
         List<AutoCloseable> handles = new ArrayList<>(pending.size());
         for (ApiSpec spec : pending) {
             handles.add(runtime.register(spec));
+            String detail = describeRegister(spec);
             LOGGER.info("[Route] register {} route for '{}'{}",
-                    spec.capability(), spec.pattern(), describeRegister(spec));
+                    spec.capability(), spec.pattern(), detail);
+            // 注册信息经报告桥接进报告"Route registrations"区（与 stdout / 网络调用分开归类）。
+            // 旁路上报失败绝不波及路由主流程。
+            try {
+                ReportingBridgeRegistry.get().recordRouteRegistration(
+                        "[Route] register " + spec.capability() + " route for '" + spec.pattern() + "'" + detail);
+            } catch (Throwable ignored) {
+                LOGGER.trace("[Route] registration reporting skipped: {}", ignored.toString());
+            }
         }
         pending.clear();
         AutoCloseable merged = () -> {
@@ -447,7 +457,7 @@ public final class RouteDsl {
 
     /**
      * 把一次命中（请求真正触发能力）格式化为单行可读描述，供 {@code RouteDispatcher} 的逐次命中日志复用，
-     * 并作为路由命中证据（{@code RouteEvidenceSink}）的<b>正文</b>写入 Serenity 报告。
+     * 并作为路由命中证据（{@code RouteEvidenceSink}）的<b>正文</b>写入 框架 报告。
      *
      * <p>附带 method/url 便于追溯是哪次请求触发；<b>URL 与 body 一并脱敏</b>：URL 走
      * {@link SensitiveDataSanitizer#sanitizeUrl}（命中敏感 query 键/值即整体丢弃 query，并剥离
