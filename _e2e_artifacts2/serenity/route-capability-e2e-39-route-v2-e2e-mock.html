@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    
+    <title>route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
+    <link rel="stylesheet" href="assets/report-v2.css"/>
+    <style>
+        /* 新设计 CSS 未覆盖的局部样式（证据 / 附件 / 截图 / 未定义结果） */
+        .evidence { margin: 6px 0; padding-left: 20px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+        .attachment { margin: 6px 0; }
+        .attachment > summary { cursor: pointer; color: var(--text-2); font-size: 12px; }
+        .att-text, .att-html { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; }
+        /* 截图：悬浮放大（2 倍，左上角为锚点，压在其它内容之上，不改变布局） */
+        .shot { position: relative; overflow: visible; }
+        .shot img {
+            max-width: 320px; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px;
+            cursor: zoom-in; transition: transform .15s ease; transform-origin: top left;
+        }
+        .shot img:hover {
+            transform: scale(2); z-index: 20; position: relative;
+            box-shadow: 0 8px 28px rgba(31, 45, 61, .28);
+        }
+        .step-note { font-size: 12px; color: var(--failure); margin-top: 4px; }
+        .step-actions { margin-top: 4px; }
+        .b-UNDEFINED { background: var(--skipped); }
+        .step-table { margin: 8px 0 2px; font-size: 12px; }
+        .step-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
+        .step-table tr:first-child td { font-weight: 600; background: #f8fafc; }
+        .step-docstring { margin: 8px 0 2px; white-space: pre-wrap; }
+        /* 失败用例操作入口（上传补图 / 标记通过） */
+        .case-actions .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+        .btn-action { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: background .15s ease; }
+        .btn-action:hover { background: #f1f5f9; }
+        .btn-ok { color: #047857; border-color: #a7f3d0; }
+        .btn-ok:hover { background: #ecfdf5; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Scenario <a href="feature-route-capability-e2e.html" style="color:#fff;text-decoration:none;font-size:14px;font-weight:400">← back to route_capability_e2e</a></h1>
+  <div class="meta">route_capability_e2e<br>reportVersion 1</div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <div class="crumbs"><a href="index.html">Overview</a><span class="sep">›</span><a href="feature-route-capability-e2e.html">route_capability_e2e</a><span class="sep">›</span><b>route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）</b></div>
+    <div class="case-head">
+      <span class="badge b-PASS" style="padding:4px 14px;font-size:14px">Passed</span>
+      <div class="case-title">route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）</div>
+    </div>
+    <div class="case-meta">
+      <span class="chip">45s</span>
+      <span class="chip">started 2026-10-20T00:07:04.862+08:00</span>
+      <span class="chip">Automated</span>
+      <span class="chip tag">@regression</span><span class="chip tag">@route</span><span class="chip tag">@route-e2e</span><span class="chip tag">@route-e2e-mock</span>
+    </div>
+  </div>
+
+  <div class="case-layout">
+
+    <div class="case-main">
+
+
+      <div class="card">
+        <h3><span class="icon"></span>Execution steps</h3>
+        <ul class="steps" id="steps">        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">Given I arm route v2 e2e case &quot;login-mock&quot;</span>
+                <span class="step-time">569 ms</span>
+            </div>
+            
+    <details class="con-group con-route">
+      <summary>API / Route registration<span class="con-count">2</span></summary>
+      <ul class="con-lines">
+    <li class="con-raw">00:07:05.436 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MOCK route for &#39;leftmenu/permissionLeftMenuConfig&#39; status=real-response intercept=true body=[intercepted] replacePaths=[$.enablePaymentPP]</li>
+    <li class="con-raw">00:07:05.438 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; expectStatus=200 bodyRegex=&quot;&quot;enablePaymentPP&quot;\s*:\s*&quot;X&quot;&quot; timeout=30s</li>
+      </ul>
+    </details>
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">3</span></summary>
+      <ul class="con-lines">
+    <li class="con-raw">00:07:04.873 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.w.session.SessionStore - Session cleared successfully: O63_SIT1_WP7UAT2_2</li>
+    <li class="con-raw">00:07:05.419 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.r.RouteCapturePolicy - [Route] capture policy frozen: allTypes=false (layer=DEFAULT), inlineMaxBytes=262144 (layer=DEFAULT), gzipMaxBytes=8388608 (layer=DEFAULT), assertBodyMaxBytes=2097152 (layer=DEFAULT)</li>
+    <li class="con-raw">00:07:05.440 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] armed case &#39;login-mock&#39; BEFORE logon (page url=about:blank)</li>
+      </ul>
+    </details>
+                <div class="step-route">
+                    <div class="sub">Route Register</div>
+                    <ul class="route-lines"><li>[Route] register MOCK route for &#39;leftmenu/permissionLeftMenuConfig&#39; status=real-response intercept=true body=[intercepted] replacePaths=[$.enablePaymentPP]</li><li>[Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; expectStatus=200 bodyRegex=&quot;&quot;enablePaymentPP&quot;\s*:\s*&quot;X&quot;&quot; timeout=30s</li></ul>
+                </div>
+        </li>
+        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">And logon DBB &quot;O63_SIT1&quot; environment as user &quot;WP7UAT2_2&quot;</span>
+                <span class="step-time">38,265 ms</span>
+            </div>
+            
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">50</span></summary>
+      <ul class="con-lines">
+    <li class="con-raw">00:07:05.442 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================</li>
+    <li class="con-raw">00:07:05.443 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - LogonGlue - Scenario: O63_SIT1 as WP7UAT2_2</li>
+    <li class="con-raw">00:07:05.443 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Effective browser: chromium</li>
+    <li class="con-raw">00:07:05.444 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Default browser: chromium</li>
+    <li class="con-raw">00:07:05.445 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================</li>
+    <li class="con-raw">00:07:05.445 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Get DBB login info - Environment: O63_SIT1, Username: WP7UAT2_2</li>
+    <li class="con-raw">00:07:05.446 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Successfully retrieved DBB login info - Environment: O63_SIT1, User: WP7UAT2_2, URL: https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon, Profile: W1-HKHBAP001060698838PUSER1</li>
+    <li class="con-raw">00:07:05.454 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================</li>
+    <li class="con-raw">00:07:05.454 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - LoginSteps - SessionKey: O63_SIT1_WP7UAT2_2</li>
+    <li class="con-raw">00:07:05.455 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================</li>
+    <li class="con-raw">00:07:05.457 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - No valid session, performing login for: O63_SIT1_WP7UAT2_2</li>
+    <li class="con-raw">00:07:12.151 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.s.TestServices - Creating BaseStep with null entity (dynamic configuration)</li>
+    <li class="con-raw">00:07:12.152 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.e.EntityBuilder - Building Entity with null configuration (for dynamic setup)</li>
+    <li class="con-raw">00:07:12.153 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] WARN  c.h.c.h.d.a.f.a.c.ConfigProvider - Context config not initialized, loading default config for current thread</li>
+    <li class="con-raw">00:07:12.154 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Loading config from file path: ./src/test/resources/config/\application.conf</li>
+    <li class="con-raw">00:07:12.160 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Set base URI: https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk</li>
+    <li class="con-raw">00:07:12.163 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Set endpoint: /getotp.htm</li>
+    <li class="con-raw">00:07:12.164 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: username = 9900196198</li>
+    <li class="con-raw">00:07:12.165 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: type = 1</li>
+    <li class="con-raw">00:07:12.165 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: key = 10gkfnqf7i53bv1at0n7mvcfrt</li>
+    <li class="con-raw">00:07:12.166 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.a.c.r.RestJobProvider - Parsed URL - BaseUri: https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk, Endpoint: /getotp.htm, Query params count: 3</li>
+    <li class="con-kv"><span class="con-k">Request method</span><span class="con-v">GET</span></li>
+    <li class="con-kv"><span class="con-k">Request URI</span><span class="con-v">https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk/getotp.htm?type=1&amp;key=***&amp;username=9900196198</span></li>
+    <li class="con-kv"><span class="con-k">Query params</span><span class="con-v">type=1</span></li>
+    <li class="con-cont">key=10gkfnqf7i53bv1at0n7mvcfrt</li>
+    <li class="con-cont">username=9900196198</li>
+    <li class="con-kv"><span class="con-k">Headers</span><span class="con-v">Accept=*/*</span></li>
+    <li class="con-raw">HTTP/1.1 200 OK</li>
+    <li class="con-kv"><span class="con-k">Access-Control-Allow-Origin</span><span class="con-v">http://localhost:9080</span></li>
+    <li class="con-kv"><span class="con-k">Access-Control-Allow-Methods</span><span class="con-v">GET, POST, OPTIONS</span></li>
+    <li class="con-kv"><span class="con-k">Access-Control-Allow-Headers</span><span class="con-v">Content-Type, Authorization, x-hsbc-chnl-countrycode, x-hsbc-chnl-group-member, x-hsbc-global-channel-id, X-HSBC-GBGF, Language</span></li>
+    <li class="con-kv"><span class="con-k">Access-Control-Allow-Credentials</span><span class="con-v">true</span></li>
+    <li class="con-kv"><span class="con-k">Strict-Transport-Security</span><span class="con-v">max-age=16070400; includeSubDomains</span></li>
+    <li class="con-kv"><span class="con-k">Content-Type</span><span class="con-v">text/html</span></li>
+    <li class="con-kv"><span class="con-k">Content-Encoding</span><span class="con-v">gzip</span></li>
+    <li class="con-kv"><span class="con-k">S</span><span class="con-v">DWSGSP02HK</span></li>
+    <li class="con-kv"><span class="con-k">Content-Length</span><span class="con-v">126</span></li>
+    <li class="con-kv"><span class="con-k">Date</span><span class="con-v">Mon, 19 Oct 2026 16:07:11 GMT</span></li>
+    <li class="con-kv"><span class="con-k">Connection</span><span class="con-v">keep-alive</span></li>
+    <li class="con-kv"><span class="con-k">Vary</span><span class="con-v">Accept-Encoding</span></li>
+    <li class="con-kv"><span class="con-k">Set-Cookie</span><span class="con-v">***</span></li>
+    <li class="con-kv"><span class="con-k">Set-Cookie</span><span class="con-v">***</span></li>
+    <li class="con-raw">&lt;html&gt;</li>
+      </ul>
+    </details>
+                <div class="step-route">
+                    <div class="sub">Route Register</div>
+                    <ul class="route-lines"><li>[Route] register MONITOR route for &#39;/error/profile-error.jsp&#39; expectStatus=200 timeout=60s</li><li>[Route] register MONITOR route for &#39;auth/assert&#39; expectStatus=200 timeout=60s</li><li>[Route] register MONITOR route for &#39;j_spring_security-check_v2&#39; expectStatus=302 timeout=60s</li><li>[Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; expectStatus=200 jsonPath=[enableAdminTools=Y] timeout=60s</li><li>[Route] register MOCK route for &#39;profile/list&#39; status=real-response intercept=true body=[intercepted] replacePaths=[updateContctOverlayFlag, isOverBlockedDate]</li></ul>
+                </div>
+        </li>
+        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">Then route v2 e2e case &quot;login-mock&quot; assertions pass</span>
+                <span class="step-time">6,168 ms</span>
+            </div>
+            
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">5</span></summary>
+      <ul class="con-lines">
+    <li class="con-raw">00:07:49.830 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://qualityassurance-amh-dbbsp-mauth-sit.p2g.netd2.hsbc.com.hk/api/v2/auth/assert?aid=webapplication_cxp_sit1&amp;did=56ab36e6-ee54-4de1-926c-af0b4316631d&amp;sid=fcc661f6-2f45-4caf-ad5d-4c16ac3359e5&amp;locale=Cam40HardTokenLogin (pattern=auth/assert)</li>
+    <li class="con-raw">00:07:49.846 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] GET https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=leftmenu/permissionLeftMenuConfig)</li>
+    <li class="con-raw">00:07:49.863 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] GET https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=leftmenu/permissionLeftMenuConfig)</li>
+    <li class="con-raw">00:07:49.868 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] WARN  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] 采集类断言未通过（非门禁；判定以框架断言为准）: MOCK 自定义响应头必须下发，实际 responseHeaders={x-ratelimit-limit-second=300, adrum_4=s:f, x-ratelimit-limit=300, x-frame-options=SAMEORIGIN, connection=keep-alive, x-bbxsrf=6a0c2771-bdd6-4d35-8bee-057b0f05c9a8, strict-transport-security=max-age=16070400; includeSubDomains, canary-flag=logon_migration_on, date=Mon, 19 Oct 2026 16:07:22 GMT, x-ratelimit-remaining-second=299, content-length=6632, x-ratelimit-reset=1, cache-control=max-age=300, must-revalidate, s=SGBB01CPHK-WS, x-ratelimit-remaining=299, access-control-allow-credentials=true, x-xss-protection=1; mode=block, adrum_0=g:8a5b56bc-d10f-488c-9394-8ae3a37f9970, adrum_1=n:HSBCCMBtest_ccf59003-206a-4767-b21c-0e286fa21a59, adrum_2=i:4323579, adrum_3=t:1792425938764, x-content-type-options=nosniff}</li>
+    <li class="con-raw">00:07:49.875 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [LEAK-REPORT] unconfirmedRetirements=0, isClean=true, activeRuntimes=1</li>
+      </ul>
+    </details>
+        </li>
+</ul>
+      </div>
+
+      <div class="card">
+        <h3><span class="icon"></span>Evidence</h3>
+        <ul class="evidence"><li>TRACE: route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头） = trace=trace.zip
+window=00:07:04.861 → 00:07:49.877 (45016ms)  [覆盖本用例执行窗口]</li></ul>
+      </div>
+
+
+
+
+
+    </div>
+
+    <div class="case-side">
+
+      <div class="card trace-card">
+        <h3><span class="icon"></span>Playwright Trace</h3>
+        <div class="trace-path">route-capability-e2e-39-route-v2-e2e-mock/trace.zip</div>
+        <dl class="trace-meta">
+            <dt>录制窗口</dt><dd>00:07:04.861 → 00:07:49.877</dd>
+            <dt>时长</dt><dd>45,016 ms</dd>
+        </dl>
+        <div class="trace-btns">
+          <a class="btn-trace" href="https://trace.playwright.dev/?trace=route-capability-e2e-39-route-v2-e2e-mock%2Ftrace.zip" target="_blank" rel="noopener">▶ 播放</a>
+          <a class="btn-trace ghost" href="route-capability-e2e-39-route-v2-e2e-mock%2Ftrace.zip" download="trace.zip">↓ 下载</a>
+        </div>
+      </div>
+
+
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Console log</h3>
+      <ul class="log-lines">    <li class="con-raw">[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）  (45016 ms)[0m</li>
+    <li class="con-raw">00:07:51.709 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @601080273: dispatches=5, hits=5, retiredByPurpose=1, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=38610, j_spring_security-check_v2=38599, auth/assert=30603, leftmenu/permissionLeftMenuConfig=38598, profile/list=38594}, delayDeliveries(directed=0, queued=0)</li>
+</ul>
+  </div>
+
+  <footer>Scenario page · reportVersion 1 · outcomeId route-capability-e2e-39-route-v2-e2e-mock</footer>
+</div>
+
+<script>
+(function(){
+  var OUTCOME_ID = "route-capability-e2e-39-route-v2-e2e-mock";
+  window.__doPatch = function(files) {
+    if (!files || !files.length) return;
+    var results = [];
+    var readers = [];
+    for (var i = 0; i < files.length; i++) {
+      (function(f) {
+        readers.push(new Promise(function(resolve) {
+          var r = new FileReader();
+          r.onload = function() { results.push({filename: f.name, dataBase64: r.result.split(',')[1]}); resolve(); };
+          r.readAsDataURL(f);
+        }));
+      })(files[i]);
+    }
+    Promise.all(readers).then(function() {
+      var payload = JSON.stringify({outcomeId: OUTCOME_ID, screenshots: results});
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/patch', {method: 'POST', body: payload})
+          .then(function(r){ return r.json(); })
+          .then(function(d){ if (d.ok) { alert('Uploaded ' + results.length + ' screenshot(s), reloading...'); setTimeout(function(){location.reload()}, 800); } else { alert('Failed: ' + (d.error || 'unknown')); } })
+          .catch(function(e){ alert('Upload failed: ' + e); });
+      } else {
+        var blob = new Blob([payload], {type: 'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = OUTCOME_ID + '.patch.json';
+        a.click();
+        alert('Patch downloaded: ' + a.download + '\nApply locally with ManualCaseRecorder --apply-patch ' + a.download);
+      }
+    });
+  };
+
+  //  失败用例操作按钮：上传补图 + 标记通过
+  var upBtn = document.getElementById('btn-upload');
+  var msBtn = document.getElementById('btn-marksuccess');
+  var input = document.getElementById('shot-input');
+  if (upBtn && input) {
+    upBtn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', function() {
+      if (input.files && input.files.length) { window.__doPatch(input.files); input.value = ''; }
+    });
+  }
+  if (msBtn) {
+    msBtn.addEventListener('click', function() {
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/mark-success', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcomeId: OUTCOME_ID })
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) { alert('Marked success, reloading...'); setTimeout(function() { location.reload(); }, 600); }
+            else { alert('Failed: ' + (d.error || 'unknown')); }
+          })
+          .catch(function(e) { alert('Failed: ' + e); });
+      } else {
+        alert('Mark case success requires the report server (http/https).');
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

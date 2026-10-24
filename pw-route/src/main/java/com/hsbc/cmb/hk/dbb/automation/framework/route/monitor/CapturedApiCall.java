@@ -24,8 +24,9 @@ import java.util.Set;
  * <ul>
  *   <li><b>敏感头脱敏</b>：authorization / cookie / set-cookie / token 等敏感头值一律打码为
  *       {@link SensitiveDataSanitizer#maskToken()}（与全框架统一掩码一致），只保留键名；</li>
- *   <li><b>体截断</b>：请求体预览 ≤ 2 KiB；响应体<b>整存不截断</b>（{@code captureBodyLimitBytes}
- *       字段保留兼容旧写法但不再参与截断，{@link #responseBodyTruncated()} 恒 false）；</li>
+ *   <li><b>响应体整存不截断</b>（2026-10-22 用户要求：报告里响应体必须完整可见）；
+ *       {@link #responseBodyTruncated()} 恒 false；<b>请求体</b>预览仍按
+ *       {@value #REQUEST_BODY_PREVIEW_MAX} 字节裁剪（避免 POST 大表单灌满证据）；</li>
  *   <li><b>防御拷贝</b>：header 快照不可变，杜绝调用方修改内部状态（EI_EXPOSE_REP2）。</li>
  * </ul>
  *
@@ -285,7 +286,7 @@ public record CapturedApiCall(String pattern, String method, String url,
      * （仅脱敏），解析失败一律回退；任何展示期异常都退化为 {@link #summary()}。</p>
      *
      * <p>头值构造期已脱敏；体先经 {@link SensitiveDataSanitizer#sanitizeBody(String)} 打码，
-     * 响应体超限在段内附 {@code [truncated]} 标记。示例：
+     * <b>响应体整体渲染不截断</b>（2026-10-22 用户要求：报告里响应体必须完整可见）。示例：
      * <pre>{@code
      * [Route] captured api {
      *   pattern   : profile/list
@@ -335,14 +336,14 @@ public record CapturedApiCall(String pattern, String method, String url,
         }
         // 渲染期脱敏：记录里是原始值，日志/报告必须打码（sanitize 只在此处使用）
         appendHeaders(d, "reqHeaders", sanitize(requestHeaders));
-        appendBody(d, "reqBody", requestBodyPreview, false);
+        appendBody(d, "reqBody", requestBodyPreview);
         if (timedOut) {
             appendField(d, "response", "[timeout]");
         } else {
             appendField(d, "response", responseStatus);
         }
         appendHeaders(d, "respHeaders", sanitize(responseHeaders));
-        appendBody(d, "respBody", responseBody(), responseBodyTruncated);
+        appendBody(d, "respBody", responseBody());
         d.append('}');
         return d.toString();
     }
@@ -384,36 +385,19 @@ public record CapturedApiCall(String pattern, String method, String url,
     }
 
     /**
-     * 证据文本中单个体最多渲染的字符数 —— 与 {@code RouteDispatcher} / {@code CapturedExchange}
-     * 既有的证据体上限（4096）同口径，避免同一份报告里两套截断阈值。
-     */
-    static final int EVIDENCE_BODY_MAX_CHARS = 4096;
-
-    /**
      * 体段落：整体缩进 4 空格（JSON 自动 pretty；空体整段省略）。
      *
-     * <p><b>证据有界化</b>：只渲染首 {@value #EVIDENCE_BODY_MAX_CHARS} 字符，并标注总长度 ——
-     * 超大响应不再把整份 pretty JSON 灌进日志/报告（这正是"体不撑爆堆"的另一半：
-     * 遗留存储形态之外，报告渲染也必须是有界的）。截断在 {@code prettyBody} <b>之前</b>完成，
-     * 故也不会为超大 JSON 付出整体格式化开销。原体（{@code responseBody()} /
-     * {@code responseBodyBytes()}）与 DTO 其他字段均<b>不受影响</b>。
+     * <p><b>整响应保留、不截断</b>（2026-10-22 用户要求：报告里响应体必须完整可见）。
+     * 原实现按 {@code 4096} 上限截断并附 {@code [evidence limited ...]} 标记，
+     * 导致报告里的响应/请求体永远看不到全貌；现已整体渲染，只对 {@code responseBody()} /
+     * {@code responseBodyBytes()} 作脱敏与 JSON 美化，不做任何裁剪。
      */
-    private static void appendBody(StringBuilder d, String label, String body, boolean truncated) {
+    private static void appendBody(StringBuilder d, String label, String body) {
         if (body == null || body.isEmpty()) {
             return;
         }
-        boolean bounded = body.length() > EVIDENCE_BODY_MAX_CHARS;
-        String rendered = bounded ? body.substring(0, EVIDENCE_BODY_MAX_CHARS) : body;
-        d.append("  ").append(label).append(':');
-        if (truncated) {
-            d.append(" [truncated]");
-        }
-        if (bounded) {
-            d.append(" [evidence limited to first ").append(EVIDENCE_BODY_MAX_CHARS)
-                    .append(" of ").append(body.length()).append(" chars]");
-        }
-        d.append('\n');
-        for (String line : prettyBody(rendered).split("\n", -1)) {
+        d.append("  ").append(label).append(':').append('\n');
+        for (String line : prettyBody(body).split("\n", -1)) {
             d.append("    ").append(line).append('\n');
         }
     }

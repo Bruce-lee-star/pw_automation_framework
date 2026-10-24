@@ -48,6 +48,16 @@ public final class TestStep {
 
     /** 步骤内捕获的 stderr（脱敏，限行）。additive-only。 */
     private List<String> consoleError = new CopyOnWriteArrayList<>();
+    /** 步骤级 API 操作记录（REST Assured / route 抓包按发生步骤归位到此；脱敏，限行）。additive-only。 */
+    private List<String> apiOperations = new CopyOnWriteArrayList<>();
+
+    /**
+     * 步骤级 RouteDsl 路由注册行（注册发生在哪个步骤就归到哪个步骤；脱敏，限行）。additive-only。
+     *
+     * <p>与用例级 {@code TestOutcome#routeRegistrations} 的关系：注册时若处于步骤上下文归位到本步骤，
+     * 否则（如 {@code @Before} 钩子内注册）回落用例级列表。
+     */
+    private List<String> routeRegistrations = new CopyOnWriteArrayList<>();
 
     /** Gherkin DataTable（行 × 列，含表头行）；非 DataTable 步骤为 null。additive-only。 */
     private List<List<String>> dataTable;
@@ -163,6 +173,22 @@ public final class TestStep {
 
     public List<String> getConsoleError() {
         return consoleError;
+    }
+
+    public List<String> getApiOperations() {
+        return apiOperations;
+    }
+
+    public void setApiOperations(List<String> apiOperations) {
+        this.apiOperations = apiOperations;
+    }
+
+    public List<String> getRouteRegistrations() {
+        return routeRegistrations;
+    }
+
+    public void setRouteRegistrations(List<String> routeRegistrations) {
+        this.routeRegistrations = routeRegistrations;
     }
 
     public void setConsoleError(List<String> consoleError) {

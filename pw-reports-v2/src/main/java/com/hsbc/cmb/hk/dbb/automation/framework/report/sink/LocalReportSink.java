@@ -32,9 +32,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <ol>
  *   <li>{@code CaseFinished} → <b>立即写 per-case JSON</b>（真相源实时保，CI 超时被杀也不丢已完成用例）；</li>
  *   <li>{@code RunFinished} → sweep 补写漏网 JSON → 逐用例渲染 HTML（失败降级最小页）
- *       → serenity-summary.json → index.html → serenity-summary.html →
+ *       → serenity-summary.json → index.html → feature-*.html →
  *       email-report.html（邮件用单页自包含报告）→
  *       monitor-failures.html（无监控失败不落文件）→ assets；</li>
+ *       <p>（{@code serenity-summary.html} 已于 2026-10-22 删除：与 index + feature 页信息重复。）</p>
  *   <li>每项独立 try/catch，单项失败不影响其余项与测试本身。</li>
  * </ol>
  */
@@ -128,12 +129,6 @@ public final class LocalReportSink implements ReportSink {
             FeatureHtmlRenderer.writeFeatures(dir(), aggregated);
         } catch (Throwable t) {
             log.warn("feature pages write failed (non-fatal)", t);
-        }
-        try {
-            SummaryHtmlRenderer.writeSummary(dir(), aggregated);
-        } catch (Throwable t) {
-            errors.incrementAndGet();
-            log.warn("serenity-summary.html write failed", t);
         }
         try {
             // 邮件用单页报告：自包含（无外部 CSS/JS），可直接作附件或贴入正文

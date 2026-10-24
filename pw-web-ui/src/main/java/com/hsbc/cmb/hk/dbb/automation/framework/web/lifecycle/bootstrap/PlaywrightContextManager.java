@@ -1,8 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.ContextOutcomeBinding;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.CloseGuard;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.DownloadRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.DownloadLifecycle;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.config.PlaywrightConfigManager;
@@ -14,12 +13,11 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace.ScenarioTrac
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.BrowserException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.async.AsyncPool;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.Download;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.ColorScheme;
 import com.microsoft.playwright.options.Geolocation;
@@ -29,7 +27,6 @@ import org.slf4j.LoggerFactory;
 
 import java.awt.*;
 import java.io.IOException;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -63,11 +60,22 @@ public class PlaywrightContextManager {
      */
     private static final ThreadLocal<Boolean> MANAGED_PAGE_CREATION_IN_FLIGHT = new ThreadLocal<>();
 
+    /** 录屏诊断告警去重（每 JVM 一条）：避免"开了却没录到"在每个用例上刷屏。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean VIDEO_WARNED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
     /**
-     * 下载同名去重的候选序号上限（防御性）：{@code name}、{@code name (1)} … 最多尝试这么多次占位。
-     * 正常场景序号极小（同目录同名文件数），该上限只为避免极端情况下无限递增。
+     * 每个 Context 的录屏句柄登记表 —— 在<b>建页时</b>登记，而不是等关闭时再去
+     * {@code context.pages()} 里捞。
+     *
+     * <p>why：实测 dbb-2/dbb-3 在 close 阶段 {@code context.pages()} 已拿不到可用录像句柄
+     * （页面此前已被 {@code page-close} 关掉 / 通道已失效），于是"明明录了却报没有录像"。
+     * 关闭时只做兜底补充，主来源是这张表。</p>
+     *
+     * <p>BrowserContext 未覆写 equals/hashCode → 按身份匹配；条目在 closeContext 末尾移除，不会泄漏。</p>
      */
-    private static final int MAX_DOWNLOAD_NAME_SEQ = 10_000;
+    private static final java.util.Map<BrowserContext, java.util.List<com.microsoft.playwright.Video>>
+            CONTEXT_VIDEOS = new java.util.concurrent.ConcurrentHashMap<>();
 
     //  trace 的启停 / 分段 / 导出 / 报告挂载已收口到
     //  {@link com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace.ScenarioTraceRecorder}
@@ -135,11 +143,6 @@ public class PlaywrightContextManager {
             // 与 PageEventMonitor 同族、同接缝；各项均默认零行为回归，受独立配置开关控制
             PageInteractionMonitor.register(context);
 
-            // 注册下载保存监听（§3.2：1.60+ 经 context.onDownload 一次注册即覆盖该 Context 下所有页面，
-            // 含 window.open 弹窗，无需逐页注册；原先在 createPage 逐页 page.onDownload 会让弹窗内下载漏捕获，
-            // 现由 Context 级注册彻底堵住该洞）
-            registerDownloadHandler(context);
-
             // 设置超时
             configureTimeouts(context);
 
@@ -147,6 +150,16 @@ public class PlaywrightContextManager {
             enableTracing(context);
 
             initialized = true;
+            //  per-context → outcomeId 绑定：供 CloseGuard 收尾线程精确解析 per-case 落点（并行下不取
+            //    "最近开始的用例"）。报告旁路失败绝不影响 context 创建。
+            try {
+                String oid = ReportingBridgeRegistry.get().currentOutcomeId();
+                if (oid != null) {
+                    ContextOutcomeBinding.bind(context, oid);
+                }
+            } catch (RuntimeException ignore) {
+                //  报告未装配 / 桥缺失 → 不绑定，回落既有最佳努力逻辑
+            }
             VerboseLogging.logInfoIfVerbose(logger, "BrowserContext created successfully");
             return context;
         } finally {
@@ -162,13 +175,142 @@ public class PlaywrightContextManager {
         }
     }
 
+    /** 登记一页的录屏句柄（未开启录屏时 {@code page.video()} 为 null，直接跳过）。尽力而为。 */
+    private static void rememberVideo(BrowserContext context, Page page) {
+        if (context == null || page == null) {
+            return;
+        }
+        try {
+            com.microsoft.playwright.Video video = page.video();
+            if (video == null) {
+                return;
+            }
+            CONTEXT_VIDEOS.computeIfAbsent(context,
+                            k -> java.util.Collections.synchronizedList(new java.util.ArrayList<>()))
+                    .add(video);
+        } catch (Exception e) {
+            VerboseLogging.logDebugIfVerbose(logger, "[video] handle unavailable: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 采集本 context 下各页面的录屏句柄 —— <b>必须在 {@code context.close()} 之前调用</b>。
+     *
+     * <p><b>API 事实（务必照此实现，勿改）</b>：Playwright 的录屏句柄在 <b>Page</b> 上
+     * （{@code Page.video()}），<b>不在</b> {@code BrowserContext}——context 根本没有
+     * {@code video()} 方法。而 {@code Video.path()} 只在 context 关闭后才返回可用路径、文件也才完整。</p>
+     *
+     * <p><b>为什么必须先取句柄</b>：{@code context.pages()} 在 close 之后返回空列表（页面通道随
+     * context 一起销毁）。此前"close 之后再遍历 {@code context.pages()} 取 video"的写法永远拿不到
+     * 句柄 → 报告里 Playwright records 一直显示"没有录像"（2026-10-21 用户反馈）。</p>
+     *
+     * <p>完全尽力而为：未开启录屏（video 为 null）/ 句柄不可用，一律静默跳过，绝不影响 context 收尾。</p>
+     */
+    private static List<com.microsoft.playwright.Video> collectVideoHandles(BrowserContext context) {
+        List<com.microsoft.playwright.Video> videos = new java.util.ArrayList<>();
+        if (context == null) {
+            return videos;
+        }
+        try {
+            for (Page page : context.pages()) {
+                if (page == null) {
+                    continue;
+                }
+                try {
+                    com.microsoft.playwright.Video video = page.video();
+                    if (video != null) {
+                        videos.add(video);
+                    }
+                } catch (Exception e) {
+                    VerboseLogging.logDebugIfVerbose(logger,
+                            "[video] handle unavailable for a page: {}", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            VerboseLogging.logDebugIfVerbose(logger, "[video] collect skipped: {}", e.getMessage());
+        }
+        return videos;
+    }
+
+    /**
+     * 把已采集的录屏句柄登记进报告（{@code ReportingBridge#attachVideo}）——在 close 之后调用。
+     *
+     * <p>一个 context 可能有多个页面（各自一份录像），报告只展示一份，故取<b>最大</b>的那个
+     * 已落盘文件（主页面通常最长；空录像只有几 KB，被自动跳过），避免把弹窗的短录像当主录像。</p>
+     *
+     * @param videos    各页面录屏句柄（close 前采集的快照；可为空 → 安全 no-op）
+     * @param outcomeId context 绑定的用例 id（可为 null——回落最佳努力归属）
+     */
+    private static void attachVideosToReport(List<com.microsoft.playwright.Video> videos, String outcomeId) {
+        boolean enabled = PlaywrightManager.config().isRecordVideoEnabled();
+        if (videos == null || videos.isEmpty()) {
+            //  开了录屏却连句柄都没有 = 录制根本没配置上（context 创建时 recordVideoDir 未生效）。
+            //  这条必须可定位：否则报告只会静默显示"该用例没有录像"（2026-10-22 用户仍在踩）。
+            if (enabled) {
+                warnVideoOnce("[video] recordVideo is enabled but no Video handle was found on any page — "
+                        + "context was likely created without setRecordVideoDir (check "
+                        + "playwright.context.recordVideo.enabled / dir)");
+            }
+            return;
+        }
+        Path best = null;
+        long bestSize = -1L;
+        StringBuilder detail = new StringBuilder();
+        for (com.microsoft.playwright.Video video : videos) {
+            try {
+                Path recorded = video.path();
+                if (recorded == null) {
+                    detail.append(" | null path");
+                    continue;
+                }
+                boolean exists = Files.exists(recorded);
+                long size = exists ? Files.size(recorded) : -1L;
+                detail.append(" | ").append(recorded.getFileName()).append(" exists=").append(exists)
+                        .append(" bytes=").append(size);
+                if (!exists) {
+                    continue;
+                }
+                if (size > bestSize) {
+                    best = recorded;
+                    bestSize = size;
+                }
+            } catch (Throwable t) {
+                //  Video.path() 在"无视频帧/未完成"时会抛异常：跳过该句柄，不拖累其它页面
+                detail.append(" | path error: ").append(t.getMessage());
+                VerboseLogging.logDebugIfVerbose(logger, "[video] path unavailable: {}", t.toString());
+            }
+        }
+        if (best == null) {
+            if (enabled) {
+                warnVideoOnce("[video] recordVideo is enabled but no playable file was produced" + detail);
+            }
+            return;
+        }
+        try {
+            //  优先按 context 绑定的 outcomeId 精确挂载（并行下不归错用例）；id 缺失时桥回落最佳努力。
+            ReportingBridgeRegistry.get().attachVideo(outcomeId, best);
+            VerboseLogging.logDebugIfVerbose(logger, "[video] recorded {} ({} bytes) to report (outcomeId={})",
+                    best.getFileName(), bestSize, outcomeId);
+        } catch (Throwable t) {
+            warnVideoOnce("[video] attach to report failed for " + best.getFileName() + ": " + t);
+        }
+    }
+
+    /**
+     * 录屏诊断告警<b>每 JVM 只打一条</b>：录屏属旁路能力，不能因为每个用例都失败而刷屏；
+     * 但"开了却没有任何录像"必须可见，否则报告里只会静默显示"该用例没有录像"，
+     * 无法区分"没开"与"开了但没接上"（2026-10-22 排障口径）。
+     */
+    private static void warnVideoOnce(String message) {
+        if (VIDEO_WARNED.compareAndSet(false, true)) {
+            logger.warn(message);
+        }
+    }
+
     /** CT2-05：半初始化 context 失败时的安全回收（close 自身再包 try-catch，避免二次异常掩盖原错误）。 */
     private static void safeCloseContextOnFailure(BrowserContext ctx) {
         try {
             if (ctx != null && ctx.browser() != null && ctx.browser().isConnected()) {
-                // CT2-15：半初始化 context 的回收与 closeContext 同语义 —— 同样登记关闭状态，
-                //  使可能存在的在途下载保存失败被正确归因为预期噪音而非 ERROR。
-                DownloadLifecycle.markContextClosing(ctx);
                 ctx.close();
             }
         } catch (Exception e) {
@@ -192,6 +334,9 @@ public class PlaywrightContextManager {
         } finally {
             MANAGED_PAGE_CREATION_IN_FLIGHT.remove();
         }
+        //  录像句柄<b>建页即登记</b>：Video 对象此刻一定可用；等到 close 时页面可能已被
+        //  page-close 关掉，context.pages() 捞不出来（2026-10-22 实测）。
+        rememberVideo(context, page);
 
         // 下载保存监听已迁移至 createContext 经 context.onDownload 一次性注册（见报告 §3.2），
         // 此处不再逐页注册，避免 window.open 弹窗内下载漏捕获。
@@ -200,187 +345,7 @@ public class PlaywrightContextManager {
         return page;
     }
 
-    /**
-     * 注册 BrowserContext 级下载保存监听（报告 §3.2：1.60+ 经 {@code context.onDownload} 一次注册即覆盖
-     * 该上下文下所有页面，含 {@code window.open} 弹窗，无需逐页注册）。
-     * <p>
-     * 取代原先在 {@link #createPage} 逐页 {@code page.onDownload} 的做法，彻底堵住「弹窗内下载漏捕获」的洞；
-     * 关闭时序降级（WEB-P3-N14 ②）与真实失败告警的日志语义与原实现逐字一致。
-     *
-     * <p><b>受配置开关控制</b>：{@code playwright.page.events.download.enabled}（默认 true）。
-     * 关闭后不再订阅 {@code onDownload}，代价是下载不再被保存/登记——{@code PlaywrightManager} 的
-     * {@code getLastDownloadPath/getLastDownloadFileName/getDownloadPaths} 将恒为空（依赖下载的用例会失败），
-     * 仅在"下载监听本身引发问题"时才建议关闭。
-     *
-     * @param context 浏览器上下文（null 安全：直接忽略）
-     */
-    private static void registerDownloadHandler(BrowserContext context) {
-        if (context == null
-                || !WebFrameworkConfig.PLAYWRIGHT_PAGE_EVENTS_DOWNLOAD_ENABLED.getBooleanValue()) {
-            return;
-        }
-        final Path downloadDir = PlaywrightManager.downloadDirectoryForCurrentThread();
-        final long saveTimeoutMs = TimeUnit.MINUTES.toMillis(
-                Math.max(1, PlaywrightManager.config().getBrowserDownloadTimeoutMinutes()));
-        //  监听器内【只派发】：绝不在此同步调用 saveAs —— 见 saveDownloadAsync 的「连接读线程」说明。
-        //  CT2-15：在途归属按【downloadDir】而非线程 —— 收尾线程未必等于本线程（见 DownloadLifecycle）。
-        context.onDownload(download -> {
-            //  避免「为已进入关闭流程的 Context 发起保存」：该保存必然被 close() 取消。
-            //  不发起就不会产生失败，也就不需要事后按异常文案分类（预防优于归因）。
-            if (DownloadLifecycle.isContextClosing(context)) {
-                VerboseLogging.logDebugIfVerbose(logger,
-                        "Download discarded: BrowserContext already in closing flow (saving would be cancelled)");
-                return;
-            }
-            saveDownloadAsync(context, download, downloadDir, saveTimeoutMs);
-        });
-    }
 
-    /**
-     * 异步保存下载文件 —— <b>监听器内绝不同步执行 {@code saveAs}</b>。
-     *
-     * <p><b>为什么必须卸载（连接读线程自死锁防护；2026-09-08 修复的恢复）</b>：Playwright 的事件
-     * （{@code onPage}/{@code onLoad}/{@code onDownload}）在<b>连接读线程</b>上派发，而
-     * {@code download.saveAs(...)} 是同步操作（需等下载完成并落盘）。在监听器内直接调用会阻塞读线程
-     * <b>自身</b> → 该连接上所有 CDP 命令排队（表现为该 worker 的当前/后续 scenario「卡住、排队」），
-     * 极端情况自死锁、整轮挂起。2026-09-08 曾用专属 {@code DOWNLOAD_EXECUTOR} 卸载该调用，但在改为
-     * 「context 级一次注册」时被丢失（2026-09-21 复核：全仓只剩测试 javadoc 提及它，生产代码已无此卸载）。</p>
-     *
-     * <p>现卸载到受管 {@link AsyncPool}（守护线程 + 有界队列 + 拒绝/超时可观测 + {@code ShutdownCoordinator} 收口），
-     * 与 {@code MonitorHandler}/{@code ModifyHandler} 把阻塞链路移出事件线程同一治理方式；{@code timeoutMs}
-     * 取 {@code playwright.browser.download.timeout.minutes}，超时由池兜底记 ERROR（不静默）。</p>
-     *
-     * <p><b>CT2-15（收尾竞态）</b>：任务体按 {@code downloadDir} 在 {@link DownloadLifecycle} 登记在途，
-     * 使场景收尾的 {@code cleanupTempDownloads()} 能判定「该目录是否仍有未写完的文件」并在有在途写入时
-     * <b>放弃本轮删除</b>（非阻塞，绝不把异步保存的耗时转嫁给 scenario 收尾关键路径）。
-     * 按目录而非线程归属的原因见 {@link DownloadLifecycle}。</p>
-     *
-     * <p>包级可见以便单测用「慢 {@code saveAs} 桩」证明派发<b>不阻塞</b>调用线程（{@code DownloadSaveOffloadTest}）。</p>
-     *
-     * @param context     触发下载的上下文（仅用于下载登记，可 mock）
-     * @param download    下载对象（{@code saveAs} 在池线程执行）
-     * @param downloadDir 下载目录（不存在则创建）
-     * @param timeoutMs   保存超时（毫秒；≤0 由 {@link AsyncPool} 默认值兜底）
-     */
-    static void saveDownloadAsync(BrowserContext context, Download download, Path downloadDir, long timeoutMs) {
-        AsyncPool.runWithTimeout(() -> {
-            //  CT2-15：进入任务体即按【下载目录】登记在途保存 —— 场景收尾据此判定能否安全删除该目录。
-            //    按目录（而非线程）归属的原因见 DownloadLifecycle 类说明：收尾线程未必等于本线程。
-            //    登记放在任务体内（而非提交前）：AsyncPool 丢弃任务时不抛异常，
-            //    提交前登记会让计数永久挂账；任务体内登记则「无执行 ⇒ 无计数」。
-            DownloadLifecycle.begin(downloadDir);
-            Path reserved = null;
-            boolean saved = false;
-            try {
-                //  CT2-15：发起保存前复核状态 —— 事件线程的派发与本任务执行之间存在时间差，
-                //    期间 Context 可能已进入关闭流程（或被整体清理）。此时保存必然失败，
-                //    故直接跳过：不产生注定失败的 saveAs，也不占用磁盘写入。
-                //    注意判据是「已知不可用」（见 isEnvironmentKnownDead）：无证据时照常保存，
-                //    绝不因「拿不到 Browser」（持久化上下文即如此）而漏存文件。
-                if (DownloadLifecycle.isContextClosing(context) || isEnvironmentKnownDead(context)) {
-                    VerboseLogging.logDebugIfVerbose(logger,
-                            "Save skipped: context closing or browser disconnected before save started");
-                    return;
-                }
-                String suggestedFilename = download.suggestedFilename();
-                //  原子占位（目录按需创建）：并发同名下载不会选到同一路径（见 resolveNonConflictingDownloadPath）
-                reserved = resolveNonConflictingDownloadPath(downloadDir, suggestedFilename);
-                download.saveAs(reserved);
-                saved = true;
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "Download completed: {} -> {}", suggestedFilename, reserved.toAbsolutePath());
-                // 登记已落盘文件 + 原始文件名，供业务层经 PlaywrightManager.getLastDownloadPath() /
-                // getLastDownloadOriginalFileName() 等查询（报告 §3.2 收尾）。
-                // 同时带上 suggestedFilename：落盘路径会被同名去重改写，原始名才是"下载到的文件叫什么"。
-                DownloadRegistry.instance().record(context, suggestedFilename, reserved);
-            } catch (Exception e) {
-                //  占位文件回滚：仅当尚未写成功（保存失败/上下文关闭）时删除，避免残留 0 字节文件
-                rollbackReservation(reserved, saved);
-                //  CT2-15：失败归因按【框架已知状态】判定，不解析 Playwright 异常文案（文案随版本变化，
-                //    按文案分类必然漏判）：
-                //    ① 本 context 已进入关闭流程 → 该下载被 close() 取消，属预期；
-                //    ② 其 Browser 已断开 → 保存无从完成；「浏览器断开」本身由生命周期各层各自告警，
-                //       此处再记 ERROR 只是重复噪音（且会掩盖真实的磁盘/权限类失败）。
-                //    其余（磁盘满 / 路径非法 / 权限不足）仍记 ERROR，保持告警信噪比。
-                if (DownloadLifecycle.isContextClosing(context) || isEnvironmentKnownDead(context)) {
-                    VerboseLogging.logDebugIfVerbose(logger,
-                            "Save aborted (context closing or browser disconnected; nothing written): {}",
-                            e.getMessage());
-                } else {
-                    logger.error("[Download] Failed to save file: {}", e.getMessage(), e);
-                }
-            } finally {
-                // CT2-15：成功 / 失败 / 被超时取消（cancel(true) 中断）都必须注销，保证计数配对归零
-                DownloadLifecycle.end(downloadDir);
-            }
-        }, timeoutMs);
-    }
-
-    /**
-     * 回滚未被写入的下载占位文件（best-effort）。
-     *
-     * <p>占位文件由 {@link #resolveNonConflictingDownloadPath} 预先创建；保存失败时应删除，避免残留 0 字节文件
-     * 干扰后续同名去重（残留也会被本线程收尾的 {@code cleanupTempDownloads} 兜底清掉）。</p>
-     *
-     * @param reserved 已占位的路径（可为 null）
-     * @param saved    是否已成功写入（true 表示文件是有效产物，<b>不得</b>删除）
-     */
-    private static void rollbackReservation(Path reserved, boolean saved) {
-        if (reserved == null || saved) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(reserved);
-        } catch (IOException ignored) {
-            // 收尾清理（按线程目录）会兜底；此处不重抛，避免掩盖上层真实异常
-            logger.debug("rollbackReservation: failed to delete reserved temp path {} (per-thread cleanup will retry): {}",
-                    reserved, ignored.getMessage());
-        }
-    }
-
-    /**
-     * 解析并<b>原子占位</b>「不覆盖既有文件」的下载保存路径（同名去重）。
-     *
-     * <p><b>2026-09-21 修复（并发同名覆盖）</b>：原实现是「先查后选」（{@code Files.exists} 探测 + 递增序号），
-     * 真并行下两个同名下载可能同时探测到同一"空闲"路径并互相覆盖。现改为 {@link Files#createFile}（{@code CREATE_NEW}，
-     * 原子）<b>抢占</b>候选路径：抢占失败（{@link FileAlreadyExistsException}）即换下一个序号 ——
-     * 并发同名下载必然拿到不同路径。抢占到的 0 字节文件随后由 {@code download.saveAs(...)} 覆写
-     * （{@code saveAs} 会覆盖既有文件）；保存失败由调用方回滚删除该占位文件。</p>
-     *
-     * <p>命名规则不变：若 {@code dir/name} 已被占用，则在主文件名与扩展名之间插入序号后缀
-     * {@code " (1)"} / {@code " (2)"} …；隐藏文件（如 {@code .gitignore}，点号在首位）整体作为主名处理，
-     * 不加序号到扩展名。</p>
-     *
-     * @param dir               下载目录（不存在则创建）
-     * @param suggestedFilename 服务器建议的文件名（来自 {@code Content-Disposition}）
-     * @return 已被<b>本次调用原子占位</b>的路径（调用方负责写入；失败应回滚删除）
-     * @throws IOException 目录不可创建，或候选序号耗尽（防御性上限，正常不会发生）
-     */
-    static Path resolveNonConflictingDownloadPath(Path dir, String suggestedFilename) throws IOException {
-        Files.createDirectories(dir);
-        String base = suggestedFilename;
-        String ext = "";
-        int dot = suggestedFilename.lastIndexOf('.');
-        if (dot > 0) { // dot == 0 视为隐藏文件主名（如 ".env"），不拆扩展名
-            base = suggestedFilename.substring(0, dot);
-            ext = suggestedFilename.substring(dot);
-        }
-        for (int seq = 0; seq < MAX_DOWNLOAD_NAME_SEQ; seq++) {
-            Path candidate = seq == 0
-                    ? dir.resolve(suggestedFilename)
-                    : dir.resolve(base + " (" + seq + ")" + ext);
-            try {
-                Files.createFile(candidate);   // 原子占位（CREATE_NEW）：并发下不可能两方拿到同一路径
-                return candidate;
-            } catch (FileAlreadyExistsException taken) {
-                // 已被占用（含并发邻居刚抢占）→ 试下一个序号（正常竞争路径，仅 DEBUG 级可观测）
-                logger.debug("resolveNonConflictingDownloadPath: name already taken {}, trying next sequence",
-                        taken.getMessage());
-            }
-        }
-        throw new IOException("Exhausted " + MAX_DOWNLOAD_NAME_SEQ + " candidate names for '"
-                + suggestedFilename + "' in " + dir);
-    }
 
     /**
      * 关闭 Context
@@ -392,14 +357,20 @@ public class PlaywrightContextManager {
             //    SIT 真实收尾分布，为 CloseGuard.CONTEXT_CLOSE_LIMIT_MS 定标提供数据（正常毫秒级，
             //    挂死时此处不返回、由 CloseGuard 超时放弃 + dirty 隔离兜底，与阈值大小无关）。
             long t0 = System.nanoTime();
-            //  CT2-15：在任何清理动作之前登记「本 context 已进入关闭流程」——【避免】而非【事后归因】：
-            //    此后到达的下载事件与在途保存任务不再发起 saveAs（该保存必被 close() 取消），
-            //    绝大多数情况下根本不产生「需要分类的失败」；对已越过该判定的极小残留窗口，
-            //    其失败亦按此已知状态判定为预期噪音（详见 DownloadLifecycle）。
-            //    closeContext 是框架内 Context 销毁的唯一收口（场景收尾 / 自定义配置重建 / 孤儿回收 /
-            //    套件级 cleanupAll 均经此），故此处一处登记即全覆盖，无需逐路径打补丁。
-            //    标记不在此后手工清除：清除若早于「在途保存失败」会让噪音复现（弱引用键自动回收）。
-            DownloadLifecycle.markContextClosing(context);
+            //  录屏句柄：主来源是建页时登记的 CONTEXT_VIDEOS（close 阶段 context.pages() 常常已不可用），
+            //   再把 close 前能枚举到的补上（去重），最后在收尾处摘除登记。
+            List<com.microsoft.playwright.Video> recordedVideos = new java.util.ArrayList<>();
+            java.util.List<com.microsoft.playwright.Video> remembered = CONTEXT_VIDEOS.get(context);
+            if (remembered != null) {
+                synchronized (remembered) {
+                    recordedVideos.addAll(remembered);
+                }
+            }
+            for (com.microsoft.playwright.Video v : collectVideoHandles(context)) {
+                if (!recordedVideos.contains(v)) {
+                    recordedVideos.add(v);
+                }
+            }
             try {
                 //  先释放路由层资源：停止 MonitorSession 定时器、unroute、清理注册表与防重门控，
                 //    避免调度器线程池持有已销毁 context 引用导致内存泄漏 / 对已关闭 context 无效调度。
@@ -409,8 +380,6 @@ public class PlaywrightContextManager {
                 } catch (Exception re) {
                     VerboseLogging.logWarnIfVerbose(logger, "Failed to clear Route resources on context close: {}", re.getMessage());
                 }
-                // 清理下载登记簿中该上下文的记录（与路由资源同批释放，避免陈旧记录堆积）
-                DownloadRegistry.instance().clear(context);
                 //  trace 收尾（方案 A，2026-09-17）：交给 ScenarioTraceRecorder。
                 //  正常路径下每个用例已在 scenario 收尾时导出了自己的 chunk 文件；若仍有未导出的活动 chunk
                 //  （该用例未走到收尾，如异常/强制清理路径），在此兜底导出为 ONCLOSE 文件，随后结束 tracing。
@@ -439,9 +408,17 @@ public class PlaywrightContextManager {
                     logger.trace("[CT] context.close() segment took {} ms (reason=teardown)",
                             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - tClose));
                 }
+                //  录屏收尾：Video.path() 只在 context 关闭后才可用且文件才完整，
+                //   故解析路径放在 close() 之后；句柄则来自 close 之前采集的快照。
+                //   交给报告落入 per-case（<outcomeId>/records/）；未开启录屏时集合为空 → 安全 no-op。
+                //   归属优先用 context 绑定的 outcomeId（并行下精确），缺失时回落最佳努力。
+                attachVideosToReport(recordedVideos, ContextOutcomeBinding.outcomeId(context));
             } catch (Exception e) {
                 logger.error("Failed to close BrowserContext: {}", e.getMessage(), e);
                 throw new BrowserException("Failed to close BrowserContext", e);
+            } finally {
+                CONTEXT_VIDEOS.remove(context); // 防泄漏：条目随 context 一起消亡
+                ContextOutcomeBinding.unbind(context); // 同步解绑 outcomeId，防 key 驻留
             }
             if (logger.isTraceEnabled()) {
                 logger.trace("[CT] closeContext total took {} ms (routeClear+downloadClear+trace+close)",
@@ -572,10 +549,25 @@ public class PlaywrightContextManager {
 
         // 配置录屏
         if (PlaywrightManager.config().isRecordVideoEnabled()) {
-            String videoDir = PlaywrightManager.config().getRecordVideoDir();
             screenSize = PlaywrightManager.config().getAvailableScreenSize();
-            contextOptions.setRecordVideoDir(Paths.get(videoDir));
+            //  录屏直接落到 per-case 目录（<outputDir>/<outcomeId>/records）——从源头避免
+            //  「全局 videoDir 先落一份、context 关闭后再搬进 per-case」的两份与中途失败；
+            //  解析不到活动用例句柄（如 context 建于场景开始前）时回落配置目录，
+            //  仍由 closeContext 内的 attachContextVideoToReport 搬入 per-case。
+            java.nio.file.Path perCaseVideoDir = null;
+            try {
+                perCaseVideoDir = ReportingBridgeRegistry.get().videoTarget();
+            } catch (RuntimeException ignore) {
+                perCaseVideoDir = null; // 报告旁路失败绝不影响录屏
+            }
+            java.nio.file.Path videoDir = perCaseVideoDir != null
+                    ? perCaseVideoDir : Paths.get(PlaywrightManager.config().getRecordVideoDir());
+            contextOptions.setRecordVideoDir(videoDir);
             contextOptions.setRecordVideoSize((int) screenSize.getWidth(), (int) screenSize.getHeight());
+            //  自证落点：录屏"没进报告"时，第一现场要能看出到底录到哪个目录、多大
+            VerboseLogging.logInfoIfVerbose(logger, "[video] recordVideo dir={} size={}x{} (perCase={})",
+                    videoDir, (int) screenSize.getWidth(), (int) screenSize.getHeight(),
+                    perCaseVideoDir != null);
         }
     }
 
@@ -920,36 +912,5 @@ public class PlaywrightContextManager {
         return sb.toString();
     }
 
-    /**
-     * 判定保存环境是否<b>已知不可用</b>（CT2-15：不解析异常文案，只在有实证时才下结论）。
-     *
-     * <p>以框架既有惯用法 {@code browser().isConnected()} 为准（与 {@code closeContext} /
-     * {@code ContextRegistryImpl} / {@code safeCloseContextOnFailure} 同一判据）：<b>仅当 Browser
-     * 存在且已断开</b>，或对象已失效（调用即抛异常）时，才判定为不可用。</p>
-     *
-     * <p><b>为什么是「已知不可用」而不是「已知可用」（重要，勿反转）</b>：</p>
-     * <ul>
-     *   <li>Playwright 的<b>持久化上下文</b>（{@code launchPersistentContext}）其
-     *       {@code browser()} 返回 {@code null}，而它是<b>完全可用</b>的 —— 若把「拿不到 Browser」
-     *       当作不可用，会导致该拓扑下<b>所有下载被静默跳过</b>（比噪音严重得多的故障）；</li>
-     *   <li>「无证据」应回落到<b>照常保存 / 照常告警</b>（失败记 ERROR）：宁可多一条日志，
-     *       也不可静默吞掉真实失败或漏存文件。</li>
-     * </ul>
-     *
-     * <p><b>为何不解析异常文案</b>：Playwright 在不同关闭路径下文案不同（{@code TargetClosedError}、
-     * {@code Cannot find object to call close}、…），按文案分类必然要持续追补新变体，
-     * 漏判即把预期噪音记成 ERROR（或反向把真实失败降级）。</p>
-     *
-     * @param context 触发下载的上下文
-     * @return true 表示有实证表明环境已不可用（保存无从完成，其失败属预期噪音）
-     */
-    private static boolean isEnvironmentKnownDead(BrowserContext context) {
-        try {
-            Browser browser = context.browser();
-            return browser != null && !browser.isConnected();
-        } catch (Exception gone) {
-            // 对象已失效（如已从连接中移除）—— 这本身就是实证
-            return true;
-        }
-    }
+
 }

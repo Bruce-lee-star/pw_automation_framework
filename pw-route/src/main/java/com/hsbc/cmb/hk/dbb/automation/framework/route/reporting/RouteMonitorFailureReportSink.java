@@ -30,8 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 而是由探针在返回失败列表时<b>顺带复制一份</b>经 {@link #recordFailures(List)} 归集进来。
  * 一份失败两用：web 侧即时抛错（用例标红） + 套件收尾的聚合报告（落盘 + HTML 显示区）。
  *
- * <p><b>跨进程可靠通道（2026-10-10 实证修正）</b>：{@code generate-summary-report} 在
- * 测试 JVM <b>退出后</b>独立运行（exec:java），进程内归集表必然为空 —— 因此
+ * <p><b>跨进程可靠通道（2026-10-10 实证修正）</b>：摘要报告阶段在测试 JVM
+ * <b>退出后</b>独立运行（exec:java），进程内归集表必然为空 —— 因此
  * {@link #recordFailures(List)} <b>喂入即落盘</b>（内存 + 文件双写，文件是报告阶段的唯一
  * 可靠数据源）；报告阶段的 {@link #collectData()} / {@link #write()} 在内存为空时
  * <b>从文件读回</b>，保证落盘与 HTML 显示区一致。

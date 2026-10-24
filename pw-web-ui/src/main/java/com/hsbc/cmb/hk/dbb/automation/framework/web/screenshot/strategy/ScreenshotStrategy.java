@@ -72,20 +72,6 @@ public enum ScreenshotStrategy {
         public boolean shouldTakeScreenshotBeforeEachStep() {
             return true; // 步骤开始也截图（BEFORE 半边）
         }
-    },
-
-    MANUAL {
-        public boolean shouldTakeScreenshotFor(LifecycleScenarioResult result) {
-            return false; // 仅手动截图
-        }
-
-        public boolean shouldTakeScreenshotFor(LifecycleStepInfo step) {
-            return false; // 仅手动截图
-        }
-
-        public boolean shouldTakeScreenshotFor(TestResult result) {
-            return false; // 仅手动截图
-        }
     };
 
     // 抽象方法定义（原生事件模型，不再依赖 框架）
@@ -126,8 +112,7 @@ public enum ScreenshotStrategy {
             Map.entry("FOR_EACH_STEP", AFTER_EACH_STEP),
             Map.entry("BEFORE_AND_AFTER_EACH_STEP", BEFORE_AND_AFTER_EACH_STEP),
             Map.entry("DISABLED", DISABLED),
-            Map.entry("NONE", DISABLED),
-            Map.entry("MANUAL", MANUAL));
+            Map.entry("NONE", DISABLED));
 
     // 从配置中获取策略（不再需要 框架 EnvironmentVariables）
     public static ScreenshotStrategy from() {

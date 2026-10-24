@@ -30,10 +30,11 @@ public final class JsonWriter {
     private JsonWriter() {
     }
 
-    /** 写单个用例 JSON。 */
+    /** 写单个用例 JSON（落进 per-case 子目录 {@code <dir>/<outcomeId>/<outcomeId>.json}）。 */
     public static Path writeOutcome(Path dir, TestOutcome outcome) throws IOException {
-        Files.createDirectories(dir);
-        Path target = dir.resolve(outcome.getOutcomeId() + ".json");
+        Path caseDir = dir.resolve(outcome.getOutcomeId());
+        Files.createDirectories(caseDir);
+        Path target = caseDir.resolve(outcome.getOutcomeId() + ".json");
         writeAtomic(target, MAPPER.writeValueAsBytes(outcome));
         return target;
     }

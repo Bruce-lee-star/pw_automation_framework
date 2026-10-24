@@ -30,20 +30,10 @@ public enum WebFrameworkConfig {
     // ==================== 框架 核心配置 ====================
 
     /**
-     * 项目名称
+     * 报告项目名称（所有报告统一使用该名称）
      */
     FRAMEWORK_PROJECT_NAME(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME),
 
-
-    /**
-     * 编码设置
-     */
-    FRAMEWORK_ENCODING(ConfigKeys.WEB_FRAMEWORK_ENCODING),
-
-    /**
-     * 报告编码设置
-     */
-    FRAMEWORK_REPORT_ENCODING(ConfigKeys.WEB_FRAMEWORK_REPORT_ENCODING),
 
     // ==================== Playwright 浏览器配置 ====================
 
@@ -177,13 +167,6 @@ public enum WebFrameworkConfig {
      * 浏览器超时设置（毫秒）
      */
     PLAYWRIGHT_BROWSER_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_TIMEOUT),
-
-    /**
-     * 下载文件保存<b>根</b>目录；实际文件按线程落在 {@code thread-<id>} 子目录
-     * （见 {@code PlaywrightManager.downloadDirectoryForCurrentThread()}）——
-     * 使每个用例收尾只清理自己线程的下载文件，并行下不干扰邻居用例。
-     */
-    PLAYWRIGHT_BROWSER_DOWNLOADS_PATH(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOADS_PATH),
 
     // ==================== BrowserStack 云测试配置 ====================
 
@@ -482,8 +465,6 @@ public enum WebFrameworkConfig {
     /**
      * 截图保存路径
      */
-    PLAYWRIGHT_CONTEXT_SCREENSHOT_PATH(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_SCREENSHOT_PATH),
-
     /**
      * 录屏功能
      */
@@ -680,11 +661,6 @@ public enum WebFrameworkConfig {
      * 特性文件根目录
      */
     FRAMEWORK_FEATURES_ROOT(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT),
-
-    /**
-     * 需求根目录
-     */
-    FRAMEWORK_REQUIREMENTS_BASE(ConfigKeys.WEB_FRAMEWORK_REQUIREMENTS_BASE),
 
     /**
      * 浏览器配置（Playwright 原生配置）
@@ -943,6 +919,33 @@ public enum WebFrameworkConfig {
     PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES),
 
     /**
+     * 下载文件保存目录（<b>仅是业务 {@code Download.saveAs} 的推荐根目录，非 Playwright 自动落盘点</b>）。
+     *
+     * <p>框架在创建 {@code BrowserContext} 时仅开启 {@code acceptDownloads(true)}，<b>不会</b>把该目录接到
+     * Playwright 原生的 {@code contextOptions.setDownloadsPath(...)}。因此若业务只调用
+     * {@code page.waitForDownload()} 而<b>不</b>再 {@code download.saveAs(path)}，下载文件只会落在 Playwright
+     * 内部<b>临时目录</b>，context 关闭 / 被 GC 后即被回收，<b>不持久</b>。需要稳定文件必须显式
+     * {@code saveAs} 到本目录（推荐经 {@code waitForDownloadSaved} 自动落盘到本目录的线程子目录）。</p>
+     *
+     * <p>实际落盘根目录为 {@code <downloadsPath>/thread-<线程序号>}，用于并发执行下按用例隔离；每个用例
+     * （scenario）结束时框架只清理本线程的子目录，不影响其他并发用例。</p>
+     */
+    PLAYWRIGHT_BROWSER_DOWNLOADS_PATH(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOADS_PATH),
+
+    /**
+     * 下载文件自动挂载测试报告开关（默认 {@code false}）。
+     *
+     * <p>开启后，{@code PageLifecycleCoordinator.waitForDownloadSaved(...)}（框架线程隔离目录重载）
+     * 在成功落盘时会自动调用 {@code DownloadInfo.attachToReport()}，把文件复制进报告产物目录
+     * （{@code <outputDir>/<outcomeId>/<file>}）并在 per-case 报告的「Downloads」Tab 展示/可下载。</p>
+     *
+     * <p>默认 {@code false}：不改变既有行为，报告不出现 Downloads 内容；需要下载证据时再显式开启，
+     * 或直接调用 {@code DownloadInfo.attachToReport()}（该方法不受本开关约束，调用即上报）。</p>
+     */
+    PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED(
+            ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED),
+
+    /**
      * 附加敏感请求/响应头名（逗号分隔），叠加在内置脱敏清单之上。
      * <p>由 {@code common.security.SensitiveDataSanitizer} 经 框架 配置体系读取，
      * 键名走规范化匹配（忽略大小写与 _ - . 空格）。
@@ -982,14 +985,6 @@ public enum WebFrameworkConfig {
     PLAYWRIGHT_PAGE_EVENTS_POPUP_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_POPUP_ENABLED),
 
     /**
-     * 是否订阅 {@code context.onDownload}（下载保存与查询能力）。
-     *
-     * <p><b>关闭代价</b>：{@code PlaywrightManager.getLastDownloadPath/getLastDownloadFileName/getDownloadPaths}
-     * 将恒为空（框架不再登记下载），依赖下载断言/取文件的用例会失败。
-     */
-    PLAYWRIGHT_PAGE_EVENTS_DOWNLOAD_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_DOWNLOAD_ENABLED),
-
-    /**
      * 是否订阅 {@code page.onConsoleMessage}（控制台 error/warning 诊断）。<b>默认关闭</b>。
      */
     PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED),
@@ -1017,15 +1012,12 @@ public enum WebFrameworkConfig {
     private static final java.util.Map<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys, String> SERENITY_COMPAT_KEYS =
             java.util.Map.ofEntries(
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME, "serenity.project.name"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_ENCODING, "serenity.encoding"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REPORT_ENCODING, "serenity.report.encoding"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_SCREENSHOT_STRATEGY, "serenity.screenshot.strategy"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY, "serenity.reports.screenshots.directory"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY, "serenity.screenshots.directory"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.outputDirectory"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REQUIREMENTS_BASE, "serenity.requirements.base"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME, "serenity.rerun.failures.wait.time"),
                     java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY, "serenity.retry.delay.strategy"),

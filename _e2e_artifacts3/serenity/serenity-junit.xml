@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="pw-reports" tests="7" failures="1" errors="0" skipped="0" time="386.602">
+  <testsuite name="route_capability_e2e" tests="7" failures="1" errors="0" skipped="0" time="386.602">
+    <testcase name="route v2 e2e - 登录期真实接口采集（CAPTURE）" classname="route_capability_e2e" time="69.137">
+      <failure message="[NOT_EDITABLE] click failed after 1 attempts on &apos;//*[text()=&apos;W1-HKHBAP001060698838PUSER1&apos;]&apos; | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/gbbr/en-us/home?lang=en_US title=Business Internet Banking obstruction=Obstructed by - &lt;div class=&quot;lp_text&quot; id=&quot;lp_alert_message&quot;&gt;返回上一页或登录以继续对话。&lt;/div&gt; from &lt;div class=&quot;lp_desktop&quot;&gt;…&lt;/div&gt; subtree intercepts pointer events | cause=TimeoutError" type="com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException"/>
+      <system-out><![CDATA[[1;31m✘ SCENARIO FAILED : route v2 e2e - 登录期真实接口采集（CAPTURE）  (69146 ms)  ↳ ElementOperationException[0m
+00:21:19.733 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @437838221: dispatches=5, hits=5, retiredByPurpose=2, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=49680, pinned-account=67274, j_spring_security-check_v2=49673, auth/assert=45167, leftmenu/permissionLeftMenuConfig=45166, insight/retrieve=67277, profile/list=49669}, delayDeliveries(directed=0, queued=0)]]></system-out>
+    </testcase>
+    <testcase name="route v2 e2e - 登录期 MONITOR 断言真实接口" classname="route_capability_e2e" time="46.129">
+      <system-out><![CDATA[[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期 MONITOR 断言真实接口  (46128 ms)[0m
+00:22:08.327 [main] [route v2 e2e - 登录期 MONITOR 断言真实接口] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @906130060: dispatches=7, hits=7, retiredByPurpose=3, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=38587, pinned-account=43028, j_spring_security-check_v2=38584, auth/assert=33894, leftmenu/permissionLeftMenuConfig=33895, profile/list=38580}, delayDeliveries(directed=0, queued=0)]]></system-out>
+    </testcase>
+    <testcase name="route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）" classname="route_capability_e2e" time="53.660">
+      <system-out><![CDATA[[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）  (53660 ms)[0m
+00:23:04.375 [main] [route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @297747648: dispatches=5, hits=5, retiredByPurpose=1, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=42979, j_spring_security-check_v2=42975, auth/assert=38487, leftmenu/permissionLeftMenuConfig=42974, profile/list=42970}, delayDeliveries(directed=0, queued=0)]]></system-out>
+    </testcase>
+    <testcase name="route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）" classname="route_capability_e2e" time="47.097">
+      <system-out><![CDATA[[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）  (47098 ms)[0m
+00:23:53.846 [main] [route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @109597365: dispatches=5, hits=5, retiredByPurpose=1, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=39187, j_spring_security-check_v2=39179, auth/assert=34650, leftmenu/permissionLeftMenuConfig=39177, profile/list=39171}, delayDeliveries(directed=0, queued=0)]]></system-out>
+    </testcase>
+    <testcase name="route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）" classname="route_capability_e2e" time="46.553">
+      <system-out><![CDATA[[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）  (46553 ms)[0m
+00:24:43.296 [main] [route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @1809102593: dispatches=5, hits=5, retiredByPurpose=1, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=38343, j_spring_security-check_v2=38338, auth/assert=33807, leftmenu/permissionLeftMenuConfig=38337, profile/list=38334}, delayDeliveries(directed=0, queued=0)]]></system-out>
+    </testcase>
+    <testcase name="route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）" classname="route_capability_e2e" time="77.148">
+      <system-out><![CDATA[[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）  (77148 ms)[0m
+00:26:03.401 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @47263169: dispatches=5, hits=5, retiredByPurpose=4, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=60002, j_spring_security-check_v2=60014, auth/assert=60001, leftmenu/permissionLeftMenuConfig=71005, profile/list=71004}, delayDeliveries(directed=0, queued=2)]]></system-out>
+    </testcase>
+    <testcase name="route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）" classname="route_capability_e2e" time="46.878">
+      <system-out><![CDATA[[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）  (46878 ms)[0m
+00:26:54.015 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @856296891: dispatches=5, hits=5, retiredByPurpose=1, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=41167, j_spring_security-check_v2=41164, auth/assert=35947, leftmenu/permissionLeftMenuConfig=41163, profile/list=41161}, delayDeliveries(directed=0, queued=0)]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

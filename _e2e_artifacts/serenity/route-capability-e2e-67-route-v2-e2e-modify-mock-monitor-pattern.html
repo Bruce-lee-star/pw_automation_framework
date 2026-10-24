@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    
+    <title>route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
+    <link rel="stylesheet" href="assets/report-v2.css"/>
+    <style>
+        /* 新设计 CSS 未覆盖的局部样式（证据 / 附件 / 截图 / 未定义结果） */
+        .evidence { margin: 6px 0; padding-left: 20px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+        .attachment { margin: 6px 0; }
+        .attachment > summary { cursor: pointer; color: var(--text-2); font-size: 12px; }
+        .att-text, .att-html { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; }
+        /* 截图：悬浮放大（2 倍，左上角为锚点，压在其它内容之上，不改变布局） */
+        .shot { position: relative; overflow: visible; }
+        .shot img {
+            max-width: 320px; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px;
+            cursor: zoom-in; transition: transform .15s ease; transform-origin: top left;
+        }
+        .shot img:hover {
+            transform: scale(2); z-index: 20; position: relative;
+            box-shadow: 0 8px 28px rgba(31, 45, 61, .28);
+        }
+        .step-note { font-size: 12px; color: var(--failure); margin-top: 4px; }
+        .step-actions { margin-top: 4px; }
+        .b-UNDEFINED { background: var(--skipped); }
+        .step-table { margin: 8px 0 2px; font-size: 12px; }
+        .step-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
+        .step-table tr:first-child td { font-weight: 600; background: #f8fafc; }
+        .step-docstring { margin: 8px 0 2px; white-space: pre-wrap; }
+        /* 失败用例操作入口（上传补图 / 标记通过） */
+        .case-actions .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+        .btn-action { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: background .15s ease; }
+        .btn-action:hover { background: #f1f5f9; }
+        .btn-ok { color: #047857; border-color: #a7f3d0; }
+        .btn-ok:hover { background: #ecfdf5; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Scenario <a href="feature-route-capability-e2e.html" style="color:#fff;text-decoration:none;font-size:14px;font-weight:400">← back to route_capability_e2e</a></h1>
+  <div class="meta">route_capability_e2e<br>reportVersion 1</div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <div class="crumbs"><a href="index.html">Overview</a><span class="sep">›</span><a href="feature-route-capability-e2e.html">route_capability_e2e</a><span class="sep">›</span><b>route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</b></div>
+    <div class="case-head">
+      <span class="badge b-FAILURE" style="padding:4px 14px;font-size:14px">Failed</span>
+      <div class="case-title">route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</div>
+    </div>
+    <div class="case-meta">
+      <span class="chip">19.1s</span>
+      <span class="chip">started 2026-10-19T23:28:46.149+08:00</span>
+      <span class="chip">Automated</span>
+      <span class="chip tag">@regression</span><span class="chip tag">@route</span><span class="chip tag">@route-e2e</span><span class="chip tag">@route-e2e-priority</span>
+    </div>
+  </div>
+
+  <div class="trace-bar">
+    <span class="tname">Playwright Trace</span>
+    <span class="tmeta">route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern/trace.zip</span>
+    <a class="btn-trace" href="https://trace.playwright.dev/?trace=route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern%2Ftrace.zip" target="_blank" rel="noopener">▶ Play trace</a>
+  </div>
+
+
+  <div class="card case-actions">
+    <h3><span class="icon"></span>Case actions</h3>
+    <div class="action-row">
+      <button type="button" id="btn-upload" class="btn-action">⬆ Upload screenshot</button>
+      <button type="button" id="btn-marksuccess" class="btn-action btn-ok">✓ Mark case success</button>
+    </div>
+    <input type="file" id="shot-input" accept="image/png,image/jpeg" multiple style="display:none"/>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Execution steps</h3>
+    <ul class="steps" id="steps">        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">Given I arm route v2 e2e case &quot;login-priority&quot;</span>
+                <span class="step-time">321 ms</span>
+            </div>
+            
+    <details class="con-group con-route">
+      <summary>API / Route registration<span class="con-count">3</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:28:46.472 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MODIFY_REQUEST route for &#39;leftmenu/permissionLeftMenuConfig&#39; setHeader=[x-route-e2e-mod=1]</li>
+            <li class="con-raw">23:28:46.473 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MOCK route for &#39;leftmenu/permissionLeftMenuConfig&#39; status=real-response intercept=true body=[intercepted] replacePaths=[$.enablePaymentPP]</li>
+            <li class="con-raw">23:28:46.474 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; expectStatus=200 bodyContains=&quot;enableAdminTools&quot; bodyRegex=&quot;&quot;enablePaymentPP&quot;\s*:\s*&quot;PRI&quot;&quot; timeout=60s</li>
+      </ul>
+    </details>
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">2</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:28:46.469 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.r.RouteCapturePolicy - [Route] capture policy frozen: allTypes=false (layer=DEFAULT), inlineMaxBytes=262144 (layer=DEFAULT), gzipMaxBytes=8388608 (layer=DEFAULT), assertBodyMaxBytes=2097152 (layer=DEFAULT)</li>
+            <li class="con-raw">23:28:46.475 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] armed case &#39;login-priority&#39; BEFORE logon (page url=about:blank)</li>
+      </ul>
+    </details>
+        </li>
+        <li class="st-FAILURE">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">And logon DBB &quot;O63_SIT1&quot; environment as user &quot;WP7UAT2_2&quot;</span>
+                <span class="step-time">18,718 ms</span>
+            </div>
+            
+                <div class="shot"><img src="route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern/screenshots/step-001-and-logon-dbb-o63-sit1-environment-as-user-wp7uat2-2.png" alt="screenshot"/></div>
+                <div class="step-note">ERROR: [NOT_FOUND_IN_DOM] type failed after 1 attempts on &#39;#newPassword&#39; | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError</div>
+                    <details class="step-stack"><summary>Exception details</summary><pre>[NOT_FOUND_IN_DOM] type on &#39;#newPassword&#39; exists=false vis=false en=false ed=false count=0 retries=1 | cause: TimeoutError
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException$Builder.build(ElementOperationException.java:76)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.ElementOperationSupport.buildRetryException(ElementOperationSupport.java:148)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.ElementOperationSupport.executeWithRetry(ElementOperationSupport.java:121)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.ElementOperationSupport.executeWithRetry(ElementOperationSupport.java:101)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.executeWithRetry(PageElement.java:206)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.type(PageElement.java:292)
+	at com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.performLogin(LoginSteps.java:161)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionStore.lambda$wrapLeaderAction$0(SessionStore.java:722)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionStore.restoreSession(SessionStore.java:701)
+	at com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionManager.restoreSession(SessionManager.java:68)
+	at com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.logonDBBEnvironmentAsUser(LoginSteps.java:78)
+	at com.hsbc.cmb.hk.dbb.automation.tests.glue.LogonGlue.logonDBBEnvironmentAsUserGlue(LogonGlue.java:53)
+	at ✽.logon DBB &quot;O63_SIT1&quot; environment as user &quot;WP7UAT2_2&quot;(file:///D:/IdeaProject/test-[SCRUBBED]route_capability_e2e.feature:69)
+Caused by: com.microsoft.playwright.TimeoutError: Error {
+  message=&#39;Timeout 15000ms exceeded.
+  name=&#39;TimeoutError
+  stack=&#39;TimeoutError: Timeout 15000ms exceeded.
+    at _ProgressController.run (D:\IdeaProject\test-automation\.playwright\driver\playwright-java-10497438925272316505\package\lib\coreBundle.js:12135:32)
+    at DispatcherConnection.dispatch (D:\Id…[truncated]</pre></details>
+                <ul class="evidence"><li>Interaction Diagnostics (Failure) = [导航轨迹 - 失败前页面去过]
+[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon
+[frame] about:blank</li></ul>
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">13</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:28:46.476 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================</li>
+            <li class="con-raw">23:28:46.476 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - LogonGlue - Scenario: O63_SIT1 as WP7UAT2_2</li>
+            <li class="con-raw">23:28:46.477 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Effective browser: chromium</li>
+            <li class="con-raw">23:28:46.477 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Default browser: chromium</li>
+            <li class="con-raw">23:28:46.477 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================</li>
+            <li class="con-raw">23:28:46.479 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Get DBB login info - Environment: O63_SIT1, Username: WP7UAT2_2</li>
+            <li class="con-raw">23:28:46.481 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Successfully retrieved DBB login info - Environment: O63_SIT1, User: WP7UAT2_2, URL: https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon, Profile: W1-HKHBAP001060698838PUSER1</li>
+            <li class="con-raw">23:28:46.486 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================</li>
+            <li class="con-raw">23:28:46.486 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - LoginSteps - SessionKey: O63_SIT1_WP7UAT2_2</li>
+            <li class="con-raw">23:28:46.486 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================</li>
+            <li class="con-raw">23:28:46.487 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - No valid session, performing login for: O63_SIT1_WP7UAT2_2</li>
+            <li class="con-raw">23:29:04.835 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] WARN  c.h.c.h.d.a.f.w.p.e.PageElement - Element operation failed: [NOT_FOUND_IN_DOM] type failed after 1 attempts on &#39;#newPassword&#39; | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError</li>
+            <li class="con-raw">23:29:05.180 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] WARN  c.h.c.h.d.a.f.w.l.StepFailureAggregator - [interaction-diagnostics] 步骤失败交互诊断:</li>
+      </ul>
+    </details>
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">3</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">[导航轨迹 - 失败前页面去过]</li>
+            <li class="con-raw">[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon</li>
+            <li class="con-raw">[frame] about:blank</li>
+      </ul>
+    </details>
+        </li>
+        <li class="st-SKIP">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">Then route v2 e2e case &quot;login-priority&quot; assertions pass</span>
+                <span class="step-time">2 ms</span>
+            </div>
+            
+        </li>
+</ul>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Evidence</h3>
+    <ul class="evidence"><li>TRACE: route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern） = trace=trace.zip
+window=23:28:46.147 → 23:29:05.216 (19069ms)  [覆盖本用例执行窗口]</li></ul>
+  </div>
+
+
+  <div class="card">
+    <h3><span class="icon"></span>Route registrations (3)</h3>
+    <ul class="route-lines"><li>[Route] register MODIFY_REQUEST route for &#39;leftmenu/permissionLeftMenuConfig&#39; setHeader=[x-route-e2e-mod=1]</li><li>[Route] register MOCK route for &#39;leftmenu/permissionLeftMenuConfig&#39; status=real-response intercept=true body=[intercepted] replacePaths=[$.enablePaymentPP]</li><li>[Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; expectStatus=200 bodyContains=&quot;enableAdminTools&quot; bodyRegex=&quot;&quot;enablePaymentPP&quot;\s*:\s*&quot;PRI&quot;&quot; timeout=60s</li></ul>
+  </div>
+
+
+
+  <div class="card">
+    <h3><span class="icon"></span>Console &amp; API activity</h3>
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">1</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:29:07.660 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @734149119: dispatches=0, hits=0, retiredByPurpose=0, unconfirmedRetirements=0, rulesArmedMs={leftmenu/permissionLeftMenuConfig=21185}, delayDeliveries(directed=0, queued=0)</li>
+      </ul>
+    </details>
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">1</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">[1;31m✘ SCENARIO FAILED : route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）  (19068 ms)  ↳ ElementOperationException[0m</li>
+      </ul>
+    </details>
+  </div>
+
+
+  <footer>Scenario page · reportVersion 1 · outcomeId route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern</footer>
+</div>
+
+<script>
+(function(){
+  var OUTCOME_ID = "route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern";
+  window.__doPatch = function(files) {
+    if (!files || !files.length) return;
+    var results = [];
+    var readers = [];
+    for (var i = 0; i < files.length; i++) {
+      (function(f) {
+        readers.push(new Promise(function(resolve) {
+          var r = new FileReader();
+          r.onload = function() { results.push({filename: f.name, dataBase64: r.result.split(',')[1]}); resolve(); };
+          r.readAsDataURL(f);
+        }));
+      })(files[i]);
+    }
+    Promise.all(readers).then(function() {
+      var payload = JSON.stringify({outcomeId: OUTCOME_ID, screenshots: results});
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/patch', {method: 'POST', body: payload})
+          .then(function(r){ return r.json(); })
+          .then(function(d){ if (d.ok) { alert('Uploaded ' + results.length + ' screenshot(s), reloading...'); setTimeout(function(){location.reload()}, 800); } else { alert('Failed: ' + (d.error || 'unknown')); } })
+          .catch(function(e){ alert('Upload failed: ' + e); });
+      } else {
+        var blob = new Blob([payload], {type: 'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = OUTCOME_ID + '.patch.json';
+        a.click();
+        alert('Patch downloaded: ' + a.download + '\nApply locally with ManualCaseRecorder --apply-patch ' + a.download);
+      }
+    });
+  };
+
+  //  失败用例操作按钮：上传补图 + 标记通过
+  var upBtn = document.getElementById('btn-upload');
+  var msBtn = document.getElementById('btn-marksuccess');
+  var input = document.getElementById('shot-input');
+  if (upBtn && input) {
+    upBtn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', function() {
+      if (input.files && input.files.length) { window.__doPatch(input.files); input.value = ''; }
+    });
+  }
+  if (msBtn) {
+    msBtn.addEventListener('click', function() {
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/mark-success', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcomeId: OUTCOME_ID })
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) { alert('Marked success, reloading...'); setTimeout(function() { location.reload(); }, 600); }
+            else { alert('Failed: ' + (d.error || 'unknown')); }
+          })
+          .catch(function(e) { alert('Failed: ' + e); });
+      } else {
+        alert('Mark case success requires the report server (http/https).');
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

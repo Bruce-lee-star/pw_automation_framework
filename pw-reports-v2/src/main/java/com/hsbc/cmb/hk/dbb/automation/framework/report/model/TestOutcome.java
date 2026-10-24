@@ -75,6 +75,9 @@ public final class TestOutcome {
     /** 业务层自由附件（HTML/文本块，已脱敏）。additive-only。 */
     private List<TestAttachment> attachments = new CopyOnWriteArrayList<>();
 
+    /** 挂载到报告的下载文件（additive-only）：对应 per-case 报告「Downloads」Tab，可点击下载。 */
+    private List<DownloadRecord> downloads = new CopyOnWriteArrayList<>();
+
     /** 用例级捕获的 stdout（hook 输出等，脱敏，限行）。additive-only。 */
     private List<String> consoleOutput = new CopyOnWriteArrayList<>();
 
@@ -83,6 +86,23 @@ public final class TestOutcome {
 
     /** Playwright trace.zip 相对路径（&lt;outcomeId&gt;/trace.zip），有值则渲染 Trace Viewer 按钮。 */
     private String tracePath;
+
+    /**
+     * Playwright 场景录屏相对路径（{@code <outcomeId>/records/<name>.webm}），有值则渲染录像播放器。
+     *
+     * <p>仅当框架开启 {@code playwright.record.video.enabled} 时由采集方上报；未开启/未采集到
+     * 时为 null，报告 Tab 显示空态提示。additive-only。
+     */
+    private String videoPath;
+
+    /** trace 录制起始时刻（{@code HH:mm:ss.SSS}）；采集方未提供窗口时为 null。additive-only。 */
+    private String traceStartTime;
+
+    /** trace 录制结束时刻（{@code HH:mm:ss.SSS}）；采集方未提供窗口时为 null。additive-only。 */
+    private String traceEndTime;
+
+    /** trace 录制时长（毫秒；{@code <=0} 表示未知）。additive-only。 */
+    private long traceDurationMs;
 
     /** 手动 case 标记（非自动执行）。 */
     private boolean manual;
@@ -283,6 +303,14 @@ public final class TestOutcome {
         this.attachments = attachments;
     }
 
+    public List<DownloadRecord> getDownloads() {
+        return downloads;
+    }
+
+    public void setDownloads(List<DownloadRecord> downloads) {
+        this.downloads = downloads == null ? new CopyOnWriteArrayList<>() : downloads;
+    }
+
     public List<String> getConsoleOutput() {
         return consoleOutput;
     }
@@ -305,6 +333,38 @@ public final class TestOutcome {
 
     public void setTracePath(String tracePath) {
         this.tracePath = tracePath;
+    }
+
+    public String getVideoPath() {
+        return videoPath;
+    }
+
+    public void setVideoPath(String videoPath) {
+        this.videoPath = videoPath;
+    }
+
+    public String getTraceStartTime() {
+        return traceStartTime;
+    }
+
+    public void setTraceStartTime(String traceStartTime) {
+        this.traceStartTime = traceStartTime;
+    }
+
+    public String getTraceEndTime() {
+        return traceEndTime;
+    }
+
+    public void setTraceEndTime(String traceEndTime) {
+        this.traceEndTime = traceEndTime;
+    }
+
+    public long getTraceDurationMs() {
+        return traceDurationMs;
+    }
+
+    public void setTraceDurationMs(long traceDurationMs) {
+        this.traceDurationMs = traceDurationMs;
     }
 
     public boolean isManual() {

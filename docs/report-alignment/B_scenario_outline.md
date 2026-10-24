@@ -10,7 +10,7 @@
 - `TestOutcome` 无 outline 概念。Scenario Outline 的 Examples 行在 Cucumber 下展开为多个同名 `TestCase`：
   - `OutcomeIdFactory.baseId(uri, line, name)` 中 `line` = outline **定义行**（所有示例行相同）→ baseId 相同 → `ReportBus.startCase` 追加 `-2/-3` 后缀（既有注释已明示）。
   - 结果：**N 个独立 `TestOutcome`，无 outline 分组、无示例数据表**。
-- 渲染：`index.ftl` / `serenity-summary.ftl` 逐 outcome 平铺，无 outline 折叠。
+- 渲染：`index.ftl` / `feature-*.html` 逐 outcome 平铺，无 outline 折叠（`serenity-summary.ftl` 已于 2026-10-22 删除）。
 - 原生步骤嵌套：`TestStep.children` 已支持；`@Step` 调 `@Step` 经 bus `CURRENT` 句柄已归层；但 Cucumber 步栈（`PwReportPlugin.stepStack`）与 `@Step` 树是否在所有引擎 / 线程边界统一为**单一树**，需核对（见 §5）。
 
 ## 2. 目标（对齐 Serenity 模型）
@@ -98,7 +98,7 @@
 ## 7. 落地记录（2026-10-17）
 
 - **R1 spike 结论**：Cucumber 7.34.4 `io.cucumber.plugin.event.TestCase` 有 `getKeyword()`（返回 "Scenario Outline"）→ 干净探测；`getLine()` 对 outline 各行相同（共享 outline 定义行，这正是既有 baseId 需 `-2/-3` 后缀的原因）。**示例表头 / 本行取值无插件事件 API**（需解析 Gherkin 文档，较脆），故本轮**不采集** `exampleHeaders/exampleValues`（缺省 null，omit），父 outcome 的 `examples` 已含各行（每行结果 / duration / 跳转链接），达成「一个 outline → 一个 outcome + 每行结果」的核心 Serenity 对齐。表头/值增强列为后续可选（需引入 Gherkin 解析）。
-- **R2 一致性口径**：`LocalReportSink.finishAll` 在 RunFinished 全量快照上聚合一次——index / serenity-summary(.html/.json) / CSV / JUnit-XML / history 用聚合口径（父 = 1 个 outcome，任一行 FAILURE/ERROR 即父 FAILURE，duration = 行求和）；而 rows 的 per-case JSON/HTML 与 monitor-failures 仍用原始口径（保 real-time 产物 + 父页面跳转目标 + rows 上的 monitor 失败不丢）。聚合规则：仅 `scenarioOutline==true && outlineKey!=null` 按 outlineKey 分组；>1 行生成父（`examples` 挂各行，按 exampleRowNumber 排序）；恰 1 行退化为普通用例；非 outline 行原样。
+- **R2 一致性口径**：`LocalReportSink.finishAll` 在 RunFinished 全量快照上聚合一次——index / feature-*.html / serenity-summary(.json) / CSV / JUnit-XML 用聚合口径（父 = 1 个 outcome，任一行 FAILURE/ERROR 即父 FAILURE，duration = 行求和）；而 rows 的 per-case JSON/HTML 与 monitor-failures 仍用原始口径（保 real-time 产物 + 父页面跳转目标 + rows 上的 monitor 失败不丢）。聚合规则：仅 `scenarioOutline==true && outlineKey!=null` 按 outlineKey 分组；>1 行生成父（`examples` 挂各行，按 exampleRowNumber 排序）；恰 1 行退化为普通用例；非 outline 行原样。（注：其中的 `serenity-summary.html` 已于 2026-10-22 删除。）
 - **R3 additive**：`TestOutcome` 加 6 个 boxed 可空字段（`scenarioOutline/exampleHeaders/exampleValues/exampleRowNumber/outlineKey/examples`），默认 null → NON_NULL 序列化省略，故 `SchemaContractTest`（只序列化 `full()`，未设这些字段）与 `SnapshotGateTest`（`full()` 无 outline，模板 outline 块被 `scenarioOutline` 守卫）**零影响**；schema 已同步声明 6 个可选字段（DR-1）。
-- 改动清单：`TestOutcome`(+6 字段/访问器)、`RecordingSession`(outline 字段 + `markOutline` + `toOutcome` 投影)、`ReportBus.markOutline`、`PwReportPlugin.onCaseStarted`(keyword 探测 + 行计数)、新增 `OutlineAggregator`、`LocalReportSink.finishAll`(聚合口径)、`SummaryHtmlRenderer.scenarioRow`(+isOutline/exampleCount)、`index.ftl`/`serenity-summary.ftl`/`test-outcome.ftl`(outline 展示)、`pw-reports-schema.json`(+6 可选字段)、新增 `OutlineAggregatorTest`(5)。
+- 改动清单：`TestOutcome`(+6 字段/访问器)、`RecordingSession`(outline 字段 + `markOutline` + `toOutcome` 投影)、`ReportBus.markOutline`、`PwReportPlugin.onCaseStarted`(keyword 探测 + 行计数)、新增 `OutlineAggregator`、`LocalReportSink.finishAll`(聚合口径)、`SummaryHtmlRenderer.scenarioRow`(+isOutline/exampleCount)、`index.ftl`/`feature.ftl`/`test-outcome.ftl`(outline 展示)、`pw-reports-schema.json`(+6 可选字段)、新增 `OutlineAggregatorTest`(5)。（注：其中的 `serenity-summary.ftl` 已于 2026-10-22 删除。）
 - 验证：`pw-reports-v2` 161 例 0 失败（含 SchemaContract 3 / SnapshotGate 2 / OutlineAggregator 5 / CSV/JUnit/Index/Summary 渲染测试）；`pw-web-ui -am` 全量 389 例 0 失败（下游对着改后 reporting 编译并零回归）。

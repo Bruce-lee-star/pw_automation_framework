@@ -141,6 +141,17 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
                 return null;
             }
             throw new IllegalStateException("[Route] driver call '" + opName + "' failed", cause);
+        } catch (java.util.concurrent.CancellationException cancelled) {
+            //  P0-1 缓解：本调用被「其它调用」的超时处置 shutdownNow() 取消（跨用例信道毒化）。
+            //  任务尚未执行/被中断，并非本用例自身超时，故降级而非把别人的故障判成本用例的失败。
+            Thread.currentThread().interrupt();
+            if (policy == OnTimeout.FAIL_FAST) {
+                LOGGER.warn("[Route] driver call '{}' was cancelled by another call's timeout reset "
+                        + "(cross-case channel poisoning) — degrading this case instead of failing it", opName);
+                return null;
+            }
+            LOGGER.warn("[Route] driver call '{}' cancelled (cross-case channel reset) — abandoning", opName);
+            return null;
         }
         //  调用成功 ⇒ 信道可确证可用（超时标记自动恢复；信道故障计数保持单调，供会话层判断是否被污染）
         UNUSABLE.set(false);

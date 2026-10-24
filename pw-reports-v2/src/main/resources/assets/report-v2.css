@@ -9,23 +9,55 @@
   --compromised:#9333ea; --pending:#d97706; --skipped:#94a3b8; --manual:#0d9488;
   --radius:12px;
   --shadow:0 1px 3px rgba(31,45,61,.08), 0 4px 16px rgba(31,45,61,.06);
+  /* 自绘折叠箭头（V 形，stroke 用 black，实际颜色由 mask + background-color:currentColor 决定） */
+  --chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='8 4 16 12 8 20'/%3E%3C/svg%3E");
 }
 * { box-sizing:border-box; margin:0; padding:0; }
 body { background:var(--bg); color:var(--text);
        font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
 a { color:var(--primary); }
 
-/* ---------- 顶部栏 ---------- */
-.topbar { background:linear-gradient(135deg,#1e3a8a,#2563eb); color:#fff; padding:18px 32px;
-          display:flex; align-items:center; justify-content:space-between; gap:16px; }
+/* ---------- 顶部栏 ----------
+   2026-10-22 用户反馈：测试报告期望绿色（绿色=PASS 的语义直觉）；报告名居中显示、
+   不再展示 feature 描述（过长会把标题挤压）；返回链接固定文案，仅回到当前 scenario 所属 feature。 */
+/* 2026-10-22 用户要求"顶部颜色换一下"：原绿色渐变（#065f46→#10b981）与邮件报告横幅
+   （#1e3a8a）不一致，且绿色在语义上偏向"全部通过"；改为靛蓝渐变，与邮件同色系。 */
+.topbar { background:linear-gradient(135deg,#1e3a8a,#2563eb); color:#fff; padding:16px 32px;
+          display:flex; align-items:center; gap:16px; }
 .topbar h1 { font-size:18px; font-weight:600; }
-.topbar .meta { font-size:12px; opacity:.85; text-align:right; line-height:1.7; }
+.topbar .meta { font-size:12px; opacity:.85; text-align:right; line-height:1.7; margin-left:auto; }
+/* 报告名（project.report.name，未配置显示 Test Report）：字号/字重/颜色固定，四份报告标题栏一致 */
+.topbar .proj { font-size:14px; font-weight:600; color:#fff; opacity:1; }
 .topbar a { color:#fff; opacity:.9; text-decoration:none; font-size:13px; }
 .topbar a:hover { opacity:1; text-decoration:underline; }
-.wrap { max-width:1280px; margin:24px auto; padding:0 24px; }
+/* 三栏：左=返回（flex:1）、中=报告名（真正居中）、右=版本（flex:1 右对齐） */
+.topbar-side { flex:1 1 0; display:flex; align-items:center; min-width:0; }
+.topbar-side.is-right { justify-content:flex-end; }
+/* 右侧多行概要：flex 容器里 <br> 会退化成匿名 flex item、不可靠，改用块级堆叠 */
+.topbar-stack { line-height:1.6; }
+.topbar-side.is-right .topbar-stack { text-align:right; }
+.topbar-stack .topbar-ver { display:block; }
+.topbar-title { flex:0 1 auto; text-align:center; font-size:18px; font-weight:700;
+                letter-spacing:.3px; white-space:nowrap; }
+.topbar-ver { font-size:12px; opacity:.85; white-space:nowrap; }
+/* CI / 构建链接（顶栏右侧，仅 Jenkins / GitLab CI 运行且存在 BUILD_URL 时渲染）：
+   企业级状态条风格的 pill；有构建 URL 才是 <a>（target=_blank + rel=noopener 防反向标签页劫持），
+   hover 微亮。 */
+.topbar .topbar-build { display:inline-flex; align-items:center; gap:6px; margin-top:3px;
+                        padding:2px 10px; border:1px solid rgba(255,255,255,.5); border-radius:999px;
+                        font-size:12px; line-height:1.5; color:#fff; opacity:.95; }
+.topbar a.topbar-build { text-decoration:none; }
+.topbar a.topbar-build:hover { background:rgba(255,255,255,.18); opacity:1; text-decoration:none; }
+.topbar .topbar-build .tb-ci { font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.topbar .topbar-build .tb-job { font-weight:600; }
+.topbar .topbar-build .tb-commit { font-family:ui-monospace,Consolas,monospace; opacity:.82; }
+.topbar .topbar-build .tb-ext { font-size:11px; margin-left:1px; }
+/* 2026-10-22：页面正文宽度 1280 → 1440（用户要求“整个页面宽度再增大一些”，feature 名很长时更从容） */
+.wrap { max-width:1440px; margin:24px auto; padding:0 24px; }
 
 /* ---------- KPI ---------- */
-.kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:24px; }
+/* 2026-10-22：KPI 行新增 Features 卡（feature 统计并入顶部，Feature overview 下不再放统计卡），5 → 6 列 */
+.kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:16px; margin-bottom:24px; }
 .kpi { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
        padding:18px 20px; box-shadow:var(--shadow); position:relative; overflow:hidden; }
 .kpi::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--c,#ccc); }
@@ -62,6 +94,24 @@ a { color:var(--primary); }
 .legend .v { margin-left:auto; font-weight:600; }
 
 /* ---------- 运行环境 ---------- */
+/* 环境横带（Statistics 卡内、图表下方全宽）：label 上 / value 下，与 timing-row 同一排版语言；
+   项间用细分割线区分，避免挤在一行里读不出分组（2026-10-22 用户反馈四列并置"不协调"）。 */
+.env-band { margin-top:22px; padding-top:18px; border-top:1px solid var(--border); }
+/* auto-fit：环境项与 Browsers 共用一行按需铺开（6 项在 1440 宽下正好一行）；
+   minmax(160px,1fr) 保证窄屏自动换到 2 列，不会挤压换行。 */
+.env-items { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px 20px; }
+.env-band .env-item { display:flex; flex-direction:column; gap:3px; min-width:0;
+                      padding-left:16px; border-left:1px solid var(--border); }
+.env-band .env-item:first-child { border-left:none; padding-left:0; }
+.env-band .env-item .k { font-size:10px; font-weight:700; letter-spacing:.04em;
+                         text-transform:uppercase; color:#475569; }
+.env-band .env-item .v { font-size:13px; font-weight:600; color:var(--text); overflow-wrap:anywhere; }
+/* Browsers 作为环境行的末项：多浏览器时才显示细分段条（单浏览器无信息量） */
+.env-item-browsers .browser-bar { margin:6px 0 0; }
+@media (max-width:1020px) {
+  .env-items { grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 20px; }
+  .env-band .env-item { padding-left:16px; border-left:1px solid var(--border); }
+}
 .env-item { display:flex; align-items:center; gap:10px; padding:7px 0; font-size:13px;
             border-bottom:1px dashed var(--border); }
 .env-item:last-child { border-bottom:none; }
@@ -79,6 +129,27 @@ table.tbl { width:100%; border-collapse:collapse; font-size:13px; }
 .tbl td { padding:12px; border-bottom:1px solid var(--border); vertical-align:middle; }
 .tbl tbody tr:hover td { background:#f8fafc; }
 .tbl .num-cell { text-align:right; font-variant-numeric:tabular-nums; }
+/* ---------- 表头内嵌筛选（index 的 Feature overview + per-feature 的 Scenarios 共用） ----------
+   2026-10-22 用户要求：筛选直接放在表头列内（不再用表格上方工具栏），
+   每列筛选控件与自己的列对齐；最右列放「命中数 + Reset」，形成完整的筛选区。 */
+.tbl tr.filter-row th { padding:6px 8px; border-bottom:1px solid var(--border); background:#fbfdff; }
+.tbl tr.filter-row select { width:100%; box-sizing:border-box; padding:5px 8px;
+  border:1px solid var(--border); border-radius:7px; font-size:12px; font-family:inherit;
+  color:var(--text); background:#fff; transition:border-color .12s,box-shadow .12s; }
+.tbl tr.filter-row select:hover { border-color:#c7d2e3; }
+.tbl tr.filter-row select:focus-visible { outline:none; border-color:var(--primary);
+  box-shadow:0 0 0 3px rgba(37,99,235,.15); }
+/* 最右列：命中数 + Reset（Reset 在无任何条件时置灰，避免"点了没反应"） */
+.tbl tr.filter-row .flt-actions { display:flex; align-items:center; justify-content:flex-end;
+  gap:8px; white-space:nowrap; }
+.tbl tr.filter-row .flt-count { font-size:11px; font-variant-numeric:tabular-nums; }
+.tbl tr.filter-row .flt-reset { padding:5px 11px; font-size:11px; font-weight:600;
+  font-family:inherit; color:var(--text-2); background:#fff; border:1px solid var(--border);
+  border-radius:7px; cursor:pointer; transition:.12s; }
+.tbl tr.filter-row .flt-reset:hover:not([disabled]) { color:var(--primary);
+  border-color:var(--primary); background:#eff6ff; }
+.tbl tr.filter-row .flt-reset:focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
+.tbl tr.filter-row .flt-reset[disabled] { opacity:.45; cursor:default; }
 .bar-mini { display:flex; height:8px; border-radius:4px; overflow:hidden; width:110px; margin-bottom:4px; }
 .bar-mini i { display:block; height:100%; }
 .link { color:var(--text); text-decoration:none; font-weight:500; }
@@ -91,6 +162,11 @@ tr.clickable:hover .link { color:var(--primary); text-decoration:underline; }
 td.link-cell { position:relative; }
 .link-arrow { color:var(--text-2); font-size:12px; opacity:0; transition:.12s; margin-left:6px; }
 tr.clickable:hover .link-arrow { opacity:1; color:var(--primary); }
+/* 整行可点改用真实 <a>（2026-10-23 修复）：Jenkins 对归档 HTML 施加 CSP/sandbox，
+   内联 onclick 会被浏览器拦掉，点击整行毫无反应。用锚点包裹链接单元格后完全不依赖 JS，
+   天然可点、可键盘聚焦；hover 高亮仍由上面的 tr.clickable 规则提供。 */
+a.row-link { display:block; color:inherit; text-decoration:none; }
+a.row-link:focus-visible { outline:2px solid var(--primary); outline-offset:2px; border-radius:6px; }
 .sub { color:var(--text-2); font-size:12px; }
 
 /* ---------- 徽章 ---------- */
@@ -212,7 +288,32 @@ body.drawer-open .drawer { right:0; }
 .step-desc { font-weight:500; }
 .st-FAILURE .step-desc { color:var(--failure); }
 .st-SKIP .step-desc { color:var(--text-2); text-decoration:line-through; }
-.step-time { margin-left:auto; font-size:12px; color:var(--text-2); font-variant-numeric:tabular-nums; }
+/* 时长以秒结算后位数变少，故加深颜色 + 加粗，避免"看不清"（2026-10-22 用户反馈颜色不明显） */
+.step-time { margin-left:auto; font-size:13px; font-weight:600; color:#334155;
+             font-variant-numeric:tabular-nums; }
+/* ---------- 步骤可折叠 ----------
+   summary 即原 step-row（时间线节点 + 标题 + 耗时）；折叠时整个 step-body
+   （含 Route Register / Route Captured / API Request / 失败面板）一起隐藏。 */
+.step-details { margin:0; }
+.step-details > summary { cursor:pointer; list-style:none; user-select:none; }
+.step-details > summary::-webkit-details-marker { display:none; }
+/* 折叠箭头自绘（内联 SVG + mask，随 currentColor 取色）：原 ▸ 字符在 10px 下过小，
+   2026-10-22 用户要求"自己画一个、放大"。16px 线框 V 形，展开时旋转 90°。 */
+.step-details > summary::before { content:""; flex:none; width:16px; height:16px; margin-right:2px;
+    color:var(--text-2); background-color:currentColor;
+    -webkit-mask:var(--chevron) no-repeat center/contain; mask:var(--chevron) no-repeat center/contain;
+    transition:transform .15s ease; }
+.step-details[open] > summary::before { transform:rotate(90deg); }
+.step-body { margin-top:4px; }
+/* ---------- 步骤截图：与步骤明细<b>同级</b>（flex 兄弟，见 .step-line） + 悬浮放大 ----------
+   2026-10-22 起不再 float 在 step-body 内：截图放在 <details> 之外，折叠步骤不影响截图可见；
+   布局由 per-case 模板内联样式定义 .step-line/.shot，这里只保留放大交互（模板同源覆盖亦可）。 */
+.shot { position:relative; }
+.shot img { display:block; width:100%; border:1px solid var(--border); border-radius:6px;
+            cursor:zoom-in; }
+/* 悬浮放大改为「铺满视口的完整预览」（见 per-case 模板 #shot-hover）：
+   原 transform:scale(2.2) 会被 .shot 的 overflow 裁掉，且放大后溢出屏幕、看不到整页
+   （2026-10-22 用户反馈）。此处只保留指针语义。 */
 .step-actions { display:flex; align-items:center; gap:6px; }
 .step-actions select { padding:3px 8px; font-size:12px; border:1px solid var(--border);
                        border-radius:8px; font-family:inherit; background:#fff; }
@@ -247,15 +348,66 @@ body.drawer-open .drawer { right:0; }
 .btn-trace.ghost { background:#fff; color:#4f46e5; border:1px solid #a5b4fc; }
 .btn-trace.ghost:hover { background:#eef2ff; }
 
-/* ---------- 步骤 stack ---------- */
-.step-stack { margin:8px 0 0; border-left:3px solid #fecaca; background:#fff5f5;
-              border-radius:0 8px 8px 0; padding:10px 12px; }
-.step-stack summary { cursor:pointer; color:var(--failure); font-size:12px; font-weight:600; list-style:none; }
-.step-stack summary::-webkit-details-marker { display:none; }
-.step-stack summary::before { content:"▸ "; }
-.step-stack[open] summary::before { content:"▾ "; }
-.step-stack pre { font:11.5px/1.65 Consolas,monospace; color:#7f1d1d; white-space:pre-wrap;
-                  word-break:break-all; margin-top:8px; max-height:200px; overflow:auto; }
+/* ---------- 失败信息面板（2026-10-20 重设计）----------
+   旧版把「异常类名 + 整段消息」直接铺成红色等宽小字，长 URL 折行后糊成一片、可读性差。
+   新版：左侧色条 + 浅红底的整体面板，异常类型做成徽标，消息用正文排版（非等宽、行高舒适），
+   堆栈收进与 Console 面板一致的折叠区（chevron），默认收起不抢视线。 */
+.failure-panel { margin:10px 0 0; border:1px solid #fecaca; border-left:4px solid var(--failure);
+                 background:#fff6f6; border-radius:0 10px 10px 0; overflow:hidden; }
+.failure-head { display:flex; gap:12px; padding:14px 16px; align-items:flex-start; }
+.failure-icon { flex:none; width:20px; height:20px; margin-top:1px; border-radius:50%;
+                background:var(--failure); color:#fff; font-size:12px; font-weight:700;
+                line-height:20px; text-align:center; }
+.failure-body { min-width:0; flex:1 1 auto; }
+.failure-type { display:inline-block; margin-bottom:6px; padding:1px 8px; border-radius:5px;
+                background:#fee2e2; color:#b91c1c; font:600 11.5px/1.5 Consolas,monospace;
+                overflow-wrap:anywhere; }
+.failure-msg { font-size:13px; line-height:1.75; color:#7f1d1d; overflow-wrap:anywhere; }
+/* 失败消息分段（2026-10-22 用户反馈"失败展示不友好"）：
+   框架元素异常是 "原因 | page=… title=… obstruction=… | cause=…" 三段式
+   （ElementOperationSupport#buildDiagnosticMessage），整段糊一行既看不出重点也没法扫读。
+   拆行后：第一段=主因（加粗），page 段弱化为次要信息，cause 段做成徽标。 */
+.failure-seg { padding:1px 0; }
+.failure-seg + .failure-seg { margin-top:3px; }
+/* 主因（首段）加重，长 URL 段落弱化为次要信息，视觉层级一眼可分。 */
+.failure-msg > .failure-seg:first-child { font-weight:600; color:#991b1b; }
+.failure-seg.is-page { color:#9ca3af; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.failure-seg.is-cause { display:inline-block; margin-top:6px; padding:1px 8px; border-radius:5px;
+                        background:#fee2e2; color:#b91c1c; font:600 11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.failure-stack { border-top:1px solid #fecaca; }
+.failure-stack > summary { cursor:pointer; padding:8px 14px; font-size:12px; font-weight:600;
+                           color:#b91c1c; background:#fff1f1; list-style:none; user-select:none;
+                           display:flex; align-items:center; gap:8px; }
+.failure-stack > summary::-webkit-details-marker { display:none; }
+.failure-stack > summary::before { content:""; flex:none; width:14px; height:14px;
+    color:#b91c1c; background-color:currentColor;
+    -webkit-mask:var(--chevron) no-repeat center/contain; mask:var(--chevron) no-repeat center/contain;
+    transition:transform .15s ease; }
+.failure-stack[open] > summary::before { transform:rotate(90deg); }
+/* 堆栈结构化展示（2026-10-23 优化）：逐行渲染并分类，应用帧加重、三方库帧弱化、
+   Caused by 根因高亮；summary 右侧显示异常类名/行数并带 Copy 按钮。 */
+.stack-title { flex:0 0 auto; }
+.stack-class { flex:0 0 auto; padding:1px 7px; border-radius:5px; background:#fee2e2; color:#b91c1c;
+               font:600 10.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;
+               max-width:44%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stack-count { margin-left:auto; flex:0 0 auto; color:#c08484; font-size:11px; font-weight:500; }
+.stack-copy { flex:0 0 auto; padding:2px 9px; border:1px solid #fecaca; border-radius:5px;
+              background:#fff; color:#b91c1c; font-family:inherit; font-size:11px; font-weight:600;
+              line-height:1.5; cursor:pointer; }
+.stack-copy:hover { background:#fff1f1; }
+.stack-copy:disabled { color:#c08484; cursor:default; }
+.stack-body { max-height:320px; overflow:auto; padding:10px 14px; background:#fffbfb;
+              font:11.5px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.stack-line { white-space:pre-wrap; overflow-wrap:anywhere; color:#7f1d1d; }
+.stack-line.is-ex { color:#991b1b; }
+/* 只把首行（异常声明）加粗；多行消息的续行保持常规字重，避免整段强调反而没有重点。 */
+.stack-body > .stack-line:first-child { font-weight:700; }
+.stack-line.is-app { color:#991b1b; font-weight:600; }
+.stack-line.is-lib { color:#c08484; }
+.stack-line.is-cause { color:#b91c1c; font-weight:700; margin-top:5px; }
+.stack-line.is-suppressed { color:#c08484; font-style:italic; }
+.stack-line.is-more { color:#c08484; font-style:italic; }
+.stack-line.is-empty { height:0; }
 
 /* ---------- 结果标记（用例列表内联） ---------- */
 .inline-mark { display:inline-flex; align-items:center; gap:6px; }
@@ -275,7 +427,7 @@ body.drawer-open .drawer { right:0; }
                 align-items:center; justify-content:center; pointer-events:none; }
 .donut-center b { font-size:22px; font-weight:700; line-height:1.15; }
 .donut-center span { font-size:11px; color:var(--text-2); margin-top:2px; }
-.donut-box { display:flex; align-items:center; gap:20px; }
+.donut-box { display:flex; align-items:flex-start; gap:20px; min-width:0; flex-wrap:wrap; }
 .legend { list-style:none; font-size:13px; flex:1; min-width:0; }
 .legend li { display:flex; align-items:center; gap:8px; margin:7px 0; }
 .legend .dot { width:10px; height:10px; border-radius:3px; flex:none; }
@@ -291,6 +443,11 @@ body.drawer-open .drawer { right:0; }
 .dist-list .n { margin-left:auto; font-weight:700; font-variant-numeric:tabular-nums; }
 .dist-list .pct2 { width:46px; text-align:right; color:var(--text-2); font-size:12px;
                    font-variant-numeric:tabular-nums; }
+/* 图例撑满环形图高度并均匀分布（2026-10-22 用户反馈 Statistics 不协调）：
+   2 项图例（Automated/Manual）原先缩在顶部、旁边一大块空白；撑到 148px 后与 5 项
+   图例的视觉重量一致，三列的高度感才齐平。 */
+.donut-box .dist-list { align-self:stretch; display:flex; flex-direction:column;
+                        justify-content:space-evenly; min-height:148px; }
 .stack-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; margin:4px 0 14px; }
 .stack-bar i { display:block; height:100%; }
 .donor-note { font-size:12px; color:var(--text-2); margin-top:10px; line-height:1.7; }
@@ -306,27 +463,62 @@ label.uploader.ghost:hover { background:#f1f5f9; color:var(--text); border-color
 
 footer { text-align:center; color:var(--text-2); font-size:12px; padding:16px 0 40px; }
 
-/* ---------- 统计模块（构成 / 结果 / 耗时，合并为一个模块） ---------- */
-.stats-grid { display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:24px; align-items:start; }
-.stat-block { min-width:0; }
+/* ---------- 统计模块（构成 / 结果 / 耗时，合并为一个模块）----------
+   轨道必须写 minmax(0,1fr) 而非 1fr：1fr 的自动下限是各项的 min-content，
+   环形图（148px 定宽）+ 图例文字会把列撑宽并溢到相邻列——用户看到的"统计块互相重叠"
+   正是这么来的（2026-10-22 用户反馈）。min-width:0 让列可以收缩、文字自行折行。 */
+/* 三列等高：Automated vs Manual（2 行图例）与 Result distribution（5 行图例）图例行数不同，
+   若各占各的高度，环形图与底部进度条会一高一低。改为 stretch 等高 + stat-block 纵向 flex，
+   底部 stack-bar 用 margin-top:auto 钉到同一条基线，两块才真正对齐（2026-10-22 用户反馈）。 */
+/* 2026-10-22：Environment 曾并入第四列，用户反馈"不协调"（窄列里值被折断、与三张图权重失衡），
+   改回 3 列图表栅格 + 全宽环境横带（见 .env-band）。页面宽度 1280 → 1440（同轮用户要求加宽）。 */
+.stats-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; align-items:stretch; }
+.stat-block { min-width:0; display:flex; flex-direction:column; }
+.stat-block > .stack-bar { margin-top:auto; }
 .stat-title { font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
               color:var(--text-2); margin-bottom:14px; }
+/* 执行耗时汇总（Total / Clock / Average / Max / Min）：Statistics 卡底部一行，
+   与邮件报告同口径（2026-10-22 用户反馈 index/feature 缺这块）。
+   同日再调整：用户反馈"Total/Clock 这些字体不显眼"——标签由 10px 灰提到 11px 深灰加粗，
+   数值 16px → 18px，与邮件指标条（11px/15px）保持同一醒目层级。 */
+.timing-row { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px;
+              margin-top:18px; padding-top:14px; border-top:1px solid var(--border); }
+.timing-cell { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.timing-cell .k { font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+                  color:#475569; }
+.timing-cell .v { font-size:18px; font-weight:700; color:var(--text);
+                  font-variant-numeric:tabular-nums; }
+@media (max-width:1020px) { .timing-row { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 .env-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 28px; }
 
+/* ---------- 可排序表头（overview / feature 的 Duration 列共用） ---------- */
+th.sortable { user-select: none; }
+th.sortable:hover { color: var(--primary); }
+
 /* ---------- 耗时分布直方图 ---------- */
-.hist2 { display:flex; gap:10px; height:160px; padding:6px 2px 0; border-bottom:1px solid var(--border);
-         background-image:repeating-linear-gradient(to top, var(--border) 0 1px, transparent 1px 25%); }
-.hist2-col { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; }
-.hist2-count { font-size:11px; font-weight:700; color:var(--text); margin-bottom:6px;
-               font-variant-numeric:tabular-nums; }
-.hist2-count.zero { color:var(--skipped); font-weight:500; }
-.hist2-plot { width:100%; flex:1; display:flex; align-items:flex-end; justify-content:center; }
-.hist2-bar { width:64%; border-radius:6px 6px 0 0; min-height:2px;
+/* 耗时分布直方图（2026-10-22 重绘）：左侧 y 轴刻度 + 绘图区（网格线）+ 底部 x 标签。
+   绘图区固定 128px，柱高按「桶计数/最大桶」缩放；数值标签贴在柱顶上方。 */
+/* 顶部留 24px：最高柱到 100% 时，其数值标签（absolute + bottom:100% + 5px 外边距，
+   行高约 22px）会向上占一截，不预留就会顶到 stat-title（2026-10-22 用户反馈“数量与标题有点挤”）。 */
+.hist2 { display:flex; gap:10px; padding-top:24px; }
+.hist2-scale { width:26px; flex:none; height:128px; display:flex; flex-direction:column;
+               justify-content:space-between; align-items:flex-end; padding-right:6px;
+               font-size:10px; color:var(--text-2); font-variant-numeric:tabular-nums; }
+.hist2-body { flex:1; min-width:0; }
+.hist2-tracks { display:flex; gap:10px; height:128px; border-bottom:1px solid var(--border);
+                background-image:repeating-linear-gradient(to top, var(--border) 0 1px, transparent 1px 25%); }
+.hist2-col { flex:1; min-width:0; display:flex; align-items:flex-end; justify-content:center; }
+.hist2-bar { width:46%; max-width:40px; min-height:2px; border-radius:5px 5px 0 0; position:relative;
              background:linear-gradient(180deg,#60a5fa,#3b82f6);
              transition:height .25s ease, filter .15s ease; }
-.hist2-col:hover .hist2-bar:not(.empty) { filter:brightness(1.06); }
-.hist2-bar.empty { height:2px !important; background:var(--border); border-radius:2px; min-height:0; }
-.hist2-label { font-size:10.5px; color:var(--text-2); margin-top:8px; white-space:nowrap; }
+.hist2-bar:hover:not(.empty) { filter:brightness(1.06); }
+.hist2-bar.empty { width:10px; height:2px; border-radius:2px; background:var(--border); min-height:0; }
+.hist2-val { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); margin-bottom:5px;
+             font-size:11px; font-weight:700; color:var(--text); white-space:nowrap;
+             font-variant-numeric:tabular-nums; }
+.hist2-labels { display:flex; gap:10px; margin-top:6px; }
+.hist2-labels span { flex:1; min-width:0; text-align:center; font-size:10.5px; color:var(--text-2);
+                     white-space:nowrap; }
 .hist2-axis { display:flex; justify-content:space-between; font-size:11px; color:var(--text-2); margin-top:8px; }
 
 /* ---------- 控制台 / API 分组 ---------- */
@@ -338,8 +530,11 @@ footer { text-align:center; color:var(--text-2); font-size:12px; padding:16px 0 
                        display:flex; align-items:center; gap:8px; user-select:none; transition:background .12s; }
 .con-group > summary:hover { background:#f1f5f9; }
 .con-group > summary::-webkit-details-marker { display:none; }
-.con-group > summary::before { content:"▸"; width:10px; flex:none; color:var(--con-accent,var(--text-2)); font-size:10px; }
-.con-group[open] > summary::before { content:"▾"; }
+.con-group > summary::before { content:""; flex:none; width:14px; height:14px;
+    color:var(--con-accent,var(--text-2)); background-color:currentColor;
+    -webkit-mask:var(--chevron) no-repeat center/contain; mask:var(--chevron) no-repeat center/contain;
+    transition:transform .15s ease; }
+.con-group[open] > summary::before { transform:rotate(90deg); }
 .con-count { margin-left:auto; min-width:20px; padding:1px 8px; border-radius:999px;
              background:var(--con-accent,var(--text-2)); color:#fff; font-size:11px; font-weight:700;
              text-align:center; font-variant-numeric:tabular-nums; }
@@ -348,6 +543,10 @@ footer { text-align:center; color:var(--text-2); font-size:12px; padding:16px 0 
 .con-lines li { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:11.5px; line-height:1.55;
                 color:var(--con-fg,#334155); padding:1px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .con-lines li + li { border-top:1px solid rgba(15,23,42,.05); }
+/* 卡片列表容器（Route Captured）：与 .con-lines 一样限高内部滚动，
+   避免一次抓十几条时把步骤面板拉得极长；卡片之间的间隔由 .api-card + .api-card 提供。 */
+.con-cards { max-height:520px; overflow:auto; padding:2px 0 8px;
+             background:var(--con-bg,#fbfcfe); border-top:1px solid var(--border); }
 /* 键值行（RestAssured 请求/响应转储）：键固定宽度、值自动换行；续行对齐到值列。 */
 .con-lines li.con-kv { display:grid; grid-template-columns:minmax(96px,132px) minmax(0,1fr);
                        gap:0 10px; white-space:normal; }
@@ -355,22 +554,138 @@ footer { text-align:center; color:var(--text-2); font-size:12px; padding:16px 0 
 .con-v { overflow-wrap:anywhere; }
 .con-lines li.con-cont { padding-left:142px; color:var(--text-2); }
 .con-route { --con-accent:#7c3aed; --con-bg:#faf8ff; --con-fg:#4c1d95; } .con-route > summary { color:#5b21b6; }
+/* Route Register（我们注册了什么）与 Route Captured（页面实际被抓到什么）必须是两种颜色，
+   否则同类紫块并排出现时分不清口径（2026-10-21 用户反馈）。 */
+.con-register { --con-accent:#7c3aed; --con-bg:#faf8ff; --con-fg:#4c1d95; } .con-register > summary { color:#5b21b6; }
+.con-captured { --con-accent:#0d9488; --con-bg:#f4fdfa; --con-fg:#115e59; } .con-captured > summary { color:#0f766e; }
+.card.con-register h3 { color:#5b21b6; }
+.card.con-captured h3 { color:#0f766e; }
 .con-net { --con-accent:#3b82f6; --con-bg:#f7faff; --con-fg:#1e3a8a; } .con-net > summary { color:#1d4ed8; }
 .con-log { --con-accent:#16a34a; --con-bg:#f7fdf9; --con-fg:#14532d; } .con-log > summary { color:#15803d; }
 .con-out { --con-accent:#64748b; --con-bg:#fbfcfe; --con-fg:#334155; }
 .con-err { --con-accent:#dc2626; --con-bg:#fff7f7; --con-fg:#7f1d1d; } .con-err > summary { color:#b91c1c; }
-.api-lines { list-style:none; }
-.api-lines li { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px;
-                background:#f8fafc; border:1px solid var(--border); border-radius:6px;
-                padding:4px 8px; margin:3px 0; word-break:break-all; }
 .route-lines { list-style:none; }
 .route-lines li { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px;
                   background:#f5f2ff; border:1px solid #ddd6fe; border-left:3px solid #7c3aed;
                   border-radius:6px; padding:4px 8px; margin:3px 0; word-break:break-all; }
 
+/* ---------- 底部 Tab 区：Console log / Playwright trace / Playwright records ----------
+   三段内容同级平铺在一张卡内，一次只看一段；trace/records 从右栏搬到这里，
+   避免右栏被大块 trace 卡占满、步骤区被挤成一列（2026-10-20 用户要求）。 */
+.bottom-tabs .tab-bar { display:flex; gap:4px; border-bottom:1px solid var(--border); margin:-4px -4px 12px; }
+.bottom-tabs .tab-btn { padding:9px 14px; border:none; background:none; cursor:pointer;
+                        font-size:13px; font-weight:600; color:var(--text-2);
+                        border-bottom:2px solid transparent; transition:color .12s; }
+.bottom-tabs .tab-btn:hover { color:var(--text); }
+.bottom-tabs .tab-btn.is-active { color:#4f46e5; border-bottom-color:#4f46e5; }
+.bottom-tabs .tab-pane { display:none; }
+.bottom-tabs .tab-pane.is-active { display:block; }
+.bottom-tabs .tab-empty { font-size:13px; color:var(--text-2); padding:14px 2px; margin:0; }
+.record-video { width:100%; max-width:880px; border:1px solid var(--border); border-radius:8px;
+                background:#0f172a; }
+
+/* ---------- 用例详情两栏：左=执行步骤，右=Playwright Trace / 人工复核 ---------- */
+.case-layout { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:16px; align-items:start; }
+/* 右栏没有内容（通过用例没有 Case actions）时收回 340px+gap：
+   否则「Execution steps」卡片会比上方的标题卡窄 356px，上下对不齐（2026-10-22 用户反馈）。 */
+.case-layout.is-single { grid-template-columns:minmax(0,1fr); }
+.case-main, .case-side { min-width:0; display:flex; flex-direction:column; gap:16px; }
+
+/* ---------- Playwright Trace 卡片（右栏）---------- */
+.trace-card { border:1px solid #c7d2fe; background:#eef2ff; }
+.trace-card h3 { color:#3730a3; }
+.trace-card h3 .icon { background:#4f46e5; }
+.trace-path { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:11.5px; color:#4338ca;
+              background:#fff; border:1px solid #c7d2fe; border-radius:6px; padding:6px 8px;
+              overflow-wrap:anywhere; }
+/* 路径 + 操作按钮同一行：路径占满剩余宽度并自行折行，按钮定宽靠右。
+   <b>必须用 grid（minmax(0,1fr) auto）而非 flex-wrap</b>：长路径的 max-content 宽度会把按钮
+   挤到下一行（2026-10-22 实测：缺这条规则时 .trace-path-row 退化成普通块级容器，
+   路径与按钮竖着堆叠，用户反馈"这块显示乱了"）。 */
+.trace-path-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px;
+                  align-items:start; margin-bottom:10px; }
+.trace-meta { display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 10px;
+              font-size:12px; margin:0 0 12px; }
+.trace-meta dt { color:#6366f1; white-space:nowrap; }
+.trace-meta dd { margin:0; color:#312e81; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.trace-btns { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
+.trace-hint { margin-top:10px; padding:8px 12px; font-size:12px; line-height:1.6;
+              color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; }
+.trace-hint a { color:#92400e; }
+.tab-empty code { background:rgba(0,0,0,.06); padding:1px 5px; border-radius:4px; font-size:12px; }
+
+/* ---------- 步骤级 API Request / Route Register / Route Captured ----------
+   Route Register / Route Captured 的子项统一走 con-lines 排版（等宽、行分隔），
+   只靠左侧色条 + 标题色区分来源（均为紫，同族）。
+   API Request 的子项是「管道分隔多行块」，渲染成结构化卡片 api-card：
+   头部一行 = 方法徽标 + URL + 状态徽标 + 耗时；下面按 Request/Response 分区列
+   Headers / Body。单行纯文本既不分方法也没法分区（2026-10-20 用户反馈）。 */
+.step-api, .step-route, .step-captured { margin-top:6px; }
+
+.api-card { margin:8px 12px; border:1px solid var(--border); border-radius:8px;
+            background:var(--surface); overflow:hidden; }
+/* 相邻卡片之间留明显间隔：Route Captured 一次可能抓十几条，贴在一起就糊成一片
+   （2026-10-22 用户反馈"看不出区分"）。 */
+.api-card + .api-card { margin-top:10px; }
+/* 序号徽标：Route Captured 多条抓包时的定位锚 */
+.api-seq { flex:none; min-width:20px; padding:1px 6px; border-radius:999px; text-align:center;
+           background:#e2e8f0; color:#334155;
+           font:700 11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; }
+/* 能力标签（MONITOR / MOCK / DELAY / MODIFY / CAPTURED） */
+.api-kind { flex:none; padding:1px 7px; border-radius:5px; letter-spacing:.3px;
+            background:#ede9fe; color:#5b21b6;
+            font:700 10.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; }
+/* 头部：方法徽标（按动词配色，类名由模板 ?lower_case 生成，故这里必须小写匹配）
+   + URL（等宽可断行）+ 状态徽标 + 耗时 */
+.api-card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+                 padding:8px 10px; background:#f8fafc; border-bottom:1px solid var(--border); }
+.api-method { flex:none; min-width:52px; padding:2px 0; border-radius:5px; text-align:center;
+              font:700 11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;
+              color:#fff !important; }
+.api-m-get, .api-m-head { background:#2563eb; }
+.api-m-post { background:#059669; }
+.api-m-put, .api-m-patch { background:#d97706; }
+.api-m-delete { background:#dc2626; }
+.api-m-http { background:#64748b; }
+.api-url { flex:1 1 320px; min-width:0; font:11.5px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;
+           color:#0f172a; overflow-wrap:anywhere; }
+.api-status { flex:none; padding:2px 8px; border-radius:999px;
+              font:700 11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.api-s-ok { background:#dcfce7; color:#166534; }
+.api-s-bad { background:#fee2e2; color:#b91c1c; }
+.api-s-na { background:#e2e8f0; color:#475569; }
+.api-ms { flex:none; font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--text-2); }
+/* 分区行：固定宽度标签 + 自动换行的值（标签列对齐后才好扫读） */
+.api-row { display:grid; grid-template-columns:minmax(104px,132px) minmax(0,1fr); gap:0 10px;
+           padding:6px 10px; font-size:11.5px; }
+.api-row + .api-row { border-top:1px dashed rgba(15,23,42,.08); }
+.api-label { color:var(--text-2); font-weight:600; }
+.api-value { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; line-height:1.6;
+             color:#334155; overflow-wrap:anywhere; white-space:pre-wrap; }
+/* JSON 体（request payload / response body / JSON 头值）：
+   独立代码块展示 —— 保留缩进与换行、横向不折行（长行横滚）、浅色底与边框。
+   放在键值两列里时独占右侧整列，避免被压缩成一段“糊在一起的文本”。 */
+.api-row.is-json { align-items:start; }
+.api-json {
+  margin:0; padding:8px 10px; max-height:340px; overflow:auto;
+  background:#f8fafc; border:1px solid var(--border); border-radius:6px;
+  font:11.5px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;
+  color:#0f172a; white-space:pre; tab-size:2;
+}
+.api-tag { margin-left:6px; padding:0 6px; border-radius:999px; background:#e0f2fe; color:#0369a1;
+           font:700 9.5px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace; vertical-align:1px; }
+.step-api .sub, .step-route .sub { font-weight:600; margin-bottom:3px; }
+
+/* ---------- Console log：整个运行日志，置底 ---------- */
+.log-lines { list-style:none; margin:0; padding:10px 12px; max-height:520px; overflow:auto;
+             background:#fbfcfe; border:1px solid var(--border); border-radius:8px; }
+.log-lines li { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:11.5px; line-height:1.6;
+                color:#334155; padding:1px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.log-lines li + li { border-top:1px solid rgba(15,23,42,.05); }
+
 @media (max-width:1020px) {
   .kpis { grid-template-columns:repeat(2,1fr); }
-  .grid-3, .grid-2, .stats-grid, .env-grid { grid-template-columns:1fr; }
+  .grid-3, .grid-2, .stats-grid, .env-grid, .case-layout { grid-template-columns:1fr; }
   .con-lines li.con-kv { grid-template-columns:1fr; gap:0; }
   .con-lines li.con-cont { padding-left:0; }
 }

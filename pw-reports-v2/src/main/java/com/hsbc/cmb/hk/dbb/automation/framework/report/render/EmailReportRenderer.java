@@ -1,5 +1,8 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.UserStory;
 import freemarker.template.Configuration;
@@ -35,7 +38,8 @@ import java.util.Map;
  *       故环形图退化为分段条、布局一律 table，并对关键元素补 inline style。</li>
  * </ul>
  *
- * <p>口径与 {@code serenity-summary.html} 同源（复用 {@link SummaryHtmlRenderer#summaryModel}），
+ * <p>口径复用 {@link SummaryHtmlRenderer#summaryModel}（汇总口径与 {@code index.html} 同源；
+ * 原 {@code serenity-summary.html} 已于 2026-10-22 删除），
  * 只补充邮件所需的项目名 / 版本 / 生成时间 / 环境 / 失败明细 / feature 汇总。
  *
  * <p>fail-open（R4）：渲染失败只告警并降级为最小可读页，不影响其余产物与测试本身。
@@ -88,7 +92,7 @@ public final class EmailReportRenderer {
     }
 
     /**
-     * 邮件页模型：复用 {@link SummaryHtmlRenderer#summaryModel}（汇总口径与 serenity-summary 同源），
+     * 邮件页模型：复用 {@link SummaryHtmlRenderer#summaryModel}（汇总口径与 index 页同源），
      * 补充邮件所需的项目名、版本、生成时间、环境、失败明细与 feature 汇总。
      */
     static Map<String, Object> emailModel(List<TestOutcome> outcomes) {
@@ -97,11 +101,24 @@ public final class EmailReportRenderer {
         model.put("projectName", AggregateBuilder.projectName());
         model.put("reportVersion", AggregateBuilder.reportVersion(outcomes));
         model.put("generatedAt", STAMP.format(OffsetDateTime.now(ZoneOffset.UTC)));
-        model.put("env", ReportView.environment());
-        model.put("browsers", ReportView.browsers());
-        model.put("failures", failureRows(outcomes));
-        model.put("features", features);
+        //  运行窗口（generatedAt / startedAt / endedAt，人读格式）：邮件同样要在顶部给出
+        //  "什么时候生成、测试何时开始/结束"（2026-10-22 用户要求，与三份站点报告同源）。
+        model.put("run", SummaryHtmlRenderer.runWindow(outcomes));
+        //  env / browsers / coverageFeatures / execTime 已随「Environment 节删除 +
+        //  Functional Coverage 节删除」（2026-10-22 用户决定）从模型移除——feature 统计
+        //  只保留 featureCount（顶部 Features KPI 卡），不再为已删除的节准备数据。
+        List<Map<String, Object>> failureList = failureRows(outcomes);
+        model.put("failures", failureList);
         model.put("featureCount", features.size());
+        //  邮件页派生数据：耗时口径 / 高频失败 / 不稳定 feature / 失败分组 / 报告内链
+        //  （口径沿用自旧 pw-reports 邮件摘要报告，其模板已于 2026-10-22 随模块合并一并删除）
+        model.put("timings", timings(outcomes));
+        model.put("frequentFailures", frequentFailures(outcomes));
+        model.put("unstableFeatures", unstableFeatures(outcomes));
+        model.put("failureGroups", failureGroups(failureList));
+        model.put("links", reportLinks());
+        //  CI / 构建信息（邮件页脚构建链接）；无 Jenkins/GitLab 变量时 present=false，不渲染
+        model.put("ci", ReportView.ciBuild());
         return model;
     }
 
@@ -159,6 +176,165 @@ public final class EmailReportRenderer {
     private static String featureOf(TestOutcome o) {
         UserStory story = o.getUserStory();
         return story == null || story.getStoryName() == null ? "(unknown feature)" : story.getStoryName();
+    }
+
+    /** 耗时口径（沿用旧邮件摘要 timings 表）：总时长 / 时钟 / 平均 / 最大 / 最小。 */
+    private static Map<String, Object> timings(List<TestOutcome> outcomes) {
+        //  与 index / feature 共用同一实现，避免三处口径漂移。
+        return SummaryHtmlRenderer.timings(outcomes);
+    }
+
+    /**
+     * 最常失败——按<b>失败类型</b>聚合（2026-10-22 用户要求：要能看出「到底哪种失败情况多」）。
+     *
+     * <p>类型判定优先级：{@code report.error.types} 配置的规则（匹配失败消息 / 异常类名关键字）
+     * → 用例语义类别 {@code testFailureCause.errorType}（FAILURE / ERROR / COMPROMISED）
+     * → 异常类简名。原实现按整段消息聚合，同类失败只要消息里有一处变量不同就会被拆成多条，
+     * "哪种最多"根本看不出来。
+     */
+    private static List<Map<String, Object>> frequentFailures(List<TestOutcome> outcomes) {
+        Map<String, Integer> byType = new LinkedHashMap<>();
+        for (TestOutcome o : outcomes) {
+            if (o.getResult() == null || !o.getResult().isFailure()) {
+                continue;
+            }
+            byType.merge(failureTypeOf(o), 1, Integer::sum);
+        }
+        return topCounts(byType);
+    }
+
+    /** 一条失败类型规则：类型名 + 关键字（已转小写）。 */
+    private record ErrorTypeRule(String type, List<String> keywords) {
+    }
+
+    /** 解析 {@code report.error.types}（每次渲染读取，便于测试用系统属性覆盖）。 */
+    private static List<ErrorTypeRule> errorTypeRules() {
+        String raw = ConfigSource.resolve(ConfigKeys.REPORT_ERROR_TYPES.key(),
+                ConfigKeys.REPORT_ERROR_TYPES.defaultValue());
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        List<ErrorTypeRule> rules = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            int eq = part.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String type = part.substring(0, eq).trim();
+            List<String> keywords = new ArrayList<>();
+            for (String kw : part.substring(eq + 1).split("\\|")) {
+                String k = kw.trim().toLowerCase(Locale.ROOT);
+                if (!k.isEmpty()) {
+                    keywords.add(k);
+                }
+            }
+            if (!type.isEmpty() && !keywords.isEmpty()) {
+                rules.add(new ErrorTypeRule(type, List.copyOf(keywords)));
+            }
+        }
+        return List.copyOf(rules);
+    }
+
+    /** 把一条失败用例归到可聚合的「类型」标签（配置规则优先，其次语义类别，最后异常类简名）。 */
+    private static String failureTypeOf(TestOutcome o) {
+        String message = failureMessage(o);
+        String classname = o.getTestFailureClassname() == null ? "" : o.getTestFailureClassname();
+        String haystack = (message + "\n" + classname).toLowerCase(Locale.ROOT);
+        for (ErrorTypeRule rule : errorTypeRules()) {
+            for (String kw : rule.keywords()) {
+                if (haystack.contains(kw)) {
+                    return rule.type();
+                }
+            }
+        }
+        String errorType = o.getTestFailureCause() == null ? null : o.getTestFailureCause().getErrorType();
+        if (errorType != null && !errorType.isBlank()) {
+            return switch (errorType.toUpperCase(Locale.ROOT)) {
+                case "FAILURE" -> "Assertion failure";
+                case "ERROR" -> "Unexpected error";
+                case "COMPROMISED" -> "Environment / infra";
+                default -> errorType;
+            };
+        }
+        if (!classname.isBlank()) {
+            int dot = classname.lastIndexOf('.');
+            return dot >= 0 && dot < classname.length() - 1 ? classname.substring(dot + 1) : classname;
+        }
+        return "Unknown";
+    }
+
+    /** 最不稳定 Feature（对齐 Serenity 2.0.84 home.ftl 的 Most Unstable Features）：按 feature 聚合失败数、降序、前 5，并附失败百分比。 */
+    private static List<Map<String, Object>> unstableFeatures(List<TestOutcome> outcomes) {
+        Map<String, Integer> failByFeat = new LinkedHashMap<>();
+        Map<String, Integer> totalByFeat = new LinkedHashMap<>();
+        for (TestOutcome o : outcomes) {
+            String f = featureOf(o);
+            totalByFeat.merge(f, 1, Integer::sum);
+            if (o.getResult() != null && o.getResult().isFailure()) {
+                failByFeat.merge(f, 1, Integer::sum);
+            }
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        failByFeat.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(5).forEach(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("name", e.getKey());
+                    m.put("count", e.getValue());
+                    int total = totalByFeat.getOrDefault(e.getKey(), 0);
+                    int pct = total == 0 ? 0 : Math.round(e.getValue() * 100f / total);
+                    m.put("failurePercentage", pct);
+                    rows.add(m);
+                });
+        return rows;
+    }
+
+    private static String failureMessage(TestOutcome o) {
+        if (o.getTestFailureCause() != null && o.getTestFailureCause().getMessage() != null) {
+            return o.getTestFailureCause().getMessage();
+        }
+        return o.getTestFailureMessage() == null ? "(no message)" : o.getTestFailureMessage();
+    }
+
+    private static List<Map<String, Object>> topCounts(Map<String, Integer> counts) {
+        List<Map.Entry<String, Integer>> sorted = new ArrayList<>(counts.entrySet());
+        sorted.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : sorted) {
+            if (rows.size() >= 5) {
+                break;
+            }
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("name", e.getKey());
+            r.put("count", e.getValue());
+            rows.add(r);
+        }
+        return rows;
+    }
+
+    /** 报告内链（查看完整报告 / 下载 CSV）：随 baseHref 绝对化，缺省相对（index / csv 与本报同目录）。 */
+    private static Map<String, Object> reportLinks() {
+        String base = PwReportsConfig.baseUrl();
+        Map<String, Object> l = new LinkedHashMap<>();
+        l.put("fullReport", base + "index.html");
+        l.put("csv", base + "serenity-summary.csv");
+        return l;
+    }
+
+    /** 按 feature 分组的失败列表（沿用旧邮件摘要 Full Failure List），保留首现顺序。 */
+    private static List<Map<String, Object>> failureGroups(List<Map<String, Object>> failures) {
+        Map<String, List<Map<String, Object>>> byFeat = new LinkedHashMap<>();
+        for (Map<String, Object> f : failures) {
+            String feat = String.valueOf(f.getOrDefault("feature", "(unknown feature)"));
+            byFeat.computeIfAbsent(feat, k -> new ArrayList<>()).add(f);
+        }
+        List<Map<String, Object>> groups = new ArrayList<>();
+        for (Map.Entry<String, List<Map<String, Object>>> e : byFeat.entrySet()) {
+            Map<String, Object> g = new LinkedHashMap<>();
+            g.put("feature", e.getKey());
+            g.put("scenarios", e.getValue());
+            groups.add(g);
+        }
+        return groups;
     }
 
     private static String process(String templateName, Map<String, Object> model)

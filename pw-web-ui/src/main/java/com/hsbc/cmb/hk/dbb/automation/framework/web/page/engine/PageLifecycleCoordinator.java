@@ -1,14 +1,18 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.TimeoutException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.codegen.spi.RoleCodegenBridgeRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.microsoft.playwright.Download;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.PlaywrightException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -168,15 +172,19 @@ public final class PageLifecycleCoordinator {
 
     /**
      * 等待下载：在 {@code trigger} 触发的一次下载完成前阻塞。
-     * 框架已通过 {@code setAcceptDownloads(true)} 开启下载能力，下载文件自动保存到配置的下载目录。
+     * <p>
+     * 框架在创建 {@code BrowserContext} 时已设置 {@code acceptDownloads(true)}，使 Playwright 能够捕获下载
+     * 事件并返回 {@link Download} 对象。<b>框架不自动保存下载文件</b>——{@code playwright.browser.downloadsPath}
+     * 仅是业务 {@code saveAs} 的<b>推荐根目录</b>，并非 Playwright 的 context 级自动落盘点。
+     * 因此返回的 {@link Download#path()} 指向 Playwright 内部<b>临时目录</b>，context 关闭 / 被 GC 后即被回收；
+     * 若需稳定文件，必须自行 {@code download.saveAs(path)}，或直接改用
+     * {@link #waitForDownloadSaved(BasePage, Runnable, int)}（一次返回已落盘的路径/文件名/目录）。
      *
      * @param bp          BasePage 实例
      * @param trigger     触发下载的操作（如点击下载链接）
      * @param timeoutSecs 等待超时秒数
-     * @return 本次下载的 {@link Download}（可直接读 {@code suggestedFilename()} / {@code url()}）。
-     *         <b>文件已由框架自动保存</b>；要取落盘路径请用
-     *         {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)} —— 本方法只等「下载事件」，
-     *         返回时异步保存可能尚未完成（此时读落盘路径会得到 null 或上一次的旧值）。
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}，
+     *         但 {@code path()} 为临时路径，需再 {@code saveAs(path)} 才能持久）。
      */
     public static Download waitForDownload(BasePage bp, Runnable trigger, int timeoutSecs) {
         requireNonNullPage(bp);
@@ -198,8 +206,8 @@ public final class PageLifecycleCoordinator {
      *
      * @param bp      BasePage 实例
      * @param trigger 触发下载的操作（如点击下载链接）
-     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}）；
-     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)} 获取（异步保存原因见上）。
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}，
+     *         并调用 {@code saveAs(path)} 自行落盘）。
      */
     public static Download waitForDownload(BasePage bp, Runnable trigger) {
         requireNonNullPage(bp);
@@ -209,6 +217,97 @@ public final class PageLifecycleCoordinator {
         } catch (PlaywrightException e) {
             throw new TimeoutException("Waiting for download timed out (context default timeout)", e);
         }
+    }
+
+    /**
+     * 等待下载并<b>自动落盘</b>（沿用框架默认线程隔离目录）。
+     * <p>
+     * 底层复用 {@link #waitForDownload(BasePage, Runnable, int)} 捕获 {@link Download}，再调用
+     * {@code saveAs} 把文件落到 {@link PlaywrightManager#downloadDirectoryForCurrentThread()}
+     * （{@code <playwright.browser.downloadsPath>/thread-<线程序号>}），一次返回
+     * {@link DownloadInfo}（稳定路径 / 文件名 / 目录）。用例结束由框架自动清理本线程子目录。
+     * <p>
+     * 相比直接 {@link #waitForDownload} 再手动 {@code saveAs}，本方法消除「不调用 saveAs 时
+     * {@code Download.path()} 是临时文件、context 关闭后被回收」的歧义，是企业级推荐入口。
+     *
+     * @param bp          BasePage 实例
+     * @param trigger     触发下载的操作（如点击下载链接）
+     * @param timeoutSecs 等待超时秒数
+     * @return 本次下载的 {@link DownloadInfo}（{@code path()} 已稳定落盘，可直接读取 / 挂报告证据）
+     */
+    public static DownloadInfo waitForDownloadSaved(BasePage bp, Runnable trigger, int timeoutSecs) {
+        DownloadInfo info = waitForDownloadSaved(bp, trigger, timeoutSecs,
+                PlaywrightManager.downloadDirectoryForCurrentThread());
+        attachToReportIfEnabled(info);
+        return info;
+    }
+
+    /**
+     * 同 {@link #waitForDownloadSaved(BasePage, Runnable, int)}，沿用 Playwright 上下文默认超时。
+     *
+     * @param bp      BasePage 实例
+     * @param trigger 触发下载的操作（如点击下载链接）
+     * @return 本次下载的 {@link DownloadInfo}
+     */
+    public static DownloadInfo waitForDownloadSaved(BasePage bp, Runnable trigger) {
+        DownloadInfo info = waitForDownloadSaved(bp, trigger, PlaywrightManager.downloadDirectoryForCurrentThread());
+        attachToReportIfEnabled(info);
+        return info;
+    }
+
+    /**
+     * 按开关 {@code playwright.browser.download.attachToReport.enabled}（默认 false）自动把下载文件挂到报告。
+     *
+     * <p>只作用于<b>框架线程隔离目录</b>的两个公开重载（业务推荐入口）；显式 {@code saveDir} 重载与
+     * 包级 {@link #saveDownloadTo} 不自动挂载（保留给单测/特殊落盘）。开关读取失败时降级为「不挂载」，
+     * 绝不影响下载本身的结果。</p>
+     */
+    private static void attachToReportIfEnabled(DownloadInfo info) {
+        if (info == null) {
+            return;
+        }
+        try {
+            if (Boolean.TRUE.equals(FrameworkConfigManager.getBoolean(
+                    WebFrameworkConfig.PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED))) {
+                info.attachToReport();
+            }
+        } catch (Exception | LinkageError e) {
+            VerboseLogging.logWarnIfVerbose(log,
+                    "[download] attachToReport switch unavailable, skipping auto-attach: {}", e.toString());
+        }
+    }
+
+    /**
+     * 等待下载并自动落盘到<b>指定目录</b>（不依赖框架线程隔离目录，便于单测与特殊落盘需求）。
+     *
+     * @param bp          BasePage 实例
+     * @param trigger     触发下载的操作（如点击下载链接）
+     * @param timeoutSecs 等待超时秒数
+     * @param saveDir     落盘根目录（方法内以 {@code suggestedFilename()} 拼出最终文件）
+     * @return 本次下载的 {@link DownloadInfo}
+     */
+    public static DownloadInfo waitForDownloadSaved(BasePage bp, Runnable trigger, int timeoutSecs, Path saveDir) {
+        Download dl = waitForDownload(bp, trigger, timeoutSecs);
+        return saveDownloadTo(dl, saveDir);
+    }
+
+    /**
+     * 同 {@link #waitForDownloadSaved(BasePage, Runnable, int, Path)}，沿用 context 默认超时。
+     */
+    public static DownloadInfo waitForDownloadSaved(BasePage bp, Runnable trigger, Path saveDir) {
+        Download dl = waitForDownload(bp, trigger);
+        return saveDownloadTo(dl, saveDir);
+    }
+
+    /**
+     * 把下载文件落到 {@code saveDir/suggestedFilename}，返回 {@link DownloadInfo}。
+     * 包级私有：被上述重载共用，亦便于单测直接覆盖。
+     */
+    static DownloadInfo saveDownloadTo(Download dl, Path saveDir) {
+        String filename = dl.suggestedFilename();
+        Path file = saveDir.resolve(filename);
+        dl.saveAs(file);
+        return new DownloadInfo(saveDir, file, filename, dl.url());
     }
 
     /**

@@ -254,24 +254,32 @@ public class PlaywrightInitializer {
             String browserType = PlaywrightManager.config().getBrowserType();
             String channel = PlaywrightManager.config().getBrowserChannel();
 
-            // channel 场景仅对 chromium 有效：使用系统本地 Chrome/Edge
-            if (isChannelBased(channel) && "chromium".equalsIgnoreCase(browserType)) {
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "[Static Init] Channel={} configured for chromium, using system browser (no download needed)",
-                        channel);
-                return false;
-            }
-
             String configuredPath = FrameworkConfigManager.getString(WebFrameworkConfig.PLAYWRIGHT_BROWSERS_PATH);
             if (configuredPath == null || configuredPath.trim().isEmpty()) {
                 configuredPath = DEFAULT_PLAYWRIGHT_BROWSER_PATH;
             }
             Path cachePath = Paths.get(configuredPath).toAbsolutePath();
 
+            // 视频录制依赖 Playwright 自带 ffmpeg（即便走系统浏览器 channel 也需此二进制）
+            boolean videoEnabled = FrameworkConfigManager.getBoolean(
+                    WebFrameworkConfig.PLAYWRIGHT_CONTEXT_RECORD_VIDEO_ENABLED);
+
+            // channel 场景仅对 chromium 有效：使用系统本地 Chrome/Edge
+            if (isChannelBased(channel) && "chromium".equalsIgnoreCase(browserType)) {
+                VerboseLogging.logInfoIfVerbose(logger,
+                        "[Static Init] Channel={} configured for chromium, using system browser (no browser download needed)",
+                        channel);
+                // 系统浏览器不下载，但录视频仍需 Playwright ffmpeg
+                if (videoEnabled) {
+                    ensureFfmpegInstalled(cachePath);
+                }
+                return false;
+            }
+
             boolean browsersInstalled = checkBrowsersInstalled(cachePath);
             if (!browsersInstalled) {
                 VerboseLogging.logInfoIfVerbose(logger, "[Static Init] {} browser not found in cache, downloading...", browserType);
-                installBrowsers(cachePath);
+                installBrowsers(cachePath);   // 内含 ffmpeg
                 // 下载后验证二进制文件确实存在且可执行
                 if (!checkBrowsersInstalled(cachePath)) {
                     VerboseLogging.logWarnIfVerbose(logger,
@@ -280,9 +288,16 @@ public class PlaywrightInitializer {
                 }
                 VerboseLogging.logInfoIfVerbose(logger,
                     "[Static Init] Browser {} downloaded and verified successfully", browserType);
+                if (videoEnabled) {
+                    ensureFfmpegInstalled(cachePath);
+                }
                 return true;
             } else {
                 VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Playwright {} browser already installed in: {}", browserType, cachePath);
+                // 浏览器在，但 ffmpeg 可能缺失（旧缓存 / channel 历史），视频开启时补校验
+                if (videoEnabled) {
+                    ensureFfmpegInstalled(cachePath);
+                }
                 return false;
             }
         } catch (Exception e) {
@@ -374,28 +389,86 @@ public class PlaywrightInitializer {
     }
 
     /**
-     * 下载 Playwright 浏览器到指定路径。
-     * <p>自动处理：
-     * <ol>
-     *   <li>设置 Node.js 临时目录到工程 .playwright/driver（跨平台兼容）</li>
-     *   <li>设置 PLAYWRIGHT_BROWSERS_PATH 到工程 .playwright/browsers</li>
-     *   <li>注入 HTTP_PROXY / HTTPS_PROXY（支持带用户名密码的代理认证，特殊字符自动 URL 编码）</li>
-     * </ol>
+     * 下载 Playwright 浏览器到指定路径（同时附带 ffmpeg，供视频录制使用）。
+     * <p>实际安装逻辑委托给 {@link #runPlaywrightCliInstall(Path, String...)}。
      */
     private static void installBrowsers(Path cachePath) {
+        String browserType = PlaywrightManager.config().getBrowserType();
+        VerboseLogging.logInfoIfVerbose(logger,
+                "[Static Init] Downloading Playwright {} browser (with ffmpeg) to: {}", browserType, cachePath);
+        runPlaywrightCliInstall(cachePath, browserType, "ffmpeg");
+    }
+
+    /**
+     * 确保视频录制所需的 Playwright ffmpeg 已安装。
+     * <p>channel 模式（系统浏览器）下 {@link #ensureBrowsersInstalled()} 会跳过整个浏览器包下载，
+     * 但 ffmpeg 仍由 Playwright 缓存目录提供，故需单独补装，否则录视频时报
+     * {@code Executable doesn't exist at .../ffmpeg-XXXX/ffmpeg-win64.exe}。</p>
+     */
+    private static void ensureFfmpegInstalled(Path cachePath) {
+        if (isFfmpegInstalled(cachePath)) {
+            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] ffmpeg already installed in: {}", cachePath);
+            return;
+        }
+        VerboseLogging.logInfoIfVerbose(logger,
+                "[Static Init] ffmpeg not found (required for video recording), downloading to: {}", cachePath);
+        int exit = runPlaywrightCliInstall(cachePath, "ffmpeg");
+        if (exit == 0 && isFfmpegInstalled(cachePath)) {
+            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] ffmpeg installed and verified successfully");
+        } else {
+            VerboseLogging.logWarnIfVerbose(logger,
+                    "[Static Init] ffmpeg installation/verification failed at {}. Video recording will fail with "
+                            + "'Executable doesn't exist'. Pre-install once via: "
+                            + "mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args=\"install ffmpeg\"",
+                    cachePath);
+        }
+    }
+
+    /**
+     * 检查 Playwright 自带 ffmpeg 是否已安装（视频录制依赖）。
+     * <p>目录命名形如 {@code ffmpeg-1011}，二进制随平台不同：
+     * Windows → {@code ffmpeg-win64.exe}；Linux → {@code ffmpeg-linux}；macOS → {@code ffmpeg-macos}。</p>
+     */
+    private static boolean isFfmpegInstalled(Path cachePath) {
+        if (!Files.exists(cachePath)) {
+            return false;
+        }
+        String os = System.getProperty("os.name", "").toLowerCase();
+        String exeName = os.contains("win") ? "ffmpeg-win64.exe"
+                : os.contains("mac") ? "ffmpeg-macos"
+                : "ffmpeg-linux";
+        try (Stream<Path> stream = Files.list(cachePath)) {
+            return stream
+                    .filter(Files::isDirectory)
+                    .filter(p -> p.getFileName().toString().startsWith("ffmpeg-"))
+                    .anyMatch(p -> Files.exists(p.resolve(exeName)));
+        } catch (IOException e) {
+            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to check ffmpeg installation", e);
+            return false;
+        }
+    }
+
+    /**
+     * 启动 Playwright CLI 安装指定目标（浏览器类型 / ffmpeg 等），返回退出码。
+     * <p>统一处理：Node.js 临时目录、PLAYWRIGHT_BROWSERS_PATH、下载代理注入、有界等待与进程清理。
+     *
+     * @param cachePath 浏览器缓存目录（绝对路径）
+     * @param targets   install 目标，例如 {@code "chromium", "ffmpeg"} 或 {@code "ffmpeg"}
+     * @return CLI 退出码；超时 / 异常返回 -1
+     */
+    private static int runPlaywrightCliInstall(Path cachePath, String... targets) {
         try {
-            String browserType = PlaywrightManager.config().getBrowserType();
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Downloading Playwright {} browser to: {}", browserType, cachePath);
+            List<String> cmd = new ArrayList<>();
+            cmd.add("java");
+            cmd.add("-cp");
+            cmd.add(System.getProperty("java.class.path"));
+            cmd.add("com.microsoft.playwright.CLI");
+            cmd.add("install");
+            for (String t : targets) {
+                cmd.add(t);
+            }
 
-            ProcessBuilder pb = new ProcessBuilder(
-                    "java",
-                    "-cp", System.getProperty("java.class.path"),
-                    "com.microsoft.playwright.CLI",
-                    "install",
-                    browserType,
-                    "ffmpeg"
-            );
-
+            ProcessBuilder pb = new ProcessBuilder(cmd);
             Map<String, String> env = pb.environment();
             env.put("PLAYWRIGHT_BROWSERS_PATH", cachePath.toString());
             env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "0");
@@ -424,7 +497,8 @@ public class PlaywrightInitializer {
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
 
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Starting Playwright {} browser download...", browserType);
+            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Starting Playwright CLI install {} -> {}",
+                    List.of(targets), cachePath);
             Process process = pb.start();
 
             // 跟踪下载进程,以便在 JVM 退出时终止
@@ -433,13 +507,14 @@ public class PlaywrightInitializer {
             }
 
             try {
-                int exitCode = waitForDownloadProcess(process, browserType);
+                int exitCode = waitForDownloadProcess(process, String.join(",", targets));
                 if (exitCode == 0) {
-                    VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Playwright {} browser downloaded successfully!", browserType);
+                    VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Playwright install {} succeeded", List.of(targets));
                 } else {
-                    VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Playwright {} browser download failed with exit code: {}", browserType, exitCode);
-                    VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Browsers will be downloaded on first use");
+                    VerboseLogging.logWarnIfVerbose(logger,
+                            "[Static Init] Playwright install {} failed with exit code: {}", List.of(targets), exitCode);
                 }
+                return exitCode;
             } finally {
                 if (process.isAlive()) {
                     process.destroyForcibly();
@@ -449,8 +524,8 @@ public class PlaywrightInitializer {
                 }
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to download Playwright browsers", e);
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Browsers will be downloaded on first use");
+            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to run Playwright CLI install " + List.of(targets), e);
+            return -1;
         }
     }
 

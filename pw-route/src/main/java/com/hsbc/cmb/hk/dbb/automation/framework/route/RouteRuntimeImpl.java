@@ -195,8 +195,19 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     private void scheduleResponsePoll(Request request, ApiSpec spec,
                                       boolean monitorPending, boolean capturePending, long deadlineNs,
                                       long intervalMs) {
-        if (closed.get() || DriverFailureSignal.reported()) {
-            return; // runtime 已关闭 / F4：驱动连接已不可信 → 停止轮询（不再泵连接）
+        if (closed.get()) {
+            return; // runtime 已关闭 → 停止轮询
+        }
+        if (DriverFailureSignal.reported()) {
+            //  F4：全局信号被置位（任一场景判驱动连接不可信）。原实现此处直接 return 会【永久断链】
+            //  —— 其它并行用例的 MONITOR/CAPTURE 轮询就此停摆且无法自愈（P0-2）。
+            //  改为：本轮跳过定案、但仍按节拍继续调度，待信号被对应 runtime 收尾 reset 后下一轮自动恢复
+            //  （deadline 已兜底，不会无限空转）。
+            long next = Math.min(RESPONSE_POLL_MAX_MS, intervalMs * 2);
+            RouteDelayScheduler.delay(intervalMs,
+                    () -> enqueueMainAction(() -> scheduleResponsePoll(request, spec, monitorPending,
+                            capturePending, deadlineNs, next)));
+            return;
         }
         Response response = safeExistingResponse(request);
         if (response != null) {

@@ -62,7 +62,8 @@ public final class PwReportSource implements ReportSource {
         if (id == null) {
             return null;
         }
-        Path f = dir.resolve(id + ".json");
+        //  per-case JSON 位于 dir/<id>/<id>.json（2026-10-21 per-case 目录迁移）
+        Path f = dir.resolve(id).resolve(id + ".json");
         if (!Files.exists(f)) {
             return null;
         }

@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Test Report</title>
+    <style>
+        body { margin:0; padding:0; background:#f5f7fa; }
+        body, td, th { font-family:-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",Arial,sans-serif;
+                       color:#1f2d3d; font-size:13px; line-height:1.55; }
+        table { border-collapse:collapse; }
+        .card { background:#ffffff; border:1px solid #e4e9f0; border-radius:10px; }
+        .sec { padding:18px; }
+        .th { background:#f8fafc; text-align:left; padding:9px 12px; font-size:11px; color:#64748b;
+              text-transform:uppercase; letter-spacing:.4px; border-bottom:1px solid #e4e9f0; }
+        .td { padding:10px 12px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+        .num { text-align:right; }
+        .sub { color:#6b7a90; font-size:12px; }
+        .name { font-weight:600; }
+        .msg { font-family:Consolas,Menlo,monospace; font-size:11.5px; color:#b91c1c;
+               word-break:break-all; margin-top:3px; }
+        .foot { padding:16px 18px; font-size:11px; color:#94a3b8; text-align:center; }
+        .env-k { padding:7px 12px 2px; font-size:10px; color:#6b7a90; text-transform:uppercase; letter-spacing:.4px; }
+        .env-v { padding:0 12px 10px; font-size:13px; font-weight:600; color:#1f2d3d; }
+        .env-sub { margin:2px 0 8px; font-size:11px; font-weight:700; letter-spacing:.06em;
+                   text-transform:uppercase; color:#6b7a90; }
+        .browser-legend { font-size:12px; color:#6b7a90; }
+        .browser-legend b { color:#1f2d3d; }
+    </style>
+</head>
+<body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f7fa">
+<tr>
+<td align="center" style="padding:20px 8px;">
+
+
+<table role="presentation" width="720" cellpadding="0" cellspacing="0" border="0">
+
+    <tr>
+        <td bgcolor="#1e3a8a" style="padding:22px 24px 16px;border-radius:10px 10px 0 0;">
+            <div style="font-size:22px;font-weight:700;color:#ffffff;letter-spacing:.2px;">Test Report</div>
+            <div style="font-size:12px;color:#c7d2fe;margin-top:6px;">
+                7 scenarios &middot; 1 feature &middot; 6m 18s &middot; 2026-10-20 12:06:25 UTC
+            </div>
+        </td>
+    </tr>
+    <tr>
+        <td bgcolor="#1e3a8a" style="padding:0 24px 0;font-size:0;line-height:0;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#1e3a8a">
+                <tr>
+                    <td width="71.4%" bgcolor="#22c55e" style="height:5px;font-size:0;line-height:5px;">&nbsp;</td>
+                    <td width="28.6%" bgcolor="#ef4444" style="height:5px;font-size:0;line-height:5px;">&nbsp;</td>
+                    
+                    
+                    
+                    
+                </tr>
+            </table>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+
+    <tr>
+        <td style="padding:0 0 14px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+<td width="20%" valign="top" style="padding:0 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background:#ffffff;border:1px solid #e4e9f0;border-radius:8px;">
+        <tr>
+            <td style="border-left:4px solid #3b82f6;padding:12px 14px;">
+                <div style="font-size:11px;color:#6b7a90;text-transform:uppercase;letter-spacing:.4px;">Scenarios</div>
+                <div style="font-size:26px;font-weight:700;line-height:1.2;color:#3b82f6;margin-top:2px;">7</div>
+                <div style="font-size:11px;color:#6b7a90;margin-top:2px;">across 1 feature</div>
+            </td>
+        </tr>
+    </table>
+</td>
+<td width="20%" valign="top" style="padding:0 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background:#ffffff;border:1px solid #e4e9f0;border-radius:8px;">
+        <tr>
+            <td style="border-left:4px solid #16a34a;padding:12px 14px;">
+                <div style="font-size:11px;color:#6b7a90;text-transform:uppercase;letter-spacing:.4px;">Passed</div>
+                <div style="font-size:26px;font-weight:700;line-height:1.2;color:#16a34a;margin-top:2px;">5</div>
+                <div style="font-size:11px;color:#6b7a90;margin-top:2px;">71.4%</div>
+            </td>
+        </tr>
+    </table>
+</td>
+<td width="20%" valign="top" style="padding:0 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background:#ffffff;border:1px solid #e4e9f0;border-radius:8px;">
+        <tr>
+            <td style="border-left:4px solid #dc2626;padding:12px 14px;">
+                <div style="font-size:11px;color:#6b7a90;text-transform:uppercase;letter-spacing:.4px;">Failed</div>
+                <div style="font-size:26px;font-weight:700;line-height:1.2;color:#dc2626;margin-top:2px;">2</div>
+                <div style="font-size:11px;color:#6b7a90;margin-top:2px;">28.6%</div>
+            </td>
+        </tr>
+    </table>
+</td>
+<td width="20%" valign="top" style="padding:0 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background:#ffffff;border:1px solid #e4e9f0;border-radius:8px;">
+        <tr>
+            <td style="border-left:4px solid #ea580c;padding:12px 14px;">
+                <div style="font-size:11px;color:#6b7a90;text-transform:uppercase;letter-spacing:.4px;">Error</div>
+                <div style="font-size:26px;font-weight:700;line-height:1.2;color:#ea580c;margin-top:2px;">0</div>
+                <div style="font-size:11px;color:#6b7a90;margin-top:2px;">0%</div>
+            </td>
+        </tr>
+    </table>
+</td>
+<td width="20%" valign="top" style="padding:0 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background:#ffffff;border:1px solid #e4e9f0;border-radius:8px;">
+        <tr>
+            <td style="border-left:4px solid #d97706;padding:12px 14px;">
+                <div style="font-size:11px;color:#6b7a90;text-transform:uppercase;letter-spacing:.4px;">Pending / Skipped</div>
+                <div style="font-size:26px;font-weight:700;line-height:1.2;color:#d97706;margin-top:2px;">0</div>
+                <div style="font-size:11px;color:#6b7a90;margin-top:2px;">0%</div>
+            </td>
+        </tr>
+    </table>
+</td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+
+    <tr>
+        <td class="card">
+<div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+    <span style="font-size:15px;font-weight:600;color:#1f2d3d;vertical-align:middle;">Summary</span>
+</div>
+            <div class="sec">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#e4e9f0">
+                    <tr>
+                        <td width="71.4%" bgcolor="#16a34a" style="height:14px;font-size:0;line-height:14px;">&nbsp;</td>
+                        <td width="28.6%" bgcolor="#dc2626" style="height:14px;font-size:0;line-height:14px;">&nbsp;</td>
+                        
+                        
+                        
+                        
+                    </tr>
+                </table>
+
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;">
+                    <tr>
+                        <td class="td" style="border-bottom:none;padding-left:0;">
+                            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#16a34a;margin-right:7px;"></span>
+                            <span style="color:#1f2d3d;">Passed</span>
+                            <span style="color:#6b7a90;margin-left:6px;">5 &middot; 71.4%</span>
+                        </td>
+                        <td class="td" style="border-bottom:none;">
+                            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#dc2626;margin-right:7px;"></span>
+                            <span style="color:#1f2d3d;">Failed</span>
+                            <span style="color:#6b7a90;margin-left:6px;">2 &middot; 28.6%</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="border-bottom:none;padding-left:0;">
+                            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ea580c;margin-right:7px;"></span>
+                            <span style="color:#1f2d3d;">Error</span>
+                            <span style="color:#6b7a90;margin-left:6px;">0 &middot; 0%</span>
+                        </td>
+                        <td class="td" style="border-bottom:none;">
+                            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#d97706;margin-right:7px;"></span>
+                            <span style="color:#1f2d3d;">Pending</span>
+                            <span style="color:#6b7a90;margin-left:6px;">0 &middot; 0%</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="border-bottom:none;padding-left:0;">
+                            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#94a3b8;margin-right:7px;"></span>
+                            <span style="color:#1f2d3d;">Skipped</span>
+                            <span style="color:#6b7a90;margin-left:6px;">0 &middot; 0%</span>
+                        </td>
+                        <td class="td" style="border-bottom:none;"></td>
+                    </tr>
+                </table>
+
+                <div class="sub" style="margin-top:10px;">7 tests executed on 2026-10-20 12:06:25 UTC</div>
+
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;">
+                    <tr>
+                        <th class="th num" style="padding-left:0;">Total</th>
+                        <th class="th num">Clock</th>
+                        <th class="th num">Average</th>
+                        <th class="th num">Max</th>
+                        <th class="th num" style="padding-right:0;">Min</th>
+                    </tr>
+                    <tr>
+                        <td class="td num" style="border-bottom:none;padding-left:0;font-weight:600;">6m 18s</td>
+                        <td class="td num" style="border-bottom:none;">6m 18s</td>
+                        <td class="td num" style="border-bottom:none;">54.0s</td>
+                        <td class="td num" style="border-bottom:none;">1m 20s</td>
+                        <td class="td num" style="border-bottom:none;padding-right:0;">19.1s</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td style="padding:0 2px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+                <td style="padding-right:10px;">
+                    <a href="index.html" target="_blank"
+                       style="display:inline-block;background:#2563eb;color:#ffffff;font-weight:600;font-size:13px;padding:11px 22px;border-radius:999px;text-decoration:none;">View full report &rarr;</a>
+                </td>
+                <td>
+                    <a href="serenity-summary.csv" target="_blank"
+                       style="display:inline-block;background:#ffffff;color:#334155;border:1px solid #cbd5e1;font-weight:600;font-size:13px;padding:10px 20px;border-radius:999px;text-decoration:none;">Download CSV</a>
+                </td>
+            </tr></table>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td class="card">
+<div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+    <span style="font-size:15px;font-weight:600;color:#1f2d3d;vertical-align:middle;">Functional Coverage</span>
+</div>
+            <div class="sec">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                        <th class="th" style="padding-left:0;">Feature</th>
+                        <th class="th num" width="64">Tests</th>
+                        <th class="th num" width="64">Pass</th>
+                        <th class="th num" width="70">Issues</th>
+                        <th class="th" width="150">Pass rate</th>
+                    </tr>
+                    <tr>
+                        <td class="td name" style="padding-left:0;">route_capability_e2e</td>
+                        <td class="td num">7</td>
+                        <td class="td num">5</td>
+                        <td class="td num"><span style="color:#dc2626;font-weight:600;">2</span></td>
+                        <td class="td">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef2f7" style="border-radius:999px;">
+                                <tr>
+                                    <td width="71%" bgcolor="#16a34a" style="height:8px;font-size:0;line-height:8px;">&nbsp;</td>
+                                    <td width="29%" bgcolor="#dc2626" style="height:8px;font-size:0;line-height:8px;">&nbsp;</td>
+                                </tr>
+                            </table>
+                            <span class="sub">71.4%</span>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td class="card">
+<div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+    <span style="font-size:15px;font-weight:600;color:#1f2d3d;vertical-align:middle;">Test Failure Overview</span>
+</div>
+            <div class="sec">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+                    <td width="50%" valign="top" style="padding-right:10px;">
+                        <div class="env-sub">Most Frequent Failures</div>
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                                <td class="td msg" style="border-bottom:1px solid #eef2f7;padding-left:0;">Element not visible within 60 seconds: [id=&#39;topnav.profileswitcher.dropdown&#39;],.current-profile</td>
+                                <td class="td num" width="34" style="border-bottom:1px solid #eef2f7;padding-right:0;">
+                                    <span style="display:inline-block;min-width:20px;padding:1px 7px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-weight:700;font-size:11px;">1</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="td msg" style="border-bottom:1px solid #eef2f7;padding-left:0;">[NOT_FOUND_IN_DOM] type failed after 1 attempts on &#39;#newPassword&#39; | page=https://www.qualityassurance-amh-gbb-sit.p2g.ne…</td>
+                                <td class="td num" width="34" style="border-bottom:1px solid #eef2f7;padding-right:0;">
+                                    <span style="display:inline-block;min-width:20px;padding:1px 7px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-weight:700;font-size:11px;">1</span>
+                                </td>
+                            </tr>
+                        </table>
+                        
+                    </td>
+                    <td width="50%" valign="top">
+                        <div class="env-sub">Most Unstable Features</div>
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                                <td class="td" style="border-bottom:1px solid #eef2f7;padding-left:0;">route_capability_e2e</td>
+                                <td class="td num" width="44" style="border-bottom:1px solid #eef2f7;padding-right:0;">
+                                    <span style="display:inline-block;min-width:20px;padding:1px 7px;border-radius:999px;background:#fef2f2;color:#b91c1c;font-weight:700;font-size:11px;">29%</span>
+                                </td>
+                            </tr>
+                        </table>
+                        
+                    </td>
+                </tr></table>
+            </div>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td class="card">
+<div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+    <span style="font-size:15px;font-weight:600;color:#1f2d3d;vertical-align:middle;">Full Failure List</span>
+</div>
+            <div class="sec">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr><th class="th" width="46%" style="padding-left:0;">Requirement</th><th class="th" style="padding-right:0;">Failure</th></tr>
+                    <tr>
+                        <td colspan="2" style="padding:9px 0 7px;border-bottom:1px solid #e4e9f0;font-weight:700;font-size:12px;color:#334155;background:#f8fafc;">
+                            &nbsp;route_capability_e2e
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="td name" style="padding-left:0;">
+                            <a href="route-capability-e2e-60-route-v2-e2e-delay.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）</a>
+                        </td>
+                        <td class="td" style="padding-right:0;">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#dc2626;">Failed</span>
+                            <div class="msg">Element not visible within 60 seconds: [id=&#39;topnav.profileswitcher.dropdown&#39;],.current-profile</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="td name" style="padding-left:0;">
+                            <a href="route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</a>
+                        </td>
+                        <td class="td" style="padding-right:0;">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#dc2626;">Failed</span>
+                            <div class="msg">[NOT_FOUND_IN_DOM] type failed after 1 attempts on &#39;#newPassword&#39; | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError</div>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td class="card">
+<div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+    <span style="font-size:15px;font-weight:600;color:#1f2d3d;vertical-align:middle;">Full Test Results</span>
+</div>
+            <div class="sec">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                        <th class="th" width="52%" style="padding-left:0;">Requirement</th>
+                        <th class="th" width="110">Result</th>
+                        <th class="th num" width="86" style="padding-right:0;">This run</th>
+                    </tr>
+                    <tr>
+                        <td colspan="3" style="padding:9px 0 7px;border-bottom:1px solid #e4e9f0;font-weight:700;font-size:12px;color:#334155;background:#f8fafc;">
+                            &nbsp;route_capability_e2e
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-22-route-v2-e2e-capture.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期真实接口采集（CAPTURE）</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#16a34a;">Passed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">1m 10s</td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-32-route-v2-e2e-monitor.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期 MONITOR 断言真实接口</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#16a34a;">Passed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">58.0s</td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-39-route-v2-e2e-mock.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#16a34a;">Passed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">46.3s</td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-46-route-v2-e2e-mock-when-then.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#16a34a;">Passed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">44.7s</td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-53-route-v2-e2e-modify.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#16a34a;">Passed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">1m 0s</td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-60-route-v2-e2e-delay.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#dc2626;">Failed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">1m 20s</td>
+                    </tr>
+                    <tr>
+                        <td class="td" style="padding-left:0;">
+                            <a href="route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern.html" style="color:#2563eb;text-decoration:none;">route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</a>
+                        </td>
+                        <td class="td">
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:#dc2626;">Failed</span>
+                        </td>
+                        <td class="td num sub" style="padding-right:0;">19.1s</td>
+                    </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td class="card">
+<div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:8px;vertical-align:middle;"></span>
+    <span style="font-size:15px;font-weight:600;color:#1f2d3d;vertical-align:middle;">Environment</span>
+</div>
+            <div class="sec">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                    <td width="50%" valign="top" style="padding:4px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;">
+                            <tr><td class="env-k">JDK</td></tr>
+                            <tr><td class="env-v">21.0.9 (OpenJDK 64-Bit Server VM)</td></tr>
+                        </table>
+                    </td>
+                    
+                    <td width="50%" valign="top" style="padding:4px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;">
+                            <tr><td class="env-k">Build tool</td></tr>
+                            <tr><td class="env-v">Maven 3.9.9</td></tr>
+                        </table>
+                    </td>
+                        
+                        </tr>
+                    <tr>
+                    <td width="50%" valign="top" style="padding:4px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;">
+                            <tr><td class="env-k">Test framework</td></tr>
+                            <tr><td class="env-v">Cucumber · JUnit</td></tr>
+                        </table>
+                    </td>
+                    
+                    <td width="50%" valign="top" style="padding:4px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                               style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;">
+                            <tr><td class="env-k">OS</td></tr>
+                            <tr><td class="env-v">Windows 10 (10.0)</td></tr>
+                        </table>
+                    </td>
+                        
+                        </tr>
+                </table>
+            </div>
+        </td>
+    </tr>
+    <tr><td height="14" style="font-size:0;line-height:14px;">&nbsp;</td></tr>
+
+    <tr>
+        <td class="card">
+            <div class="foot">
+                Test Report &middot; reportVersion 1 &middot; duration 6m 18s<br/>
+                Self-contained single file (email safe).
+            </div>
+        </td>
+    </tr>
+
+</table>
+
+</td>
+</tr>
+</table>
+</body>
+</html>

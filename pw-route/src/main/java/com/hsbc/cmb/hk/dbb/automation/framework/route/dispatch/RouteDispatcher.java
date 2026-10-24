@@ -236,17 +236,6 @@ public final class RouteDispatcher {
 
     // ── 路由证据（命中 / 结果）──
 
-    /** 证据正文里的体预览上限：防大夹具把报告撑爆（要完整体请用 CAPTURE 能力）。 */
-    private static final int EVIDENCE_BODY_MAX = 4096;
-
-    /** 体预览（脱敏由 {@code CapturedApiCall} 统一负责，这里只截断）。 */
-    private static String preview(String body) {
-        if (body == null) {
-            return null;
-        }
-        return body.length() <= EVIDENCE_BODY_MAX ? body : body.substring(0, EVIDENCE_BODY_MAX) + "...[truncated]";
-    }
-
     /** 规则声明行（expectStatus / timeout / delay / mock 内容…），复用 {@link RouteDsl} 的既有格式化。 */
     private static String ruleLine(ApiSpec spec, Request request) {
         return RouteDsl.describeCaptured(spec,
@@ -305,7 +294,7 @@ public final class RouteDispatcher {
             com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry.record(
                     operation, request.url(),
                     CapturedApiCall.ofRequest(spec.pattern(), request, status, responseHeaders,
-                                    preview(responseBody), false, -1, false)
+                                    responseBody, false, -1, false)
                             .detailWith("rule      : " + ruleLine(spec, request),
                                     "applied   : " + actionLine,
                                     "result    : " + result,

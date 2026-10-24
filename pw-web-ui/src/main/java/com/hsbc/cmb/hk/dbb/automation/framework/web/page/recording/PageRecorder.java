@@ -270,15 +270,15 @@ public final class PageRecorder {
     }
 
     public void refresh(BasePage bp) {
-        recorder.record("refresh", null, () -> bp.getPageRaw().reload());
+        recorder.record("refresh", null, () -> PageNavigation.refresh(bp));
     }
 
     public void back(BasePage bp) {
-        recorder.record("back", null, () -> bp.getPageRaw().goBack());
+        recorder.record("back", null, () -> PageNavigation.back(bp));
     }
 
     public void forward(BasePage bp) {
-        recorder.record("forward", null, () -> bp.getPageRaw().goForward());
+        recorder.record("forward", null, () -> PageNavigation.forward(bp));
     }
 
     // ==================== 可见性断言 ====================

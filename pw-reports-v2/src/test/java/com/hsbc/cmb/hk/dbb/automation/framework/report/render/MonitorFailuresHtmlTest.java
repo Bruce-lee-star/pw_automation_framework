@@ -71,9 +71,9 @@ class MonitorFailuresHtmlTest {
         int payIdx = html.indexOf("Payment");
         int authIdx = html.indexOf("Auth");
         assertThat(payIdx).isBetween(0, authIdx);
-        // 场景回链
-        assertThat(html).contains("<a class=\"scenario\" href=\"pay-10-f.html\">pay failed</a>");
-        assertThat(html).contains("href=\"auth-12-f.html\"");
+        // 场景回链（per-case 嵌套目录）
+        assertThat(html).contains("<a class=\"scenario\" href=\"pay-10-f/pay-10-f.html\">pay failed</a>");
+        assertThat(html).contains("href=\"auth-12-f/auth-12-f.html\"");
         // 成功用例不出现在条目里
         assertThat(html).doesNotContain("pay-11-ok.html");
     }

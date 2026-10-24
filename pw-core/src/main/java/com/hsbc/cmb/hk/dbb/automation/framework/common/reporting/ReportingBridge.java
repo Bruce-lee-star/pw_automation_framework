@@ -84,6 +84,151 @@ public interface ReportingBridge {
     }
 
     /**
+     * 挂载 Playwright trace.zip <b>并附带录制窗口</b>（起止时刻 + 时长），供报告页 Trace 卡片
+     * 展示「录制窗口 / 时长」（对齐 Playwright Trace Viewer 的可读信息）。
+     *
+     * <p>默认实现回落到 {@link #attachTrace(Path)}（只登记路径）：旧报告实现无需改动即可兼容；
+     * v2 报告覆写本方法以渲染窗口与时长。任一时点为 {@code null} 时表示采集方未提供窗口，
+     * 报告侧相应省略该行。
+     *
+     * @param traceZip       已落盘的 trace 源文件；{@code null}/不存在忽略
+     * @param traceStartTime 录制起始时刻（{@code HH:mm:ss.SSS}，可为 {@code null}）
+     * @param traceEndTime   录制结束时刻（{@code HH:mm:ss.SSS}，可为 {@code null}）
+     * @param traceDurationMs 录制时长（毫秒；{@code <=0} 表示未知）
+     */
+    default void attachTrace(Path traceZip, String traceStartTime, String traceEndTime, long traceDurationMs) {
+        attachTrace(traceZip);
+    }
+
+    /**
+     * 登记 Playwright 场景<b>录屏</b>（recordVideo 产出，webm）——报告侧把文件落入 per-case
+     * （{@code <outcomeId>/records/<name>.webm}）并在 “Playwright records” Tab 渲染播放器。
+     *
+     * <p>调用时机：场景收尾、context 关闭<b>之后</b>（Playwright 的 {@code Video.path()}
+     * 只在 context 关闭后才可用且文件才完整）。默认 no-op：未接报告 / 未开启录屏时无任何行为。
+     *
+     * @param video 录屏文件（可为 null——未开启录屏或采集失败时安全跳过）
+     */
+    default void attachVideo(Path video) {
+    }
+
+    /**
+     * 报告侧 trace 落点（可选）：返回非 {@code null} 时，框架把本次 trace <b>直接导出到该路径</b>
+     * （通常是报告 per-case 目录下的 {@code trace.zip}），从而不产生“框架 traces/ + per-case”两份、
+     * 也无须事后拷贝/移动。
+     *
+     * <p>默认 {@code null} = 框架自选位置（固定 {@code target/site/serenity/traces}，非配置项）：
+     * 无活动用例句柄 / 未接报告时走此路，trace 仍落盘作证据，由 TraceRetention 按 mtime 治理。
+     *
+     * @return trace 目标文件路径；不需要指导落点时返回 {@code null}
+     */
+    default Path traceTarget() {
+        return null;
+    }
+
+    /**
+     * 截图落盘<b>目录</b>（可选）：返回非 {@code null} 时，框架把截图写进该目录（通常是报告
+     * per-case 目录下的 {@code screenshots/}），而不是固定的 {@code target/site/serenity} 根目录。
+     *
+     * <p>动机（2026-10-20 用户反馈）：截图曾以 sha256 命名散落在 {@code target/site/serenity/}
+     * 根下，与 per-case 目录（报告真正引用的位置）割裂，产物目录被垃圾文件污染。
+     * 与 {@link #traceTarget()} 同源：报告侧指导框架落点，从源头避免两份。
+     *
+     * <p>默认 {@code null} = 框架自选位置（{@code target/site/serenity}，非配置项）：
+     * 未接报告 / 无活动用例句柄时走此路，截图仍落盘作证据。
+     *
+     * @return 截图目录；不需要指导落点时返回 {@code null}
+     */
+    default Path screenshotTarget() {
+        return null;
+    }
+
+    /**
+     * 当前用例的录屏落点（{@code <outputDir>/<outcomeId>/records}）——指导框架<b>直接录到 per-case
+     * 目录</b>，从源头避免「全局 videoDir 先落一份、再搬进 per-case」的两份与中途失败。
+     *
+     * <p>与 {@link #screenshotTarget()} / {@code traceTarget()} 同策略：解析不到活动用例句柄时返回
+     * {@code null}，框架回落其配置的录屏目录（随后由 {@link #attachVideo(Path)} 搬入）。</p>
+     */
+    default Path videoTarget() {
+        return null;
+    }
+
+    /**
+     * 按<b>显式用例 id</b> 解析 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}）——与
+     * {@link #traceTarget()} 同目标，但不依赖 ThreadLocal 句柄。供<b>收尾线程</b>（CloseGuard 的
+     * {@code close-bounded-*} worker）在句柄缺失时，仍能凭"跨线程可见的活动用例 id"把 trace
+     * <b>直接导出到 per-case</b>，从源头避免"traces/ + per-case"两份与事后拷贝/移动。
+     *
+     * <p>默认 {@code null}：未接报告 / 该 id 无活动会话时回落框架自有证据目录。</p>
+     *
+     * @param outcomeId 用例 id（可为 null——直接回落）
+     * @return trace 目标文件路径；不需要指导落点时返回 {@code null}
+     */
+    default Path traceTargetByOutcomeId(String outcomeId) {
+        return null;
+    }
+
+    /**
+     * 按<b>显式用例 id</b> 解析录屏落点（{@code <outputDir>/<outcomeId>/records}）——与
+     * {@link #videoTarget()} 同源，但不依赖 ThreadLocal 句柄。供收尾线程在句柄缺失时，仍能凭
+     * "跨线程可见的活动用例 id"把录屏直接录进 per-case。
+     *
+     * <p>默认 {@code null}：未接报告 / 该 id 无活动会话时回落框架配置的录屏目录（随后由
+     * {@link #attachVideo(Path)} 搬入）。</p>
+     *
+     * @param outcomeId 用例 id（可为 null——直接回落）
+     * @return 录屏目录；不需要指导落点时返回 {@code null}
+     */
+    default Path videoTargetByOutcomeId(String outcomeId) {
+        return null;
+    }
+
+    /**
+     * 当前活动用例 id（<b>不依赖线程上下文</b>）——供<b>非用例线程</b>在产物生成 / 挂载时抓取归属，
+     * 以及框架把 {@code context → outcomeId} 绑定后据此回填绑定关系。
+     *
+     * <p>默认 {@code null}：未装配报告引擎 / 无活动用例时调用方按既有最佳努力逻辑处理。</p>
+     */
+    default String currentOutcomeId() {
+        return null;
+    }
+
+    /**
+     * 按<b>显式用例 id</b> 挂载场景录屏（recordVideo 产出，webm）——与 {@link #attachVideo(Path)} 同语义，
+     * 但归属不依赖线程上下文，直接由调用方（凭 context 绑定）传入。未接报告 / id 为 {@code null} 时
+     * 回落 {@link #attachVideo(Path)}（最佳努力）。默认 no-op。
+     *
+     * @param outcomeId 用例 id（可为 null——回落 {@link #attachVideo(Path)}）
+     * @param video     录屏文件（可为 null）
+     */
+    default void attachVideo(String outcomeId, Path video) {
+        attachVideo(video);
+    }
+
+    /**
+     * 按<b>显式用例 id</b> 挂载 trace.zip——与 {@link #attachTrace(Path)} 同语义，归属不依赖线程上下文，
+     * 由调用方（凭 context 绑定）传入。默认回落 {@link #attachTrace(Path)}（最佳努力）。no-op 桥无需改动。
+     *
+     * @param outcomeId 用例 id（可为 null——回落 {@link #attachTrace(Path)}）
+     * @param traceZip  已落盘的 trace 源文件
+     */
+    default void attachTrace(String outcomeId, Path traceZip) {
+        attachTrace(traceZip);
+    }
+
+    /**
+     * 按<b>显式用例 id</b> 挂载 trace.zip 并附带录制窗口——与
+     * {@link #attachTrace(Path, String, String, long)} 同语义，归属不依赖线程上下文。
+     *
+     * @param outcomeId 用例 id（可为 null——回落 {@link #attachTrace(Path, String, String, long)}）
+     */
+    default void attachTrace(String outcomeId, Path traceZip,
+                             String traceStartTime, String traceEndTime, long traceDurationMs) {
+        attachTrace(traceZip, traceStartTime, traceEndTime, traceDurationMs);
+    }
+
+    /**
      * 记录场景级结果（scenario 名 + 结果 + 耗时），供报告汇总。
      *
      * @param scenarioName 场景名
@@ -103,6 +248,46 @@ public interface ReportingBridge {
      * @param line 已格式化的注册描述行
      */
     default void recordRouteRegistration(String line) {
+    }
+
+    /**
+     * 记录一条<b>已捕获的 API 调用</b>（method / url / status / 摘要），进 per-case 页的
+     * {@code apiOperations}（步骤内捕获归位到发生它的步骤）。
+     *
+     * <p>与 {@link #attachEvidence(String)} 的差异：证据是自由文本诊断，{@code apiOperations}
+     * 是结构化的 API 调用清单，报告页按「每个抓取到的 API」逐条展示。实现方须在
+     * <b>测试主线程</b>调用（典型时机：场景收尾 flush 队列）。
+     *
+     * @param line 已脱敏的 API 调用摘要行
+     */
+    default void recordApiOperation(String line) {
+    }
+
+    /**
+     * 当前（或最近）活动步骤的 id —— 供<b>非测试线程</b>在证据产生时抓取归属。
+     *
+     * <p>存在的理由：route 命中发生在 Playwright 事件线程，该线程没有测试线程的 ThreadLocal 上下文；
+     * 若不在证据产生时抓取 stepId，等到主线程 flush 时已回落到用例级，per-case 页的步骤下就看不到
+     * Route Captured（全部掉进「用例级兜底」卡片）。取不到步骤上下文时返回 {@code null}。</p>
+     *
+     * <p>默认 {@code null}：未装配报告引擎时调用方按「用例级」处理。</p>
+     */
+    default String currentStepId() {
+        return null;
+    }
+
+    /**
+     * 记录一条已捕获的 API 调用，并<b>显式归属到 {@code stepId}</b>。
+     *
+     * <p>与 {@link #recordApiOperation(String)} 的差别仅在归属来源：调用方在证据产生时已抓到
+     * stepId（见 {@link #currentStepId()}），故 flush 时不再依赖当时线程的上下文。stepId 为空时
+     * 实现方按 {@link #recordApiOperation(String)} 处理。</p>
+     *
+     * @param stepId 归属步骤 id；{@code null}/空表示用例级
+     * @param line   已脱敏的 API 调用摘要行
+     */
+    default void recordApiOperation(String stepId, String line) {
+        recordApiOperation(line);
     }
 
     /**

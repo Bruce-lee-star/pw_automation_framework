@@ -57,6 +57,25 @@ public final class RouteAction {
      */
     private static final boolean FETCH_PROBE = flag("route.fetch.probe", "ROUTE_FETCH_PROBE", true);
 
+    /**
+     * intercept 重发（{@link #fetch}）是否<b>忽略 HTTPS 证书校验</b>——默认 <b>true</b>。
+     *
+     * <p><b>为什么默认开</b>：取真实响应发生在<b>驱动（Node）侧</b>的 {@code APIRequestContext.fetch}，
+     * 其 TLS 校验与浏览器渲染进程<b>不一致</b>（典型差异：证书链缺中间证书时浏览器会补链放行、
+     * 自签/内网代理证书同理，Node 直接失败）。一旦失败就上抛 → {@code GuardedRunner} fail-open →
+     * 因尚未 {@code markIssued()} 而 {@code fallback} 放行 → <b>mock 静默失效</b>（页面拿到真实响应，
+     * 表象却像"规则没匹配"），排查成本极高。默认放开是测试框架对 SIT 环境的合理取舍。</p>
+     *
+     * <p><b>影响面刻意最小</b>：走 {@code RequestOptions#setIgnoreHTTPSErrors}（<b>每请求</b>级），
+     * 只作用于这一次截获重发，<b>不会</b>降低页面自身的 TLS 校验（与在
+     * {@code Browser.NewContextOptions} 上设 {@code ignoreHTTPSErrors} 有本质区别）。</p>
+     *
+     * <p>关闭：{@code -Droute.fetch.ignoreHttpsErrors=false}
+     * 或环境变量 {@code ROUTE_FETCH_IGNORE_HTTPS_ERRORS=false}。</p>
+     */
+    private static final boolean FETCH_IGNORE_HTTPS =
+            flag("route.fetch.ignoreHttpsErrors", "ROUTE_FETCH_IGNORE_HTTPS_ERRORS", true);
+
     /** 全局在飞 intercept fetch 数（探针用；多 Context 并行时为其总和）。 */
     private static final AtomicInteger FETCH_INFLIGHT = new AtomicInteger();
 
@@ -354,13 +373,21 @@ public final class RouteAction {
      * 从结构上消除"导航期句柄回收"竞态——<b>无需</b>任何异常捕获或错误串匹配。任何失败直接上抛，
      * 由 {@link com.hsbc.cmb.hk.dbb.automation.framework.route.exec.GuardedRunner} 统一 fail-open。</p>
      *
+     * <p><b>TLS</b>：本方法的重发默认是<b>忽略证书校验</b>的（{@code FETCH_IGNORE_HTTPS}，
+     * 可用 {@code -Droute.fetch.ignoreHttpsErrors=false} 关闭）——驱动侧校验比浏览器严格，
+     * 不放开会让 SIT 自签 / 缺中间证书的站点在取真实响应时失败并 fail-open，
+     * 表现为"mock 没生效"。仅作用于本次重发，不影响页面自身的证书校验。</p>
+     *
      * @param requestContext runtime 所属 Context 的 {@link APIRequestContext}（调用方保证非空）
      * @param snapshot       拦截时的请求快照（调用方保证非空）
      */
     public static APIResponse fetch(APIRequestContext requestContext, RequestSnapshot snapshot) {
         RequestOptions options = RequestOptions.create()
                 .setMethod(snapshot.method() == null || snapshot.method().isEmpty() ? "GET" : snapshot.method())
-                .setTimeout(DEFAULT_FETCH_TIMEOUT_MS);
+                .setTimeout(DEFAULT_FETCH_TIMEOUT_MS)
+                //  证书策略：驱动侧 TLS 校验比浏览器严格，SIT 自签/缺中间证书会导致 fetch 失败 →
+                //   fail-open 放行 → mock 静默失效。默认忽略，且只作用于本次重发（见 FETCH_IGNORE_HTTPS）。
+                .setIgnoreHTTPSErrors(FETCH_IGNORE_HTTPS);
         Set<String> skip = Set.of("host", "content-length", "connection", "accept-encoding", "cookie");
         for (Map.Entry<String, String> entry : snapshot.headers().entrySet()) {
             String name = entry.getKey();
@@ -377,9 +404,10 @@ public final class RouteAction {
         int inflight = FETCH_INFLIGHT.incrementAndGet();
         long seq = FETCH_SEQ.incrementAndGet();
         if (FLAGS_LOGGED.compareAndSet(false, true)) {
-            // 自证本次运行的有效配置（诊断期排错用）
-            LOGGER.info("[Route][FETCH-PROBE] flags: probe={} (via -Droute.fetch.probe / ROUTE_FETCH_PROBE)",
-                    FETCH_PROBE);
+            // 自证本次运行的有效配置（诊断期排错用）：证书策略一并打出，避免"为什么放过/为什么失败"靠猜
+            LOGGER.info("[Route][FETCH-PROBE] flags: probe={} ignoreHttpsErrors={} "
+                            + "(via -Droute.fetch.probe / -Droute.fetch.ignoreHttpsErrors)",
+                    FETCH_PROBE, FETCH_IGNORE_HTTPS);
         }
         try {
             return fetchOnce(requestContext, snapshot, options, seq, inflight);

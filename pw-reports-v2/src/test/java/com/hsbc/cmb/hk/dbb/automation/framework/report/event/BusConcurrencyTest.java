@@ -151,15 +151,16 @@ class BusConcurrencyTest {
 
         bus.finishRun();
 
-        assertThat(tempDir.resolve("art-1-a.json")).exists();
-        assertThat(tempDir.resolve("art-2-b.json")).exists();
+        assertThat(tempDir.resolve("art-1-a").resolve("art-1-a.json")).exists();
+        assertThat(tempDir.resolve("art-2-b").resolve("art-2-b.json")).exists();
         assertThat(tempDir.resolve("serenity-summary.json")).exists();
         assertThat(tempDir.resolve("index.html")).exists();
         assertThat(tempDir.resolve("assets/report.css")).exists();
-        assertThat(tempDir.resolve("art-2-b.html")).exists();
+        assertThat(tempDir.resolve("art-2-b").resolve("art-2-b.html")).exists();
 
         // 失败信息已脱敏落 JSON（堆栈/消息口径）
-        String json = java.nio.file.Files.readString(tempDir.resolve("art-2-b.json"));
+        String json = java.nio.file.Files.readString(
+                tempDir.resolve("art-2-b").resolve("art-2-b.json"));
         assertThat(json).contains("\"result\" : \"FAILURE\"");
         assertThat(json).contains("testFailureCause");
         assertThat(bus.sinkErrorCount()).isZero();
@@ -204,10 +205,10 @@ class BusConcurrencyTest {
         StepHandle h = bus.startCase("idem-1-a", "f", "s", List.of());
         bus.finishCase(h, TestResult.SUCCESS, null, 1);
         bus.finishRun();
-        String first = java.nio.file.Files.exists(tempDir.resolve("idem-1-a.json"))
-                ? read(tempDir.resolve("idem-1-a.json")) : "";
+        String first = java.nio.file.Files.exists(tempDir.resolve("idem-1-a").resolve("idem-1-a.json"))
+                ? read(tempDir.resolve("idem-1-a").resolve("idem-1-a.json")) : "";
         bus.finishRun(); // 双触发（ObjectFactory.stop + TestRunFinished）
-        assertThat(read(tempDir.resolve("idem-1-a.json"))).isEqualTo(first);
+        assertThat(read(tempDir.resolve("idem-1-a").resolve("idem-1-a.json"))).isEqualTo(first);
     }
 
     private static String read(Path p) {

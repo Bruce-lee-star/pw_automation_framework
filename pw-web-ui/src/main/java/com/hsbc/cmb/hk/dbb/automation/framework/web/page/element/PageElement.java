@@ -916,8 +916,11 @@ public class PageElement {
      */
     public PageElement scrollIntoView() {
         executeWithRetry(() -> {
-            locatorInternal().evaluate("el => el.scrollIntoView({ behavior: 'instant', block: 'center' })",
-                    new Locator.EvaluateOptions().setTimeout(opTimeout()));
+            // 用 Playwright 原生 scrollIntoViewIfNeeded（与 click/fill/type 等动作内部一致）：
+            // 仅在元素未在视口内时才滚动，避免 scrollIntoView({block:'center'}) 的强制重排/抖动；
+            // 且走 Playwright 的 actionability 超时与重试，比手搓 evaluate 更稳。
+            locatorInternal().scrollIntoViewIfNeeded(
+                    new Locator.ScrollIntoViewIfNeededOptions().setTimeout(opTimeout()));
             return true;
         }, "scrollIntoView");
         return this;

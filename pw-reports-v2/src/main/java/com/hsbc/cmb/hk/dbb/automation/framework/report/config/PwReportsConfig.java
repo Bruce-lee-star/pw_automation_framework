@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.config;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,8 +28,8 @@ import java.util.regex.PatternSyntaxException;
  *   <caption>配置项（4 项）</caption>
  *   <tr><th>属性</th><th>默认</th><th>作用</th></tr>
  *   <tr><td>{@code pw.report.enabled}</td><td>{@code true}</td><td>kill-switch：false 时整体静默</td></tr>
- *   <tr><td>{@code pw.report.output}</td><td>{@code target/site/serenity}</td><td>产物目录</td></tr>
- *   <tr><td>{@code pw.report.screenshot}</td><td>{@code ON_FAILURE}</td><td>截图策略（见 {@link ScreenshotMode}）</td></tr>
+ *   <tr><td>{@code pw.report.output}</td><td>{@code target/site/serenity}</td><td>产物目录（回落 {@code framework.output.directory}）</td></tr>
+ *   <tr><td>{@code pw.report.screenshot}</td><td>{@code FOR_FAILURES}</td><td>截图策略（见 {@link ScreenshotMode}）</td></tr>
  *   <tr><td>{@code pw.report.push.url}</td><td>空</td><td>非空即启用推送（不再需要单独的 enabled）</td></tr>
  * </table>
  *
@@ -129,7 +131,7 @@ public final class PwReportsConfig {
     public static PwReportsConfig load() {
         Builder b = new Builder();
         b.enabled = bool("enabled", true);
-        b.outputDir = Paths.get(str("output", "target/site/serenity"));
+        b.outputDir = Paths.get(resolveOutputDir());
         b.screenshotMode = ScreenshotMode.parse(str("screenshot", null),
                 msg -> log.warn("pw.report.screenshot: {}", msg));
         b.extraScrubPatterns = parsePatterns(str("scrub.extra-patterns", null));
@@ -141,6 +143,30 @@ public final class PwReportsConfig {
     /** 测试/框架内嵌构造入口。 */
     public static Builder builder() {
         return new Builder();
+    }
+
+    /**
+     * 产物目录解析顺序：<b>{@code pw.report.output}</b>（系统属性 / 环境变量 {@code PW_REPORT_OUTPUT}）
+     * → <b>{@code framework.output.directory}</b>（框架通用配置，经 {@link ConfigSource} 解析：
+     * 系统属性 / 环境变量 / 配置源）→ 默认 {@code target/site/serenity}。
+     *
+     * <p>第二级是刻意保留的兼容：业务侧早已用 {@code framework.output.directory} 表达"报告生成位置"，
+     * 该键此前只在 {@code ConfigKeys} 登记却<b>无任何读取方</b>（等于死配置）。现在它真正生效，
+     * 且与 {@code pw.report.output} 明确分层——后者是报告模块的专用开关，优先级更高。</p>
+     */
+    private static String resolveOutputDir() {
+        String out = str("output", null);
+        if (out != null && !out.isBlank()) {
+            return out.trim();
+        }
+        String frameworkDir = ConfigSource.resolve(
+                ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY.key(),
+                ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY.defaultValue());
+        if (frameworkDir != null && !frameworkDir.isBlank()) {
+            log.debug("pw.report.outputDir falls back to framework.output.directory={}", frameworkDir);
+            return frameworkDir.trim();
+        }
+        return "target/site/serenity";
     }
 
     // ---------------------------------------------------------------- getters
@@ -260,7 +286,7 @@ public final class PwReportsConfig {
 
         private boolean enabled = true;
         private Path outputDir = Paths.get("target/site/serenity");
-        private ScreenshotMode screenshotMode = ScreenshotMode.ON_FAILURE;
+        private ScreenshotMode screenshotMode = ScreenshotMode.FOR_FAILURES;
         private List<Pattern> extraScrubPatterns = new ArrayList<>();
         private Limits limits = Limits.DEFAULT;
         private String pushUrl;

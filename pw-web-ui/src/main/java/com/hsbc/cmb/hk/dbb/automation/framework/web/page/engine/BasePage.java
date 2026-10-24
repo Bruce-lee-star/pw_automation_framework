@@ -579,11 +579,13 @@ public abstract class BasePage {
 
     /**
      * 等待下载：在 {@code trigger} 触发的一次下载完成前阻塞，对齐 {@code page.waitForDownload(...)}。
-     * 框架已开启下载能力，文件自动保存到配置目录；可与弹窗/新页面嵌套。
+     * 框架已开启下载能力（acceptDownloads=true），但<b>不自动保存文件</b>：返回的 {@link Download#path()}
+     * 指向 Playwright 内部<b>临时目录</b>，context 关闭 / 被 GC 后即被回收（{@code playwright.browser.downloadsPath}
+     * 仅是 saveAs 的推荐根目录，并非自动落盘点）。需稳定文件请自行 {@link Download#saveAs}，或直接用
+     * {@link #waitForDownloadSaved(Runnable, int)}。
      * @param trigger     触发下载的操作（如点击下载链接）
      * @param timeoutSecs 等待超时秒数
-     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}）；
-     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)}（保存是异步的）。
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}，但 {@code path()} 为临时路径）。
      * @see PageLifecycleCoordinator#waitForDownload(BasePage, Runnable, int)
      */
     public Download waitForDownload(Runnable trigger, int timeoutSecs) {
@@ -592,13 +594,37 @@ public abstract class BasePage {
 
     /**
      * 等待下载（<b>不指定超时</b>）：沿用 Playwright 上下文默认超时（框架配置驱动）。
+     * 注意：未调用 saveAs 时 {@link Download#path()} 为临时文件，需稳定文件请用 {@link #waitForDownloadSaved(Runnable)}。
      * @param trigger 触发下载的操作（如点击下载链接）
-     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}）；
-     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)}（保存是异步的）。
+     * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} / {@code url()}，但 {@code path()} 为临时路径）。
      * @see PageLifecycleCoordinator#waitForDownload(BasePage, Runnable)
      */
     public Download waitForDownload(Runnable trigger) {
         return PageLifecycleCoordinator.waitForDownload(this, trigger);
+    }
+
+    /**
+     * 等待下载并<b>自动落盘</b>：底层走 {@link #waitForDownload(Runnable, int)}，再把文件 saveAs 到本线程隔离目录
+     * （{@code <playwright.browser.downloadsPath>/thread-<线程序号>}），一次返回稳定路径 / 文件名 / 目录
+     * （{@link DownloadInfo}），消除「不调用 saveAs 时 {@code Download.path()} 是临时文件」的歧义。
+     * <p>需要拿到下载文件时，推荐用本方法替代 {@link #waitForDownload} + 手动 saveAs。</p>
+     * @param trigger     触发下载的操作（如点击下载链接）
+     * @param timeoutSecs 等待超时秒数
+     * @return 本次下载的 {@link DownloadInfo}（{@code path()} 已稳定落盘，可直接读取 / 挂报告证据）
+     * @see PageLifecycleCoordinator#waitForDownloadSaved(BasePage, Runnable, int)
+     */
+    public DownloadInfo waitForDownloadSaved(Runnable trigger, int timeoutSecs) {
+        return PageLifecycleCoordinator.waitForDownloadSaved(this, trigger, timeoutSecs);
+    }
+
+    /**
+     * 同 {@link #waitForDownloadSaved(Runnable, int)}，沿用 Playwright 上下文默认超时。
+     * @param trigger 触发下载的操作（如点击下载链接）
+     * @return 本次下载的 {@link DownloadInfo}
+     * @see PageLifecycleCoordinator#waitForDownloadSaved(BasePage, Runnable)
+     */
+    public DownloadInfo waitForDownloadSaved(Runnable trigger) {
+        return PageLifecycleCoordinator.waitForDownloadSaved(this, trigger);
     }
 
     /**

@@ -268,14 +268,14 @@ environment.O88_SIT3=https://qualityassurance-amh-gbb-sit11.p2g.netd2.hsbc.com.h
 
 # 账号凭证（两种写法任选，框架自动探测）
 # 写法 A：按厂分组（多厂时推荐）
-userinfo_O63.WP7UAT2_2.password=b2g3ifd
+userinfo_O63.WP7UAT2_2.password=<示例值，请用环境变量注入>
 userinfo_O63.WP7UAT2_2.profile=W1-HKHBAP001060698838PUSER1
-userinfo_O63.WP7UAT2_2.token.security.url=https://.../getotp.htm?username=9900196198&type=1&key=...
+userinfo_O63.WP7UAT2_2.token.security.url=https://.../getotp.htm?username=<用户名>&type=1&key=...
 
 # 写法 B：扁平（单厂或不分组时直接用）
-amhb2g0677_3.password=b2g3ifd
-amhb2g0677_3.token.security.url=https://.../getotp.htm?username=9912644750&type=1&key=...
-ABCDEW.password=123456
+amhb2g0677_3.password=<示例值，请用环境变量注入>
+amhb2g0677_3.token.security.url=https://.../getotp.htm?username=<用户名>&type=1&key=...
+ABCDEW.password=<示例值，请用环境变量注入>
 ABCDEW.profile=AABBCCDD
 ABCDEW.token.security.url=http://localhost:8080/api/v1/token/security
 

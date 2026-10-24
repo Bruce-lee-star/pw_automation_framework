@@ -118,9 +118,14 @@ public final class MonitorSink {
     private final ConcurrentMap<ApiSpec, AtomicInteger> hitCounts = new ConcurrentHashMap<>();
 
     /**
-     * 目的驱动撤销（T2+，即"规则随目的生灭"取代"规则随用例生灭"）：带响应侧期望的 MONITOR 规则在<b>首个响应定案</b>后
-     * 即撤销绑定 —— 不管断言成功还是失败（目的已达成，无需继续 armed）。这是<b>不可关闭的默认行为</b>，
-     * 没有 kill-switch（{@code autoStopOnMatch} 场景走"达到 minMatches 才撤"，见 {@link #purposeSettles}）。
+     * 目的驱动撤销（T2+，即"规则随目的生灭"取代"规则随用例生灭"）：带响应侧期望的 MONITOR 规则在<b>达到目的</b>后
+     * 撤销绑定。是否"达到目的"由 {@link #purposeSettles} 决定，受 {@code autoStopOnMatch} 控制：
+     * <ul>
+     *   <li>{@code autoStopOnMatch(true)}：达到 {@code minMatches} 次命中才视为目的达成并撤销（其目的是"观察 N 次"）；</li>
+     *   <li>{@code autoStopOnMatch(false)}（<b>默认</b>）：<b>持续监控</b>，不会因命中而自动撤销 —— 规则保持 armed，
+     *       继续记录/断言后续请求，直到监控窗口（{@code monitorTimeoutMs}）到期或显式 stopMonitor/stopApi。</li>
+     * </ul>
+     * 不论走哪条路，断言失败证据都先入结算队列再撤销（不丢失败证据）。
      */
 
     /** 已触发"目的达成"的规则实例（幂等键 = 规则实例，与请求/响应配对键一致）。 */
@@ -173,12 +178,14 @@ public final class MonitorSink {
     }
 
     /**
-     * 该规则是否"目的已达成、可以撤销"（2026-09-29 细化）：
+     * 该规则是否"目的已达成、可以撤销"（2026-10-23 修正）：
      * <ul>
      *   <li>MONITOR + 至少一条响应侧期望（无期望的纯采集 MONITOR 无"定案"概念）；</li>
      *   <li><b>{@code autoStopOnMatch(true)} 规则：达到 {@code minMatches} 才撤销</b>（其目的是"观察 N 次"）；
      *       未达标不提前撤销 ⇒ 交由监控窗口到期（{@code monitorTimeoutMs}）或用例收尾兜底 flush 清理；</li>
-     *   <li>其余带期望的 MONITOR 规则：首个响应定案即撤销（armed 窗口收敛为"首个响应"）。</li>
+     *   <li><b>{@code autoStopOnMatch(false)}（默认）：永不因命中而自动撤销</b> —— 保持 armed 持续监控，
+     *       直到监控窗口到期或显式 stopMonitor/stopApi（对齐 {@code RouteDsl#autoStopOnMatch} 的契约：
+     *       "默认 false=持续，直到显式 stopMonitor/stopApi"）。</li>
      * </ul>
      */
     private boolean purposeSettles(ApiSpec spec) {
@@ -192,7 +199,7 @@ public final class MonitorSink {
             AtomicInteger hits = hitCounts.get(spec);
             return hits != null && hits.get() >= spec.minMatches();
         }
-        return true;
+        return false;
     }
 
     /**
@@ -320,10 +327,12 @@ public final class MonitorSink {
         // 结果证据要能展示响应体：即便本规则没有 body 断言，也在句柄存活时读一份前缀
         // （流式端点跳过 —— 见 takeBodySnapshot 的说明）。开关见 READ_BODY_FOR_EVIDENCE。
 
-        //  T2+ 目的驱动撤销（"规则随目的生灭"）：响应已到达 ⇒ "断言这次调用"这一目的已达成，
-        //  通知 runtime 撤销该规则（armed 窗口从"整个用例"收敛为"首个响应"；断言成败不影响是否撤销）。
+        //  T2+ 目的驱动撤销（"规则随目的生灭"）：仅当 {@code autoStopOnMatch(true)} 且达到 {@code minMatches} 时，
+        //  响应到达 ⇒ "观察 N 次"目的达成，通知 runtime 撤销该规则（armed 窗口收敛为"达到 minMatches 次响应"）。
+        //  {@code autoStopOnMatch(false)}（默认）不在此处撤销 —— 规则保持 armed 持续监控，交由监控窗口到期或
+        //  显式 stopMonitor/stopApi 收敛。断言成败不影响是否撤销（由 purposeSettles 决定）。
         //  安全性：body 快照在紧接的下方**同步**读取、断言在 IO 线程完成，均不依赖"规则仍 armed"，
-        //  故撤销不会丢证据（由 MonitorSinkPurposeRetirementTest 的失败用例钉住该语义）。
+        //  故撤销不会丢证据（由 MonitorSinkPurposeRetirementTest 钉住该语义）。
         firePurposeMet(spec);
         //  (ii) 线程边界（2026-10-11 定稿）：**轮询线程零协议调用** —— body() 是协议调用，
         //  从本轮起**不在响应轮询线程读取**（历史实测：轮询线程读 body 与 main 并发泵 Connection

@@ -13,6 +13,11 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,8 +25,15 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 聚合 HTML 出口——{@code serenity-summary.html} + {@code monitor-failures.html}
- * （对齐旧 {@code SummaryReportGenerator} 的文件名与信息结构，Phase 2 接手职责）。
+ * 聚合 HTML 出口——{@code monitor-failures.html} + 邮件报告共用的汇总模型
+ * {@link #summaryModel(List)}。
+ *
+ * <p><b>{@code serenity-summary.html} 已于 2026-10-22 整页删除</b>（用户决定）：它与
+ * {@code index.html} + {@code feature-*.html} 信息完全重复，且是三页里唯一没对齐顶栏的遗留页。
+ * 删除范围：模板 {@code serenity-summary.ftl}、{@code writeSummary}、{@code SUMMARY_FILE}
+ * 常量、{@code minimalSummary} 兜底页，以及 {@code LocalReportSink} 里的写盘调用。
+ * {@code serenity-summary.json} / {@code serenity-summary.csv} 是<b>数据出口</b>（供 CI 与
+ * 邮件插件消费），与 HTML 页无关，<b>保留不动</b>。
  *
  * <p>与旧实现的差异（有意）：
  * <ul>
@@ -38,8 +50,6 @@ public final class SummaryHtmlRenderer {
 
     private static final Logger log = LoggerFactory.getLogger(SummaryHtmlRenderer.class);
 
-    /** 旧模块同名文件（SUMMARY_FILE 常量），消费方链接与 CI 收集逻辑零改动。 */
-    public static final String SUMMARY_FILE = "serenity-summary.html";
     /** 旧模块同名文件（MONITOR_FAILURE_FILE 常量）。 */
     public static final String MONITOR_FAILURE_FILE = "monitor-failures.html";
 
@@ -55,30 +65,7 @@ public final class SummaryHtmlRenderer {
     private SummaryHtmlRenderer() {
     }
 
-    // ---------------------------------------------------------------- summary
-
-    /**
-     * 写 {@code serenity-summary.html}：alert 条 + 统计行 + feature 分组场景表 +
-     * 失败概览。永不抛（R4：单项失败不拖累其余产物）。
-     */
-    public static Path writeSummary(Path dir, List<TestOutcome> outcomes) {
-        Path target = dir.resolve(SUMMARY_FILE);
-        try {
-            Map<String, Object> model = summaryModel(outcomes);
-            String html = process("serenity-summary.ftl", model);
-            Files.createDirectories(dir);
-            Files.writeString(target, html, StandardCharsets.UTF_8);
-        } catch (Throwable t) {
-            log.warn("summary HTML render failed, degrading to minimal page", t);
-            try {
-                Files.createDirectories(dir);
-                Files.writeString(target, minimalSummary(outcomes), StandardCharsets.UTF_8);
-            } catch (IOException io) {
-                log.error("even minimal summary HTML write failed", io);
-            }
-        }
-        return target;
-    }
+    // ---------------------------------------------------------------- monitor
 
     /**
      * 写 {@code monitor-failures.html}：监控失败独立报告（旧版 2026-10-11 拆出语义）。
@@ -111,7 +98,12 @@ public final class SummaryHtmlRenderer {
 
     // ---------------------------------------------------------------- model
 
-    /** 汇总页模型：totals + feature 分组 + 失败概览。 */
+    /**
+     * 汇总模型：totals + feature 分组 + 失败概览 + 占比/环形图分段。
+     *
+     * <p>{@code serenity-summary.html} 删除后，唯一消费方是
+     * {@link EmailReportRenderer}（邮件报告），故模型口径仍保留原样，邮件页不受影响。
+     */
     static Map<String, Object> summaryModel(List<TestOutcome> outcomes) {
         Map<String, Object> model = new LinkedHashMap<>();
         Map<String, Object> totals = JsonWriter.totals(outcomes);
@@ -202,7 +194,7 @@ public final class SummaryHtmlRenderer {
         row.put("isSuccess", o.getResult() == com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult.SUCCESS);
         row.put("durationMs", o.getDuration());
         row.put("durationText", formatDuration(o.getDuration()));
-        row.put("link", o.getOutcomeId() + ".html");
+        row.put("link", o.getOutcomeId() + "/" + o.getOutcomeId() + ".html");
         row.put("tags", o.getTags() == null ? List.of() : o.getTags());
         row.put("isOutline", Boolean.TRUE.equals(o.getScenarioOutline()));
         row.put("exampleCount", o.getExamples() == null ? 0 : o.getExamples().size());
@@ -220,7 +212,7 @@ public final class SummaryHtmlRenderer {
             row.put("name", o.getName());
             row.put("feature", o.getUserStory() == null ? "" : o.getUserStory().getStoryName());
             row.put("result", o.getResult().name());
-            row.put("link", o.getOutcomeId() + ".html");
+            row.put("link", o.getOutcomeId() + "/" + o.getOutcomeId() + ".html");
             String message = o.getTestFailureCause() == null || o.getTestFailureCause().getMessage() == null
                     ? (o.getTestFailureMessage() == null ? "(no message)" : o.getTestFailureMessage())
                     : o.getTestFailureCause().getMessage();
@@ -259,6 +251,78 @@ public final class SummaryHtmlRenderer {
             return min + "m " + sec + "s";
         }
         return (ms % 1000 == 0 ? totalSec + "s" : String.format(Locale.ROOT, "%.1fs", ms / 1000.0));
+    }
+
+    /**
+     * 执行耗时汇总：Total / Clock / Average / Max / Min（已格式化文本）。
+     *
+     * <p>口径与旧邮件摘要一致：Total = 全部用例 duration 之和，Clock 同 Total（串行墙钟口径下两者一致），
+     * Average = 均值，Max / Min = 最大 / 最小单用例耗时。index / feature / 邮件三处共用，避免各算各的漂移。
+     */
+    static Map<String, Object> timings(List<TestOutcome> outcomes) {
+        List<TestOutcome> list = outcomes == null ? List.of() : outcomes;
+        long total = list.stream().mapToLong(TestOutcome::getDuration).sum();
+        long max = list.stream().mapToLong(TestOutcome::getDuration).max().orElse(0);
+        long min = list.stream().mapToLong(TestOutcome::getDuration).min().orElse(0);
+        long avg = list.isEmpty() ? 0 : Math.round(total / (double) list.size());
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("total", formatDuration(total));
+        t.put("clock", formatDuration(total));
+        t.put("avg", formatDuration(avg));
+        t.put("max", formatDuration(max));
+        t.put("min", formatDuration(min));
+        return t;
+    }
+
+    /** 人读时间戳格式（{@code yyyy-MM-dd HH:mm:ss}，系统默认时区渲染）。 */
+    private static final DateTimeFormatter HUMAN_TS =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT);
+
+    /**
+     * 运行窗口（index / feature / per-case / 邮件四份报告顶栏共用，2026-10-22 用户要求：
+     * 「顶部除报告名外，显示生成时间、从什么时间开始测试、什么时间结束」）。
+     *
+     * <p>口径：{@code startedAt} = 最早用例开始时间、{@code endedAt} = 最晚用例结束时间、
+     * {@code generatedAt} = 报告生成时刻；均已格式化为 {@code yyyy-MM-dd HH:mm:ss}。
+     * 空跑或无时间戳时 started/ended 为 {@code "—"}，{@code generatedAt} 恒有值。</p>
+     */
+    static Map<String, Object> runWindow(List<TestOutcome> outcomes) {
+        List<TestOutcome> list = outcomes == null ? List.of() : outcomes;
+        OffsetDateTime min = null;
+        OffsetDateTime max = null;
+        for (TestOutcome o : list) {
+            OffsetDateTime s = parseQuietly(o.getStartTime());
+            OffsetDateTime e = parseQuietly(o.getEndTime());
+            if (s != null && (min == null || s.isBefore(min))) {
+                min = s;
+            }
+            if (e != null && (max == null || e.isAfter(max))) {
+                max = e;
+            }
+        }
+        Map<String, Object> w = new LinkedHashMap<>();
+        w.put("startedAt", min == null ? "—" : HUMAN_TS.format(min));
+        w.put("endedAt", max == null ? "—" : HUMAN_TS.format(max));
+        w.put("generatedAt", HUMAN_TS.format(OffsetDateTime.now()));
+        return w;
+    }
+
+    /** ISO-8601 → {@link OffsetDateTime}；缺失/不可解析时返回 null（不抛，容忍脏数据）。 */
+    private static OffsetDateTime parseQuietly(String iso) {
+        if (iso == null || iso.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(iso);
+        } catch (DateTimeParseException e) {
+            log.debug("timestamp without offset, trying local date-time: {}", iso);
+        }
+        try {
+            return LocalDateTime.parse(iso).atZone(ZoneId.systemDefault()).toOffsetDateTime();
+        } catch (DateTimeParseException e) {
+            log.debug("unparsable timestamp ignored: {}", iso);
+            return null;
+        }
     }
 
     /** 标签云：按出现次数降序、同量按字典序；供 index / summary 共用。 */
@@ -303,7 +367,8 @@ public final class SummaryHtmlRenderer {
             String feature = o.getUserStory() == null || o.getUserStory().getStoryName() == null
                     ? "(unknown feature)" : o.getUserStory().getStoryName();
             for (String line : o.getApiMonitorFailures()) {
-                entries.add(new MonitorEntry(o.getName(), feature, line, o.getOutcomeId() + ".html"));
+                entries.add(new MonitorEntry(o.getName(), feature, line,
+                        o.getOutcomeId() + "/" + o.getOutcomeId() + ".html"));
             }
         }
         return entries;
@@ -347,20 +412,5 @@ public final class SummaryHtmlRenderer {
             template.process(model, sw);
             return sw.toString();
         }
-    }
-
-    /** 汇总页兜底：无模板依赖的最小可读页。 */
-    static String minimalSummary(List<TestOutcome> outcomes) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">")
-                .append("<title>Test Summary</title></head><body><h1>Test Summary</h1><ul>");
-        for (TestOutcome o : outcomes) {
-            String result = o.getResult() == null ? "UNKNOWN" : o.getResult().name();
-            sb.append("<li><a href=\"").append(HtmlRenderer.esc(o.getOutcomeId()))
-                    .append(".html\">").append(HtmlRenderer.esc(o.getName()))
-                    .append("</a> — ").append(result).append("</li>");
-        }
-        sb.append("</ul></body></html>");
-        return sb.toString();
     }
 }

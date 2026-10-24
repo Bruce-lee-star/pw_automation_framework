@@ -76,20 +76,28 @@ public enum ConfigKeys {
     // ===================== Web（对应 WebFrameworkConfig）=====================
 
     WEB_FRAMEWORK_PROJECT_NAME(
-        "framework.project.name",
-        "框架 Playwright Demo",
-        "项目名称"
+        "project.report.name",
+        "",
+        "报告项目名称（所有报告统一使用；<b>未配置时报告显示 Test Report</b>）"
     ),
-    WEB_FRAMEWORK_ENCODING(
-        "framework.encoding",
-        "UTF-8",
-        "编码设置"
+
+    /**
+     * 失败类型分类规则（报告「Most Frequent Failures」按<b>类型</b>而非整段消息聚合）。
+     *
+     * <p><b>格式</b>：逗号分隔的 {@code Type=keyword1|keyword2}，大小写不敏感，按声明顺序短路匹配
+     * （同时匹配失败消息与异常类名）。示例：
+     * <pre>Timeout=timeout|timed out|等待超时,Assertion=expect|assert,Network=ECONNREFUSED|socket|connection reset</pre>
+     *
+     * <p><b>未配置</b>时回退到用例语义类别 {@code testFailureCause.errorType}
+     * （FAILURE / ERROR / COMPROMISED），再回退到异常类简名——保证任何失败都能归类，
+     * 报告不再把「哪类失败最多」显示成一堆重复的消息片段。
+     */
+    REPORT_ERROR_TYPES(
+        "report.error.types",
+        "",
+        "失败类型分类规则（逗号分隔，形如 Type=keyword1|keyword2）；未配置时按 FAILURE/ERROR/COMPROMISED 分类"
     ),
-    WEB_FRAMEWORK_REPORT_ENCODING(
-        "framework.report.encoding",
-        "UTF-8",
-        "报告编码设置"
-    ),
+
     WEB_PLAYWRIGHT_BROWSER_TYPE(
         "playwright.browser.type",
         "chromium",
@@ -135,11 +143,7 @@ public enum ConfigKeys {
         "true",
         "是否订阅 page.onPopup（未受管弹窗诊断，失败告警用）"
     ),
-    WEB_PLAYWRIGHT_PAGE_EVENTS_DOWNLOAD_ENABLED(
-        "playwright.page.events.download.enabled",
-        "true",
-        "是否订阅 context.onDownload（下载保存与查询；关闭后 getLastDownloadPath 等将无记录）"
-    ),
+
     WEB_PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED(
         "playwright.page.events.console.enabled",
         "false",
@@ -236,11 +240,7 @@ public enum ConfigKeys {
         "30000",
         "浏览器超时设置"
     ),
-    WEB_PLAYWRIGHT_BROWSER_DOWNLOADS_PATH(
-        "playwright.browser.downloadsPath",
-        "target/downloads",
-        "下载文件保存根目录（实际文件按线程落在其 thread-<id> 子目录，避免并行用例互相清理）"
-    ),
+
     WEB_BROWSERSTACK_ENABLED(
         "browserstack.enabled",
         "false",
@@ -441,11 +441,6 @@ public enum ConfigKeys {
         "false",
         "移动设备模拟"
     ),
-    WEB_PLAYWRIGHT_CONTEXT_SCREENSHOT_PATH(
-        "playwright.context.screenshotPath",
-        "target/screenshots",
-        "截图保存路径"
-    ),
     WEB_PLAYWRIGHT_CONTEXT_RECORD_VIDEO_ENABLED(
         "playwright.context.recordVideo.enabled",
         "false",
@@ -623,11 +618,7 @@ public enum ConfigKeys {
         "src/test/resources/features",
         "特性文件根目录"
     ),
-    WEB_FRAMEWORK_REQUIREMENTS_BASE(
-        "framework.requirements.base",
-        "src/test/resources/features",
-        "需求根目录"
-    ),
+
     WEB_FRAMEWORK_BROWSER(
         "framework.browser",
         "playwright",
@@ -824,6 +815,16 @@ public enum ConfigKeys {
         "playwright.browser.download.timeout.minutes",
         "5",
         "浏览器下载超时时间（分钟）"
+    ),
+    WEB_PLAYWRIGHT_BROWSER_DOWNLOADS_PATH(
+        "playwright.browser.downloadsPath",
+        "target/downloads",
+        "下载文件保存目录（用例结束按线程子目录清理）"
+    ),
+    WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED(
+        "playwright.browser.download.attachToReport.enabled",
+        "false",
+        "下载文件自动挂载测试报告开关：waitForDownloadSaved 成功后自动上报，per-case 报告显示 Downloads Tab；默认 false（不挂载，报告无 Downloads 内容）"
     ),
     WEB_SENSITIVE_DATA_EXTRA_HEADER_KEYS(
         "sensitive.data.extra.header.keys",

@@ -26,6 +26,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.screenshot.strategy.Screensh
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -447,10 +448,27 @@ public class PlaywrightListener implements
                 ReportingBridge bridge = ReportingBridgeRegistry.get();
                 for (CapturedScreenshot shot : screenshots) {
                     bridge.attachScreenshot(shot);
+                    //  截图已进报告（attachScreenshot 会把字节写入 per-case screenshots/step-NNN.png），
+                    //   框架侧落盘的临时文件随即失去引用价值——删除之，避免 per-case 目录里
+                    //   堆积 sha256 命名的孤儿 png（2026-10-20 用户反馈"截图散落"）。
+                    //   删除失败只降级日志：孤儿文件不影响报告正确性。
+                    deleteFrameworkTempScreenshot(shot);
                 }
             }
         } catch (Exception e) {
             logger.error("Failed to attach screenshots", e);
+        }
+    }
+
+    /** 删除框架为本次上报落盘的临时截图（幂等、静默失败）。 */
+    private void deleteFrameworkTempScreenshot(CapturedScreenshot shot) {
+        try {
+            if (shot != null && shot.pngFile() != null) {
+                Files.deleteIfExists(shot.pngFile().toPath());
+            }
+        } catch (Exception e) {
+            logger.debug("Failed to delete framework temp screenshot {}: {}",
+                    shot.pngFile(), e.toString());
         }
     }
 

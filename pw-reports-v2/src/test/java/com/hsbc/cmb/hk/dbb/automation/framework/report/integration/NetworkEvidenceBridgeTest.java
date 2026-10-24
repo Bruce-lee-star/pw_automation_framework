@@ -61,7 +61,8 @@ class NetworkEvidenceBridgeTest {
         bus.finishCase(caseHandle, TestResult.SUCCESS, null, 7);
         bus.finishRun();
 
-        TestOutcome o = JsonWriter.mapper().readValue(dir.resolve("net-1-call.json").toFile(), TestOutcome.class);
+        TestOutcome o = JsonWriter.mapper().readValue(
+                dir.resolve("net-1-call").resolve("net-1-call.json").toFile(), TestOutcome.class);
         String evidence = o.getTestSteps().stream()
                 .flatMap(s -> s.getEvidence().stream())
                 .reduce((a, b) -> a + "\n" + b)
@@ -71,7 +72,10 @@ class NetworkEvidenceBridgeTest {
         assertThat(evidence).doesNotContain("Bearer xyz789");
 
         // 同时进 apiOperations 列表（双口径）
-        assertThat(o.getApiOperations()).anyMatch(line -> line.contains("NET") && !line.contains("SUPER_SECRET_TOKEN"));
+        //  captured 为 step 级句柄 → API 操作归位到对应步骤；用例级列表为空
+        assertThat(o.getApiOperations()).isEmpty();
+        assertThat(o.getTestSteps().stream().flatMap(s -> s.getApiOperations().stream()))
+                .anyMatch(line -> line.contains("NET") && !line.contains("SUPER_SECRET_TOKEN"));
     }
 
     @Test
@@ -87,7 +91,8 @@ class NetworkEvidenceBridgeTest {
         bus.finishCase(caseHandle, TestResult.ERROR, null, 1);
         bus.finishRun();
 
-        TestOutcome o = JsonWriter.mapper().readValue(dir.resolve("net-2-fail.json").toFile(), TestOutcome.class);
+        TestOutcome o = JsonWriter.mapper().readValue(
+                dir.resolve("net-2-fail").resolve("net-2-fail.json").toFile(), TestOutcome.class);
         assertThat(o.getTestSteps().stream().flatMap(s -> s.getEvidence().stream()))
                 .anyMatch(line -> line.contains("ERR:") && line.contains("ConnectException"));
     }

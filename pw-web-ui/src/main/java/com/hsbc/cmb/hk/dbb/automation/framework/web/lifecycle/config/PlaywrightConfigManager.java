@@ -127,20 +127,24 @@ public class PlaywrightConfigManager {
     }
 
     /**
-     * 获取浏览器下载路径
-     */
-    public String getBrowserDownloadsPath() {
-        return FrameworkConfigManager.getString(WebFrameworkConfig.PLAYWRIGHT_BROWSER_DOWNLOADS_PATH);
-    }
-
-    /**
      * 获取下载保存超时（分钟）—— 复用既有键 {@code playwright.browser.download.timeout.minutes}（无新增配置键）。
      *
-     * <p>用途：作为「下载保存」卸载到 {@code AsyncPool} 后的任务超时上限（见
-     * {@code PlaywrightContextManager.saveDownloadAsync}）。</p>
+     * <p>该键原用于控制「浏览器自动保存下载文件」的任务超时上限；框架已不再自动保存下载，业务经
+     * {@code Download.saveAs} 自行落盘，此 getter 保留作为历史配置键的读取入口。</p>
      */
     public int getBrowserDownloadTimeoutMinutes() {
         return FrameworkConfigManager.getInt(WebFrameworkConfig.PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES);
+    }
+
+    /**
+     * 获取下载文件保存目录（业务自行 {@code Download.saveAs} 的推荐根目录）。
+     *
+     * <p>并发执行下的实际落盘位置为 {@code <downloadsPath>/thread-<线程序号>}
+     * （见 {@code PlaywrightManager.downloadDirectoryForCurrentThread()}），每个用例结束时框架只清理
+     * 本线程子目录。</p>
+     */
+    public String getBrowserDownloadsPath() {
+        return FrameworkConfigManager.getString(WebFrameworkConfig.PLAYWRIGHT_BROWSER_DOWNLOADS_PATH);
     }
 
     /**

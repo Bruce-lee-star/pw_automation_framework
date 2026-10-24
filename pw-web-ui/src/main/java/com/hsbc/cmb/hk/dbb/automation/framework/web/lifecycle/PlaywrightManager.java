@@ -287,175 +287,11 @@ public class PlaywrightManager {
         return provider.getPage();
     }
 
-    // ==================== 下载查询（业务层获取自动保存的下载文件） ====================
 
-    /**
-     * 获取当前上下文最近一次下载文件的绝对路径。
-     * <p>
-     * 下载由框架在 {@code BrowserContext} 级自动保存至 {@code browser.downloads.path}（见 §3.2 收尾），
-     * 文件名取自响应 {@code Content-Disposition}（{@code Download.suggestedFilename()}）。
-     *
-     * @return 最近下载文件的绝对路径；当前上下文无下载记录时返回 {@code null}
-     * @apiNote 稳定公开契约。业务触发下载（点击导出等）后调用，需确保下载已完成再读取。
-     */
-    public static Path getLastDownloadPath() {
-        return DownloadRegistry.instance().last(getContext());
-    }
 
-    /**
-     * 获取当前上下文最近一次下载文件的文件名（不含目录）。
-     *
-     * @return 文件名；当前上下文无下载记录时返回 {@code null}
-     * @apiNote 稳定公开契约。业务触发下载后调用，需确保下载已完成再读取。
-     */
-    public static String getLastDownloadFileName() {
-        Path p = getLastDownloadPath();
-        if (p == null) {
-            return null;
-        }
-        Path fileName = p.getFileName();   // 根路径无文件名（防御，SpotBugs NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE）
-        return fileName == null ? null : fileName.toString();
-    }
 
-    /**
-     * 获取当前上下文最近一次下载的<b>原始文件名</b> —— 响应 {@code Content-Disposition}，即
-     * {@code Download.suggestedFilename()}。
-     *
-     * <p><b>与 {@link #getLastDownloadFileName()} 的区别</b>：后者返回<b>落盘文件名</b>，会在同名冲突时
-     * 被 {@code resolveNonConflictingDownloadPath} 去重改写（并发下载 / 重复导出同一份报表即会变），
-     * 用它做断言不稳定；断言"下载到的文件叫什么"应以本方法为准。</p>
-     *
-     * <p><b>可见时机</b>：与 {@link #getLastDownloadPath()} 同批登记（异步保存完成后），故同样需要先
-     * {@link #awaitLastDownloadPath(long)} / {@link #awaitDownloadCount(int, long)}。若要在下载事件当下
-     * 立刻拿到原始名，用 {@code BasePage.waitForDownload(...)} 的返回值 {@code Download} 读
-     * {@code suggestedFilename()}（事件到达即已可用）。</p>
-     *
-     * @return 原始文件名；当前上下文无下载记录（或 Playwright 未提供）时返回 {@code null}
-     * @apiNote 稳定公开契约。
-     */
-    public static String getLastDownloadOriginalFileName() {
-        DownloadRegistry.DownloadRecord record = DownloadRegistry.instance().lastRecord(getContext());
-        return record == null ? null : record.suggestedFileName();
-    }
 
-    /**
-     * 获取当前上下文全部下载文件的绝对路径（按时间升序）。
-     *
-     * @return 下载路径列表；当前上下文无下载记录时返回空列表（非 {@code null}）
-     * @apiNote 稳定公开契约。业务触发下载后调用，需确保下载已完成再读取。
-     */
-    public static List<Path> getDownloadPaths() {
-        return DownloadRegistry.instance().all(getContext());
-    }
 
-    /** 下载等待的轮询间隔（毫秒）：等待的是「文件保存完成并登记」，非忙等（基于 LockSupport，不调 Thread.sleep）。 */
-    private static final long DOWNLOAD_AWAIT_POLL_MS = 50;
-
-    /**
-     * 当前上下文的<b>已登记下载数</b> —— 作为「等这一次下载落盘」的基线。
-     *
-     * <p>用法：触发下载<b>前</b>取基线，触发后用 {@link #awaitDownloadCount(int, long)} 等基线 + 1。</p>
-     *
-     * @return 当前上下文已登记的下载文件数（无记录返回 0）
-     */
-    public static int getDownloadCount() {
-        return getDownloadPaths().size();
-    }
-
-    /**
-     * 等待「当前上下文的已登记下载数 ≥ {@code expectedCount}」，超时返回 {@code false}（<b>不抛异常</b>）。
-     *
-     * <p><b>为什么需要它</b>：下载保存是<b>异步</b>的 —— 下载事件在 Playwright 连接读线程派发后，
-     * 框架把 {@code download.saveAs(...)} 卸载到工作线程执行（避免阻塞读线程，见
-     * {@code PlaywrightContextManager.saveDownloadAsync}），保存成功后才登记到 {@code DownloadRegistry}。
-     * 因此 {@code waitForDownload(...)} 返回时（它只等<b>下载事件</b>）文件<b>可能尚未落盘</b>，
-     * 立刻读 {@link #getLastDownloadPath()} 可能得到 {@code null} 或上一次的旧值。</p>
-     *
-     * @param expectedCount 期望达到的已登记下载数（通常＝触发前的 {@link #getDownloadCount()} + 1）
-     * @param timeoutMs     超时（毫秒）；≤0 表示只探测一次
-     * @return 是否在超时前达到期望数量
-     */
-    public static boolean awaitDownloadCount(int expectedCount, long timeoutMs) {
-        long deadline = System.currentTimeMillis() + Math.max(0L, timeoutMs);
-        while (true) {
-            if (getDownloadCount() >= expectedCount) {
-                return true;
-            }
-            if (System.currentTimeMillis() >= deadline) {
-                return false;
-            }
-            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(DOWNLOAD_AWAIT_POLL_MS));
-        }
-    }
-
-    /**
-     * 等待「<b>本次新触发</b>的下载」保存完成并登记，返回其路径；超时返回 {@code null}。
-     *
-     * <p>语义：以调用时刻的已登记数为基线，等第一个<b>新的</b>登记出现 —— 因此不会误读到上一次下载的旧路径
-     * （多下载场景请改用 {@link #getDownloadCount()} + {@link #awaitDownloadCount(int, long)} 或
-     * {@link #getDownloadPaths()}）。</p>
-     *
-     * <p>典型用法：{@code page.waitForDownload(() -> clickExport());} 然后
-     * {@code Path f = PlaywrightManager.awaitLastDownloadPath(15_000);}</p>
-     *
-     * @param timeoutMs 超时（毫秒）
-     * @return 新下载文件的绝对路径；超时未见新登记时返回 {@code null}
-     */
-    public static Path awaitLastDownloadPath(long timeoutMs) {
-        int baseline = getDownloadCount();
-        if (!awaitDownloadCount(baseline + 1, timeoutMs)) {
-            return null;
-        }
-        return getLastDownloadPath();
-    }
-
-    /**
-     * <b>当前线程</b>的下载目录：{@code <playwright.browser.downloadsPath>/thread-<threadId>}。
-     *
-     * <p><b>为什么要按线程分目录（2026-09-21）</b>：下载目录原为<b>全局单目录</b>，而每个 scenario 收尾都会
-     * 清空该目录（{@code PlaywrightLifecycleBridge.cleanupTempDownloads}）⇒ 真并行下会删掉并发 scenario
-     * 正在下载/刚下载的文件（跨用例干扰）。按线程分目录后，<b>某线程收尾只清自己的目录</b>，邻居不受影响 ——
-     * 与「每线程独立 Browser/Context/Page」以及 per-thread 锁是同一隔离模型。</p>
-     *
-     * <p><b>必须共用本方法</b>：下载保存（{@code PlaywrightContextManager.registerDownloadHandler}）与收尾清理
-     * （{@code PlaywrightLifecycleBridge.cleanupTempDownloads}）若各写一份命名，会漂移成「清了别人的目录」或
-     * 「自己的目录没清」。</p>
-     *
-     * @return 当前线程的下载目录（不保证已存在；保存路径解析时会按需创建）
-     */
-    public static Path downloadDirectoryForCurrentThread() {
-        return Paths.get(config().getBrowserDownloadsPath(), "thread-" + Thread.currentThread().threadId());
-    }
-
-    // ==================== 下载附件挂 框架 报告 ====================
-
-    /**
-     * 把最近一次完成的下载作为<b>可下载附件</b>挂到当前 scenario 的 框架 报告。
-     *
-     * <p>典型位置：触发下载（点击导出等）并 {@code await*} 之后、scenario 收尾前调用。实现先等下载登记
-     * （{@link #awaitLastDownloadPath(long)}，默认 15s），再把文件复制到仓库根的
-     * {@code site/report-attachments/}（该目录不参与 scenario 清理、可被报告/CI 稳定引用），最后经
-     * {@code 框架.recordReportData().withTitle(...).fromFile(...).downloadable()} 嵌入报告。
-     * 之所以要先复制出来：scenario 收尾会清本线程 {@code target/downloads/thread-<id>/}，
-     * 直接引用临时下载目录 ⇒ 报告生成时文件已删 ⇒ 附件链接失效。</p>
-     *
-     * @apiNote 稳定公开契约。多线程下只挂<b>本线程本 Context</b>的下载（与查询 API 同隔离语义）。
-     *         报告挂接是尽力而为：无可用下载或挂接失败安全返回 {@code false}（不抛、不阻断 case）。
-     * @return true 表示已归档（并尽力嵌入报告）；false 表示无可用下载
-     */
-    public static boolean attachLastDownloadToReport() {
-        return DownloadReportAttacher.attachLastDownload(null);
-    }
-
-    /**
-     * 同 {@link #attachLastDownloadToReport()}，但指定报告里显示的标题。
-     *
-     * @param caption 报告附件标题（null/空白时回退为下载文件名）
-     * @return true 表示已归档（并尽力嵌入报告）；false 表示无可用下载
-     */
-    public static boolean attachLastDownloadToReport(String caption) {
-        return DownloadReportAttacher.attachLastDownload(caption);
-    }
 
     // ==================== Context 和 Page 创建方法 ====================
 
@@ -756,6 +592,31 @@ public class PlaywrightManager {
      */
     public static FrameworkState getFrameworkState() {
         return frameworkState;
+    }
+
+    /**
+     * 解析本线程的下载落盘目录：{@code <playwright.browser.downloadsPath>/thread-<线程序号>}。
+     *
+     * <p>框架不自动保存下载文件；业务在 {@code Download.saveAs(...)} 时可使用本目录，以获得
+     * 「按线程隔离 + 用例结束自动清理」的语义：每个用例（scenario）收尾时框架只删除本线程的
+     * 子目录，并发执行的其它线程不受影响。</p>
+     *
+     * <p><b>为何带线程子目录</b>：{@code downloadsPath} 是进程级共享根目录，并行执行时若所有用例
+     * 直接落到同一目录，一次用例清理会误删其它线程正在写入的文件。</p>
+     *
+     * @return 本线程的下载目录（不存在则尝试创建；创建失败也返回该路径，由落盘方报错）
+     */
+    public static Path downloadDirectoryForCurrentThread() {
+        Path dir = Paths.get(config().getBrowserDownloadsPath())
+                .resolve("thread-" + Thread.currentThread().getId());
+        try {
+            Files.createDirectories(dir);
+        } catch (Exception e) {
+            // 目录创建失败不阻断业务：返回路径即可，真正落盘时由 saveAs 暴露错误
+            LoggerFactory.getLogger(PlaywrightManager.class)
+                    .warn("[download] failed to create download dir {}: {}", dir, e.getMessage());
+        }
+        return dir;
     }
 
 }

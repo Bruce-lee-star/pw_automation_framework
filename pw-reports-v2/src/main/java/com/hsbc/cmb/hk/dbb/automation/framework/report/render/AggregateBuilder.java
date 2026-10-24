@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestStep;
 import freemarker.template.Configuration;
@@ -74,7 +76,8 @@ public final class AggregateBuilder {
         for (TestOutcome o : outcomes) {
             String result = o.getResult() == null ? "UNKNOWN" : o.getResult().name();
             sb.append("<li class=\"result-").append(result.toLowerCase(Locale.ROOT)).append("\">")
-                    .append("<a href=\"").append(HtmlRenderer.esc(o.getOutcomeId())).append(".html\">")
+                    .append("<a href=\"").append(HtmlRenderer.esc(o.getOutcomeId()))
+                    .append("/").append(HtmlRenderer.esc(o.getOutcomeId())).append(".html\">")
                     .append(HtmlRenderer.esc(o.getName())).append("</a> — ").append(result)
                     .append("</li>");
         }
@@ -93,7 +96,9 @@ public final class AggregateBuilder {
         for (Map<String, Object> g : groups) {
             List<Map<String, Object>> scenarios = (List<Map<String, Object>>) g.get("scenarios");
             for (Map<String, Object> s : scenarios) {
-                String id = ((String) s.get("link")).replace(".html", "");
+                String link = (String) s.get("link");
+                //  link 形如 <outcomeId>/<outcomeId>.html（2026-10-21 迁移），取末段文件名作 id
+                String id = link.substring(link.lastIndexOf('/') + 1).replace(".html", "");
                 s.put("steps", buildSteps(byId.get(id)));
             }
             featureStats(g, outcomes);
@@ -136,6 +141,8 @@ public final class AggregateBuilder {
         model.put("durationBuckets", ReportView.durationBuckets(outcomes));
         model.put("env", ReportView.environment());
         model.put("browsers", ReportView.browsers());
+        //  CI / 构建信息（顶栏构建链接）；本地运行无 Jenkins/GitLab 变量时 present=false，不渲染
+        model.put("ci", ReportView.ciBuild());
         model.put("outcomes", outcomes);
         model.put("totals", totals);
         model.put("reportVersion", reportVersion(outcomes));
@@ -146,6 +153,12 @@ public final class AggregateBuilder {
         model.put("successRate", SummaryHtmlRenderer.successRate(count, failures));
         model.put("totalDurationText",
                 SummaryHtmlRenderer.formatDuration(((Number) totals.get("duration")).longValue()));
+        //  执行耗时汇总（Total / Clock / Average / Max / Min）：与邮件报告同口径，
+        //  index / feature 都要展示（2026-10-22 用户反馈两块都缺"整个 case 执行总时长"）。
+        model.put("timings", SummaryHtmlRenderer.timings(outcomes));
+        //  运行窗口（generatedAt / startedAt / endedAt）：顶栏除报告名外的时间信息
+        //  （2026-10-22 用户要求，index / feature / per-case / 邮件四处共用）。
+        model.put("run", SummaryHtmlRenderer.runWindow(outcomes));
         model.put("groups", groups);
         model.put("tags", SummaryHtmlRenderer.tagCounts(outcomes));
         model.put("projectName", projectName());
@@ -221,9 +234,22 @@ public final class AggregateBuilder {
 
 
 
-    /** 报告标题：读框架项目名（桥接注入的系统属性），缺省回退 Test Report。index / 邮件报告共用。 */
+    /**
+     * 报告标题：读框架配置 {@code project.report.name}（历史键 {@code framework.project.name} 仍作兜底），
+     * 缺省回退 {@code Test Report}。index / 邮件报告共用。
+     *
+     * <p>统一走 {@link ConfigSource#resolve}：系统属性 → 环境变量 → SPI 配置源 → 默认值，
+     * 与框架其它配置读取链路一致，保证「所有报告使用同一个 name」。</p>
+     */
     static String projectName() {
-        String name = System.getProperty("framework.project.name");
+        String name = ConfigSource.resolve(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME.key(),
+                ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME.defaultValue());
+        if (name == null || name.isBlank()) {
+            // 兼容旧桥接：早期实现直接把项目名塞进该系统属性
+            name = System.getProperty("framework.project.name");
+        }
+        //  <b>未配置 → Test Report</b>：不再拿框架自带的默认值冒充"用户配的名字"
+        //  （2026-10-22 用户要求：只显示配置的，没配置就显示 Test Report）。
         return name == null || name.isBlank() ? "Test Report" : name;
     }
 

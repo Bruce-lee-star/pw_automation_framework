@@ -12,6 +12,7 @@ on:
       - 'docs/**'
       - 'tools/check-doc-drift.sh'
       - 'tools/check-doc-drift.ps1'
+      - 'tools/check_doc_standard.py'
       - '.github/workflows/doc-drift-check.yml'
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - 'docs/**'
       - 'tools/check-doc-drift.sh'
       - 'tools/check-doc-drift.ps1'
+      - 'tools/check_doc_standard.py'
       - '.github/workflows/doc-drift-check.yml'
 
 jobs:
@@ -30,3 +32,8 @@ jobs:
       - name: Verify README versions match pom
         shell: pwsh
         run: pwsh tools/check-doc-drift.ps1
+      # S4 quality gates: metadata / structure / link integrity of docs/**.
+      # The script itself is in paths() on purpose: a broken checker must be
+      # able to trigger the check, otherwise rule regressions go unnoticed.
+      - name: Verify docs metadata and structure
+        run: python3 tools/check_doc_standard.py --strict

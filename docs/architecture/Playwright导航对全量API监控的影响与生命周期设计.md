@@ -79,7 +79,7 @@ Page 事件应记录每个 Frame 的 `FRAME_NAVIGATED`、文档提交、load 与
 
 **监听器不会被导航自动“清空”，但新导航会稀释其语义。** 官方没有承诺“每次整页导航后 `page.onX` 自动移除”；它们是对象级订阅。真正危险的是测试代码在导航前登记、导航后忘记取消，导致重复调用和重复计数。相反，若测试误把 `page.removeAllListeners()` 当成版本安全 API，也可能把业务框架的监听器一起移除；应保存返回的 `Disposable` 或具名 handler，调用 `dispose()`/`unroute(handler)`，必要时 `unrouteAll()`。
 
-![popup 与 Service Worker 漏捕风险最高](https://one-agent-prod-1343551737.cos.ap-guangzhou.myqcloud.com/artifacts/0125/4c14ac651e3b4e8992d48adf574038cc/0QL5JwAUuMU/task-51db7ee0a91a1aca107b95e00579fd4b/.rendered/_assets/dr%3Aplaywright-nav-lifecycle/fig_risk.png?q-sign-algorithm=sha1&q-ak=AKIDDMTk0KZdUSL21fBYigcl3C8rMeiT5TdZ&q-sign-time=1791989853%3B1799765853&q-key-time=1791989853%3B1799765853&q-header-list=host&q-url-param-list=&q-signature=b29afdac00cd12dca321960d4861a8d2aad2b206)
+![popup 与 Service Worker 漏捕风险最高](assets/fig_risk.png)
 *图 1：不同导航拓扑的相对风险；分值综合官方可见性边界、首请求时序和结果归属难度。数据来源：Playwright Java 官方 API 与 Network 文档 [1][3][4][6][8]*
 
 ## 5. 后台重取与 page route 是两条不同调用路径

@@ -1,4 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
@@ -213,7 +214,8 @@ public class PlaywrightScreenshotManager {
      *       再用更短超时重试一次视口截图，尽量为失败场景保留一张图。</li>
      * </ul>
      *
-     * @apiNote 落盘目录固定为 {@code target/site/serenity}（框架 报告目录），后缀 {@code .png}。
+     * @apiNote 落盘目录由报告侧指导（{@code ReportingBridge#screenshotTarget()}，通常为 per-case
+     *          的 {@code screenshots/}）；未接报告时回落 {@code target/site/serenity}（非配置项）。
      *          框架 4.2.0 对截图后缀/格式有内部假设，必须保持 PNG。
      */
     public static String takeScreenshot(String title) {
@@ -221,8 +223,8 @@ public class PlaywrightScreenshotManager {
         if (page == null || page.isClosed()) {
             return null;
         }
-        // 目录（框架 标准）
-        Path screenshotDir = Paths.get("target/site/serenity");
+        //  目录：优先报告侧 per-case screenshots/，其次 标准根目录（历史兜底）
+        Path screenshotDir = resolveScreenshotDir();
         try {
             Files.createDirectories(screenshotDir);
         } catch (Exception e) {
@@ -246,6 +248,28 @@ public class PlaywrightScreenshotManager {
                 restorePageHeightStyle(page);
             }
         }
+    }
+
+    /**
+     * 解析截图落盘目录：优先 {@code ReportingBridge#screenshotTarget()}（报告 per-case
+     * {@code screenshots/}），不可用（未接报告 / 无活动用例句柄 / 路径非法）时回落
+     * {@code target/site/serenity}。
+     *
+     * <p>why：2026-10-20 前截图一律写 {@code target/site/serenity} 根目录并以 sha256 命名，
+     * 报告实际引用的是 per-case 下的 {@code step-NNN.png}，于是根目录里堆满无人引用的
+     * 垃圾文件、per-case 目录反而不是唯一真相源。与 {@code traceTarget()} 同一设计：
+     * 报告侧指导框架落点，从源头避免两份。
+     */
+    private static Path resolveScreenshotDir() {
+        try {
+            Path target = ReportingBridgeRegistry.get().screenshotTarget();
+            if (target != null && !target.toString().isBlank()) {
+                return target;
+            }
+        } catch (Throwable t) {
+            VerboseLogging.logDebugIfVerbose(logger, "screenshotTarget unavailable, fallback: {}", t.toString());
+        }
+        return Paths.get("target/site/serenity");
     }
 
     /**

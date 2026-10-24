@@ -5,6 +5,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.ContextOutcomeBinding;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Tracing;
@@ -14,6 +15,10 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -55,8 +60,59 @@ public final class ScenarioTraceRecorder {
 
     private static final Logger logger = LoggerFactory.getLogger(ScenarioTraceRecorder.class);
 
-    /** trace 落盘目录（与 框架 报告同目录，报告内可直接下载）。 */
+    /**
+     * 证据兜底目录（固定值，<b>非配置</b>）：仅当报告未指导落点（无活动用例句柄 / 未接 v2 报告）时，
+     * trace.zip 才落到此处作证据；正常使用 v2 报告时 trace 直接落 per-case（{@link #resolveTraceTarget}），
+     * 此目录不被使用。
+     */
     static final String TRACE_DIR = "target/site/serenity/traces";
+
+    /** trace 保存目录（固定 {@link #TRACE_DIR}，不由配置覆盖——trace 落点由报告经 {@code traceTarget()} 指导）。 */
+    static String traceDir() {
+        return TRACE_DIR;
+    }
+
+    /**
+     * 解析本次导出的目标文件：优先采用<b>报告指导的落点</b>（{@code ReportingBridge#traceTarget()}，
+     * 通常是 per-case 的 {@code trace.zip}）——trace 直接写进报告目录，不产生“框架 traces/ + per-case”
+     * 两份、也无须事后移动；报告未指导（无活动用例句柄 / 未接报告）时落固定 {@link #TRACE_DIR} 作证据兜底
+     * （此时文件名带 slug/时间戳/结果，便于在扁平目录中区分，由 TraceRetention 治理）。
+     */
+    private static Path resolveTraceTarget(String fallbackName) {
+        try {
+            Path reportTarget = ReportingBridgeRegistry.get().traceTarget();
+            if (reportTarget != null) {
+                return reportTarget;
+            }
+        } catch (Exception ignore) {
+            // 桥缺失/异常 → 回落固定证据目录
+        }
+        return Paths.get(traceDir(), fallbackName);
+    }
+
+    /**
+     * 上下文感知的落点解析：优先 {@link #resolveTraceTarget(String)}（场景线程上句柄有效 → per-case）；
+     * 句柄 NOOP 的<b>收尾 / CloseGuard 线程</b>上，改用 {@link ContextOutcomeBinding} 绑定的 outcomeId
+     * 精确解析 per-case——并行下不再取"最近开始的用例"，trace 始终直接落该 context 所属 per-case，永不搬/拷。
+     */
+    private static Path resolveTraceTarget(BrowserContext context, String fallbackName) {
+        try {
+            Path reportTarget = ReportingBridgeRegistry.get().traceTarget();
+            if (reportTarget != null) {
+                return reportTarget;
+            }
+            String id = context != null ? ContextOutcomeBinding.outcomeId(context) : null;
+            if (id != null) {
+                Path byId = ReportingBridgeRegistry.get().traceTargetByOutcomeId(id);
+                if (byId != null) {
+                    return byId;
+                }
+            }
+        } catch (Exception ignore) {
+            // 桥缺失/异常 → 回落固定证据目录
+        }
+        return Paths.get(traceDir(), fallbackName);
+    }
 
     /** 文件名片段最大长度（防超长名，文件系统上限 255）。 */
     private static final int MAX_NAME_FRAGMENT = 120;
@@ -143,8 +199,8 @@ public final class ScenarioTraceRecorder {
             if (!traceEnabled() || context == null || !Boolean.TRUE.equals(chunkActive())) {
                 return;
             }
-            Path file = Paths.get(TRACE_DIR,
-                    traceFileName(id, startMs == null ? endMs : startMs, endMs, outcome));
+            Path file = resolveTraceTarget(context,
+                    traceFileName(id, startMs == null ? endMs : startMs, outcome));
             exportChunk(context, file, id, startMs, endMs);
         } finally {
             setChunkActive(false);
@@ -162,11 +218,16 @@ public final class ScenarioTraceRecorder {
         }
         try {
             if (Boolean.TRUE.equals(chunkActive())) {
-                String id = SCENARIO_ID.get();
+                //  收尾线程（CloseGuard worker）上 SCENARIO_ID 这一 ThreadLocal 恒为 null；改为优先取
+                //    context 绑定的 outcomeId（精确、跨线程可见），回落 SCENARIO_ID 再回落 unknown。
+                String id = context != null ? ContextOutcomeBinding.outcomeId(context) : null;
+                if (id == null) {
+                    id = SCENARIO_ID.get();
+                }
                 Long startMs = CHUNK_START_MS.get();
                 long endMs = System.currentTimeMillis();
-                Path file = Paths.get(TRACE_DIR,
-                        traceFileName(id, startMs == null ? endMs : startMs, endMs, "ONCLOSE"));
+                Path file = resolveTraceTarget(context,
+                        traceFileName(id, startMs == null ? endMs : startMs, "ONCLOSE"));
                 exportChunk(context, file, id, startMs, endMs);
             } else {
                 // 无待导出 chunk：仅结束 tracing（chunk #0 若从未导出，说明本 context 未绑定过用例）
@@ -217,7 +278,8 @@ public final class ScenarioTraceRecorder {
                 deletePartialFile(file, "timeout(" + exportTimeoutSeconds() + "s)");
                 return;
             }
-            attachToReport(file, scenarioId, startMs, endMs);
+            attachToReport(file, scenarioId, startMs, endMs,
+                    context != null ? ContextOutcomeBinding.outcomeId(context) : null);
             TraceRetention.pruneIfDue();
         } catch (Exception e) {
             // tracing 未启动 / 已停止 / 写盘失败 / 目标被占用：一律删残片，绝不把坏 zip 挂进报告
@@ -243,15 +305,18 @@ public final class ScenarioTraceRecorder {
      * 把已落盘的 trace 登记进报告（经 {@link ReportingBridgeRegistry} 端口；框架 构建下落到 框架 报告，
      * v2 构建下落到 v2 报告）。任何失败（非报告线程 / 步骤上下文已结束）均降级为 debug，绝不抛出。
      */
-    private static void attachToReport(Path tracePath, String scenarioId, Long startMs, long endMs) {
+    private static void attachToReport(Path tracePath, String scenarioId, Long startMs, long endMs,
+                                       String outcomeId) {
         try {
             if (tracePath == null || !Files.exists(tracePath)) {
                 return;
             }
             String title = "TRACE" + (scenarioId != null ? ": " + scenarioId : "");
             StringBuilder contents = new StringBuilder();
-            contents.append("trace=").append(tracePath.getFileName())
-                    .append("\npath=").append(tracePath.toAbsolutePath());
+            //  只记采集文件名 + 执行窗口，不写绝对路径：报告会把该文件落入 per-case（<outcomeId>/trace.zip），
+            //    采集路径随之失效，写进去只会是陈旧信息；文件名（含 slug/时间戳/结果）本身就是稳定标识，
+            //    未接报告时也可凭它在 traces/ 定位（TraceRetention 同目录治理）。
+            contents.append("trace=").append(tracePath.getFileName());
             if (startMs != null) {
                 contents.append("\nwindow=")
                         .append(new java.text.SimpleDateFormat("HH:mm:ss.SSS").format(new java.util.Date(startMs)))
@@ -261,10 +326,28 @@ public final class ScenarioTraceRecorder {
                         .append("  [覆盖本用例执行窗口]");
             }
             ReportingBridgeRegistry.get().recordReportData(title, contents.toString());
-            //  v2 报告：把 trace.zip 拷到 <outcomeId>/trace.zip 并设 tracePath，使 per-case 页出现
-            //    "Play trace" 按钮（recordReportData 仅落证据文本、不驱动该按钮）。旧报告/无活动句柄下 no-op。
-            ReportingBridgeRegistry.get().attachTrace(tracePath);
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] recorded {} to 框架 report", tracePath.getFileName());
+            //  v2 报告：把 trace 落到 <outcomeId>/trace.zip 并设 tracePath，使 per-case 页出现
+            //    "Play trace" 按钮（recordReportData 仅落证据文本、不驱动该按钮）。旧报告/无活动句柄下 no-op，
+            //    此时文件留在 traces/ 由 TraceRetention 治理。
+            //    同时把录制窗口（起止时刻 + 时长）一并交给报告，供 Trace 卡片展示（旧报告经默认方法回落到只登记路径）。
+            //    归属优先用 context 绑定的 outcomeId（并行下精确）；缺失时桥回落最佳努力（句柄/活动用例）。
+            if (startMs != null) {
+                if (outcomeId != null) {
+                    ReportingBridgeRegistry.get().attachTrace(outcomeId, tracePath,
+                            windowTime(startMs), windowTime(endMs), Math.max(0L, endMs - startMs));
+                } else {
+                    ReportingBridgeRegistry.get().attachTrace(tracePath,
+                            windowTime(startMs), windowTime(endMs), Math.max(0L, endMs - startMs));
+                }
+            } else {
+                if (outcomeId != null) {
+                    ReportingBridgeRegistry.get().attachTrace(outcomeId, tracePath);
+                } else {
+                    ReportingBridgeRegistry.get().attachTrace(tracePath);
+                }
+            }
+            VerboseLogging.logDebugIfVerbose(logger, "[trace] recorded {} to 框架 report (outcomeId={})",
+                    tracePath.getFileName(), outcomeId);
         } catch (Exception e) {
             VerboseLogging.logDebugIfVerbose(logger, "[trace] record to report skipped: {}", e.getMessage());
         }
@@ -281,9 +364,32 @@ public final class ScenarioTraceRecorder {
      * @param outcome    {@code PASS} / {@code FAIL} / {@code ONCLOSE}（保留策略据此优先保留失败证据）
      * @return 文件名（不含目录）
      */
-    static String traceFileName(String scenarioId, long startMs, long endMs, String outcome) {
-        return "trace-" + sanitizeForFileName(scenarioId) + "-" + startMs + "-" + endMs
+    static String traceFileName(String scenarioId, long startMs, String outcome) {
+        return "trace-" + slugForFileName(scenarioId) + "-" + readableStamp(startMs)
                 + "-" + (outcome == null ? "UNKNOWN" : outcome) + ".zip";
+    }
+
+    /** 可读时间戳（UTC，{@code yyyyMMdd-HHmmss}）——替代原始 epoch 毫秒，文件名更易读且确定（测试不受时区影响）。 */
+    private static final DateTimeFormatter STAMP =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT).withZone(ZoneOffset.UTC);
+
+    static String readableStamp(long epochMs) {
+        return STAMP.format(Instant.ofEpochMilli(epochMs));
+    }
+
+    /**
+     * 录制窗口时刻格式（{@code HH:mm:ss.SSS}，本地时区）。
+     *
+     * <p>刻意用 {@code DateTimeFormatter} 而非 {@code SimpleDateFormat}：后者<b>非线程安全</b>，
+     * 而本类的 trace 导出可能并发触发（并行 scenario），共享实例会产出错乱时间。
+     */
+    private static final java.time.format.DateTimeFormatter WINDOW =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.ROOT);
+
+    /** epoch 毫秒 → {@code HH:mm:ss.SSS}（本地时区）。 */
+    private static String windowTime(long epochMs) {
+        return WINDOW.format(java.time.LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(epochMs), java.time.ZoneId.systemDefault()));
     }
 
     /**
@@ -304,6 +410,33 @@ public final class ScenarioTraceRecorder {
                 sb.append(c);
             } else {
                 sb.append('_');
+            }
+        }
+        return sb.length() == 0 ? "unknown" : sb.toString();
+    }
+
+    /**
+     * 可读 slug：转小写，把非 {@code [a-z0-9]} 字符段折叠为单个 {@code -}、去首尾 {@code -}、截断至 120。
+     * 比逐字符换 {@code _} 的 {@link #sanitizeForFileName} 更适合人读（如 {@code "testbed - 3MB base64 UI"}
+     * → {@code testbed-3mb-base64-ui}），用于 trace 文件名。
+     */
+    static String slugForFileName(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "unknown";
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        StringBuilder sb = new StringBuilder(Math.min(lower.length(), MAX_NAME_FRAGMENT));
+        boolean pendingDash = false;
+        for (int i = 0; i < lower.length() && sb.length() < MAX_NAME_FRAGMENT; i++) {
+            char c = lower.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                if (pendingDash && sb.length() > 0) {
+                    sb.append('-');
+                }
+                pendingDash = false;
+                sb.append(c);
+            } else {
+                pendingDash = true;
             }
         }
         return sb.length() == 0 ? "unknown" : sb.toString();

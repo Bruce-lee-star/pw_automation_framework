@@ -80,7 +80,7 @@ class QueuedNetworkEvidenceBridgeTest {
         bus.finishRun();
 
         TestOutcome o = JsonWriter.mapper()
-                .readValue(dir.resolve("net-q-1.json").toFile(), TestOutcome.class);
+                .readValue(dir.resolve("net-q-1").resolve("net-q-1.json").toFile(), TestOutcome.class);
         List<String> evidence = o.getTestSteps().stream()
                 .flatMap(s -> s.getEvidence().stream()).toList();
         assertThat(evidence).hasSize(3);
@@ -88,7 +88,9 @@ class QueuedNetworkEvidenceBridgeTest {
         // 敏感 query 必须被总线 ScrubGate 遮蔽
         assertThat(evidence).noneSatisfy(line -> assertThat(line).contains("SECRET_"));
         // 同时进用例级 API 操作列表（双口径）
-        assertThat(o.getApiOperations()).hasSize(3);
+        //  captured 为 step 级句柄 → API 操作归位到对应步骤；用例级列表为空（仅无 stepId 的兜底才落用例级）
+        assertThat(o.getApiOperations()).isEmpty();
+        assertThat(o.getTestSteps().stream().flatMap(s -> s.getApiOperations().stream()).toList()).hasSize(3);
         assertThat(bridge.pendingCount()).isZero();
     }
 
@@ -111,7 +113,7 @@ class QueuedNetworkEvidenceBridgeTest {
         bus.finishRun();
 
         TestOutcome o = JsonWriter.mapper()
-                .readValue(dir.resolve("net-q-2.json").toFile(), TestOutcome.class);
+                .readValue(dir.resolve("net-q-2").resolve("net-q-2.json").toFile(), TestOutcome.class);
         List<String> evidence = o.getTestSteps().stream()
                 .flatMap(s -> s.getEvidence().stream()).toList();
         assertThat(evidence).hasSize(3);
@@ -175,8 +177,11 @@ class QueuedNetworkEvidenceBridgeTest {
         bus.finishRun();
 
         TestOutcome o = JsonWriter.mapper()
-                .readValue(dir.resolve("net-q-4.json").toFile(), TestOutcome.class);
-        assertThat(o.getApiOperations()).hasSize(threads * perThread);
+                .readValue(dir.resolve("net-q-4").resolve("net-q-4.json").toFile(), TestOutcome.class);
+        //  captured 为 step 级句柄 → API 操作归位到对应步骤；用例级列表为空
+        assertThat(o.getApiOperations()).isEmpty();
+        assertThat(o.getTestSteps().stream().flatMap(s -> s.getApiOperations().stream()).toList())
+                .hasSize(threads * perThread);
     }
 
     @Test

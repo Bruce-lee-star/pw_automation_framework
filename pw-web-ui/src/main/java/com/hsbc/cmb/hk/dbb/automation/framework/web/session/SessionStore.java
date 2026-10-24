@@ -565,7 +565,8 @@ final class SessionStore {
             MY_LOGIN_GUARD_KEY.set(sessionKey);
             return null; // leader
         }
-        if (!existing.owner.isAlive() && loginGuards.remove(sessionKey, existing)) {
+        if ((!existing.owner.isAlive() || existing.owner == Thread.currentThread())
+                && loginGuards.remove(sessionKey, existing)) {
             existing.complete(false);
             LoginGuard recheck = loginGuards.putIfAbsent(sessionKey, candidate);
             if (recheck == null) {
@@ -665,6 +666,10 @@ final class SessionStore {
                 completeLoginGuard(sessionKey, true);
                 return true;
             }
+            //  P0-4 自锁修复：leader 无可用会话直接返回 false 时，必须 complete 并移除守卫，
+            //  否则守卫（owner=本线程、仍 alive）会滞留 —— 同线程下次 acquireOrAwait 取回它后
+            //  await 自己 → 等满 SINGLE_FLIGHT_TIMEOUT_MS。
+            completeLoginGuard(sessionKey, false);
             return false;
         }
         if (reusePersistedSession(sessionKey)) {
@@ -718,11 +723,20 @@ final class SessionStore {
 
     private static Runnable wrapLeaderAction(String sessionKey, Runnable leaderAction) {
         return () -> {
+            boolean completed = false;
             try {
                 leaderAction.run();
             } catch (RuntimeException ex) {
                 completeLoginGuard(sessionKey, false);
+                completed = true;
                 throw ex;
+            } finally {
+                //  P0-4：把"未显式完成即视为失败"变成硬约束。
+                //  正常返回但 leader 动作未自行 complete（业务吞异常 / 提前 return）时，
+                //  兜底 complete(false) 释放等待者；若动作已显式 complete(...) 则此处为幂等 no-op。
+                if (!completed) {
+                    completeLoginGuard(sessionKey, false);
+                }
             }
         };
     }

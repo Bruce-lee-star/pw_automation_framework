@@ -52,18 +52,23 @@ class EmailReportRendererTest {
     }
 
     @Test
-    @DisplayName("含汇总、失败明细与 feature 汇总")
+    @DisplayName("含汇总、失败明细；Functional Coverage 与环境节已按用户决定删除")
     void emailReportContainsSummaryAndFailures() throws Exception {
         String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
 
         assertThat(html)
-                .contains("Result distribution")
-                .contains("Failures")
-                .contains("Feature summary")
-                .contains("Environment")
+                .contains("Summary")
+                .contains("Full Failure List")
+                .contains("Full Test Results")
+                .contains("Test Failure Overview")
                 .contains("User logs in with valid credentials")
                 .contains("expected status 200 but was 401")
                 .contains("Authentication");
+        //  2026-10-22 用户决定：feature 统计并入顶部 KPI 卡后删除 Functional Coverage；
+        //  并"email report 去除环境信息这一块"
+        assertThat(html)
+                .doesNotContain("Functional Coverage")
+                .doesNotContain("Environment");
     }
 
     @Test
@@ -79,7 +84,7 @@ class EmailReportRendererTest {
         String html = EmailReportRenderer.renderToString(List.of(ok));
 
         assertThat(html).contains("All scenarios passed");
-        assertThat(html).contains("Failures (0)");
+        assertThat(html).doesNotContain("Full Failure List");
     }
 
     @Test
@@ -112,7 +117,90 @@ class EmailReportRendererTest {
     void rendersWithEmptyOutcomeList() throws Exception {
         String html = EmailReportRenderer.renderToString(List.of());
 
-        assertThat(html).contains("<style>").contains("Result distribution");
+        assertThat(html).contains("<style>").contains("Summary");
         assertThat(html).contains("All scenarios passed");
+    }
+
+    @Test
+    @DisplayName("报告名居中放大：配置了 project.report.name 就显示它，不再显示 Test Report")
+    void bannerUsesConfiguredReportName() throws Exception {
+        String saved = System.getProperty("project.report.name");
+        System.setProperty("project.report.name", "DBB Regression Suite");
+        try {
+            String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
+
+            assertThat(html)
+                    .contains("DBB Regression Suite")
+                    .contains("align=\"center\"")
+                    .contains("font-size:28px");
+            // 配置了名字，标题就不该再回落成 "Test Report"
+            assertThat(html).doesNotContain(">Test Report</div>");
+        } finally {
+            if (saved == null) {
+                System.clearProperty("project.report.name");
+            } else {
+                System.setProperty("project.report.name", saved);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("版式：960 宽正文 + 耗时指标条 + 运行时间行（2026-10-22 用户反馈页面太窄、时间区不好看、缺时间信息）")
+    void layoutUsesWideContainerAndTimingStrip() throws Exception {
+        String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
+
+        // 正文宽度 720 → 960（仍是邮件客户端安全上限内）
+        assertThat(html).contains("width=\"960\"");
+        // 耗时由「一行粗体文本」改为 5 格分隔指标条：标签小字加粗 + 数值加大
+        assertThat(html)
+                .contains("background:#f8fafc;border:1px solid #e8eef6;border-radius:8px")
+                .contains(">Total</div>")
+                .contains(">Clock</div>")
+                .contains(">Average</div>")
+                .contains(">Max</div>")
+                .contains(">Min</div>");
+        //  指标条标签加粗提色（用户反馈"Total/Clock 这些字体不显眼"）
+        assertThat(html).contains("font-size:11px;font-weight:700;color:#475569;text-transform:uppercase");
+        //  运行时间行：生成 / 开始 / 结束（与三份站点报告同源的 run 窗口）
+        assertThat(html)
+                .contains("tests executed")
+                .contains("Generated at <b>")
+                .contains("Started <b>2026-10-15 10:15:30</b>");
+    }
+
+    @Test
+    @DisplayName("feature 统计进顶部 KPI 卡；Functional Coverage 与环境信息已从邮件去除")
+    void featureStatsInKpiRowAndCoverageAndEnvRemoved() throws Exception {
+        String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
+
+        //  feature 统计：KPI 行新增 Features 卡（6 卡，16.66% 宽）
+        assertThat(html)
+                .contains("Features")
+                .contains("executed in this run")
+                .contains("width=\"16.66%\"");
+        //  Functional Coverage 整节删除（用户 2026-10-22 决定）
+        assertThat(html).doesNotContain("Functional Coverage");
+        //  环境信息从邮件去除（用户反馈 Summary 加环境列后不好看）
+        assertThat(html).doesNotContain("Environment");
+    }
+
+    @Test
+    @DisplayName("失败总览按 report.error.types 配置的类型聚合，而非整段消息片段")
+    void frequentFailureTypesRespectConfig() throws Exception {
+        String saved = System.getProperty("report.error.types");
+        System.setProperty("report.error.types", "AuthFailure=401|unauthorized");
+        try {
+            String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
+
+            assertThat(html)
+                    .contains("Most Frequent Failure Types")
+                    .contains("AuthFailure");
+        } finally {
+            if (saved == null) {
+                System.clearProperty("report.error.types");
+            } else {
+                System.setProperty("report.error.types", saved);
+            }
+        }
     }
 }

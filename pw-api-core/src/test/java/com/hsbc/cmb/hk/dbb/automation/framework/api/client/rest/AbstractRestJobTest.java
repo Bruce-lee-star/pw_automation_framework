@@ -1,6 +1,10 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest.impl.RestDeleteJob;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest.impl.RestGetJob;
+import com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest.impl.RestPatchJob;
+import com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest.impl.RestPostJob;
+import com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest.impl.RestPutJob;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import io.restassured.response.ValidatableResponse;
 import org.junit.Test;
@@ -92,5 +96,48 @@ public class AbstractRestJobTest {
     public void restAssuredConfig_isInitialized() {
         // 触发（或复用）类静态块中的连接池 / 超时装配，断言产出非空配置
         assertThat(AbstractRestJob.getRestAssuredConfig()).isNotNull();
+    }
+
+    // ── 报告上报：URL 还原 + HTTP 方法名 ──
+
+    @Test
+    public void resolveRequestUrl_rebuildsBasePathEndpointAndQuery() {
+        Entity entity = new Entity();
+        entity.setBaseUri("https://api.example.com");
+        entity.setBasePath("/portalserver");
+        entity.setEndpoint("/getotp.htm");
+        entity.addQueryParam("username", "9900196198");
+        entity.addQueryParam("type", "1");
+
+        // query 顺序由 HashMap 迭代决定，故按前缀 + 逐参数包含断言（不假设顺序）
+        String url = AbstractRestJob.resolveRequestUrl(entity);
+        assertThat(url).startsWith("https://api.example.com/portalserver/getotp.htm?")
+                .contains("username=9900196198")
+                .contains("type=1");
+    }
+
+    @Test
+    public void resolveRequestUrl_omitsEmptyPartsAndBlankQuery() {
+        Entity entity = new Entity();
+        entity.setBaseUri("https://api.example.com");
+        entity.setEndpoint("/health");
+
+        assertThat(AbstractRestJob.resolveRequestUrl(entity)).isEqualTo("https://api.example.com/health");
+    }
+
+    @Test
+    public void httpMethod_isOverriddenByEveryJob() throws Exception {
+        // httpMethod 是 protected（子类在 impl 子包），单测经反射读取，不为测试放宽可见性。
+        assertThat(invokeHttpMethod(new RestGetJob())).isEqualTo("GET");
+        assertThat(invokeHttpMethod(new RestPostJob())).isEqualTo("POST");
+        assertThat(invokeHttpMethod(new RestPutJob())).isEqualTo("PUT");
+        assertThat(invokeHttpMethod(new RestPatchJob())).isEqualTo("PATCH");
+        assertThat(invokeHttpMethod(new RestDeleteJob())).isEqualTo("DELETE");
+    }
+
+    private static String invokeHttpMethod(AbstractRestJob job) throws ReflectiveOperationException {
+        java.lang.reflect.Method method = job.getClass().getDeclaredMethod("httpMethod");
+        method.setAccessible(true);
+        return (String) method.invoke(job);
     }
 }

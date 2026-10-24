@@ -126,6 +126,23 @@ public class PageNavigationTest {
     }
 
     @Test
+    // @DisplayName: "后退/前进 无历史（goBack/goForward 返回 null）必须视为 no-op：不抛 NPE、重置上下文、且不无谓等待加载状态"
+    public void backAndForward_noHistory_isNoOpAndResetsFrameContext() {
+        BasePage bp = navigable();
+        Page page = bp.getPage();
+        // goBack / goForward 在无历史可导航时返回 null（Playwright 原生语义）
+        when(page.goBack(any(Page.GoBackOptions.class))).thenReturn(null);
+        when(page.goForward(any(Page.GoForwardOptions.class))).thenReturn(null);
+
+        assertDoesNotThrow(() -> PageNavigation.back(bp));
+        assertDoesNotThrow(() -> PageNavigation.forward(bp));
+        // 两操作各重置一次 iframe/shadow 上下文
+        verify(bp, times(2)).resetFrameContextAfterNavigation();
+        // 无历史即未真正导航：不应再对未变化的页面无谓等待加载状态
+        verify(page, never()).waitForLoadState(any(), any());
+    }
+
+    @Test
     public void setContent_replacesAndResetsFrameContext() {
         BasePage bp = bp();
         Page page = bp.getPage();
@@ -387,6 +404,9 @@ public class PageNavigationTest {
         PlaywrightConfigManager config = bp.getConfig();
         when(config.getPageLoadState()).thenReturn("networkidle");
         when(page.url()).thenReturn(NAV_URL);
+        // reload() 在 Playwright 中恒返回主文档响应（不会是 null）；此处 stub 一个响应，
+        // 使 historyNavigation 走"非空→enforce→等加载状态"的正常两步分支。
+        when(page.reload(any(Page.ReloadOptions.class))).thenReturn(mock(Response.class));
 
         ArgumentCaptor<Page.ReloadOptions> options = ArgumentCaptor.forClass(Page.ReloadOptions.class);
         PageNavigation.refresh(bp);

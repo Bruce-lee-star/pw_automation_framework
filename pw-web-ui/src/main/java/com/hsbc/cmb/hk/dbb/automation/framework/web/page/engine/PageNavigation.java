@@ -280,6 +280,13 @@ public final class PageNavigation {
         String url = bp.getPage().url();
         try {
             Response response = action.apply(timeout);
+            if (response == null) {
+                // goBack / goForward 在无历史可导航时返回 null：视为 no-op，不抛错（与 Playwright 语义一致），
+                // 也避免对未变化的页面无谓地等待加载状态。
+                logger.debug("{} is a no-op: no history entry to navigate from {}", operation, url);
+                bp.resetFrameContextAfterNavigation();
+                return;
+            }
             NavigationStatusGuard.enforce(response, url);
             waitForConfiguredState(bp, configuredState, remainingMs(deadlineNanos), url);
             logger.debug("{} completed (waitUntil={}): {}", operation, config.getPageLoadState(), url);

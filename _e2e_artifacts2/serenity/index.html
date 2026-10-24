@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    
+    <title>Test Report · Test Report</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
+    <link rel="stylesheet" href="assets/report-v2.css"/>
+    <style>
+        th.sortable { user-select: none; }
+        th.sortable:hover { color: var(--primary); }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Test Report <span style="font-weight:400;font-size:13px;opacity:.85">· Test Report</span></h1>
+  <div class="meta">1 features · 7 scenarios<br>reportVersion 1 · 7m 1s</div>
+</div>
+
+<div class="wrap">
+
+  <!-- KPI -->
+  <div class="kpis">
+    <div class="kpi" style="--c:var(--primary)">
+      <div class="label">Scenarios</div><div class="num">7</div>
+      <div class="pct">across 1 features</div>
+    </div>
+    <div class="kpi" style="--c:var(--primary)">
+      <div class="label">Automated</div><div class="num">7</div>
+      <div class="pct">100%</div>
+    </div>
+    <div class="kpi" style="--c:var(--manual)">
+      <div class="label">Manual</div><div class="num" style="color:var(--manual)">0</div>
+      <div class="pct">0%</div>
+    </div>
+    <div class="kpi" style="--c:var(--success)">
+      <div class="label">Pass rate</div><div class="num" style="color:var(--success)">100%</div>
+      <div class="pct">7 / 7</div>
+    </div>
+    <div class="kpi" style="--c:var(--failure)">
+      <div class="label">Failed / Error</div><div class="num" style="color:var(--failure)">0</div>
+      <div class="pct">0 failed · 0 error</div>
+    </div>
+  </div>
+
+  <!-- 统计信息：构成 / 结果 / 耗时，合并为一个模块 -->
+  <div class="card">
+    <h3><span class="icon"></span>Statistics<span class="aside">composition · results · execution time</span></h3>
+    <div class="stats-grid">
+      <div class="stat-block">
+        <div class="stat-title">Automated vs Manual</div>
+        <div class="donut-box">
+    <div class="donut-wrap">
+      <svg viewBox="0 0 120 120" class="donut-svg">
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#3b82f6" stroke-width="17"
+                    stroke-linecap="round"
+                    stroke-dasharray="298.59 3"
+                    stroke-dashoffset="0"
+                    transform="rotate(-90 60 60)"></circle>
+      </svg>
+      <div class="donut-center"><b>100%</b><span>automated</span></div>
+    </div>
+          <ul class="legend">
+            <li><span class="dot" style="background:#3b82f6"></span>Automated<span class="v">7</span><span class="p">100%</span></li>
+            <li><span class="dot" style="background:#0d9488"></span>Manual<span class="v">0</span><span class="p">0%</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-title">Result distribution</div>
+        <div class="donut-box">
+    <div class="donut-wrap">
+      <svg viewBox="0 0 120 120" class="donut-svg">
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#16a34a" stroke-width="17"
+                    stroke-linecap="round"
+                    stroke-dasharray="298.59 3"
+                    stroke-dashoffset="0"
+                    transform="rotate(-90 60 60)"></circle>
+      </svg>
+      <div class="donut-center"><b>100%</b><span>pass rate</span></div>
+    </div>
+          <ul class="dist-list">
+            <li><span class="dot" style="background:#16a34a"></span>Passed<span class="n">7</span><span class="pct2">100%</span></li>
+            <li><span class="dot" style="background:#dc2626"></span>Failed<span class="n">0</span><span class="pct2">0%</span></li>
+            <li><span class="dot" style="background:#ea580c"></span>Error<span class="n">0</span><span class="pct2">0%</span></li>
+            <li><span class="dot" style="background:#d97706"></span>Pending<span class="n">0</span><span class="pct2">0%</span></li>
+            <li><span class="dot" style="background:#94a3b8"></span>Skipped<span class="n">0</span><span class="pct2">0%</span></li>
+          </ul>
+        </div>
+        <div class="stack-bar">
+            <i style="width:100%;background:#16a34a"></i>
+            <i style="width:0%;background:#dc2626"></i>
+            <i style="width:0%;background:#ea580c"></i>
+            <i style="width:0%;background:#d97706"></i>
+            <i style="width:0%;background:#94a3b8"></i>
+        </div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-title">Duration distribution</div>
+  <div class="hist2">
+      <div class="hist2-col" title="<1m: 5 scenario(s)">
+        <span class="hist2-count">5</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar" style="height:100%"></div>
+        </div>
+        <span class="hist2-label"><1m</span>
+      </div>
+      <div class="hist2-col" title="1-2m: 2 scenario(s)">
+        <span class="hist2-count">2</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar" style="height:40%"></div>
+        </div>
+        <span class="hist2-label">1-2m</span>
+      </div>
+      <div class="hist2-col" title="2-5m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">2-5m</span>
+      </div>
+      <div class="hist2-col" title="5-10m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">5-10m</span>
+      </div>
+      <div class="hist2-col" title="10-30m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">10-30m</span>
+      </div>
+      <div class="hist2-col" title=">30m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">>30m</span>
+      </div>
+  </div>
+  <div class="hist2-axis"><span>Execution time</span><span>7 scenario(s)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 运行环境 -->
+  <div class="card">
+    <h3><span class="icon"></span>Environment</h3>
+    <div class="env-grid">
+        <div class="env-item"><span class="k">JDK</span><span class="v">21.0.9 (OpenJDK 64-Bit Server VM)</span></div>
+        <div class="env-item"><span class="k">Build tool</span><span class="v">Maven 3.9.9</span></div>
+        <div class="env-item"><span class="k">Test framework</span><span class="v">Cucumber · JUnit</span></div>
+        <div class="env-item"><span class="k">Browser driver</span><span class="v">Playwright 1.62.0</span></div>
+        <div class="env-item"><span class="k">OS</span><span class="v">Windows 10 (10.0)</span></div>
+    </div>
+      <div class="sub" style="margin-top:12px;grid-column:1/-1">Browsers</div>
+      <div class="browser-bar" style="grid-column:1/-1">
+        <i style="width:100%;background:#3b82f6"></i>
+      </div>
+      <div class="browser-legend" style="grid-column:1/-1">
+        <span>Chromium <b>151.0.7922.34</b></span>
+      </div>
+  </div>
+
+  <!-- Feature 总览 -->
+  <div class="card">
+    <h3><span class="icon"></span>Feature overview<span class="aside">Feature → Scenario · click to open</span></h3>
+    <table class="tbl">
+      <thead><tr>
+        <th>Feature</th><th class="num-cell">Scenarios</th><th>Automated / Manual</th>
+        <th class="num-cell">Passed</th><th class="num-cell">Issues</th><th>Pass rate</th><th style="width:90px"></th>
+      </tr></thead>
+      <tbody>
+        <tr class="clickable" onclick="location.href='feature-route-capability-e2e.html'">
+          <td class="link-cell"><span class="link">route_capability_e2e</span><span class="link-arrow">→</span></td>
+          <td class="num-cell">7</td>
+          <td><span class="badge b-auto">7 automated</span> <span class="badge b-manual">0 manual</span></td>
+          <td class="num-cell">7</td>
+          <td class="num-cell">
+0
+          </td>
+          <td>
+            <div class="bar-mini">
+              <i style="width:100%;background:var(--success)"></i><i style="width:0%;background:var(--failure)"></i>
+            </div>100%
+          </td>
+          <td><a class="btn sm" href="feature-route-capability-e2e.html">Open →</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 全部 Scenario -->
+  <div class="card">
+    <h3><span class="icon"></span>All scenarios (7)<span class="aside">click a row to open its detail page</span></h3>
+
+    <div class="toolbar">
+      <label class="sub" for="flt-result">Result:</label>
+      <select id="flt-result">
+        <option value="all">All</option><option value="bad">Issues only</option><option value="pass">Passed only</option>
+      </select>
+      <label class="sub" for="flt-type" style="margin-left:8px">Type:</label>
+      <select id="flt-type">
+        <option value="all">All</option><option value="auto">Automated</option><option value="manual">Manual</option>
+      </select>
+      <label class="sub" for="flt-feat" style="margin-left:8px">Feature:</label>
+      <select id="flt-feat">
+        <option value="all">All features</option>
+        <option value="route_capability_e2e">route_capability_e2e</option>
+      </select>
+      <span class="sub" id="shown" style="margin-left:10px"></span>
+    </div>
+
+    <table class="tbl">
+      <thead><tr>
+        <th style="width:100px">Result</th><th>Scenario</th><th style="width:110px">Type</th>
+        <th style="width:150px">Feature</th><th class="num-cell sortable" id="sort-duration" style="width:90px;cursor:pointer" title="Sort by duration">Duration &#8597;</th>
+      </tr></thead>
+      <tbody id="sc-body">
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="94169" onclick="location.href='route-capability-e2e-22-route-v2-e2e-capture.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期真实接口采集（CAPTURE）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">94.2s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="51769" onclick="location.href='route-capability-e2e-32-route-v2-e2e-monitor.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MONITOR 断言真实接口</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">51.8s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="45016" onclick="location.href='route-capability-e2e-39-route-v2-e2e-mock.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">45.0s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="46185" onclick="location.href='route-capability-e2e-46-route-v2-e2e-mock-when-then.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">46.2s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="48282" onclick="location.href='route-capability-e2e-53-route-v2-e2e-modify.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">48.3s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="85889" onclick="location.href='route-capability-e2e-60-route-v2-e2e-delay.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">85.9s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" data-feature="route_capability_e2e" data-duration="50157" onclick="location.href='route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="sub">route_capability_e2e</td>
+          <td class="num-cell sub">50.2s</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>Test report · reportVersion 1 · all scenarios visible · offline capable (no server required)</footer>
+</div>
+
+<script>
+(function () {
+    var r = document.getElementById('flt-result');
+    var t = document.getElementById('flt-type');
+    var f = document.getElementById('flt-feat');
+    var rows = [].slice.call(document.querySelectorAll('#sc-body tr.sc-row'));
+    var shownEl = document.getElementById('shown');
+    function apply() {
+        var rv = r.value, tv = t.value, fv = f.value, shown = 0;
+        rows.forEach(function (tr) {
+            var res = tr.getAttribute('data-result');
+            var auto = tr.getAttribute('data-auto');
+            var ok = true;
+            if (rv === 'bad' && ['PASS', 'SKIPPED', 'IGNORED'].indexOf(res) >= 0) { ok = false; }
+            if (rv === 'pass' && res !== 'PASS') { ok = false; }
+            if (tv === 'auto' && auto !== '1') { ok = false; }
+            if (tv === 'manual' && auto !== '0') { ok = false; }
+            if (fv !== 'all' && tr.getAttribute('data-feature') !== fv) { ok = false; }
+            tr.style.display = ok ? '' : 'none';
+            if (ok) { shown++; }
+        });
+        shownEl.textContent = 'Showing ' + shown + ' / ' + rows.length;
+    }
+    [r, t, f].forEach(function (el) { el.addEventListener('change', apply); });
+    apply();
+})();
+(function () {
+    var th = document.getElementById('sort-duration');
+    var body = document.getElementById('sc-body');
+    if (!th || !body) { return; }
+    var asc = null;
+    th.addEventListener('click', function () {
+        asc = (asc === null) ? true : !asc;
+        var rows = [].slice.call(body.querySelectorAll('tr.sc-row'));
+        rows.sort(function (a, b) {
+            var x = Number(a.getAttribute('data-duration') || 0);
+            var y = Number(b.getAttribute('data-duration') || 0);
+            return asc ? x - y : y - x;
+        });
+        rows.forEach(function (row) { body.appendChild(row); });
+        th.innerHTML = 'Duration ' + (asc ? '&#8593;' : '&#8595;');
+    });
+})();
+</script>
+</body>
+</html>

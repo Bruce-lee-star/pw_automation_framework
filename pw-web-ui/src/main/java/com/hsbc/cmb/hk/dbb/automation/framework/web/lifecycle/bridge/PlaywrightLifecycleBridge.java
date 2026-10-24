@@ -2,7 +2,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkCore;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.CloseGuard;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.DownloadLifecycle;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.PlaywrightContextManager;
 
@@ -23,10 +22,13 @@ import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
 /**
@@ -42,74 +44,7 @@ public class PlaywrightLifecycleBridge {
 
     private static final Logger logger = LoggerFactory.getLogger(PlaywrightLifecycleBridge.class);
 
-    // ==================== 临时目录清理 ====================
 
-    /**
-     * 通用临时目录清理方法
-     */
-    private static void cleanupTempDirectory(Path dir, String label, boolean verboseLog) {
-        try {
-            if (!Files.exists(dir)) {
-                return;
-            }
-            AtomicInteger deletedCount = new AtomicInteger(0);
-            Files.walk(dir)
-                    .sorted(Comparator.reverseOrder())
-                    .forEach(path -> {
-                        if (!path.equals(dir)) {
-                            try {
-                                Files.deleteIfExists(path);
-                                deletedCount.incrementAndGet();
-                            } catch (Exception ignored) {
-                                VerboseLogging.logDebugIfVerbose(logger, "Skipping file during {} cleanup: {}", label, path);
-                            }
-                        }
-                    });
-            if (verboseLog) {
-                VerboseLogging.logInfoIfVerbose(logger, "[{}] Cleaned {} file(s) from {}", label, deletedCount.get(), dir.toAbsolutePath());
-            } else {
-                VerboseLogging.logDebugIfVerbose(logger, "Cleaned {} {}: {} files from {}", label, deletedCount.get(), dir);
-            }
-        } catch (Exception e) {
-            if (verboseLog) {
-                logger.warn("[{}] Failed to clean temp files: {}", label, e.getMessage());
-            } else {
-                VerboseLogging.logWarnIfVerbose(logger, "Failed to clean {}: {}", label, e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * 清理<b>本线程</b>的下载目录（{@code <downloadsPath>/thread-<threadId>}）。
-     *
-     * <p><b>2026-09-21 修复（跨用例干扰）</b>：原实现清空<b>全局</b>下载目录 —— 真并行下会把并发 scenario
-     * 正在下载/刚下载的文件一起删掉。现按线程隔离：<b>哪个线程收尾就只清它自己的目录</b>，与
-     * {@link PlaywrightManager#downloadDirectoryForCurrentThread()}（下载保存所用的同一命名）成对。</p>
-     *
-     * <p><b>CT2-15（与异步保存的竞态）</b>：{@code download.saveAs(...)} 被卸载到 {@code AsyncPool}
-     * 异步执行（见 {@link PlaywrightContextManager#saveDownloadAsync}），而本方法在场景收尾
-     * <b>直接删除</b>该目录 —— 两者存在竞态：可能删掉尚未保存完的文件，并使 {@code DownloadRegistry}
-     * 登记的路径指向不存在的文件（表现为「下载记录在、文件没了」）。</p>
-     *
-     * <p><b>处置：非阻塞跳过（刻意不等待）</b>。本方法位于<b>每个 scenario 的关键路径</b>上，
-     * 在其中阻塞等待（哪怕设上限）会把后台异步保存的耗时转嫁给场景收尾：下载较多或
-     * {@code AsyncPool} 繁忙时，逐场景累加可把并发下载类场景拖长到分钟级。
-     * 而这里要保证的只是「不删未写完的文件」—— 检测到该目录仍有在途保存（
-     * {@link DownloadLifecycle#pendingCount(java.nio.file.Path)} {@code > 0}）即<b>放弃本轮删除</b>：
-     * 既不影响在途写入，也不让收尾多花一毫秒；保存正常在毫秒级完成，目录由下一轮收尾正常清除
-     * （自愈，且不会无限滞留）。</p>
-     */
-    static void cleanupTempDownloads() {
-        Path downloadDir = PlaywrightManager.downloadDirectoryForCurrentThread();
-        int inFlight = DownloadLifecycle.pendingCount(downloadDir);
-        if (inFlight > 0) {
-            logger.info("[Download] deferred temp-dir cleanup: {} save(s) still in flight under {} — "
-                    + "deleting it now would destroy unfinished files; a later cleanup round will remove it",
-                    inFlight, downloadDir);
-            return;
-        }
-        cleanupTempDirectory(downloadDir, "Download", true);
-    }
 
     // ==================== ThreadLocal 清理 ====================
 
@@ -480,7 +415,6 @@ public class PlaywrightLifecycleBridge {
         //  MDC 此刻仍绑定（LogContext.endScenario 在监听器 finally 中），故 scenarioId 可稳定取得。
         ScenarioTraceRecorder.onScenarioEnd(LogContext.currentScenarioId(), scenarioFailed);
 
-        cleanupTempDownloads();
         AutoBrowserProcessor.clearProcessingState();
         //  评审修复（2026-09-17）：请求作用域的 PageObject 现在以「用例」为键（不再是线程名），
         //  故必须在用例收尾处回收，否则实例会随用例数累积（且它们持有 Page/Context 引用）。
@@ -511,6 +445,48 @@ public class PlaywrightLifecycleBridge {
         //  与"轻量 newContext 即可隔离"的官方初衷一致，不再退化成"每用例重启浏览器"。
         if (scenarioClosedContext) {
             closeBrowserForCurrentThreadIfApplicable();
+        }
+
+        // 下载目录清理：每个用例结束只清理<b>本线程</b>子目录（<downloadsPath>/thread-<id>）。
+        // 框架不再自动保存下载（业务自行 Download.saveAs），故此处不再需要「在途保存」守卫；
+        // 业务若已把文件复制到报告挂载点，清理不影响报告；未复制走的临时文件随用例结束一并回收。
+        cleanupTempDownloads();
+    }
+
+    /**
+     * 清理本线程的下载临时目录（{@code <playwright.browser.downloadsPath>/thread-<线程序号>}）。
+     *
+     * <p><b>只删本线程子目录</b>：{@code downloadsPath} 是进程级共享根目录，并行执行时其它线程的用例
+     * 可能正在写入，故绝不能整根删除。并发执行下的用例隔离由
+     * {@link PlaywrightManager#downloadDirectoryForCurrentThread()} 的线程子目录保证。</p>
+     *
+     * <p>失败不抛出：清理属「尽力而为的磁盘治理」，任何 IO 异常只记 DEBUG，避免掩盖用例真实结果。</p>
+     */
+    private static void cleanupTempDownloads() {
+        Path dir = PlaywrightManager.downloadDirectoryForCurrentThread();
+        if (!Files.exists(dir)) {
+            return;
+        }
+        try {
+            Files.walkFileTree(dir, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Files.deleteIfExists(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path directory, IOException exc) throws IOException {
+                    if (exc != null) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    Files.deleteIfExists(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (Exception e) {
+            VerboseLogging.logDebugIfVerbose(logger, "Failed to clean download dir {}: {}",
+                    dir, e.getMessage());
         }
     }
 

@@ -1114,9 +1114,19 @@ public final class RouteDsl {
         /**
          * 从 classpath 资源读取响应体模板（注册时读取，失败快速失败）。
          * 可链式 {@link #replaceField(String, Object)} 做字段覆盖（纯静态，不访问真实服务器）。
+         *
+         * <p><b>空白路径必须立刻失败</b>（2026-10-22 用户要求：避免静默失效）：
+         * {@code null} / {@code ""} / {@code "   "} 直接抛 {@link IllegalArgumentException}，
+         * 而不是让 {@code getResourceAsStream("")} 返回 {@code null} 后只报一句
+         * {@code "classpath resource not found: "} —— 那种报讯分不清"配了空串"与"资源放错目录"，
+         * 排查时极易误判，且历史上出现过因路径为空导致 mock 体悄悄退化的案例。
          */
         public MockDsl mockBodyFromFile(String classpathResource) {
-            Objects.requireNonNull(classpathResource, "classpathResource");
+            if (classpathResource == null || classpathResource.isBlank()) {
+                throw new IllegalArgumentException(
+                        "classpathResource must not be null/blank (got: [" + classpathResource + "]); "
+                                + "pass a classpath resource path such as \"mocks/login-template.json\"");
+            }
             try (java.io.InputStream in = Thread.currentThread().getContextClassLoader()
                     .getResourceAsStream(classpathResource)) {
                 if (in == null) {

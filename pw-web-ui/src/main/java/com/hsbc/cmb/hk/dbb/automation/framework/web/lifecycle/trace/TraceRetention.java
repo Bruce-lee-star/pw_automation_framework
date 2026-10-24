@@ -23,8 +23,10 @@ import java.util.stream.Stream;
  * 一律保留，避免"证据凭空消失"。开关 {@code playwright.context.trace.retention.enabled=false}
  * 可整体关闭。
  *
- * <p><b>目标目录固定</b>：{@code target/site/serenity/traces}（与 {@link ScenarioTraceRecorder#TRACE_DIR}
- * 一致）。这是唯一被治理的目录——截图 / WebP 等其它产物不在治理范围。
+ * <p><b>目标目录</b>：{@link ScenarioTraceRecorder#traceDir()}（<b>固定值</b>
+ * {@code target/site/serenity/traces}，<b>无</b> {@code playwright.context.trace.dir} 配置键——
+ * trace 落点由报告经 {@code ReportingBridge#traceTarget()} 指导直接进 per-case，
+ * 该目录只是"报告未指导"时的证据兜底）。这是唯一被治理的目录——截图 / WebP 等其它产物不在治理范围。
  */
 public final class TraceRetention {
 
@@ -44,7 +46,7 @@ public final class TraceRetention {
         if (!WebFrameworkConfig.PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED.getBooleanValue()) {
             return;
         }
-        Path dir = Paths.get(ScenarioTraceRecorder.TRACE_DIR);
+        Path dir = Paths.get(ScenarioTraceRecorder.traceDir());
         if (!Files.isDirectory(dir)) {
             return;
         }

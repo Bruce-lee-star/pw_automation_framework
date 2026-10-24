@@ -17,21 +17,22 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 规则"按目的生灭"的触发点契约（2026-09-28，T2+ 第二步）。
+ * 规则"按目的生灭"的触发点契约（2026-10-23 修正）。
  *
- * <p><b>语义</b>：带响应侧期望的 MONITOR 规则，其"目的"就是"断言这次调用"——因此<b>首个响应定案
- * （无论断言成功还是失败）</b>即视为目的达成，回调通知 runtime 撤销该规则（armed 窗口从"整个用例"
- * 收敛为"首个响应"）。断言失败必须先入结算队列，再撤销（不丢失败证据）。</p>
+ * <p><b>语义</b>：带响应侧期望且 {@code autoStopOnMatch(true)} 的 MONITOR 规则，其"目的"是"观察 N 次调用"——
+ * 因此<b>达到 {@code minMatches}</b>（无论断言成功还是失败）即视为目的达成，回调通知 runtime 撤销该规则
+ * （armed 窗口收敛为"达到 minMatches 次响应"）。断言失败必须先入结算队列，再撤销（不丢失败证据）。
+ * {@code autoStopOnMatch(false)}（<b>默认</b>）表示<b>持续监控</b>：首个响应后<b>不</b>撤销，继续记录/断言后续
+ * 命中，直到监控窗口到期或显式 stopMonitor/stopApi。</p>
  *
- * <p>本测试守护四条语义：
+ * <p>本测试守护五条语义：
  * <ol>
- *   <li>首个响应定案 → 触发一次撤销回调；</li>
+ *   <li>{@code autoStopOnMatch(true)} + 达到 minMatches → 触发一次撤销回调；</li>
  *   <li>同一条规则只触发一次（幂等）；</li>
  *   <li>断言<b>失败</b>时同样撤销，且失败证据已入 {@code drainSettledFailures()}；</li>
- *   <li>非 MONITOR / 无响应侧期望的规则不触发（它们没有"定案"概念）。</li>
+ *   <li>非 MONITOR / 无响应侧期望的规则不触发（它们没有"定案"概念）；</li>
+ *   <li>{@code autoStopOnMatch(false)}（默认）首个/多次响应后<b>不</b>撤销（持续监控）。</li>
  * </ol>
- *
- * <p>目的驱动撤销是<b>不可关闭的默认行为</b>（无 {@code -Droute.retire.on.settle=off} 之类的回退开关）。</p>
  */
 public class MonitorSinkPurposeRetirementTest {
 
@@ -52,13 +53,13 @@ public class MonitorSinkPurposeRetirementTest {
         return response;
     }
 
-    /** 场景 1：首个响应定案 ⇒ 触发一次撤销回调（armed 窗口收敛为"首个响应"）。 */
+    /** 场景 1：autoStopOnMatch(true) 首个响应定案（达 minMatches=1）⇒ 触发一次撤销回调。 */
     @Test
     public void firstSettledResponseTriggersRetirement() {
         List<String> retired = new CopyOnWriteArrayList<>();
         MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
         ApiSpec spec = ApiSpec.builder("leftmenu/permissionLeftMenuConfig", RouteCapability.MONITOR)
-                .expectStatus(200).build();
+                .expectStatus(200).autoStopOnMatch(true).build();
 
         sink.recordRequest(mockRequest("https://host/leftmenu/permissionLeftMenuConfig"), spec);
         sink.onResponseForSpec(spec, mockResponse(200));
@@ -66,12 +67,13 @@ public class MonitorSinkPurposeRetirementTest {
         assertEquals("必须恰好触发一次目的达成回调", List.of("leftmenu/permissionLeftMenuConfig"), retired);
     }
 
-    /** 场景 2：同一条规则只撤一次（幂等）。 */
+    /** 场景 2：autoStopOnMatch(true) 同一条规则只撤一次（幂等）。 */
     @Test
     public void retirementIsIdempotentPerRule() {
         List<String> retired = new CopyOnWriteArrayList<>();
         MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
-        ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR).expectStatus(200).build();
+        ApiSpec spec = ApiSpec.builder("/api/users/**", RouteCapability.MONITOR)
+                .expectStatus(200).autoStopOnMatch(true).build();
 
         sink.recordRequest(mockRequest("https://host/api/users/1"), spec);
         sink.onResponseForSpec(spec, mockResponse(200));
@@ -81,12 +83,13 @@ public class MonitorSinkPurposeRetirementTest {
         assertEquals("同一条规则不得重复触发撤销", 1, retired.size());
     }
 
-    /** 场景 3：断言失败也撤销（"不管成功失败都 unroute"），但不丢失败证据。 */
+    /** 场景 3：autoStopOnMatch(true) 断言失败也撤销（"不管成功失败都 unroute"），但不丢失败证据。 */
     @Test
     public void assertionFailureStillRetiresButKeepsEvidence() {
         List<String> retired = new CopyOnWriteArrayList<>();
         MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
-        ApiSpec spec = ApiSpec.builder("/api/pay", RouteCapability.MONITOR).expectStatus(201).build();
+        ApiSpec spec = ApiSpec.builder("/api/pay", RouteCapability.MONITOR)
+                .expectStatus(201).autoStopOnMatch(true).build();
 
         sink.recordRequest(mockRequest("https://host/api/pay"), spec);
         sink.onResponseForSpec(spec, mockResponse(200)); // 期望 201，实际 200 ⇒ 断言失败
@@ -112,6 +115,23 @@ public class MonitorSinkPurposeRetirementTest {
         sink.onResponseForSpec(captureOnly, mockResponse(200));
 
         assertTrue("MOCK / 无期望 MONITOR 不得触发目的撤销（由收尾 flush 收敛）", retired.isEmpty());
+    }
+
+    /** 场景 5（2026-10-23 修正）：{@code autoStopOnMatch(false)}（默认值）= 持续监控，首个/多次响应后<b>不</b>撤销，
+     *  继续记录/断言后续命中，直到监控窗口到期或显式 stopMonitor/stopApi。 */
+    @Test
+    public void autoStopOnMatchFalseKeepsMonitoringAcrossMultipleHits() {
+        List<String> retired = new CopyOnWriteArrayList<>();
+        MonitorSink sink = new MonitorSink(spec -> retired.add(spec.pattern()));
+        ApiSpec spec = ApiSpec.builder("/api/stream", RouteCapability.MONITOR)
+                .expectStatus(200).autoStopOnMatch(false).build();
+
+        for (int i = 0; i < 3; i++) {
+            sink.recordRequest(mockRequest("https://host/api/stream/" + i), spec);
+            sink.onResponseForSpec(spec, mockResponse(200));
+        }
+
+        assertTrue("autoStopOnMatch(false) 不应在首次响应后撤销（应持续监控后续命中）", retired.isEmpty());
     }
 
     /** 场景 6（2026-09-29 裁定）：{@code autoStopOnMatch} 规则"达到 minMatches 才撤"；未达标不提前撤销。 */

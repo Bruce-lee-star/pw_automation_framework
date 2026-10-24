@@ -1,0 +1,80 @@
+{
+  "reportVersion" : 1,
+  "outcomeId" : "route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern",
+  "name" : "route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）",
+  "title" : "route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）",
+  "userStory" : {
+    "storyName" : "route_capability_e2e",
+    "displayName" : "route_capability_e2e",
+    "path" : "file:///D:/IdeaProject/test-automation/src/test/resources/features/web/route_capability_e2e.feature",
+    "type" : "feature"
+  },
+  "tags" : [ "@regression", "@route", "@route-e2e", "@route-e2e-priority" ],
+  "result" : "FAILURE",
+  "startTime" : "2026-10-19T23:28:46.149+08:00",
+  "endTime" : "2026-10-19T23:29:07.83+08:00",
+  "duration" : 19066,
+  "testSteps" : [ {
+    "stepId" : "s1",
+    "description" : "Given I arm route v2 e2e case \"login-priority\"",
+    "result" : "SUCCESS",
+    "duration" : 321,
+    "startTime" : "2026-10-19T23:28:46.1542789+08:00",
+    "lineNumber" : 68,
+    "children" : [ ],
+    "evidence" : [ ],
+    "attachments" : [ ],
+    "consoleOutput" : [ "23:28:46.469 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.r.RouteCapturePolicy - [Route] capture policy frozen: allTypes=false (layer=DEFAULT), inlineMaxBytes=262144 (layer=DEFAULT), gzipMaxBytes=8388608 (layer=DEFAULT), assertBodyMaxBytes=2097152 (layer=DEFAULT)", "23:28:46.472 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MODIFY_REQUEST route for 'leftmenu/permissionLeftMenuConfig' setHeader=[x-route-e2e-mod=1]", "23:28:46.473 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MOCK route for 'leftmenu/permissionLeftMenuConfig' status=real-response intercept=true body=[intercepted] replacePaths=[$.enablePaymentPP]", "23:28:46.474 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for 'leftmenu/permissionLeftMenuConfig' expectStatus=200 bodyContains=\"enableAdminTools\" bodyRegex=\"\"enablePaymentPP\"\\s*:\\s*\"PRI\"\" timeout=60s", "23:28:46.475 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] armed case 'login-priority' BEFORE logon (page url=about:blank)" ],
+    "consoleError" : [ ],
+    "apiOperations" : [ ]
+  }, {
+    "stepId" : "s2",
+    "description" : "And logon DBB \"O63_SIT1\" environment as user \"WP7UAT2_2\"",
+    "result" : "FAILURE",
+    "duration" : 18718,
+    "startTime" : "2026-10-19T23:28:46.4764179+08:00",
+    "lineNumber" : 69,
+    "children" : [ ],
+    "evidence" : [ "Interaction Diagnostics (Failure) = [导航轨迹 - 失败前页面去过]\n[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon\n[frame] about:blank" ],
+    "screenshot" : "step-001-and-logon-dbb-o63-sit1-environment-as-user-wp7uat2-2.png",
+    "attachments" : [ ],
+    "consoleOutput" : [ "23:28:46.476 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================", "23:28:46.476 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - LogonGlue - Scenario: O63_SIT1 as WP7UAT2_2", "23:28:46.477 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Effective browser: chromium", "23:28:46.477 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Default browser: chromium", "23:28:46.477 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================", "23:28:46.479 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Get DBB login info - Environment: O63_SIT1, Username: WP7UAT2_2", "23:28:46.481 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Successfully retrieved DBB login info - Environment: O63_SIT1, User: WP7UAT2_2, URL: https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon, Profile: W1-HKHBAP001060698838PUSER1", "23:28:46.486 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================", "23:28:46.486 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - LoginSteps - SessionKey: O63_SIT1_WP7UAT2_2", "23:28:46.486 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================", "23:28:46.487 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - No valid session, performing login for: O63_SIT1_WP7UAT2_2", "23:29:04.835 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] WARN  c.h.c.h.d.a.f.w.p.e.PageElement - Element operation failed: [NOT_FOUND_IN_DOM] type failed after 1 attempts on '#newPassword' | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError", "23:29:05.180 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] WARN  c.h.c.h.d.a.f.w.l.StepFailureAggregator - [interaction-diagnostics] 步骤失败交互诊断:", "[导航轨迹 - 失败前页面去过]", "[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon", "[frame] about:blank" ],
+    "consoleError" : [ ],
+    "apiOperations" : [ ],
+    "exception" : {
+      "message" : "[NOT_FOUND_IN_DOM] type failed after 1 attempts on '#newPassword' | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError",
+      "errorType" : "ERROR"
+    }
+  }, {
+    "stepId" : "s3",
+    "description" : "Then route v2 e2e case \"login-priority\" assertions pass",
+    "result" : "SKIPPED",
+    "duration" : 2,
+    "startTime" : "2026-10-19T23:29:05.1984288+08:00",
+    "lineNumber" : 70,
+    "children" : [ ],
+    "evidence" : [ ],
+    "attachments" : [ ],
+    "consoleOutput" : [ ],
+    "consoleError" : [ ],
+    "apiOperations" : [ ]
+  } ],
+  "testFailureCause" : {
+    "message" : "[NOT_FOUND_IN_DOM] type failed after 1 attempts on '#newPassword' | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError",
+    "errorType" : "ERROR"
+  },
+  "testFailureClassname" : "com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException",
+  "testFailureMessage" : "[NOT_FOUND_IN_DOM] type failed after 1 attempts on '#newPassword' | page=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon title=Log on to HSBC Online Business Banking obstruction=Element not found | cause=TimeoutError",
+  "testFailureSummary" : "[NOT_FOUND_IN_DOM] type on '#newPassword' exists=false vis=false en=false ed=false count=0 retries=1 | cause: TimeoutError\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException$Builder.build(ElementOperationException.java:76)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.ElementOperationSupport.buildRetryException(ElementOperationSupport.java:148)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.ElementOperationSupport.executeWithRetry(ElementOperationSupport.java:121)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.ElementOperationSupport.executeWithRetry(ElementOperationSupport.java:101)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.executeWithRetry(PageElement.java:206)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.type(PageElement.java:292)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.performLogin(LoginSteps.java:161)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionStore.lambda$wrapLeaderAction$0(SessionStore.java:722)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionStore.restoreSession(SessionStore.java:701)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionManager.restoreSession(SessionManager.java:68)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.logonDBBEnvironmentAsUser(LoginSteps.java:78)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.glue.LogonGlue.logonDBBEnvironmentAsUserGlue(LogonGlue.java:53)\r\n\tat ✽.logon DBB \"O63_SIT1\" environment as user \"WP7UAT2_2\"(file:///D:/IdeaProject/test-[SCRUBBED]route_capability_e2e.feature:69)\r\nCaused by: com.microsoft.playwright.TimeoutError: Error {\n  message='Timeout 15000ms exceeded.\n  name='TimeoutError\n  stack='TimeoutError: Timeout 15000ms exceeded.\n    at _ProgressController.run (D:\\IdeaProject\\test-automation\\.playwright\\driver\\playwright-java-10497438925272316505\\package\\lib\\coreBundle.js:12135:32)\n    at DispatcherConnection.dispatch (D:\\Id…[truncated]",
+  "evidence" : [ "TRACE: route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern） = trace=trace.zip\nwindow=23:28:46.147 → 23:29:05.216 (19069ms)  [覆盖本用例执行窗口]" ],
+  "apiOperations" : [ ],
+  "apiMonitorFailures" : [ ],
+  "routeRegistrations" : [ "[Route] register MODIFY_REQUEST route for 'leftmenu/permissionLeftMenuConfig' setHeader=[x-route-e2e-mod=1]", "[Route] register MOCK route for 'leftmenu/permissionLeftMenuConfig' status=real-response intercept=true body=[intercepted] replacePaths=[$.enablePaymentPP]", "[Route] register MONITOR route for 'leftmenu/permissionLeftMenuConfig' expectStatus=200 bodyContains=\"enableAdminTools\" bodyRegex=\"\"enablePaymentPP\"\\s*:\\s*\"PRI\"\" timeout=60s" ],
+  "attachments" : [ ],
+  "consoleOutput" : [ "\u001B[1;31m✘ SCENARIO FAILED : route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）  (19068 ms)  ↳ ElementOperationException\u001B[0m", "23:29:07.660 [main] [route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @734149119: dispatches=0, hits=0, retiredByPurpose=0, unconfirmedRetirements=0, rulesArmedMs={leftmenu/permissionLeftMenuConfig=21185}, delayDeliveries(directed=0, queued=0)" ],
+  "consoleError" : [ ],
+  "tracePath" : "route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern/trace.zip",
+  "manual" : false,
+  "browserConsole" : [ ],
+  "browserErrors" : [ ]
+}

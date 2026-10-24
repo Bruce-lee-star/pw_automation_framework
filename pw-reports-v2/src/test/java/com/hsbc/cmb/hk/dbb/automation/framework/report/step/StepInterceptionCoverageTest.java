@@ -102,7 +102,7 @@ class StepInterceptionCoverageTest {
         // finishRun 双触发安全（插件 TestRunFinished + ObjectFactory.stop）
         factory.stop();
         assertThat(bus.sinkErrorCount()).isZero();
-        assertThat(tempDir.resolve("cov-10-demo.json")).exists();
+        assertThat(tempDir.resolve("cov-10-demo").resolve("cov-10-demo.json")).exists();
     }
 
     @Test

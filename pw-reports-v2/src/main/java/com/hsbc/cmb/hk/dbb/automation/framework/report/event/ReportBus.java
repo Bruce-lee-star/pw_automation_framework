@@ -1,10 +1,12 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.event;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.model.DownloadRecord;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestAttachment;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestStep;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.model.UserStory;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.sink.HttpPushSink;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.sink.LocalReportSink;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.sink.LogSink;
@@ -15,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -62,6 +65,21 @@ public final class ReportBus {
     private final ConcurrentHashMap<String, RecordingSession> sessions = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<ReportSink> sinks = new CopyOnWriteArrayList<>();
     private final ThreadLocal<StepHandle> current = new ThreadLocal<>();
+
+    /**
+     * 跨线程可见的「最近启动的步骤」——{@code ThreadLocal} 只在本线程有效，而 Playwright 事件线程
+     * （route 命中线程）没有该上下文。此 volatile 快照让事件线程也能把证据归到「当时正在跑的步骤」，
+     * 是<b>最佳努力</b>归属：并行执行下可能落到另一线程的步骤，但总比全部落到用例级更接近真相。
+     */
+    private volatile StepHandle activeStep;
+
+    /**
+     * 跨线程可见的「当前活动用例 id」——与 {@link #activeStep} 同源，供<b>非测试线程</b>
+     * （CloseGuard 的 {@code close-bounded-*} 收尾线程）在挂接证据（录屏）时定位归属。
+     * 并行执行下取"最近开始的用例"，属最佳努力；总比因 ThreadLocal 缺失而整份丢弃强。
+     */
+    private volatile String activeOutcomeId;
+
     private final AtomicLong sinkErrors = new AtomicLong();
     private final AtomicBoolean runFinished = new AtomicBoolean(false);
     private volatile boolean enabled;
@@ -147,14 +165,69 @@ public final class ReportBus {
             return;
         }
         try {
-            List<TestOutcome> snapshot = new ArrayList<>();
-            for (RecordingSession s : new HashMap<>(sessions).values()) {
-                snapshot.add(s.toOutcome(scrub));
-            }
-            fanOut(new RunFinishedEvent(List.copyOf(snapshot)));
+            fanOut(new RunFinishedEvent(List.copyOf(orderForReport(collectOutcomes()))));
         } catch (Throwable t) {
             log.error("finishRun failed; JSON preserved where written", t);
         }
+    }
+
+    /**
+     * 报告顺序确定化——{@link #finishRun} 与 {@link #outcomeSnapshots} 共用。
+     *
+     * <p>{@code sessions} 是 {@link ConcurrentHashMap}，{@code new HashMap<>(sessions).values()} 迭代是
+     * <b>hash 序</b>：非确定性、无业务含义、跨运行不稳定，令 index / feature 分组 / per-case 列表 /
+     * CSV / JUnit-XML 的顺序不可预期。改为两级稳定排序：
+     * <ol>
+     *   <li><b>同 feature 聚合</b>：feature 之间按该 feature 首个场景的 {@code startTime} 排序
+     *       （保持执行流，而非字母序——报告读者关心"先跑了什么"）；</li>
+     *   <li><b>feature 内按 {@code startTime}</b>（{@code RecordingSession#toOutcome} 产出 ISO-8601 UTC，
+     *       同一次运行格式一致，字典序=时间序）。</li>
+     * </ol>
+     * {@code startTime} 为 {@code null}（未记录开始时间的兜底路径）或 feature 名缺失（归一为 {@code ""}）
+     * 的场景仍确定性地参与排序（前者沉底、后者相邻聚合），比较器保持全序、不抛——
+     * 不影响 {@code finishRun} 永不抛的不变式。输入列表不被修改。
+     */
+    static List<TestOutcome> orderForReport(List<TestOutcome> outcomes) {
+        List<TestOutcome> ordered = new ArrayList<>(outcomes);
+        Map<String, String> featureFirstSeen = new HashMap<>();
+        for (TestOutcome o : ordered) {
+            String feature = featureKey(o);
+            //  HashMap.merge 不接受 null 值（startTime 可能为 null）→ 显式 get/put 取更早者
+            featureFirstSeen.put(feature, earlierStart(featureFirstSeen.get(feature), o.getStartTime()));
+        }
+        ordered.sort(java.util.Comparator
+                .comparing((TestOutcome o) -> featureFirstSeen.get(featureKey(o)),
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
+                .thenComparing(TestOutcome::getStartTime,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+        return ordered;
+    }
+
+    /** 收集全部 session 的 POJO 投影（hash 序；排序见 {@link #orderForReport}）。 */
+    private List<TestOutcome> collectOutcomes() {
+        List<TestOutcome> out = new ArrayList<>();
+        for (RecordingSession s : new HashMap<>(sessions).values()) {
+            out.add(s.toOutcome(scrub));
+        }
+        return out;
+    }
+
+    /** feature 分组键：{@code userStory.storyName}；缺失归一为 {@code ""}（相邻聚合，按首场景时间参与排序）。 */
+    private static String featureKey(TestOutcome o) {
+        UserStory story = o.getUserStory();
+        String name = story == null ? null : story.getStoryName();
+        return name == null ? "" : name;
+    }
+
+    /** 取更早的 ISO-8601 时间串（同运行格式一致，字典序=时间序）；任一为 {@code null} 取另一个。 */
+    private static String earlierStart(String a, String b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return a.compareTo(b) <= 0 ? a : b;
     }
 
     // ---------------------------------------------------------------- case lifecycle
@@ -179,6 +252,7 @@ public final class ReportBus {
         RecordingSession session = placeSession(safeBase, feature, scenario, tags, featurePath);
         StepHandle handle = StepHandle.ofCase(session.outcomeId());
         current.set(handle);
+        activeOutcomeId = session.outcomeId();
         // 用例级控制台捕获（钩子输出等）：压栈，步骤开始时再压步骤 sink 盖在上层
         ConsoleCapture.clear();
         ConsoleCapture.push((isError, line) -> session.appendConsole(isError, scrub.scrubLine(line)));
@@ -266,6 +340,10 @@ public final class ReportBus {
         StepHandle cur = current.get();
         if (cur != null && cur.outcomeId().equals(handle.outcomeId())) {
             current.remove();
+            activeStep = null;
+        }
+        if (handle.outcomeId().equals(activeOutcomeId)) {
+            activeOutcomeId = null;
         }
         ConsoleCapture.clear();
         fanOut(new CaseFinishedEvent(session.toOutcome(scrub)));
@@ -350,6 +428,7 @@ public final class ReportBus {
         step.setDocString(docString);
         StepHandle handle = StepHandle.ofStep(cur.outcomeId(), step.getStepId(), cur);
         current.set(handle);
+        activeStep = handle;
         // 步骤级控制台捕获：盖在用例级 sink 之上，本步骤内输出归本步骤
         ConsoleCapture.push((isError, line) -> session.appendStepConsole(step.getStepId(), isError, scrub.scrubLine(line)));
         return handle;
@@ -370,6 +449,7 @@ public final class ReportBus {
         if (handle.equals(current.get())) {
             StepHandle parent = handle.parent();
             current.set(parent == null ? StepHandle.ofCase(handle.outcomeId()) : parent);
+            activeStep = parent == null ? StepHandle.ofCase(handle.outcomeId()) : parent;
         }
         ConsoleCapture.pop();
     }
@@ -409,7 +489,7 @@ public final class ReportBus {
         }
         RecordingSession session = sessions.get(handle.outcomeId());
         if (session != null) {
-            session.appendApiOperation(scrub.scrubLine(raw));
+            session.appendApiOperation(handle.stepId(), scrub.scrubLine(raw));
         }
     }
 
@@ -424,7 +504,9 @@ public final class ReportBus {
         }
         RecordingSession session = sessions.get(handle.outcomeId());
         if (session != null) {
-            session.appendRouteRegistration(scrub.scrubLine(raw));
+            //  注册发生在哪个步骤就归到哪个步骤（RouteDsl 在步骤内调用 → handle 为 step 级）；
+            //  步骤上下文外（@Before 钩子等）stepId 为 null → 回落用例级列表。
+            session.appendRouteRegistration(handle.stepId(), scrub.scrubLine(raw));
         }
     }
 
@@ -432,6 +514,63 @@ public final class ReportBus {
     public StepHandle captureHandle() {
         StepHandle h = current.get();
         return h == null ? StepHandle.NOOP : h;
+    }
+
+    /**
+     * 当前（或最近）活动步骤的 id —— 供<b>非测试线程</b>（Playwright 事件线程）在证据产生时抓取归属。
+     *
+     * <p>解析顺序：本线程 ThreadLocal（业务线程上精确）→ 跨线程 volatile 快照（事件线程上的最佳努力）。
+     * 两者都取不到步骤上下文（如场景边界）时返回 {@code null}，调用方应按「用例级」处理。</p>
+     */
+    /**
+     * 当前活动用例 id（<b>不依赖线程上下文</b>）——供收尾线程（CloseGuard worker）挂接录屏等证据。
+     * 用例结束（finishCase）后清空；并行执行下取"最近开始的用例"（最佳努力）。
+     */
+    public String activeOutcomeId() {
+        StepHandle local = current.get();
+        if (local != null && !local.isNoop()) {
+            return local.outcomeId();
+        }
+        return activeOutcomeId;
+    }
+
+    public String activeStepId() {
+        StepHandle local = current.get();
+        if (local != null && !local.isNoop() && !local.isCaseLevel()) {
+            return local.stepId();
+        }
+        StepHandle shared = activeStep;
+        if (shared != null && !shared.isNoop() && !shared.isCaseLevel()) {
+            return shared.stepId();
+        }
+        return null;
+    }
+
+    /**
+     * 按<b>指定的 stepId</b> 记录一条 API 操作（供跨线程证据在入队时已抓取归属的场景使用）。
+     *
+     * <p>与 {@link #recordApiOperation(StepHandle, String)} 的差别：句柄由调用方在证据产生时捕获，
+     * 而非在 flush 时解析——否则场景收尾时 {@code current} 已回落到用例级，所有证据都会被算作
+     * 「用例级兜底」，per-case 页的步骤下就永远看不到 Route Captured。</p>
+     *
+     * <p>stepId 为空 / 该步骤已不在索引中时，自动回落用例级（与 {@code appendApiOperation} 语义一致）。</p>
+     */
+    public void recordApiOperationByStep(String stepId, String raw) {
+        if (!enabled) {
+            return;
+        }
+        if (stepId == null || stepId.isBlank()) {
+            recordApiOperation(captureHandle(), raw);
+            return;
+        }
+        StepHandle handle = captureHandle();
+        if (handle == null || handle.isNoop()) {
+            return;
+        }
+        RecordingSession session = sessions.get(handle.outcomeId());
+        if (session != null) {
+            session.appendApiOperation(stepId, scrub.scrubLine(raw));
+        }
     }
 
     // ---------------------------------------------------------------- screenshots
@@ -442,15 +581,15 @@ public final class ReportBus {
             return false;
         }
         return switch (config.getScreenshotMode()) {
-            case ON_FAILURE -> result != null && result.isFailure();
-            case AFTER_EACH_STEP -> true;
-            case DISABLED, MANUAL -> false;
+            case FOR_FAILURES -> result != null && result.isFailure();
+            case AFTER_EACH_STEP, BEFORE_AND_AFTER_EACH_STEP -> true;
+            case DISABLED -> false;
         };
     }
 
     /**
-     * 落一张截图（调用方已通过 {@link #screenshotWanted} 或 MANUAL 语义决策）。
-     * 写 {@code <output>/<outcomeId>/screenshots/step-NNN.png}，step 记录相对文件名。
+     * 落一张截图（调用方已通过 {@link #screenshotWanted} 或显式采集决策）。
+     * 写 {@code <output>/<outcomeId>/screenshots/step-NNN[-<slug>].png}，step 记录相对文件名。
      * 任何 IO 失败只记日志——截图缺失不拖累用例。
      */
     public void attachScreenshot(StepHandle handle, byte[] png) {
@@ -461,16 +600,22 @@ public final class ReportBus {
         if (session == null) {
             return;
         }
-        String name = session.nextScreenshotName();
+        // 先解析步骤（取描述用于可读截图名）；解析失败不影响截图落盘
+        TestStep step = null;
+        if (!handle.isCaseLevel()) {
+            try {
+                step = session.stepForWrite(handle.stepId());
+            } catch (Throwable ignore) {
+                step = null;
+            }
+        }
+        String name = session.nextScreenshotName(step == null ? null : step.getDescription());
         Path target = config.getOutputDir().resolve(session.outcomeId()).resolve("screenshots").resolve(name);
         try {
             java.nio.file.Files.createDirectories(target.getParent());
             java.nio.file.Files.write(target, png);
-            if (!handle.isCaseLevel()) {
-                TestStep step = session.stepForWrite(handle.stepId());
-                if (step != null) {
-                    step.setScreenshot(name);
-                }
+            if (step != null) {
+                step.setScreenshot(name);
             }
         } catch (Throwable t) {
             log.warn("attachScreenshot failed for {} ({} bytes): {}", session.outcomeId(), png.length, t.toString());
@@ -516,36 +661,231 @@ public final class ReportBus {
     }
 
     /**
-     * 挂载 Playwright trace.zip 并设 {@code tracePath}（报告页 "Play trace" 按钮据此深链 Trace Viewer）。
-     * <p>trace 已在报告输出目录内（默认框架 {@code traces/} 就在 outputDir 下）时<b>直接引用、不拷贝</b>，
-     * 避免同一文件两份；仅当 trace 位于报告目录外（如 {@code PW_REPORT_OUTPUT} 与框架 traces/ 不一致）时，
-     * 才拷到 {@code <outcomeId>/trace.zip} 保报告自包含。
+    /**
+     * 当前用例的 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}）——经 {@code ReportingBridge#traceTarget()}
+     * 指导框架<b>直接导出到此</b>，从源头避免"框架 traces/ + per-case"两份（也无须事后移动）。无活动句柄 /
+     * 会话不存在时返回 {@code null}（框架落其固定 {@code traces/} 目录作证据兜底，非配置项）。
      */
-    public void attachTrace(StepHandle handle, java.nio.file.Path traceZip) {
-        if (!enabled || handle == null || handle.isNoop() || traceZip == null) {
-            return;
+    public Path traceTarget(StepHandle handle) {
+        if (!enabled || handle == null || handle.isNoop()) {
+            return null;
         }
         RecordingSession session = sessions.get(handle.outcomeId());
+        if (session == null) {
+            return null;
+        }
+        return config.getOutputDir().resolve(session.outcomeId()).resolve("trace.zip");
+    }
+
+    /**
+     * 当前用例的截图落盘<b>目录</b>（{@code <outputDir>/<outcomeId>/screenshots}）——经
+     * {@code ReportingBridge#screenshotTarget()} 指导框架把截图直接写到这里，
+     * 不再散落在 {@code target/site/serenity} 根目录（2026-10-20 用户反馈）。
+     *
+     * <p>与 {@link #traceTarget} 一致的无活动句柄语义：返回 {@code null} 时框架自选位置兜底。
+     * 目录<b>不</b>在此处创建（框架侧负责创建），仅返回目标路径。
+     */
+    public Path screenshotTarget(StepHandle handle) {
+        if (!enabled || handle == null || handle.isNoop()) {
+            return null;
+        }
+        RecordingSession session = sessions.get(handle.outcomeId());
+        if (session == null) {
+            return null;
+        }
+        return config.getOutputDir().resolve(session.outcomeId()).resolve("screenshots");
+    }
+
+    /**
+     * 当前用例的录屏落点（{@code <outputDir>/<outcomeId>/records}）——经 {@code ReportingBridge#videoTarget()}
+     * 指导框架<b>直接录到 per-case 目录</b>，从源头避免「配置的全局 videoDir 先落一份、再搬进
+     * per-case」的两份与中途失败。无活动句柄 / 会话不存在时返回 {@code null}
+     * （框架回落其配置的录屏目录，由 {@link #attachVideo} 事后搬入）。
+     */
+    public Path videoTarget(StepHandle handle) {
+        if (!enabled || handle == null || handle.isNoop()) {
+            return null;
+        }
+        RecordingSession session = sessions.get(handle.outcomeId());
+        if (session == null) {
+            return null;
+        }
+        Path dir = config.getOutputDir().resolve(session.outcomeId()).resolve("records");
+        try {
+            java.nio.file.Files.createDirectories(dir);
+        } catch (java.io.IOException e) {
+            log.debug("videoTarget dir creation failed for {}: {}", dir, e.toString());
+        }
+        return dir;
+    }
+
+    /**
+     * 按显式用例 id 解析 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}）——绕开 ThreadLocal 句柄，
+     * 供收尾线程（CloseGuard worker）凭"跨线程可见的活动用例 id"把 trace <b>直接导出到 per-case</b>，
+     * 从源头避免"traces/ + per-case"两份与事后移动（与 {@link #traceTarget} 同语义，仅入参不同）。
+     * 无活动会话时返回 {@code null}（框架回落其固定 {@code traces/} 证据目录）。
+     */
+    public Path traceTargetByOutcomeId(String outcomeId) {
+        if (!enabled || outcomeId == null || outcomeId.isBlank()) {
+            return null;
+        }
+        RecordingSession session = sessions.get(outcomeId);
+        if (session == null) {
+            return null;
+        }
+        return config.getOutputDir().resolve(session.outcomeId()).resolve("trace.zip");
+    }
+
+    /**
+     * 按显式用例 id 解析录屏落点（{@code <outputDir>/<outcomeId>/records}）——绕开 ThreadLocal 句柄，
+     * 供收尾线程凭"跨线程可见的活动用例 id"把录屏<b>直接录进 per-case</b>（与 {@link #videoTarget} 同语义，
+     * 仅入参不同）。无活动会话时返回 {@code null}（框架回落其配置的录屏目录，由 {@link #attachVideo} 事后搬入）。
+     */
+    public Path videoTargetByOutcomeId(String outcomeId) {
+        if (!enabled || outcomeId == null || outcomeId.isBlank()) {
+            return null;
+        }
+        RecordingSession session = sessions.get(outcomeId);
+        if (session == null) {
+            return null;
+        }
+        Path dir = config.getOutputDir().resolve(session.outcomeId()).resolve("records");
+        try {
+            java.nio.file.Files.createDirectories(dir);
+        } catch (java.io.IOException e) {
+            log.debug("videoTargetByOutcomeId dir creation failed for {}: {}", dir, e.toString());
+        }
+        return dir;
+    }
+
+    /**
+     * 登记场景录屏：把 webm 落入 {@code <outputDir>/<outcomeId>/records/} 并设
+     * {@code videoPath}（报告页 “Playwright records” Tab 据此渲染播放器）。
+     *
+     * <p>与 {@link #attachTrace} 同策略：优先移动（消副本，录屏只有一份），失败则拷贝，
+     * 绝不丢录像。任何 IO 失败只记日志。
+     */
+    public void attachVideo(StepHandle handle, java.nio.file.Path video) {
+        if (!enabled || handle == null || video == null) {
+            return;
+        }
+        if (handle.isNoop()) {
+            //  兜底：关闭常发生在 CloseGuard 的 worker 线程（close-bounded-context-close），
+            //   该线程没有 ThreadLocal 用例上下文 → captureHandle() 恒 NOOP → 录像被静默丢弃
+            //   （2026-10-22 实测：dbb-1 有句柄却进不了报告）。改用跨线程可见的活动用例。
+            attachVideoToOutcome(activeOutcomeId(), video);
+            return;
+        }
+        attachVideoToOutcome(handle.outcomeId(), video);
+    }
+
+    /**
+     * 按<b>用例 id</b> 直接登记录屏 —— 不依赖线程上下文。
+     *
+     * <p>存在理由：context 关闭跑在 CloseGuard 的有界 worker 线程上（{@code close-bounded-*}），
+     * 那个线程没有 {@code ThreadLocal} 用例上下文，只能靠用例 id 定位归属。
+     * 会话不存在（已 finishCase）时安全 no-op——录像本身已落盘，只是不进报告。</p>
+     */
+    /**
+     * 把产物（录像 / trace）安全落入 per-case 目录，绝不丢产物；源文件不存在时跳过。
+     * 落盘策略：{@code moveWhenOutsideReport=true}（录像）恒 move（顺带清理 Playwright 临时文件）、
+     * 失败 copy 兜底；{@code false}（trace）仅当源落在报告目录<b>内</b>才 move（消副本），
+     * 目录外则 copy（保留框架侧原件，见 {@code ReportBusTraceTargetTest}）。
+     *
+     * <p>{@code onMounted} 在落盘成功后回调，由调用方设置对应 path / meta 字段。统一此前
+     * attachVideo / attachTrace 两套近乎一致的"建目录 + move/copy + 设字段"逻辑，消除职责重复（#2）。</p>
+     */
+    private void mountArtifact(String outcomeId, java.nio.file.Path source, String relativeTarget,
+                              boolean moveWhenOutsideReport,
+                              java.util.function.Consumer<RecordingSession> onMounted) {
+        if (!enabled || outcomeId == null || outcomeId.isBlank() || source == null) {
+            return;
+        }
+        RecordingSession session = sessions.get(outcomeId);
         if (session == null) {
             return;
         }
         try {
-            java.nio.file.Path outputDir = config.getOutputDir().toAbsolutePath().normalize();
-            java.nio.file.Path traceAbs = traceZip.toAbsolutePath().normalize();
-            java.nio.file.Path rel = outputDir.relativize(traceAbs);
-            if (rel.getNameCount() > 0 && !rel.startsWith("..") && !rel.isAbsolute()) {
-                //  trace 已在报告目录内 → 直接引用（相对 outputDir），消除同文件两份拷贝
-                session.setTracePath(rel.toString().replace('\\', '/'));
-            } else {
-                //  trace 在报告目录外 → 拷进 per-case，保报告自包含
-                java.nio.file.Path target = config.getOutputDir().resolve(session.outcomeId()).resolve("trace.zip");
-                java.nio.file.Files.createDirectories(target.getParent());
-                java.nio.file.Files.copy(traceZip, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                session.setTracePath(session.outcomeId() + "/trace.zip");
+            if (!java.nio.file.Files.exists(source)) {
+                log.debug("mountArtifact skipped (file absent): {}", source);
+                return;
             }
+            java.nio.file.Path target = config.getOutputDir().resolve(session.outcomeId()).resolve(relativeTarget);
+            java.nio.file.Files.createDirectories(target.getParent());
+            //  必须按绝对路径比较：report 输出目录常为相对路径，而 Playwright 产物为绝对路径；
+            //  此前用 Path.equals 比较相对 vs 绝对永远不等 → 对自身执行 move → 失败被吞（2026-10-21 反馈）。
+            if (!source.toAbsolutePath().normalize().equals(target.toAbsolutePath().normalize())) {
+                boolean insideReport = source.toAbsolutePath().normalize()
+                        .startsWith(config.getOutputDir().toAbsolutePath().normalize());
+                boolean move = moveWhenOutsideReport || insideReport;
+                if (move) {
+                    try {
+                        java.nio.file.Files.move(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (java.io.IOException moveFailed) {
+                        //  移动失败（文件被占用 / 跨卷）→ 拷贝兜底，绝不丢产物
+                        java.nio.file.Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } else {
+                    java.nio.file.Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            onMounted.accept(session);
         } catch (Throwable t) {
-            log.warn("attachTrace failed for {}: {}", session.outcomeId(), t.toString());
+            log.warn("mountArtifact failed for {} ({}): {}", session.outcomeId(), source, t.toString());
         }
+    }
+
+    public void attachVideoToOutcome(String outcomeId, java.nio.file.Path video) {
+        mountArtifact(outcomeId, video, "records/" + video.getFileName().toString(), true,
+                session -> session.setVideoPath(
+                        session.outcomeId() + "/records/" + video.getFileName().toString()));
+    }
+
+    /**
+     * 挂载 Playwright trace.zip 并设 {@code tracePath}（报告页 "Play trace" 按钮据此深链 Trace Viewer）。
+     * <p>正常路径：框架已按 {@link #traceTarget} 把 trace 直接写到 {@code <outcomeId>/trace.zip}，
+     * 本方法仅登记 {@code tracePath}（文件就位，不拷贝不移动——trace 全程只有一份）。
+     * <p>兜底路径：调用方传来的是<b>其它位置</b>的文件（如外部直接调 API、或框架未指导落点而落到
+     * 固定 {@code traces/} 后被消费）→ 落入 per-case：源在报告目录内则移动（消副本），目录外/移动失败则拷贝，
+     * 绝不丢 trace。
+     */
+    public void attachTrace(StepHandle handle, java.nio.file.Path traceZip) {
+        attachTrace(handle, traceZip, null, null, 0L);
+    }
+
+    /**
+     * 挂载 trace 并附带录制窗口（起止时刻 + 时长）——报告页 Trace 卡片据此展示
+     * 「录制窗口 / 时长」。任一时点为 {@code null} 时省略对应行，不影响 path / 播放按钮。
+     */
+    public void attachTrace(StepHandle handle, java.nio.file.Path traceZip,
+                            String traceStartTime, String traceEndTime, long traceDurationMs) {
+        if (!enabled || handle == null || traceZip == null) {
+            return;
+        }
+        if (handle.isNoop()) {
+            //  兜底：context 关闭常发生在 CloseGuard 的 worker 线程（close-bounded-*），
+            //    该线程无 ThreadLocal 用例上下文 → captureHandle() 恒 NOOP → trace 被静默丢弃
+            //    （与 attachVideo 同策略：改用跨线程可见的活动用例 id 定位归属，绝不丢 trace）。
+            attachTraceToOutcome(activeOutcomeId(), traceZip, traceStartTime, traceEndTime, traceDurationMs);
+            return;
+        }
+        attachTraceToOutcome(handle.outcomeId(), traceZip, traceStartTime, traceEndTime, traceDurationMs);
+    }
+
+    /**
+     * 按<b>用例 id</b> 直接挂载 trace —— 不依赖线程上下文。
+     *
+     * <p>存在理由与 {@link #attachVideoToOutcome} 同：context 关闭跑在 CloseGuard 的有界 worker
+     * 线程上（{@code close-bounded-*}），那个线程没有 {@code ThreadLocal} 用例上下文，只能靠用例 id
+     * 定位归属。会话不存在（已 finishCase）时安全 no-op——trace 本身已落盘，只是不进报告。</p>
+     */
+    public void attachTraceToOutcome(String outcomeId, java.nio.file.Path traceZip,
+                                     String traceStartTime, String traceEndTime, long traceDurationMs) {
+        mountArtifact(outcomeId, traceZip, "trace.zip", false,
+                session -> {
+                    session.setTracePath(session.outcomeId() + "/trace.zip");
+                    session.setTraceMeta(traceStartTime, traceEndTime, traceDurationMs);
+                });
     }
 
     /**
@@ -568,6 +908,12 @@ public final class ReportBus {
             java.nio.file.Files.copy(file, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             attachText(handle, "DOWNLOAD: " + file.getFileName(),
                     "Downloadable file archived at " + session.outcomeId() + "/" + file.getFileName());
+            //  结构化登记：供 per-case 报告「Downloads」Tab 罗列/链接下载文件（additive-only）。
+            session.appendDownload(new DownloadRecord(
+                    "DOWNLOAD: " + file.getFileName(),
+                    file.getFileName().toString(),
+                    session.outcomeId() + "/" + file.getFileName(),
+                    Instant.now().toString()));
         } catch (Throwable t) {
             log.warn("attachDownloadableFile failed for {}: {}", session.outcomeId(), t.toString());
         }
@@ -590,11 +936,7 @@ public final class ReportBus {
      * {@code AutoBrowserProcessor.readScenarioTags} 换靶后读取场景状态）。
      */
     public List<TestOutcome> outcomeSnapshots() {
-        List<TestOutcome> out = new ArrayList<>();
-        for (RecordingSession s : new HashMap<>(sessions).values()) {
-            out.add(s.toOutcome(scrub));
-        }
-        return List.copyOf(out);
+        return List.copyOf(orderForReport(collectOutcomes()));
     }
 
     /** 已录用例数。 */

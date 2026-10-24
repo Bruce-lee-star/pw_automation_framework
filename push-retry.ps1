@@ -20,7 +20,7 @@ while ($retryCount -lt $MaxRetries) {
     $retryCount++
     Write-Host "[Attempt $retryCount/$MaxRetries] Pushing to origin/DEV-V3..." -ForegroundColor Yellow
 
-    $output = git push origin DEV-V3 2>&1
+    $output = git push origin DEV-V5 2>&1
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 0) {

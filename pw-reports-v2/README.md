@@ -1,3 +1,17 @@
+---
+id: DOC-MOD-REPORTS-0001
+title: pw-reports-v2 模块说明
+type: module
+status: active
+owner: team-automation
+created: 2026-10-22
+updated: 2026-10-22
+applies_to: pw-reports-v2
+tags: [module, reporting, serenity]
+supersedes: []
+superseded_by: null
+---
+
 # pw-reports-v2
 
 自建 Serenity 兼容报告模块。**零 `serenity-*` 依赖**，镜像 Serenity 4.3.4 的
@@ -77,7 +91,7 @@ cucumber.object-factory=com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwR
 |---|---|---|
 | `pw.report.enabled` | `true` | kill-switch；false = 总线整体静默 |
 | `pw.report.output` | `target/site/serenity` | 产物根目录 |
-| `pw.report.screenshot` | `ON_FAILURE` | `ON_FAILURE` / `AFTER_EACH_STEP` / `MANUAL` / `DISABLED`（含 Serenity 别名） |
+| `pw.report.screenshot` | `FOR_FAILURES` | `BEFORE_AND_AFTER_EACH_STEP` / `AFTER_EACH_STEP` / `FOR_FAILURES` / `DISABLED`（含历史别名 `ON_FAILURE` / `AFTER_FAILING_STEP` / `OFF` / `NONE`） |
 | `pw.report.push.url` | 空 | **非空即启用推送**（无需单独的 enabled 开关） |
 
 > **CI 产物落地：`pw.report.output` 支持工程目录之外的绝对路径**（等价环境变量 `PW_REPORT_OUTPUT`）。
@@ -116,10 +130,12 @@ cucumber.object-factory=com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwR
 
 ```
 target/site/serenity/
-├── index.html                      # 汇总页
-├── serenity-summary.html           # 聚合汇总（对齐旧 SummaryReportGenerator 文件名）
+├── index.html                      # 总览页（汇总 + feature 下钻）
+├── feature-*.html                  # 每个 feature 一页
 ├── monitor-failures.html           # API 监控失败独立报告（无失败不落文件）
+├── email-report.html               # 邮件用单页自包含报告
 ├── serenity-summary.json           # 汇总 JSON
+├── serenity-summary.csv            # 汇总 CSV
 ├── <outcomeId>.html                # per-case 展示页
 ├── <outcomeId>.json                # per-case 真相源（镜像 Serenity schema）
 └── assets/report.css               # 静态资产
@@ -263,3 +279,19 @@ bridge.flush(handle);
 8. **工作区目录名仍为 `pw-reports/`**（artifactId 已是 `pw-reports-v2`）：目录重命名
    被系统句柄占用未成功。落地到框架时模块目录请用 `pw-reports-v2/`，与既有
    `pw-reports`（Serenity 调用封装）并存。
+
+## 9. 边界与非目标
+
+- **不驱动浏览器**——截图捕获由业务侧在步骤内调用 `ReportBus.attachScreenshot(StepHandle, byte[])`；
+  本模块不依赖 Playwright，也不触发页面操作。
+- **不负责用例编排**——只消费 Cucumber 事件与 `@Step` 拦截，不决定执行顺序。
+- **不追求替换 Serenity 的全部能力**——镜像的是其 JSON schema 与报告**形态**，
+  不实现 Serenity 的全部特性；迁移以"双跑一致"为准绳逐步推进。
+- **不承担**框架目录改造——见 §8 第 7 条，模块只提供接缝，框架侧改造在主工程完成。
+
+## 10. 延伸阅读
+
+- [自建 Serenity 兼容报告方案](../docs/architecture/自建Serenity兼容报告方案.md)
+- [FrameworkListener SPI 对齐规范](../docs/report-alignment/A_frameworklistener_spi.md)
+- [Scenario Outline 规范](../docs/report-alignment/B_scenario_outline.md)
+- [根 README 模块表](../README.md#模块)

@@ -36,6 +36,10 @@ class SnapshotGateTest {
     private static final Pattern DURATION = Pattern.compile("\\b\\d+ ms\\b");
     private static final Pattern ISO_TIMESTAMP =
             Pattern.compile("\\d{4}-\\d{2}-\\d{2}T[\\d:.]+(?:Z|[+-]\\d{2}:\\d{2})");
+    //  2026-10-22 顶栏新增运行窗口（generatedAt / startedAt / endedAt），格式为
+    //  "yyyy-MM-dd HH:mm:ss"（人读，空格分隔）——generatedAt 每次运行都变，必须一并规范化
+    private static final Pattern HUMAN_TIMESTAMP =
+            Pattern.compile("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}");
     private static final Pattern SCREENSHOT_NAME = Pattern.compile("step-\\d+\\.png");
     private static final Pattern REPORT_VERSION = Pattern.compile("reportVersion \\d+");
 
@@ -76,8 +80,10 @@ class SnapshotGateTest {
     private static String normalize(String html) {
         return REPORT_VERSION.matcher(
                 SCREENSHOT_NAME.matcher(
-                        ISO_TIMESTAMP.matcher(
-                                DURATION.matcher(html).replaceAll("<D> ms"))
+                        HUMAN_TIMESTAMP.matcher(
+                                ISO_TIMESTAMP.matcher(
+                                        DURATION.matcher(html).replaceAll("<D> ms"))
+                                        .replaceAll("<TS>"))
                                 .replaceAll("<TS>"))
                         .replaceAll("step-<N>.png"))
                 .replaceAll("reportVersion <V>");
@@ -92,6 +98,7 @@ class SnapshotGateTest {
         }
         assertThat(normalizedSnapshot).doesNotContainPattern(DURATION);
         assertThat(normalizedSnapshot).doesNotContainPattern(ISO_TIMESTAMP);
+        assertThat(normalizedSnapshot).doesNotContainPattern(HUMAN_TIMESTAMP);
         assertThat(normalizedSnapshot).doesNotContainPattern(SCREENSHOT_NAME);
         assertThat(normalizedSnapshot).contains("<D> ms").contains("<TS>").contains("step-<N>.png");
     }

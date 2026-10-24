@@ -67,6 +67,93 @@ class ReportViewEnvironmentTest {
                 .containsEntry("Target", "https://sit.example");
     }
 
+    @Test
+    @DisplayName("Jenkins 运行：BUILD_URL + JOB_NAME + BUILD_NUMBER + GIT_COMMIT 全部识别")
+    void jenkinsBuildUrlDetected() {
+        Map<String, String> env = Map.of(
+                "BUILD_URL", "https://jenkins.corp/job/regression/123/",
+                "JENKINS_URL", "https://jenkins.corp/",
+                "JOB_NAME", "team/regression",
+                "BUILD_NUMBER", "123",
+                "GIT_COMMIT", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+
+        Map<String, Object> ci = ReportView.ciBuild(env);
+
+        assertThat(ci.get("present")).isEqualTo(true);
+        assertThat(ci.get("ciName")).isEqualTo("Jenkins");
+        assertThat(ci.get("url")).isEqualTo("https://jenkins.corp/job/regression/123/");
+        assertThat(ci.get("job")).isEqualTo("team/regression");
+        assertThat(ci.get("number")).isEqualTo("123");
+        assertThat(ci.get("commitShort")).isEqualTo("a1b2c3d");
+    }
+
+    @Test
+    @DisplayName("pw.report.ci.url 覆盖：BUILD_URL 含错误 /jenkins context 时改用可达链接（占位符展开并优先）")
+    void ciUrlOverrideReplacesBuildUrl() {
+        String prev = System.getProperty("pw.report.ci.url");
+        try {
+            System.setProperty("pw.report.ci.url",
+                    "http://localhost:61438/job/${JOB_NAME}/${BUILD_NUMBER}/");
+            Map<String, String> env = Map.of(
+                    "BUILD_URL", "http://localhost:61438/jenkins/job/team/regression/123/",
+                    "JENKINS_URL", "http://localhost:61438/jenkins/",
+                    "JOB_NAME", "team/regression",
+                    "BUILD_NUMBER", "123");
+
+            Map<String, Object> ci = ReportView.ciBuild(env);
+
+            assertThat(ci.get("present")).isEqualTo(true);
+            assertThat(ci.get("ciName")).isEqualTo("Jenkins");
+            assertThat(ci.get("url"))
+                    .isEqualTo("http://localhost:61438/job/team/regression/123/");
+            assertThat(ci.get("job")).isEqualTo("team/regression");
+            assertThat(ci.get("number")).isEqualTo("123");
+        } finally {
+            if (prev == null) System.clearProperty("pw.report.ci.url");
+            else System.setProperty("pw.report.ci.url", prev);
+        }
+    }
+
+    @Test
+    @DisplayName("Jenkins 仅给 JENKINS_URL + JOB_NAME + BUILD_NUMBER：按约定拼接构建链接")
+    void jenkinsUrlConstructedWhenBuildUrlAbsent() {
+        Map<String, String> env = Map.of(
+                "JENKINS_URL", "https://jenkins.corp/",
+                "JOB_NAME", "team/regression",
+                "BUILD_NUMBER", "123");
+
+        Map<String, Object> ci = ReportView.ciBuild(env);
+
+        assertThat(ci.get("present")).isEqualTo(true);
+        assertThat(ci.get("url")).isEqualTo("https://jenkins.corp/job/team/job/regression/123/");
+    }
+
+    @Test
+    @DisplayName("GitLab CI：CI_JOB_URL + CI_COMMIT_SHA 识别为 CI（非 Jenkins）")
+    void gitlabCiDetected() {
+        Map<String, String> env = Map.of(
+                "CI_JOB_URL", "https://gitlab.corp/grp/proj/-/jobs/456",
+                "CI_COMMIT_SHA", "deadbeefcafe");
+
+        Map<String, Object> ci = ReportView.ciBuild(env);
+
+        assertThat(ci.get("present")).isEqualTo(true);
+        assertThat(ci.get("ciName")).isEqualTo("CI");
+        assertThat(ci.get("url")).isEqualTo("https://gitlab.corp/grp/proj/-/jobs/456");
+        assertThat(ci.get("commitShort")).isEqualTo("deadbee");
+    }
+
+    @Test
+    @DisplayName("本地 IDE 运行（无任何 CI 变量）：present=false，不显示 CI 痕迹")
+    void noCiOnLocalRun() {
+        Map<String, String> env = Map.of("PATH", "/usr/bin");
+
+        Map<String, Object> ci = ReportView.ciBuild(env);
+
+        assertThat(ci.get("present")).isEqualTo(false);
+        assertThat(ci.get("url")).isNull();
+    }
+
     private void set(String key, String value) {
         backup.putIfAbsent(key, System.getProperty(key));
         if (value == null) {

@@ -287,7 +287,8 @@ class PluginEventChainTest {
     }
 
     private TestOutcome read(String id) throws Exception {
-        return JsonWriter.mapper().readValue(dir.resolve(id + ".json").toFile(), TestOutcome.class);
+        return JsonWriter.mapper().readValue(
+                dir.resolve(id).resolve(id + ".json").toFile(), TestOutcome.class);
     }
 
     // --------------------------------------------------------------------- tests
@@ -480,8 +481,8 @@ class PluginEventChainTest {
         finishCase(Status.PASSED, null, 1);
         finishRun();
 
-        assertThat(dir.resolve("a-5-same-name.json")).exists();
-        assertThat(dir.resolve("a-5-same-name-2.json")).as("冲突走 -2 后缀").exists();
+        assertThat(dir.resolve("a-5-same-name").resolve("a-5-same-name.json")).exists();
+        assertThat(dir.resolve("a-5-same-name-2").resolve("a-5-same-name-2.json")).as("冲突走 -2 后缀").exists();
     }
 
     @Test
@@ -494,7 +495,7 @@ class PluginEventChainTest {
 
         assertThat(dir.resolve("index.html")).exists();
         assertThat(dir.resolve("serenity-summary.json")).exists();
-        assertThat(dir.resolve("login-12-indexed.html")).exists();
+        assertThat(dir.resolve("login-12-indexed").resolve("login-12-indexed.html")).exists();
     }
 
     @Test
@@ -506,7 +507,7 @@ class PluginEventChainTest {
         finishRun();
         finishRun();   // 某些 runner 下可能重复派发
 
-        assertThat(dir.resolve("login-12-twice.json")).exists();
+        assertThat(dir.resolve("login-12-twice").resolve("login-12-twice.json")).exists();
         assertThat(read("login-12-twice")).isNotNull();
     }
 }

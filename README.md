@@ -15,7 +15,7 @@
 | 构建 | Maven（多模块） |
 | Playwright for Java | 1.62.0 |
 | Serenity BDD | 4.3.4 |
-| Cucumber | 7.31.0 |
+| Cucumber | 7.34.9 |
 | JUnit | 4.13.2 |
 | Logback | 1.5.34 |
 | Typesafe Config | 1.4.5 |
@@ -96,4 +96,11 @@ Web / API / Monitor 三侧配置类（`WebFrameworkConfig` / `ApiFrameworkConfig
 
 | 位置 | 内容 |
 |---|---|
-| 架构评审文档集（01~13） | 总体分层与依赖治理、各模块评审、CI / 工程可维护性、问题修复任务清单。**注**：该文档集不在本仓库（自 CT2-22 起未随代码落盘），如需追溯请查 git 历史 |
+| [文档总索引](docs/README.md) | **文档总索引** —— 全仓库文档的唯一入口 |
+| [文档规范与模板库](docs/standards/README.md) | **文档规范与模板库** —— 目录约定、写作风格、元数据、门禁规则、评审清单 |
+| [文档模板](docs/templates/README.md) | **文档模板** —— ADR、技术方案、模块 README、教程、操作指南、参考手册、Runbook、对齐规范 |
+| [架构评审文档集](docs/architecture/Java-Playwright-1.62-网络API分层指南.md) | 总体分层与依赖治理、各模块评审、CI / 工程可维护性、问题修复任务清单。**注**：编号 01~13 的完整评审集不在本仓库（自 CT2-22 起未随代码落盘），如需追溯请查 git 历史 |
+
+> **文档门禁**：`tools/check-doc-drift.ps1`（版本漂移、引用完整性、模块拓扑）与
+> `tools/check_doc_standard.py`（元数据、目录类型、内链、占位符残留）均由 CI
+> `.github/workflows/doc-drift-check.yml` 执行。文档改动与实现改动须在**同一个 PR** 内提交。

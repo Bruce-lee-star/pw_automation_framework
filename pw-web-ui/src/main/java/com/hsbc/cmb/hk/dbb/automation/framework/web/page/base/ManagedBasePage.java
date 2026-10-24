@@ -233,7 +233,7 @@ public interface ManagedBasePage {
      * 触发下载并等待完成，超时沿用框架默认（上下文级配置）；拾取生成物默认走本重载。
      *
      * @return 本次下载的 {@link Download}（可读 {@code suggestedFilename()} 原始文件名 / {@code url()}）；
-     *         落盘路径请用 {@code PlaywrightManager.awaitLastDownloadPath(timeoutMs)}（框架异步保存）。
+     *         保存请直接用返回的 {@link Download#saveAs}（Playwright 原生，框架不再自动保存）。
      */
     Download waitForDownload(Runnable trigger);
 

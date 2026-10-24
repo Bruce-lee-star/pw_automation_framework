@@ -5,46 +5,124 @@
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
     
     <title>User logs in with valid credentials</title>
-    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
-    <link rel="stylesheet" href="assets/report-v2.css"/>
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg"/>
+    <link rel="stylesheet" href="../assets/report-v2.css"/>
     <style>
         /* 新设计 CSS 未覆盖的局部样式（证据 / 附件 / 截图 / 未定义结果） */
         .evidence { margin: 6px 0; padding-left: 20px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
         .attachment { margin: 6px 0; }
         .attachment > summary { cursor: pointer; color: var(--text-2); font-size: 12px; }
         .att-text, .att-html { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; }
-        /* 截图：悬浮放大（2 倍，左上角为锚点，压在其它内容之上，不改变布局） */
-        .shot { position: relative; overflow: visible; }
+        /* 截图与步骤明细同级（flex 兄弟）：明细占满剩余宽度、截图定宽，折叠步骤时截图仍可见 */
+        .step-line { display:flex; align-items:flex-start; gap:14px; }
+        .step-line > .step-details { flex:1 1 auto; min-width:0; }
+        /* margin-left:auto —— 截图整体靠右（2026-10-22 用户要求"图片向右移动一点"）；
+           去掉 overflow:hidden —— 原 hover 放大被它裁成局部，用户看不到整页（2026-10-22 反馈） */
+        .shot { flex:0 0 300px; width:300px; margin:0 0 0 auto; position:relative; }
         .shot img {
-            max-width: 320px; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px;
-            cursor: zoom-in; transition: transform .15s ease; transform-origin: top left;
+            display:block; width:100%; max-width:300px; border:1px solid var(--border); border-radius:6px;
+            cursor: zoom-in;
         }
-        .shot img:hover {
-            transform: scale(2); z-index: 20; position: relative;
-            box-shadow: 0 8px 28px rgba(31, 45, 61, .28);
+        .shot a { display:block; }
+        /* 失败步骤与成功步骤统一布局（2026-10-22 反馈"失败的和成功的没有对齐"）：
+           此前失败步骤用 flex-wrap 把截图换行到明细下方并放大到 560px，于是同一「Execution steps」
+           列表里出现「成功步骤截图在右上、失败步骤截图掉到下方」的错位。
+           现在统一为「明细占满左侧 + 截图固定右列、顶部对齐」：成功/失败截图同列、同顶线、同尺寸，
+           失败面板仍完整占据左侧可读宽度（.failure-body min-width:0 + .failure-msg overflow-wrap:anywhere
+           已在 assets/report-v2.css 保证长 URL / 堆栈自动折行，不会横向溢出）。 */
+        /* 点击放大（2026-10-22 用户要求"点击放大，再点击恢复原来的"）：
+           点截图 → 铺满视口的完整预览；再点一下（或按 Esc）→ 恢复原状。
+           指针事件必须可用（原 hover 方案是 pointer-events:none，点了没反应）。 */
+        #shot-hover { position:fixed; inset:0; z-index:999; display:none; align-items:center; justify-content:center;
+                      background:rgba(15,23,42,.82); pointer-events:auto; cursor:zoom-out; }
+        #shot-hover.on { display:flex; }
+        #shot-hover img { max-width:92vw; max-height:90vh; object-fit:contain; background:#fff;
+                          border-radius:8px; box-shadow:0 20px 60px rgba(0,0,0,.5); cursor:zoom-out; }
+        /* 放大态提示：告诉用户"再点一下就回去" */
+        #shot-hover .zoom-tip { position:absolute; top:18px; left:50%; transform:translateX(-50%);
+                                background:rgba(15,23,42,.78); color:#fff; font-size:12px;
+                                padding:4px 12px; border-radius:999px; pointer-events:none; }
+        /* 底部 Screenshots 画廊：大图 + 一行序号按钮（2026-10-22 用户要求去掉下方缩略图小图条，
+           序号（纯数字）直接显示在图片底部，点图片下方的序号按钮或大图左右箭头切换对应步骤截图）。
+           大图可点击放大（cursor:zoom-in + JS 切到 #shot-hover 全屏预览）。 */
+        .shot-gallery { padding: 14px; }
+        /* 2026-10-23 用户反馈「图片两边黑边占据太宽」：舞台原先是整行宽的深色块（block），
+           而截多为竖长的整页图，被 max-height 限高后左右只剩大片深色空档，图片被挤在中间显得很小。
+           改为「舞台包住图片」：width:fit-content + margin:0 auto，深色底只比图片多 10px padding，
+           左右切图箭头也随之贴到图片两侧（不再飘在远端两颗孤立按钮）。
+           2026-10-23 二次反馈「期望 height 自适应」：Playwright 整页截图是长图，故移除 max-height
+           硬限高，改为 width 限 100% + height:auto——图片按原始比例自适应高度（长图就长，短图就短），
+           舞台随之贴高，看长图时页面自然纵向滚动，序号按钮行落在该截图之后。 */
+        .shot-viewer { position:relative; width:fit-content; max-width:100%; margin:0 auto; text-align:center;
+                       background:#0f172a; border-radius:8px; padding:10px; }
+        .shot-viewer img { display:block; width:auto; height:auto; max-width:100%; border-radius:4px; cursor:zoom-in; }
+        /* 大图底部的当前步骤序号（与序号按钮同一套视觉，字号放大） */
+        .shot-num-big { position:absolute; left:50%; bottom:16px; transform:translateX(-50%);
+                        background:rgba(15,23,42,.78); color:#fff; font-size:15px; font-weight:600;
+                        padding:2px 10px; border-radius:6px; pointer-events:none; }
+        /* 序号按钮行：点哪个序号显示哪个步骤的截图（不再放缩略图） */
+        .shot-picker { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:12px; }
+        .shot-pick { min-width:34px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:6px;
+                     background:#fff; cursor:pointer; line-height:1; }
+        .shot-pick:hover { border-color:#2563eb; background:#eff6ff; }
+        .shot-pick.is-active { border-color:#2563eb; background:#2563eb; }
+        .shot-pick.is-active .shot-pick-num { color:#fff; }
+        .shot-pick-num { font-size:14px; color:#334155; font-weight:600; }
+        /* 序号按钮的键盘焦点必须可见（2026-10-22 用户特别提醒"注意序号的 focus"）：
+           鼠标点击不显示描边，Tab 聚焦时给 2px 高对比描边 + 外扩，避免被 is-active 底色吞掉。 */
+        .shot-pick:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
+        /* 大图左右切图按钮：叠在图片两侧、垂直居中；首/末张 disabled 降透明度 */
+        .shot-nav { position:absolute; top:50%; transform:translateY(-50%); z-index:2;
+                    width:38px; height:38px; padding:0; display:flex; align-items:center; justify-content:center;
+                    border-radius:999px; border:1px solid rgba(255,255,255,.45);
+                    background:rgba(15,23,42,.55); color:#fff; cursor:pointer;
+                    transition:background .12s,border-color .12s,opacity .12s; }
+        .shot-nav:hover { background:rgba(37,99,235,.9); border-color:rgba(96,165,250,.9); }
+        .shot-nav:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
+        .shot-nav[disabled] { opacity:.3; cursor:default; }
+        .shot-nav[disabled]:hover { background:rgba(15,23,42,.55); border-color:rgba(255,255,255,.45); }
+        .shot-prev { left:12px; }
+        .shot-next { right:12px; }
+        @media (max-width:1020px) {
+            .step-line { flex-direction:column; }
+            .shot { flex:0 0 auto; width:100%; }
+            .shot img { max-width:100%; }
         }
-        .step-note { font-size: 12px; color: var(--failure); margin-top: 4px; }
         .step-actions { margin-top: 4px; }
         .b-UNDEFINED { background: var(--skipped); }
         .step-table { margin: 8px 0 2px; font-size: 12px; }
         .step-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
         .step-table tr:first-child td { font-weight: 600; background: #f8fafc; }
         .step-docstring { margin: 8px 0 2px; white-space: pre-wrap; }
+        /* 失败用例操作入口（上传补图 / 标记通过） */
+        .case-actions .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+        .btn-action { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: background .15s ease; }
+        .btn-action:hover { background: #f1f5f9; }
+        .btn-ok { color: #047857; border-color: #a7f3d0; }
+        .btn-ok:hover { background: #ecfdf5; }
     </style>
 </head>
 <body>
 
 <div class="topbar">
-  <h1>Scenario <a href="feature-authentication.html" style="color:#fff;text-decoration:none;font-size:14px;font-weight:400">← back to Authentication</a></h1>
-  <div class="meta">Authentication<br>reportVersion <V></div>
+  <div class="topbar-side">
+      <a href="../feature-authentication.html">← back to feature</a>
+  </div>
+  <div class="topbar-title">Test Report</div>
+  <div class="topbar-side is-right">
+    <div class="topbar-stack">
+      <span class="topbar-ver">Generated at <TS></span>
+      <span class="topbar-ver">Started <TS> · Ended <TS></span>
+    </div>
+  </div>
 </div>
 
 <div class="wrap">
 
   <div class="card">
-    <div class="crumbs"><a href="index.html">Overview</a><span class="sep">›</span><a href="feature-authentication.html">Authentication</a><span class="sep">›</span><b>User logs in with valid credentials</b></div>
+    <div class="crumbs"><a href="../index.html">Overview</a><span class="sep">›</span><a href="../feature-authentication.html">Authentication</a><span class="sep">›</span><b>User logs in with valid credentials</b></div>
     <div class="case-head">
-      <span class="badge b-FAILURE" style="padding:4px 14px;font-size:14px">Failed</span>
+      <span class="badge b-FAILURE" id="case-result-badge" style="padding:4px 14px;font-size:14px">Failed</span>
       <div class="case-title">User logs in with valid credentials</div>
     </div>
     <div class="case-meta">
@@ -55,86 +133,387 @@
     </div>
   </div>
 
+  <div class="case-layout is-single">
+
+    <div class="case-main">
+
+      <div class="card case-actions" id="case-actions">
+        <h3><span class="icon"></span>Case actions</h3>
+        <div class="action-row">
+          <button type="button" id="btn-upload" class="btn-action">⬆ Upload screenshot</button>
+          <button type="button" id="btn-marksuccess" class="btn-action btn-ok">✓ Make Scenario success</button>
+        </div>
+        <input type="file" id="shot-input" accept="image/png,image/jpeg" multiple style="display:none"/>
+      </div>
 
 
-  <div class="card">
-    <h3><span class="icon"></span>Execution steps</h3>
-    <ul class="steps" id="steps">        <li class="st-PASS">
+      <div class="card">
+        <h3><span class="icon"></span>Execution steps</h3>
+        <ul class="steps" id="steps">        <li class="st-PASS">
             <span class="node"></span>
-            <div class="step-row">
-                <span class="step-desc">open the login page</span>
-                <span class="step-time"><D> ms</span>
-            </div>
+            <div class="step-line">
+            <details class="step-details">
+                <summary class="step-row">
+                    <span class="step-desc">open the login page</span>
+                    <span class="step-time">0.21s</span>
+                </summary>
+                <div class="step-body">
             
-                <div class="shot"><img src="login-12-user-logs-in-with-valid-credentials/screenshots/step-<N>.png" alt="screenshot"/></div>
                 <ul class="steps">        <li class="st-PASS">
             <span class="node"></span>
-            <div class="step-row">
-                <span class="step-desc">enter username</span>
-                <span class="step-time"><D> ms</span>
-            </div>
+            <div class="step-line">
+            <details class="step-details">
+                <summary class="step-row">
+                    <span class="step-desc">enter username</span>
+                    <span class="step-time">0.06s</span>
+                </summary>
+                <div class="step-body">
             
+                </div>
+            </details>
+            </div>
         </li>
         <li class="st-PASS">
             <span class="node"></span>
-            <div class="step-row">
-                <span class="step-desc">enter password</span>
-                <span class="step-time"><D> ms</span>
-            </div>
+            <div class="step-line">
+            <details class="step-details">
+                <summary class="step-row">
+                    <span class="step-desc">enter password</span>
+                    <span class="step-time">0.05s</span>
+                </summary>
+                <div class="step-body">
             
-                <ul class="evidence"><li>password field masked</li></ul>
+                </div>
+            </details>
+            </div>
         </li>
 </ul>
+                </div>
+            </details>
+                <div class="shot">
+                    <img class="shot-zoom" src="screenshots/step-<N>.png"
+                         alt="Step screenshot" title="Click to enlarge · click again to restore"/>
+                </div>
+            </div>
         </li>
         <li class="st-FAILURE">
             <span class="node"></span>
-            <div class="step-row">
-                <span class="step-desc">click sign in</span>
-                <span class="step-time">1,<D> ms</span>
-            </div>
+            <div class="step-line">
+            <details class="step-details" open>
+                <summary class="step-row">
+                    <span class="step-desc">click sign in</span>
+                    <span class="step-time">1.02s</span>
+                </summary>
+                <div class="step-body">
             
-                <div class="shot"><img src="login-12-user-logs-in-with-valid-credentials/screenshots/step-<N>.png" alt="screenshot"/></div>
-                <div class="step-note">FAILURE: expected status 200 but was 401</div>
-                    <details class="step-stack"><summary>Exception details</summary><pre>java.lang.AssertionError: expected status 200 but was 401
-	at com.hsbc.cmb.hk.dbb.automation.framework.report.render.OutcomeFixtures.full(OutcomeFixtures.java:1)</pre></details>
-                <ul class="evidence"><li>POST /api/session?token=*** -&gt; 401</li></ul>
+                <details class="con-group con-register step-route">
+                    <summary>Route Register<span class="con-count">1</span></summary>
+                    <ul class="con-lines">    <li class="con-raw">[Route] register POST route for &#39;/api/session&#39; (mock: status=200 intercept=REPLACE)</li>
+</ul>
+                </details>
+                <details class="con-group con-net step-api">
+                    <summary>API Request<span class="con-count">1</span></summary>
+  <div class="api-card">
+    <div class="api-card-head">
+      
+      
+        <span class="api-method api-m-post">POST</span>
+      <span class="api-url">https://api.example.com/api/session</span>
+        <span class="api-status api-s-bad">401</span>
+        <span class="api-ms"><D> ms</span>
+    </div>
+      <div class="api-row">
+        <span class="api-label">Request headers</span>
+          <span class="api-value">Content-Type=application/json; Accept=application/json</span>
+      </div>
+      <div class="api-row is-json">
+        <span class="api-label">Request body<span class="api-tag">JSON</span></span>
+          <pre class="api-json">{
+  &quot;user&quot;: &quot;wp7uat2&quot;
+}</pre>
+      </div>
+      <div class="api-row">
+        <span class="api-label">Response headers</span>
+          <span class="api-value">Content-Type=application/json</span>
+      </div>
+      <div class="api-row is-json">
+        <span class="api-label">Response body<span class="api-tag">JSON</span></span>
+          <pre class="api-json">{
+  &quot;error&quot;: &quot;invalid credentials&quot;
+}</pre>
+      </div>
+  </div>
+                </details>
+                <details class="con-group con-captured step-captured">
+                    <summary>Route Captured<span class="con-count">1</span></summary>
+                    <div class="con-cards">
+  <div class="api-card">
+    <div class="api-card-head">
+      <span class="api-seq">1</span>
+      <span class="api-kind">CAPTURED</span>
+        <span class="api-method api-m-get">GET</span>
+      <span class="api-url">https://api.example.com/profile/list</span>
+        <span class="api-status api-s-ok">200</span>
+        <span class="api-ms"><D> ms</span>
+    </div>
+  </div>
+                    </div>
+                </details>
+                <div class="failure-panel">
+                    <div class="failure-head">
+                        <span class="failure-icon" aria-hidden="true">✕</span>
+                        <div class="failure-body">
+                            <span class="failure-type">FAILURE</span>
+                            <div class="failure-msg">
+                              <div class="failure-seg">expected status 200 but was 401</div>
+                            </div>
+                        </div>
+                    </div>
+                        <details class="failure-stack">
+                            <summary>
+                                <span class="stack-title">Stack trace</span>
+                                    <span class="stack-class">java.lang.AssertionError</span>
+                                <span class="stack-count">2 lines</span>
+                                <button type="button" class="stack-copy" title="Copy stack trace">Copy</button>
+                            </summary>
+                            <div class="stack-body">
+                                    <div class="stack-line is-ex">java.lang.AssertionError: expected status 200 but was 401</div>
+                                    <div class="stack-line is-app">	at com.hsbc.cmb.hk.dbb.automation.framework.report.render.OutcomeFixtures.full(OutcomeFixtures.java:1)</div>
+                            </div>
+                        </details>
+                </div>
+                </div>
+            </details>
+                <div class="shot">
+                    <img class="shot-zoom" src="screenshots/step-<N>.png"
+                         alt="Step screenshot" title="Click to enlarge · click again to restore"/>
+                </div>
+            </div>
         </li>
         <li class="st-SKIP">
             <span class="node"></span>
-            <div class="step-row">
-                <span class="step-desc">cleanup session</span>
-                <span class="step-time"><D> ms</span>
-            </div>
+            <div class="step-line">
+            <details class="step-details">
+                <summary class="step-row">
+                    <span class="step-desc">cleanup session</span>
+                    <span class="step-time">0s</span>
+                </summary>
+                <div class="step-body">
             
+                </div>
+            </details>
+            </div>
         </li>
 </ul>
+      </div>
+
+      <div class="card">
+        <h3><span class="icon"></span>API Request (2)</h3>
+  <div class="api-card">
+    <div class="api-card-head">
+      
+      
+      <span class="api-url">GET /api/health 200</span>
+    </div>
+  </div>
+  <div class="api-card">
+    <div class="api-card-head">
+      
+      
+      <span class="api-url">POST /api/session 401</span>
+    </div>
+  </div>
+      </div>
+
+
+      <div class="card con-register">
+        <h3><span class="icon"></span>Route Register (1)</h3>
+        <ul class="con-lines" style="border-top:0;background:transparent;padding:4px 0 0">
+    <li class="con-raw">[Route] register GET route for &#39;/api/health&#39; (monitor: timeout=30s)</li>
+        </ul>
+      </div>
+
+
+
+    </div>
   </div>
 
-  <div class="card">
-    <h3><span class="icon"></span>Evidence</h3>
-    <ul class="evidence"><li>WARNING: hook failed: teardown timed out</li></ul>
+  <div class="card bottom-tabs">
+    <div class="tab-bar" role="tablist">
+      <button type="button" class="tab-btn is-active" role="tab" data-tab="tab-console"
+              aria-selected="true">Console log</button>
+      <button type="button" class="tab-btn" role="tab" data-tab="tab-screenshots"
+              aria-selected="false">Screenshots (2)</button>
+      <button type="button" class="tab-btn" role="tab" data-tab="tab-trace"
+              aria-selected="false">Playwright trace</button>
+      <button type="button" class="tab-btn" role="tab" data-tab="tab-records"
+              aria-selected="false">Playwright records</button>
+    </div>
+
+    <div class="tab-pane is-active" id="tab-console" role="tabpanel">
+        <p class="tab-empty">No console output was captured for this scenario.</p>
+    </div>
+
+    <div class="tab-pane" id="tab-screenshots" role="tabpanel">
+        <div class="shot-gallery">
+          <div class="shot-viewer">
+            <img id="shot-big" src="screenshots/step-<N>.png" alt="screenshot"/>
+            <button type="button" class="shot-nav shot-prev" id="shot-prev"
+                    aria-label="Previous screenshot" title="Previous screenshot">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 5 8 12 15 19"/>
+              </svg>
+            </button>
+            <button type="button" class="shot-nav shot-next" id="shot-next"
+                    aria-label="Next screenshot" title="Next screenshot">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 5 16 12 9 19"/>
+              </svg>
+            </button>
+            <span class="shot-num shot-num-big" id="shot-big-num">1</span>
+          </div>
+          <div class="shot-picker">
+              <button type="button" class="shot-pick is-active"
+                      data-file="step-<N>.png" data-index="1" data-badge="1"
+                      title="Step 1 — open the login page">
+                <span class="shot-pick-num">1</span>
+              </button>
+              <button type="button" class="shot-pick"
+                      data-file="step-<N>.png" data-index="4" data-badge="4"
+                      title="Step 4 — click sign in">
+                <span class="shot-pick-num">4</span>
+              </button>
+          </div>
+        </div>
+    </div>
+
+    <div class="tab-pane" id="tab-downloads" role="tabpanel">
+        <p class="tab-empty">
+          No files were downloaded in this scenario.<br>
+          To attach downloads to the report, set <code>playwright.browser.download.attachToReport.enabled=true</code>
+          and read them via <code>waitForDownloadSaved</code> (or call <code>DownloadInfo.attachToReport()</code>).
+        </p>
+    </div>
+
+    <div class="tab-pane" id="tab-trace" role="tabpanel">
+        <div class="trace-hint">
+          Tip: download the <code>trace.zip</code> below, then open
+          <a href="https://trace.playwright.dev" target="_blank" rel="noopener">trace.playwright.dev</a>
+          and drag the file into the viewer to replay.
+        </div>
+        <div class="trace-path-row">
+          <code class="trace-path">login-12-x/trace.zip</code>
+          <div class="trace-btns">
+            <a class="btn-trace" href="https://trace.playwright.dev" target="_blank" rel="noopener">Play in Trace Viewer</a>
+            <a class="btn-trace ghost" href="../login-12-x/trace.zip" download="trace.zip">Download trace.zip</a>
+          </div>
+        </div>
+        <dl class="trace-meta">
+            <dt>Recorded window</dt><dd>10:15:30.100 → 10:16:00.291</dd>
+            <dt>Duration</dt><dd><D> ms</dd>
+        </dl>
+    </div>
+
+    <div class="tab-pane" id="tab-records" role="tabpanel">
+        <p class="tab-empty">No video was recorded. To enable it, set <code>playwright.context.recordVideo.enabled=true</code>.</p>
+    </div>
   </div>
-
-  <div class="card">
-    <h3><span class="icon"></span>API operations (2)</h3>
-    <ul class="api-lines"><li>GET /api/health 200</li><li>POST /api/session 401</li></ul>
-  </div>
-
-  <div class="card">
-    <h3><span class="icon"></span>Route registrations (2)</h3>
-    <ul class="route-lines"><li>[Route] register GET route for &#39;/api/health&#39; (monitor: timeout=30s)</li><li>[Route] register POST route for &#39;/api/session&#39; (mock: status=200 intercept=REPLACE)</li></ul>
-  </div>
-
-
-
-
 
   <footer>Scenario page · reportVersion <V> · outcomeId login-12-user-logs-in-with-valid-credentials</footer>
+</div>
+
+<div id="shot-hover" aria-hidden="true" role="button" tabindex="-1" title="Click to restore">
+  <span class="zoom-tip">Click anywhere or press Esc to restore</span>
+  <img alt=""/>
 </div>
 
 <script>
 (function(){
   var OUTCOME_ID = "login-12-user-logs-in-with-valid-credentials";
+  var VERDICT_KEY = 'pw-manual-scenario-success';
+
+  /* 底部 Tab 切换（Console log / Playwright trace / Playwright records）：
+     三段内容同级平铺，一次只看一段，避免长日志把 trace/records 挤出首屏。 */
+  var tabButtons = document.querySelectorAll('.bottom-tabs .tab-btn');
+  Array.prototype.forEach.call(tabButtons, function(btn) {
+    btn.addEventListener('click', function() {
+      var bar = btn.parentNode;
+      Array.prototype.forEach.call(bar.querySelectorAll('.tab-btn'), function(b) {
+        b.classList.remove('is-active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-selected', 'true');
+      var card = bar.parentNode;
+      Array.prototype.forEach.call(card.querySelectorAll('.tab-pane'), function(p) {
+        p.classList.remove('is-active');
+      });
+      var pane = card.querySelector('#' + btn.getAttribute('data-tab'));
+      if (pane) { pane.classList.add('is-active'); }
+    });
+  });
+
+  /* ---------- Playwright trace 播放 ----------
+     播放按钮已改为「只打开 Viewer 首页」的普通链接（2026-10-22 用户要求）：
+     官方 Viewer 的 ?trace= 远程拉取依赖服务端 CORS，而 file:// / IDEA 预览（63342）必然被浏览器拦截，
+     拼参数只会点开一片错误。现在点击即开 https://trace.playwright.dev/，
+     用户把下载好的 trace.zip 拖进去即可——路径短、不会失败，也不再需要这段 JS 预探测。 */
+
+  /* ---------- 人工结论（仅本浏览器） ----------
+     报告是静态产物：只有 ReportServer 托管时 /api/mark-success 才存在；IDE 预览（如 63342）、
+     file:// 或 CI 制品目录下没有任何后端，POST 会拿到 404 HTML 页。
+     以前这里直接 r.json() → "Unexpected token '<' is not valid JSON"（用户已报此错）。
+     现在统一走 postJson（校验 ok + content-type），失败即降级：标记只在当前浏览器生效并明确提示，
+     上传则自动改为下载 patch 文件（可由 ManualCaseRecorder --apply-patch 回灌），不再报语法错。 */
+  function readVerdicts() {
+    try { return JSON.parse(localStorage.getItem(VERDICT_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveVerdict(id) {
+    var map = readVerdicts();
+    map[id] = 1;
+    try { localStorage.setItem(VERDICT_KEY, JSON.stringify(map)); } catch (e) {}
+  }
+  function applyVerdicts() {
+    if (!readVerdicts()[OUTCOME_ID]) return;
+    var badge = document.getElementById('case-result-badge');
+    if (badge) {
+      badge.className = 'badge b-PASS';
+      badge.textContent = 'Passed';
+      badge.style.padding = '4px 14px';
+      badge.style.fontSize = '14px';
+    }
+    var actions = document.getElementById('case-actions');
+    if (actions) actions.style.display = 'none';
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function(r){
+      var contentType = (r.headers && r.headers.get('content-type')) || '';
+      if (!r.ok || contentType.indexOf('json') < 0) {
+        throw new Error('report backend not available');
+      }
+      return r.json();
+    });
+  }
+
+  function downloadPatch(payload, intro) {
+    var blob = new Blob([payload], {type: 'application/json'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = OUTCOME_ID + '.patch.json';
+    a.click();
+    alert(intro + '\nPatch file: ' + a.download
+        + '\nApply locally with: ManualCaseRecorder --apply-patch ' + a.download);
+  }
+
+  applyVerdicts();
+
   window.__doPatch = function(files) {
     if (!files || !files.length) return;
     var results = [];
@@ -151,20 +530,154 @@
     Promise.all(readers).then(function() {
       var payload = JSON.stringify({outcomeId: OUTCOME_ID, screenshots: results});
       if (location.protocol === 'http:' || location.protocol === 'https:') {
-        fetch('api/patch', {method: 'POST', body: payload})
-          .then(function(r){ return r.json(); })
-          .then(function(d){ if (d.ok) { alert('Uploaded ' + results.length + ' screenshot(s), reloading...'); setTimeout(function(){location.reload()}, 800); } else { alert('Failed: ' + (d.error || 'unknown')); } })
-          .catch(function(e){ alert('Upload failed: ' + e); });
+        postJson('api/patch', JSON.parse(payload))
+          .then(function(d) {
+            if (d && d.ok) {
+              alert('Uploaded ' + results.length + ' screenshot(s), reloading...');
+              setTimeout(function(){ location.reload(); }, 800);
+            } else {
+              downloadPatch(payload, 'Upload rejected by the report server (static preview).');
+            }
+          })
+          .catch(function() {
+            downloadPatch(payload, 'Report server not available (static preview).');
+          });
       } else {
-        var blob = new Blob([payload], {type: 'application/json'});
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = OUTCOME_ID + '.patch.json';
-        a.click();
-        alert('Patch downloaded: ' + a.download + '\nApply locally with ManualCaseRecorder --apply-patch ' + a.download);
+        downloadPatch(payload, 'Patch downloaded (no report server).');
       }
     });
   };
+
+  //  失败用例操作按钮：上传补图 + 标记通过
+  var upBtn = document.getElementById('btn-upload');
+  var msBtn = document.getElementById('btn-marksuccess');
+  var input = document.getElementById('shot-input');
+  if (upBtn && input) {
+    upBtn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', function() {
+      if (input.files && input.files.length) { window.__doPatch(input.files); input.value = ''; }
+    });
+  }
+  if (msBtn) {
+    msBtn.addEventListener('click', function() {
+      var applied = function() {
+        saveVerdict(OUTCOME_ID);
+        applyVerdicts();
+        alert('Scenario marked as success (this browser only).');
+      };
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        postJson('api/mark-success', { outcomeId: OUTCOME_ID })
+          .then(function(d) {
+            if (d && d.ok) { applied(); setTimeout(function() { location.reload(); }, 600); }
+            else { applied(); }
+          })
+          .catch(function() { applied(); });
+      } else {
+        applied();
+      }
+    });
+  }
+
+  /* ---------- 底部 Screenshots 画廊 ----------
+     切换方式：点序号按钮 / 点大图左右箭头 / 键盘 ← →（仅 Screenshots 标签可见时生效）。
+     2026-10-22 用户要求：加向前向后图标可切图；序号按钮保持明确的 active 与 focus 状态。
+     以「数组下标」而非 data-index 判定 active——序号与截图顺序强绑定，避免属性缺失时高亮错位。 */
+  var shotBig = document.getElementById('shot-big');
+  var shotBigNum = document.getElementById('shot-big-num');
+  var shotPicks = [].slice.call(document.querySelectorAll('.shot-pick'));
+  var shotPrev = document.getElementById('shot-prev');
+  var shotNext = document.getElementById('shot-next');
+  var shotPane = document.getElementById('tab-screenshots');
+  var shotAt = 0;
+  function renderShot() {
+    if (!shotPicks.length) { return; }
+    shotAt = Math.max(0, Math.min(shotAt, shotPicks.length - 1));
+    var cur = shotPicks[shotAt];
+    if (shotBig) { shotBig.src = 'screenshots/' + cur.getAttribute('data-file'); }
+    if (shotBigNum) { shotBigNum.textContent = cur.getAttribute('data-badge'); }
+    shotPicks.forEach(function(t, i) {
+      var on = i === shotAt;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    if (shotPrev) { shotPrev.disabled = shotAt === 0; }
+    if (shotNext) { shotNext.disabled = shotAt === shotPicks.length - 1; }
+  }
+  function stepShot(delta) {
+    var next = shotAt + delta;
+    if (next < 0 || next >= shotPicks.length) { return; }
+    shotAt = next;
+    renderShot();
+  }
+  shotPicks.forEach(function(t, i) {
+    t.addEventListener('click', function() { shotAt = i; renderShot(); });
+  });
+  if (shotPrev) { shotPrev.addEventListener('click', function() { stepShot(-1); }); }
+  if (shotNext) { shotNext.addEventListener('click', function() { stepShot(1); }); }
+  renderShot();
+
+  /* ---------- 截图点击放大 / 再点恢复 ----------
+     点任意截图（底部画廊大图 / 步骤树内联小图）→ 铺满视口显示完整页面；
+     再点一下预览层（或按 Esc）→ 恢复原状。
+     2026-10-22 用户要求"点击放大，再点击恢复原来的"；原 hover 方案 pointer-events:none，
+     鼠标划过就弹全屏、且无法主动关闭，观感上是"乱跳"。 */
+  var shotHover = document.getElementById('shot-hover');
+  var shotHoverImg = shotHover ? shotHover.querySelector('img') : null;
+  function openZoom(src) {
+    if (!shotHover || !shotHoverImg || !src) { return; }
+    shotHoverImg.src = src;
+    shotHover.classList.add('on');
+    shotHover.setAttribute('aria-hidden', 'false');
+  }
+  function closeZoom() {
+    if (!shotHover) { return; }
+    shotHover.classList.remove('on');
+    shotHover.setAttribute('aria-hidden', 'true');
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.shot-zoom, #shot-big'), function(img) {
+    img.addEventListener('click', function() { openZoom(img.getAttribute('src')); });
+  });
+  if (shotHover) {
+    shotHover.addEventListener('click', closeZoom);
+  }
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' || e.keyCode === 27) { closeZoom(); return; }
+    //  键盘 ← → 切图：仅在 Screenshots 标签可见、且未处于放大预览时生效。
+    if (shotPane && shotPane.classList.contains('is-active') && shotPicks.length > 1
+        && !(shotHover && shotHover.classList.contains('on'))) {
+      if (e.key === 'ArrowLeft') { e.preventDefault(); stepShot(-1); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); stepShot(1); }
+    }
+  });
+
+  /* 堆栈 Copy：按钮在 <summary> 内，需 preventDefault 阻止折叠切换；
+     复制该面板内全部 .stack-line 的文本（保持行序与原缩进）。 */
+  Array.prototype.forEach.call(document.querySelectorAll('.stack-copy'), function(btn) {
+    btn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var panel = btn.closest('.failure-stack');
+      var lines = panel ? panel.querySelectorAll('.stack-line') : [];
+      var text = Array.prototype.map.call(lines, function(l) { return l.textContent; }).join('\n');
+      var flash = function() {
+        var old = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.disabled = true;
+        setTimeout(function() { btn.textContent = old; btn.disabled = false; }, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(flash, flash);
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        flash();
+      }
+    });
+  });
 })();
 </script>
 </body>

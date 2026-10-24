@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    
+    <title>route_capability_e2e · Feature</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
+    <link rel="stylesheet" href="assets/report-v2.css"/>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Feature <a href="index.html" style="color:#fff;text-decoration:none;font-size:14px;font-weight:400">← back to overview</a></h1>
+  <div class="meta">Test Report<br>reportVersion 1</div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <div class="crumbs"><a href="index.html">Overview</a><span class="sep">›</span><b>route_capability_e2e</b></div>
+    <div class="feature-head">
+      <div>
+        <h2>route_capability_e2e</h2>
+        <div class="chips">
+          <span class="chip tag">7 scenarios</span>
+          <span class="chip">5 passed</span>
+          <span class="chip">2 issues</span>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div class="sub">Pass rate</div>
+        <div style="font-size:24px;font-weight:700;color:var(--success)">71.4%</div>
+        <div class="sub">5 / 7</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 统计信息：构成 / 结果 / 耗时，合并为一个模块 -->
+  <div class="card">
+    <h3><span class="icon"></span>Statistics<span class="aside">composition · results · execution time</span></h3>
+    <div class="stats-grid">
+      <div class="stat-block">
+        <div class="stat-title">Automated vs Manual</div>
+        <div class="donut-box">
+    <div class="donut-wrap">
+      <svg viewBox="0 0 120 120" class="donut-svg">
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#3b82f6" stroke-width="17"
+                    stroke-linecap="round"
+                    stroke-dasharray="298.59 3"
+                    stroke-dashoffset="0"
+                    transform="rotate(-90 60 60)"></circle>
+      </svg>
+      <div class="donut-center"><b>100%</b><span>automated</span></div>
+    </div>
+          <ul class="legend">
+            <li><span class="dot" style="background:#3b82f6"></span>Automated<span class="v">7</span><span class="p">100%</span></li>
+            <li><span class="dot" style="background:#0d9488"></span>Manual<span class="v">0</span><span class="p">0%</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-title">Result distribution</div>
+        <div class="donut-box">
+    <div class="donut-wrap">
+      <svg viewBox="0 0 120 120" class="donut-svg">
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#16a34a" stroke-width="17"
+                    stroke-linecap="round"
+                    stroke-dasharray="212.42 89.17"
+                    stroke-dashoffset="0"
+                    transform="rotate(-90 60 60)"></circle>
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#dc2626" stroke-width="17"
+                    stroke-linecap="round"
+                    stroke-dasharray="83.17 218.42"
+                    stroke-dashoffset="-215.42"
+                    transform="rotate(-90 60 60)"></circle>
+      </svg>
+      <div class="donut-center"><b>71.4%</b><span>pass rate</span></div>
+    </div>
+          <ul class="dist-list">
+            <li><span class="dot" style="background:#16a34a"></span>Passed<span class="n">5</span><span class="pct2">71.4%</span></li>
+            <li><span class="dot" style="background:#dc2626"></span>Failed<span class="n">2</span><span class="pct2">28.6%</span></li>
+            <li><span class="dot" style="background:#ea580c"></span>Error<span class="n">0</span><span class="pct2">0%</span></li>
+            <li><span class="dot" style="background:#d97706"></span>Pending<span class="n">0</span><span class="pct2">0%</span></li>
+          </ul>
+        </div>
+        <div class="stack-bar">
+            <i style="width:71.4%;background:#16a34a"></i>
+            <i style="width:28.6%;background:#dc2626"></i>
+            <i style="width:0%;background:#ea580c"></i>
+            <i style="width:0%;background:#d97706"></i>
+        </div>
+      </div>
+      <div class="stat-block">
+        <div class="stat-title">Duration distribution</div>
+  <div class="hist2">
+      <div class="hist2-col" title="<1m: 4 scenario(s)">
+        <span class="hist2-count">4</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar" style="height:100%"></div>
+        </div>
+        <span class="hist2-label"><1m</span>
+      </div>
+      <div class="hist2-col" title="1-2m: 3 scenario(s)">
+        <span class="hist2-count">3</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar" style="height:75%"></div>
+        </div>
+        <span class="hist2-label">1-2m</span>
+      </div>
+      <div class="hist2-col" title="2-5m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">2-5m</span>
+      </div>
+      <div class="hist2-col" title="5-10m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">5-10m</span>
+      </div>
+      <div class="hist2-col" title="10-30m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">10-30m</span>
+      </div>
+      <div class="hist2-col" title=">30m: 0 scenario(s)">
+        <span class="hist2-count zero">0</span>
+        <div class="hist2-plot">
+          <div class="hist2-bar empty" style="height:0%"></div>
+        </div>
+        <span class="hist2-label">>30m</span>
+      </div>
+  </div>
+  <div class="hist2-axis"><span>Execution time</span><span>7 scenario(s)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Scenarios (7)<span class="aside">click a row to open its detail page</span></h3>
+    <div class="toolbar">
+      <label class="sub" for="flt-result">Result:</label>
+      <select id="flt-result">
+        <option value="all">All</option><option value="bad">Issues only</option><option value="pass">Passed only</option>
+      </select>
+      <label class="sub" for="flt-type" style="margin-left:8px">Type:</label>
+      <select id="flt-type">
+        <option value="all">All</option><option value="auto">Automated</option><option value="manual">Manual</option>
+      </select>
+      <span class="sub" id="shown" style="margin-left:10px"></span>
+    </div>
+    <table class="tbl">
+      <thead><tr>
+        <th style="width:100px">Result</th><th>Scenario</th><th style="width:110px">Type</th>
+        <th class="num-cell" style="width:80px">Duration</th>
+      </tr></thead>
+      <tbody id="sc-body">
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" onclick="location.href='route-capability-e2e-22-route-v2-e2e-capture.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期真实接口采集（CAPTURE）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">69.8s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" onclick="location.href='route-capability-e2e-32-route-v2-e2e-monitor.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MONITOR 断言真实接口</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">58.0s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" onclick="location.href='route-capability-e2e-39-route-v2-e2e-mock.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">46.3s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" onclick="location.href='route-capability-e2e-46-route-v2-e2e-mock-when-then.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">44.7s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="PASS" data-auto="1" onclick="location.href='route-capability-e2e-53-route-v2-e2e-modify.html'">
+          <td><span class="badge b-PASS">Passed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">60.2s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="FAILURE" data-auto="1" onclick="location.href='route-capability-e2e-60-route-v2-e2e-delay.html'">
+          <td><span class="badge b-FAILURE">Failed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">80.1s</td>
+        </tr>
+        <tr class="sc-row clickable" data-result="FAILURE" data-auto="1" onclick="location.href='route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern.html'">
+          <td><span class="badge b-FAILURE">Failed</span></td>
+          <td class="link-cell"><span class="link">route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）</span><span class="link-arrow">→</span></td>
+          <td><span class="badge b-auto">automated</span></td>
+          <td class="num-cell sub">19.1s</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>Feature page · reportVersion 1</footer>
+</div>
+
+<script>
+(function () {
+    var r = document.getElementById('flt-result');
+    var t = document.getElementById('flt-type');
+    var rows = [].slice.call(document.querySelectorAll('#sc-body tr.sc-row'));
+    var shownEl = document.getElementById('shown');
+    function apply() {
+        var rv = r.value, tv = t.value, shown = 0;
+        rows.forEach(function (tr) {
+            var res = tr.getAttribute('data-result');
+            var auto = tr.getAttribute('data-auto');
+            var ok = true;
+            if (rv === 'bad' && ['PASS', 'SKIPPED', 'IGNORED'].indexOf(res) >= 0) { ok = false; }
+            if (rv === 'pass' && res !== 'PASS') { ok = false; }
+            if (tv === 'auto' && auto !== '1') { ok = false; }
+            if (tv === 'manual' && auto !== '0') { ok = false; }
+            tr.style.display = ok ? '' : 'none';
+            if (ok) { shown++; }
+        });
+        shownEl.textContent = 'Showing ' + shown + ' / ' + rows.length;
+    }
+    [r, t].forEach(function (el) { el.addEventListener('change', apply); });
+    apply();
+})();
+</script>
+</body>
+</html>

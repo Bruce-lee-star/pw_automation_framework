@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.event;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.report.model.DownloadRecord;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.FailureCause;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestAttachment;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
@@ -46,11 +47,24 @@ final class RecordingSession {
     private final List<String> apiOperations = new CopyOnWriteArrayList<>();
     /** API 监控失败条目（独立于 apiOperations：这里只收失败，monitor-failures.html 数据源）。 */
     private final List<String> apiMonitorFailures = new CopyOnWriteArrayList<>();
-    /** RouteDsl 路由注册（API 注册）行；用例级（注册是 scenario 级事实，不挂步骤树）。 */
+    /**
+     * RouteDsl 路由注册（API 注册）行；<b>用例级兜底</b>——注册发生在步骤上下文时归位到
+     * {@code TestStep#routeRegistrations}，非步骤上下文（钩子等）才落本列表。
+     */
     private final List<String> routeRegistrations = new CopyOnWriteArrayList<>();
     private final AtomicInteger routeDropped = new AtomicInteger();
     private final List<TestAttachment> attachments = new CopyOnWriteArrayList<>();
+    /** 挂载到报告的下载文件（{@link DownloadRecord}）；对应 per-case 报告「Downloads」Tab。 */
+    private final List<DownloadRecord> downloads = new CopyOnWriteArrayList<>();
     private volatile String tracePath;
+    /** 场景录屏相对路径（{@code <outcomeId>/records/<name>.webm}），未采集到时保持 null。 */
+    private volatile String videoPath;
+    /** trace 录制窗口起点（{@code HH:mm:ss.SSS}），未提供时保持 null。 */
+    private volatile String traceStartTime;
+    /** trace 录制窗口终点（{@code HH:mm:ss.SSS}），未提供时保持 null。 */
+    private volatile String traceEndTime;
+    /** trace 录制时长（毫秒；0 表示未知）。 */
+    private volatile long traceDurationMs;
     private final List<String> consoleOutput = new CopyOnWriteArrayList<>();
     private final List<String> consoleError = new CopyOnWriteArrayList<>();
     private final AtomicInteger stepCounter = new AtomicInteger();
@@ -154,8 +168,17 @@ final class RecordingSession {
         appendBounded(step.getEvidence(), scrubbedLine, maxEvidenceLines, evidenceDropped, "evidence");
     }
 
-    void appendApiOperation(String scrubbedLine) {
-        appendBounded(apiOperations, scrubbedLine, maxApiOperations, apiDropped, "apiOperation");
+    /**
+     * API 操作记录：若已知所属步骤（{@code stepId} 非 null 且该步骤存在）则归位到步骤级，
+     * 否则回落用例级列表（脱敏、限行）。
+     */
+    void appendApiOperation(String stepId, String scrubbedLine) {
+        TestStep step = (stepId != null) ? stepIndex.get(stepId) : null;
+        if (step != null) {
+            appendBounded(step.getApiOperations(), scrubbedLine, maxApiOperations, apiDropped, "apiOperation");
+        } else {
+            appendBounded(apiOperations, scrubbedLine, maxApiOperations, apiDropped, "apiOperation");
+        }
     }
 
     /** API 监控失败条目：用例级（监控失败是端点级事实，不挂步骤树），上限 200。 */
@@ -163,9 +186,18 @@ final class RecordingSession {
         appendBounded(apiMonitorFailures, scrubbedLine, 200, monitorDropped, "apiMonitorFailure");
     }
 
-    /** RouteDsl 路由注册（API 注册）行：用例级，上限同 apiOperations。 */
-    void appendRouteRegistration(String scrubbedLine) {
-        appendBounded(routeRegistrations, scrubbedLine, maxApiOperations, routeDropped, "routeRegistration");
+    /**
+     * RouteDsl 路由注册（API 注册）行：注册发生在哪个步骤就归到哪个步骤
+     * （{@code stepId} 为 null 或步骤不存在 → 回落用例级列表，如 {@code @Before} 钩子内注册）。
+     * 上限同 apiOperations。
+     */
+    void appendRouteRegistration(String stepId, String scrubbedLine) {
+        TestStep step = (stepId != null) ? stepIndex.get(stepId) : null;
+        if (step != null) {
+            appendBounded(step.getRouteRegistrations(), scrubbedLine, maxApiOperations, routeDropped, "routeRegistration");
+        } else {
+            appendBounded(routeRegistrations, scrubbedLine, maxApiOperations, routeDropped, "routeRegistration");
+        }
     }
 
     // ---------------------------------------------------------------- console
@@ -204,6 +236,10 @@ final class RecordingSession {
         attachments.add(attachment);
     }
 
+    void appendDownload(DownloadRecord download) {
+        downloads.add(download);
+    }
+
     void appendStepAttachment(String stepId, TestAttachment attachment) {
         TestStep step = stepIndex.get(stepId);
         if (step != null) {
@@ -213,6 +249,26 @@ final class RecordingSession {
 
     void setTracePath(String path) {
         this.tracePath = path;
+    }
+
+    void setVideoPath(String path) {
+        this.videoPath = path;
+    }
+
+    /**
+     * 登记 trace 录制窗口（起止时刻 + 时长）。任一时点为 {@code null} 表示采集方未提供窗口，
+     * 报告侧相应省略该行，不影响 path / 播放按钮。
+     */
+    void setTraceMeta(String startTime, String endTime, long durationMs) {
+        if (startTime != null) {
+            this.traceStartTime = startTime;
+        }
+        if (endTime != null) {
+            this.traceEndTime = endTime;
+        }
+        if (durationMs > 0) {
+            this.traceDurationMs = durationMs;
+        }
     }
 
     private void appendBounded(List<String> target, String line, int max, AtomicInteger dropped, String kind) {
@@ -225,9 +281,40 @@ final class RecordingSession {
 
     // ---------------------------------------------------------------- screenshots
 
-    /** 确定性截图名：step-NNN.png（序号按采集顺序，三位零填充，超 999 自然进位）。 */
-    String nextScreenshotName() {
-        return String.format(Locale.ROOT, "step-%03d.png", screenshotCounter.incrementAndGet());
+    /**
+     * 可读截图名：无步骤描述时 {@code step-NNN.png}；有描述时 {@code step-NNN-<slug>.png}
+     * （序号按采集顺序、三位零填充、超 999 自然进位；slug 由步骤描述折叠而来，更易认）。
+     */
+    String nextScreenshotName(String stepDescription) {
+        int n = screenshotCounter.incrementAndGet();
+        String slug = screenshotSlug(stepDescription);
+        if (slug.isEmpty()) {
+            return String.format(Locale.ROOT, "step-%03d.png", n);
+        }
+        return String.format(Locale.ROOT, "step-%03d-%s.png", n, slug);
+    }
+
+    /** 步骤描述 → 文件名字符串：小写、非 {@code [a-z0-9]} 段折叠为单个 {@code -}、去首尾 {@code -}、截断 60；空则 ""。 */
+    private static String screenshotSlug(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        StringBuilder sb = new StringBuilder(Math.min(lower.length(), 60));
+        boolean pendingDash = false;
+        for (int i = 0; i < lower.length() && sb.length() < 60; i++) {
+            char c = lower.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                if (pendingDash && sb.length() > 0) {
+                    sb.append('-');
+                }
+                pendingDash = false;
+                sb.append(c);
+            } else {
+                pendingDash = true;
+            }
+        }
+        return sb.toString();
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -284,12 +371,17 @@ final class RecordingSession {
         o.setApiMonitorFailures(apiMonitorFailures);
         o.setRouteRegistrations(routeRegistrations);
         o.setAttachments(attachments);
+        o.setDownloads(downloads);
         o.setConsoleOutput(consoleOutput);
         o.setConsoleError(consoleError);
         o.setManual(manual);
         o.setBrowserConsole(browserConsole);
         o.setBrowserErrors(browserErrors);
         o.setTracePath(tracePath);
+        o.setVideoPath(videoPath);
+        o.setTraceStartTime(traceStartTime);
+        o.setTraceEndTime(traceEndTime);
+        o.setTraceDurationMs(traceDurationMs);
         if (scenarioOutline) {
             o.setScenarioOutline(Boolean.TRUE);
             o.setOutlineKey(outlineKey);

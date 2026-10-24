@@ -49,6 +49,7 @@ import java.util.zip.ZipInputStream;
  *   <li>{@code POST /{project}/runs}            → 上传 serenity.zip，返回 runId 和 URL</li>
  *   <li>{@code GET /{project}/{runId}/...}      → 静态文件</li>
  *   <li>{@code POST /{project}/{runId}/api/patch} → 补图</li>
+ *   <li>{@code POST /{project}/{runId}/api/mark-success} → 标记用例通过（覆盖结果）</li>
  * </ul>
  */
 public final class ReportServer {
@@ -109,6 +110,11 @@ public final class ReportServer {
             handlePatch(ex, project, runId);
             return;
         }
+        // POST /{project}/{runId}/api/mark-success
+        if ("api/mark-success".equals(rest) && "POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            handleMarkSuccess(ex, project, runId);
+            return;
+        }
         // static file
         serveStatic(ex, project, runId, rest);
     }
@@ -166,7 +172,7 @@ public final class ReportServer {
             String pid = (String) patch.get("outcomeId");
             String pnote = (String) patch.getOrDefault("note", "");
 
-            Path existingJson = runDir.resolve(pid + ".json");
+            Path existingJson = runDir.resolve(pid).resolve(pid + ".json");
             if (!Files.exists(existingJson)) {
                 writeJson(ex, 404, Map.of("error", "outcome not found: " + pid));
                 return;
@@ -203,11 +209,45 @@ public final class ReportServer {
         }
     }
 
+    private void handleMarkSuccess(HttpExchange ex, String project, String runId) throws IOException {
+        Path runDir = root.resolve(project).resolve(runId);
+        try {
+            byte[] body = ex.getRequestBody().readAllBytes();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> req = mapper.readValue(body, Map.class);
+            String pid = (String) req.get("outcomeId");
+            String note = (String) req.getOrDefault("note", "");
+
+            Path existingJson = runDir.resolve(pid).resolve(pid + ".json");
+            if (!Files.exists(existingJson)) {
+                writeJson(ex, 404, Map.of("error", "outcome not found: " + pid));
+                return;
+            }
+            TestOutcome outcome = mapper.readValue(existingJson.toFile(), TestOutcome.class);
+            //  标记通过：覆盖用例结果为 SUCCESS，并清掉失败原因 / 堆栈（override，保留失败步骤供追溯）。
+            outcome.setResult(TestResult.SUCCESS);
+            outcome.setTestFailureCause(null);
+            outcome.setTestFailureSummary(null);
+            outcome.getEvidence().add("[marked success]" + (note.isEmpty() ? "" : " " + note));
+
+            JsonWriter.writeOutcome(runDir, outcome);
+            reindex(runDir);
+            writeJson(ex, 200, Map.of("ok", true, "outcomeId", pid));
+        } catch (Exception e) {
+            e.printStackTrace();
+            writeJson(ex, 500, Map.of("error", e.toString()));
+        }
+    }
+
     private void reindex(Path runDir) throws IOException {
         List<TestOutcome> all = new ArrayList<>();
-        try (var stream = Files.list(runDir)) {
-            stream.filter(p -> p.getFileName().toString().endsWith(".json")
-                            && !p.getFileName().toString().startsWith("serenity-summary"))
+        //  递归收集：per-case JSON 现位于 <runDir>/<outcomeId>/<outcomeId>.json（2026-10-21 迁移后）
+        try (var paths = Files.walk(runDir)) {
+            paths.filter(p -> {
+                        String name = p.getFileName().toString();
+                        return name.endsWith(".json") && !name.startsWith("serenity-summary")
+                                && Files.isRegularFile(p);
+                    })
                     .forEach(p -> {
                         try {
                             all.add(mapper.readValue(p.toFile(), TestOutcome.class));
@@ -240,6 +280,11 @@ public final class ReportServer {
         }
         byte[] bytes = Files.readAllBytes(file);
         ex.getResponseHeaders().set("Content-Type", contentType(file.getFileName().toString()));
+        //  静态资源（含 trace.zip / 截图 / records）必须放开 CORS：托管场景下 per-case 页的
+        //  `?trace=<URL>` 深链由 trace.playwright.dev（或其自托管实例）跨源拉取，
+        //  浏览器要求响应带 Access-Control-Allow-Origin。此处覆盖 applyCors 的最小权限源为 `*`
+        //  （静态资源只读、无凭证，放行任意源不影响 API 面；API 仍走 dispatch 里的最小权限 CORS）。
+        ex.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         ex.sendResponseHeaders(200, bytes.length);
         try (OutputStream os = ex.getResponseBody()) {
             os.write(bytes);

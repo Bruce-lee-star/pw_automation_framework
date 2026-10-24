@@ -20,4 +20,9 @@ public class RestPatchJob extends AbstractRestJob {
     public void perform(final Entity entity) {
         execute(entity, spec -> spec.when().patch(entity.getEndpoint()).then(), false);
     }
+
+    @Override
+    protected String httpMethod() {
+        return "PATCH";
+    }
 }

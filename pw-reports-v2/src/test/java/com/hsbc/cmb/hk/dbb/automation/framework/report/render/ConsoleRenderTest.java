@@ -17,12 +17,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConsoleRenderTest {
 
     @Test
-    @DisplayName("步骤级与用例级 console 归经互斥：步骤内归步骤、hook 归用例级，两者都渲染不互相压制")
+    @DisplayName("步骤级与用例级 stdout/stderr 统一汇入底部 Console log，按类别分组渲染，互不压制")
     void stepAndCaseConsoleAreRoutedDisjointlyAndBothRender() throws Exception {
         TestOutcome o = OutcomeFixtures.full();
-        // 用例级 = 步骤之外的输出（如 @Before/@After hook）；步骤级 = 步骤内输出。ConsoleCapture 按线程栈顶
-        // sink 归经（route 只投递 peek），二者天然互斥、不会重复，故页面两者都展示。早先"有步骤即抑制用例级"
-        // 的去重预期与互斥归经模型不符（且会误丢 hook 输出），已更正。
+        // route/net（抓包相关）归位到发生步骤（stepConsole），普通 stdout/stderr（out/err）
+        // 步骤内 + 步骤外合并后进页面底部 Console log。
         o.getConsoleOutput().add("CASE_OUT_LINE");
         o.getConsoleError().add("CASE_ERR_LINE");
         o.getTestSteps().get(0).getConsoleOutput().add("STEP_OUT_LINE");
@@ -32,7 +31,7 @@ class ConsoleRenderTest {
         // 普通 stdout → “Console output” 分组（con-out），不再是 Standard output
         assertThat(html).contains("Console output");
         assertThat(html).contains("con-out");
-        // 步骤级 console 挂在步骤下
+        // 步骤内普通 stdout 与步骤外输出合并进底部 Console log
         assertThat(html).contains("STEP_OUT_LINE");
         // 用例级 console（hook / 步骤外输出）照常展示，与步骤级并存、互不压制
         assertThat(html).contains("CASE_OUT_LINE");
@@ -40,7 +39,7 @@ class ConsoleRenderTest {
     }
 
     @Test
-    @DisplayName("无步骤时用例级 console 作为兜底渲染")
+    @DisplayName("无步骤时用例级 console 作为兜底渲染（底部 Console log 区）")
     void fallsBackToCaseConsoleWhenNoSteps() throws Exception {
         TestOutcome o = new TestOutcome();
         o.setOutcomeId("solo-1");
@@ -52,18 +51,25 @@ class ConsoleRenderTest {
         String html = HtmlRenderer.renderToString(o);
 
         assertThat(html).contains("CASE_OUT_LINE").contains("CASE_ERR_LINE");
-        assertThat(html).contains("Console output").contains("Console errors");
+        //  步骤外 console 同样并入底部统一的 "Console log" 区，并按类别分组（con-group）渲染。
+        assertThat(html).contains("Console log").contains("con-group");
     }
 
     @Test
-    @DisplayName("无 console 时不渲染任何 console 区块（保持快照稳定）")
+    @DisplayName("无 console 时不渲染任何 console 分组（Tab 头仍占位，pane 显示空态）")
     void noConsoleRendersNothing() throws Exception {
         TestOutcome o = OutcomeFixtures.full();
         String html = HtmlRenderer.renderToString(o);
+        //  Route Register 复用 con-group 外观（可折叠），故不能整体断言 con-group 缺席；
+        //  底部 Tab 头（Console log / Playwright trace / Playwright records）常驻占位，
+        //  但「分组内容」必须缺席：无 Console output / Console errors 组、无 con-out/con-err。
         assertThat(html)
-                .doesNotContain("con-group")
                 .doesNotContain("Console output")
-                .doesNotContain("Console errors");
+                .doesNotContain("Console errors")
+                .doesNotContain("con-out")
+                .doesNotContain("con-err")
+                //  空态提示在，说明 Tab 结构正常而不是把内容渲染了出来（英文文案，2026-10-22 统一）
+                .contains("No console output was captured");
     }
 
     @Test

@@ -316,6 +316,49 @@ public class RouteMockModifyTest {
     }
 
     /**
+     * <b>空白路径 fail-fast</b>（2026-10-22 用户要求：避免静默失效）：
+     * {@code null} / {@code ""} / {@code "   "} 必须在 DSL 声明处就抛
+     * {@link IllegalArgumentException}，而不是等 {@code getResourceAsStream("")}
+     * 返回 null 后只报一句看不出原因的 "resource not found"。
+     */
+    @Test
+    public void mockBodyFromFileRejectsBlankPathFailFast() {
+        String[] blanks = {null, "", "   ", "\t\n"};
+        for (String blank : blanks) {
+            mockContext();
+            boolean threw = false;
+            try {
+                RouteDsl.on(ctx)
+                        .api("/api/blank")
+                        .mock().mockBodyFromFile(blank)
+                        .register();
+            } catch (IllegalArgumentException expected) {
+                threw = true;
+                assertTrue( "报讯必须点明是空白路径",
+                        expected.getMessage().contains("must not be null/blank"));
+            }
+            assertTrue("空白 classpath 路径必须 fail-fast: [" + blank + "]", threw);
+        }
+    }
+
+    @Test
+    public void mockBodyFromFileStillFailsFastOnMissingResource() {
+        mockContext();
+        boolean threw = false;
+        try {
+            RouteDsl.on(ctx)
+                    .api("/api/missing")
+                    .mock().mockBodyFromFile("mocks/definitely-not-here.json")
+                    .register();
+        } catch (IllegalArgumentException expected) {
+            threw = true;
+            assertTrue("非空但不存在仍按 not found 报",
+                    expected.getMessage().contains("classpath resource not found"));
+        }
+        assertTrue("不存在的资源必须 fail-fast", threw);
+    }
+
+    /**
      * <b>O1b 契约：MODIFY 阶段必须在调用线程就地执行</b>（同步驱动，不派发到其它线程）。
      *
      * <p>判据手法：<b>不等待任何异步执行</b>，直接在 {@code handler.accept(route)}

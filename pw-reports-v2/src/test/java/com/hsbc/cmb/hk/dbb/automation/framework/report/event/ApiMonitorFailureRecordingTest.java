@@ -48,7 +48,7 @@ class ApiMonitorFailureRecordingTest {
         bus.recordApiMonitorFailure(handle, "MONITOR FAIL POST /api/pay card-1234567890123456 status=500");
         bus.finishCase(handle, TestResult.FAILURE, null, 10);
 
-        Path json = tempDir.resolve("m-10-card.json");
+        Path json = tempDir.resolve("m-10-card").resolve("m-10-card.json");
         assertThat(json).exists();
         TestOutcome o = JsonWriter.mapper().readValue(json.toFile(), TestOutcome.class);
         assertThat(o.getApiMonitorFailures()).hasSize(1);
@@ -67,7 +67,7 @@ class ApiMonitorFailureRecordingTest {
         bus.recordApiMonitorFailure(StepHandle.NOOP, "should be dropped");
         bus.finishCase(handle, TestResult.SUCCESS, null, 5);
 
-        Path json = tempDir.resolve("m-20-zero.json");
+        Path json = tempDir.resolve("m-20-zero").resolve("m-20-zero.json");
         TestOutcome o = JsonWriter.mapper().readValue(json.toFile(), TestOutcome.class);
         assertThat(o.getApiMonitorFailures()).containsExactly("MONITOR FAIL via thread local");
     }
@@ -81,7 +81,7 @@ class ApiMonitorFailureRecordingTest {
         bus.stepFinished(step, TestResult.SUCCESS, null);
         bus.finishCase(handle, TestResult.SUCCESS, null, 5);
 
-        Path json = tempDir.resolve("m-30-tree.json");
+        Path json = tempDir.resolve("m-30-tree").resolve("m-30-tree.json");
         TestOutcome o = JsonWriter.mapper().readValue(json.toFile(), TestOutcome.class);
         assertThat(o.getApiMonitorFailures()).hasSize(1);
         assertThat(o.getTestSteps()).hasSize(1);
@@ -97,7 +97,7 @@ class ApiMonitorFailureRecordingTest {
         }
         bus.finishCase(handle, TestResult.SUCCESS, null, 5);
 
-        Path json = tempDir.resolve("m-40-cap.json");
+        Path json = tempDir.resolve("m-40-cap").resolve("m-40-cap.json");
         TestOutcome o = JsonWriter.mapper().readValue(json.toFile(), TestOutcome.class);
         assertThat(o.getApiMonitorFailures()).hasSize(200);
         assertThat(o.getApiMonitorFailures().get(199)).isEqualTo("MONITOR FAIL item-199");
@@ -113,6 +113,6 @@ class ApiMonitorFailureRecordingTest {
         off.recordApiMonitorFailure("also dropped");
         off.finishCase(handle, TestResult.SUCCESS, null, 5);
         // 无异常、无落盘即通过
-        assertThat(tempDir.resolve("m-50-off.json")).doesNotExist();
+        assertThat(tempDir.resolve("m-50-off").resolve("m-50-off.json")).doesNotExist();
     }
 }

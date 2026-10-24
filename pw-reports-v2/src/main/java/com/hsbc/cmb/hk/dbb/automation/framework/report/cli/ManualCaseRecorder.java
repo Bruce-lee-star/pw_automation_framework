@@ -80,7 +80,7 @@ public final class ManualCaseRecorder {
             var patch = mapper.readValue(Paths.get(applyPatch).toFile(), java.util.Map.class);
             String pid = (String) patch.get("outcomeId");
             String pnote = (String) patch.getOrDefault("note", "");
-            Path existingJson = outputDir.resolve(pid + ".json");
+            Path existingJson = outputDir.resolve(pid).resolve(pid + ".json");
             if (!Files.exists(existingJson)) {
                 System.err.println("no such outcome: " + pid);
                 System.exit(1);
@@ -106,7 +106,7 @@ public final class ManualCaseRecorder {
             }
         } else if (appendId != null) {
             // 模式 B：追加到已有 JSON
-            Path existingJson = outputDir.resolve(appendId + ".json");
+            Path existingJson = outputDir.resolve(appendId).resolve(appendId + ".json");
             if (!Files.exists(existingJson)) {
                 System.err.println("no such outcome: " + appendId);
                 System.exit(1);
@@ -156,11 +156,15 @@ public final class ManualCaseRecorder {
         // 写 JSON
         JsonWriter.writeOutcome(outputDir, outcome);
 
-        // 重扫全部 JSON，重渲染 index + per-case HTML
+        // 重扫全部 JSON，重渲染 index + per-case HTML。per-case JSON 现已位于
+        // <outputDir>/<outcomeId>/<outcomeId>.json（2026-10-21 迁移），故递归遍历。
         List<TestOutcome> all = new ArrayList<>();
-        try (var stream = Files.list(outputDir)) {
-            stream.filter(p -> p.getFileName().toString().endsWith(".json")
-                            && !p.getFileName().toString().startsWith("serenity-summary"))
+        try (var paths = Files.walk(outputDir)) {
+            paths.filter(p -> {
+                        String name = p.getFileName().toString();
+                        return name.endsWith(".json") && !name.startsWith("serenity-summary")
+                                && Files.isRegularFile(p);
+                    })
                     .forEach(p -> {
                         try {
                             all.add(mapper.readValue(p.toFile(), TestOutcome.class));

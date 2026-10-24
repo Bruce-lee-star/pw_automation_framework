@@ -1,0 +1,23 @@
+# 存量文档基线（只减不增）
+#
+# 用途：S4 规则 R1（元数据头）等对**存量**文档暂不阻断，遵循仓库既有的
+#       checkstyle-baseline.xml「只减不增」祖父化范式。
+# 规则：
+#   - 命中本文件的文档，R1 降级为 WARN，不再阻断 CI；
+#   - 本文件中的条目只能被移除，不能新增（新增需走 PR 评审）；
+#   - 文档被修改时（S3 §4），应从本文件移除该条目并补齐元数据。
+#
+# 格式：每行一个相对仓库根的路径，空行与 # 开头的行忽略。
+
+# docs/architecture/ —— 深度技术方案，待逐篇迁移
+docs/architecture/Java-Playwright-1.62-网络API分层指南.md
+docs/architecture/Playwright_Monitor_Mock_Delay_Modify_修复方案.md
+docs/architecture/Playwright全量API监控与waitForCondition方案.md
+docs/architecture/Playwright导航对全量API监控的影响与生命周期设计.md
+docs/architecture/SSO并发与会话隔离设计.md
+docs/architecture/后台API重放准入规则.md
+docs/architecture/自建Serenity兼容报告方案.md
+
+# docs/report-alignment/ —— 跨仓库契约，待补齐 status/owner
+docs/report-alignment/A_frameworklistener_spi.md
+docs/report-alignment/B_scenario_outline.md

@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.integration;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ApiOperationKind;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
 import org.slf4j.Logger;
@@ -152,7 +153,7 @@ public final class QueuedNetworkEvidenceBridge implements NetworkEvidenceBridge 
         int written = 0;
         for (String[] item : batch) {
             try {
-                String line = "NET " + item[0] + " " + item[1]
+                String line = ApiOperationKind.CAPTURED + " " + item[0] + " " + item[1]
                         + (item[2].isEmpty() ? "" : " — " + item[2]);
                 if (attachToStep) {
                     bus.attachEvidence(handle, line);
@@ -209,7 +210,7 @@ public final class QueuedNetworkEvidenceBridge implements NetworkEvidenceBridge 
             return;
         }
         try {
-            String line = "NET " + call.toOneLine();
+            String line = ApiOperationKind.CAPTURED + " " + call.toOneLine();
             bus.attachEvidence(handle, line);
             bus.recordApiOperation(handle, line);
         } catch (Throwable t) {

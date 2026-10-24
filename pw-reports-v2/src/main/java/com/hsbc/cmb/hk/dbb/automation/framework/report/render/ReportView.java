@@ -195,6 +195,81 @@ public final class ReportView {
     }
 
     /**
+     * CI / 构建信息（取自流水线环境变量，Jenkins / GitLab CI 通用）。
+     *
+     * <p>仅当存在 {@code BUILD_URL}（或其等价物 {@code CI_JOB_URL}），或同时具备
+     * {@code JOB_NAME}+{@code BUILD_NUMBER} 时才认为“有构建上下文”，模板据此渲染顶栏构建链接；
+     * 本地 IDE 运行无这些变量，{@code present=false}，报告不显示任何 CI 痕迹。</p>
+     *
+     * <p>链接由模板以 {@code target="_blank" rel="noopener noreferrer"} 打开，避免反向标签页劫持。
+     * 字段：ciName(Jenkins/CI) / url / job / number / commit(全) / commitShort(前 7) / node / branch。</p>
+     *
+     * <p><b>URL 覆盖</b>：当 Jenkins 的 {@code BUILD_URL} 自带错误/过时的 context path
+     * （如多余 {@code /jenkins} 前缀）导致直连 404 时，可用 {@code pw.report.ci.url}
+     * （环境变量 {@code PW_REPORT_CI_URL}）提供一个可达的等价链接，优先级高于 {@code BUILD_URL}；
+     * 支持占位符 {@code ${BUILD_NUMBER}} / {@code ${JOB_NAME}} / {@code ${BUILD_URL}}。
+     * 例：{@code -Dpw.report.ci.url=http://jenkins/job/${JOB_NAME}/${BUILD_NUMBER}/}。</p>
+     */
+    public static Map<String, Object> ciBuild() {
+        return ciBuild(System.getenv());
+    }
+
+    /** 测试用重载：注入环境变量映射（真实运行传 {@link System#getenv()}）。 */
+    static Map<String, Object> ciBuild(Map<String, String> env) {
+        String jenkinsUrl = env.get("JENKINS_URL");
+        String job = env.get("JOB_NAME");
+        String number = env.get("BUILD_NUMBER");
+        String node = env.get("NODE_NAME");
+        String commit = firstNonBlank(env.get("GIT_COMMIT"), env.get("CI_COMMIT_SHA"));
+        String branch = firstNonBlank(env.get("BRANCH_NAME"), env.get("GIT_BRANCH"),
+                env.get("CI_COMMIT_REF_NAME"));
+
+        //  允许经 pw.report.ci.url / PW_REPORT_CI_URL 覆盖构建链接：某些 Jenkins 部署的
+        //  BUILD_URL 自带过时/错误的 context path（如多余 /jenkins 前缀），直连即 404；
+        //  业务填一个可达的等价链接即可，无需改动 Jenkins 系统配置。
+        //  支持占位符 ${BUILD_NUMBER} / ${JOB_NAME} / ${BUILD_URL}（取自本环境）。
+        String override = firstNonBlank(System.getProperty("pw.report.ci.url"),
+                env.get("PW_REPORT_CI_URL"));
+        if (override != null) {
+            override = override
+                    .replace("${BUILD_URL}", env.get("BUILD_URL") == null ? "" : env.get("BUILD_URL"))
+                    .replace("${JOB_NAME}", job == null ? "" : job)
+                    .replace("${BUILD_NUMBER}", number == null ? "" : number);
+        }
+
+        String buildUrl = firstNonBlank(override, env.get("BUILD_URL"), env.get("CI_JOB_URL"));
+
+        //  Jenkins 提供 JENKINS_URL 但未给 BUILD_URL 时，按约定拼出构建页链接
+        if (buildUrl == null && jenkinsUrl != null && job != null && number != null) {
+            String base = jenkinsUrl.endsWith("/") ? jenkinsUrl : jenkinsUrl + "/";
+            buildUrl = base + "job/" + job.replace("/", "/job/") + "/" + number + "/";
+        }
+
+        boolean isJenkins = jenkinsUrl != null
+                || (buildUrl != null && buildUrl.toLowerCase(Locale.ROOT).contains("jenkins"));
+        boolean isCi = isJenkins || env.get("CI") != null
+                || env.get("CI_JOB_URL") != null || env.get("GITLAB_CI") != null;
+        String ciName = isJenkins ? "Jenkins" : (isCi ? "CI" : "CI");
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("present", buildUrl != null || (job != null && number != null));
+        m.put("ciName", ciName);
+        m.put("url", buildUrl);
+        m.put("job", job);
+        m.put("number", number);
+        m.put("node", node);
+        m.put("branch", branch);
+        if (commit != null && commit.length() >= 7) {
+            m.put("commit", commit);
+            m.put("commitShort", commit.substring(0, 7));
+        } else {
+            m.put("commit", commit);
+            m.put("commitShort", commit);
+        }
+        return m;
+    }
+
+    /**
      * 构建工具：优先 {@code maven.version} / {@code maven.build.version} 系统属性；
      * Surefire fork 通常不传，退而解析 {@code maven.home} 目录名（如 {@code apache-maven-3.9.9}）。
      * 两者都取不到则返回 {@code null}（环境面板不展示该行）。

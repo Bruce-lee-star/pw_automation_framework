@@ -33,11 +33,11 @@ class ConsoleClassifierTest {
     }
 
     @Test
-    @DisplayName("应用日志归 log：级别前缀与时间戳")
-    void classifiesLogLines() {
-        assertThat(ConsoleClassifier.category("INFO c.Foo - started", false)).isEqualTo(ConsoleClassifier.LOG);
+    @DisplayName("应用日志不再单列（无 Application log 组）：级别前缀与时间戳并入 out")
+    void classifiesLogLinesAsConsole() {
+        assertThat(ConsoleClassifier.category("INFO c.Foo - started", false)).isEqualTo(ConsoleClassifier.CONSOLE);
         assertThat(ConsoleClassifier.category("12:00:01.123 [main] WARN c.Bar - slow", false))
-                .isEqualTo(ConsoleClassifier.LOG);
+                .isEqualTo(ConsoleClassifier.CONSOLE);
     }
 
     @Test
@@ -50,7 +50,7 @@ class ConsoleClassifierTest {
     }
 
     @Test
-    @DisplayName("分组顺序固定 route→net→log→out→err，且只输出非空组")
+    @DisplayName("分组顺序固定 route→net→out→err（无 log 组），且只输出非空组")
     void groupsAreOrderedAndNonEmptyOnly() {
         List<Map<String, Object>> groups = ConsoleClassifier.classify(
                 List.of("plain stdout", "INFO c.Foo - started", "[Route] register GET",
@@ -58,7 +58,7 @@ class ConsoleClassifierTest {
                 List.of("boom"));
 
         assertThat(groups).extracting(g -> g.get("key"))
-                .containsExactly("route", "net", "log", "out", "err");
+                .containsExactly("route", "net", "out", "err");
         assertThat(groups).allSatisfy(g -> {
             assertThat(g.get("label")).isNotNull();
             assertThat((List<?>) g.get("lines")).isNotEmpty();
@@ -71,5 +71,37 @@ class ConsoleClassifierTest {
         assertThat(ConsoleClassifier.classify(List.of(), List.of())).isEmpty();
         assertThat(ConsoleClassifier.classify(null, null)).isEmpty();
         assertThat(ConsoleClassifier.classify(List.of("  "), List.of())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("route 组标题为 Route registration（与 Route Captured 区分）")
+    void routeGroupLabelIsRouteRegistration() {
+        List<Map<String, Object>> groups =
+                ConsoleClassifier.classify(List.of("[Route] register GET route for 'x'"), List.of());
+        assertThat(groups).hasSize(1);
+        assertThat(groups.get(0).get("label")).isEqualTo("Route registration");
+    }
+
+    @Test
+    @DisplayName("net 组标题为 Route Captured（实际抓到的调用）")
+    void networkGroupLabelIsRouteCaptured() {
+        List<Map<String, Object>> groups =
+                ConsoleClassifier.classify(List.of("NET GET https://api/x -> 200 (5 ms)"), List.of());
+        assertThat(groups).hasSize(1);
+        assertThat(groups.get(0).get("label")).isEqualTo("Route Captured");
+    }
+
+    @Test
+    @DisplayName("步骤级捕获只留 net；注册日志留在 Route Register，不重复进捕获区")
+    void capturedAndResidualSplitsAreDisjoint() {
+        List<String> out = List.of("plain stdout", "[Route] register GET", "NET GET https://api/x -> 200");
+        List<String> err = List.of("boom");
+
+        assertThat(ConsoleClassifier.classifyCaptured(out, err))
+                .extracting(g -> g.get("key"))
+                .containsExactly("net");
+        assertThat(ConsoleClassifier.classifyResidual(out, err))
+                .extracting(g -> g.get("key"))
+                .containsExactly("out", "err");
     }
 }

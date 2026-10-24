@@ -77,6 +77,11 @@
       "items": { "$ref": "#/definitions/attachment" },
       "description": "Business-layer free-form attachments (HTML/text blocks), scrubbed"
     },
+    "downloads": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/download" },
+      "description": "additive: downloaded files attached to the report; populated when playwright.browser.download.attachToReport.enabled=true"
+    },
     "consoleOutput": {
       "type": "array",
       "items": { "type": "string" },
@@ -100,6 +105,18 @@
     "tracePath": {
       "type": ["string", "null"],
       "description": "Relative path to Playwright trace.zip (<outcomeId>/trace.zip); enables Open Trace Viewer button"
+    },
+    "traceStartTime": {
+      "type": ["string", "null"],
+      "description": "additive: trace recording window start (HH:mm:ss.SSS) reported by the recorder; omitted when unknown"
+    },
+    "traceEndTime": {
+      "type": ["string", "null"],
+      "description": "additive: trace recording window end (HH:mm:ss.SSS) reported by the recorder; omitted when unknown"
+    },
+    "traceDurationMs": {
+      "type": "number",
+      "description": "additive: trace recording duration in milliseconds (0 when unknown)"
     },
     "manual": {
       "type": "boolean",
@@ -147,6 +164,16 @@
         "content": { "type": "string" }
       }
     },
+    "download": {
+      "type": "object",
+      "required": ["title", "fileName", "relativePath", "timestamp"],
+      "properties": {
+        "title": { "type": "string" },
+        "fileName": { "type": "string" },
+        "relativePath": { "type": "string" },
+        "timestamp": { "type": "string", "description": "ISO-8601 attach timestamp" }
+      }
+    },
     "testStep": {
       "type": "object",
       "required": ["stepId", "description"],
@@ -185,6 +212,16 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Step-level captured stderr (scrubbed, line-capped)"
+        },
+        "apiOperations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Step-level API operation records (REST Assured / route capture attributed to this step), scrubbed, line-capped"
+        },
+        "routeRegistrations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Step-level RouteDsl route registration lines (attributed to the step where registration happened), scrubbed, line-capped"
         },
         "exception": {
           "type": ["object", "null"],

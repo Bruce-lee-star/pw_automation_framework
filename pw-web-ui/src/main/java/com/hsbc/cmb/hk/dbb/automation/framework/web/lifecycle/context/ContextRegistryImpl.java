@@ -135,7 +135,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
         //  窗口堆积修复：用例级 CONTEXT_KEY 可能已被 @After 清空，回退到线程级记录以免泄漏
         //  CT2-12：统一收敛到 cleanupContextScoped（与 closeContext 同一收口链），不再只
         //  existingContext.close()+摘两个 ThreadLocal，避免 RoleCodegenBridge.cleanupContext /
-        //  stopContextEngine / DownloadRegistry / trace 停止被绕过导致旧 context 资源泄漏。
+        //  stopContextEngine / trace 停止被绕过导致旧 context 资源泄漏。
         BrowserContext existingContext = TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
         if (existingContext == null) {
             existingContext = CURRENT_CONTEXT_BY_THREAD.get();
@@ -234,8 +234,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
      * 供 {@link #closeContext()} 与两条重建路径（scheduleContextRebuild / recreateContextIfCustomConfigNeeded）共用，
      * 确保无论正常关闭还是自定义配置触发的重建，都走同一套清理：
      * RoleCodegenBridge.cleanupContext（codegen 桥接）、stopContextEngine（per-context 路由引擎），
-     * 以及 PlaywrightContextManager.closeContext 内统一的 RouteLifecycleRegistry.clearContext / DownloadRegistry /
-     * trace 停止 / context.close。每条步骤独立 safeClean，单步失败不中断整条链。
+     * 以及 PlaywrightContextManager.closeContext 内统一的 RouteLifecycleRegistry.clearContext / trace 停止 / context.close。每条步骤独立 safeClean，单步失败不中断整条链。
      */
     private void cleanupContextScoped(BrowserContext context) {
         if (context == null) {

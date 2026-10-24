@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    
+    <title>route v2 e2e - 登录期真实接口采集（CAPTURE）</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg"/>
+    <link rel="stylesheet" href="assets/report-v2.css"/>
+    <style>
+        /* 新设计 CSS 未覆盖的局部样式（证据 / 附件 / 截图 / 未定义结果） */
+        .evidence { margin: 6px 0; padding-left: 20px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+        .attachment { margin: 6px 0; }
+        .attachment > summary { cursor: pointer; color: var(--text-2); font-size: 12px; }
+        .att-text, .att-html { background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 12px; overflow-x: auto; }
+        /* 截图：悬浮放大（2 倍，左上角为锚点，压在其它内容之上，不改变布局） */
+        .shot { position: relative; overflow: visible; }
+        .shot img {
+            max-width: 320px; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px;
+            cursor: zoom-in; transition: transform .15s ease; transform-origin: top left;
+        }
+        .shot img:hover {
+            transform: scale(2); z-index: 20; position: relative;
+            box-shadow: 0 8px 28px rgba(31, 45, 61, .28);
+        }
+        .step-note { font-size: 12px; color: var(--failure); margin-top: 4px; }
+        .step-actions { margin-top: 4px; }
+        .b-UNDEFINED { background: var(--skipped); }
+        .step-table { margin: 8px 0 2px; font-size: 12px; }
+        .step-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
+        .step-table tr:first-child td { font-weight: 600; background: #f8fafc; }
+        .step-docstring { margin: 8px 0 2px; white-space: pre-wrap; }
+        /* 失败用例操作入口（上传补图 / 标记通过） */
+        .case-actions .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+        .btn-action { padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: background .15s ease; }
+        .btn-action:hover { background: #f1f5f9; }
+        .btn-ok { color: #047857; border-color: #a7f3d0; }
+        .btn-ok:hover { background: #ecfdf5; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Scenario <a href="feature-route-capability-e2e.html" style="color:#fff;text-decoration:none;font-size:14px;font-weight:400">← back to route_capability_e2e</a></h1>
+  <div class="meta">route_capability_e2e<br>reportVersion 1</div>
+</div>
+
+<div class="wrap">
+
+  <div class="card">
+    <div class="crumbs"><a href="index.html">Overview</a><span class="sep">›</span><a href="feature-route-capability-e2e.html">route_capability_e2e</a><span class="sep">›</span><b>route v2 e2e - 登录期真实接口采集（CAPTURE）</b></div>
+    <div class="case-head">
+      <span class="badge b-PASS" style="padding:4px 14px;font-size:14px">Passed</span>
+      <div class="case-title">route v2 e2e - 登录期真实接口采集（CAPTURE）</div>
+    </div>
+    <div class="case-meta">
+      <span class="chip">69.8s</span>
+      <span class="chip">started 2026-10-19T23:22:28.818+08:00</span>
+      <span class="chip">Automated</span>
+      <span class="chip tag">@regression</span><span class="chip tag">@route</span><span class="chip tag">@route-e2e</span><span class="chip tag">@route-e2e-capture</span>
+    </div>
+  </div>
+
+  <div class="trace-bar">
+    <span class="tname">Playwright Trace</span>
+    <span class="tmeta">route-capability-e2e-22-route-v2-e2e-capture/trace.zip</span>
+    <a class="btn-trace" href="https://trace.playwright.dev/?trace=route-capability-e2e-22-route-v2-e2e-capture%2Ftrace.zip" target="_blank" rel="noopener">▶ Play trace</a>
+  </div>
+
+
+
+  <div class="card">
+    <h3><span class="icon"></span>Execution steps</h3>
+    <ul class="steps" id="steps">        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">Given I arm route v2 e2e case &quot;login-capture&quot;</span>
+                <span class="step-time">5,337 ms</span>
+            </div>
+            
+    <details class="con-group con-route">
+      <summary>API / Route registration<span class="con-count">4</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:22:34.362 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for &#39;profile/list&#39; timeout=30s</li>
+            <li class="con-raw">23:22:34.366 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; timeout=30s</li>
+            <li class="con-raw">23:22:34.369 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for &#39;insight/retrieve&#39; timeout=30s</li>
+            <li class="con-raw">23:22:34.377 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for &#39;pinned-account&#39; timeout=30s</li>
+      </ul>
+    </details>
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">17</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:22:29.050 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.w.session.SessionStore - Session cleared successfully: O63_SIT1_WP7UAT2_2</li>
+            <li class="con-raw">23:22:29.067 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.w.l.PlaywrightManager - [getBrowser] Browser not initialized yet, initializing with desired type: chromium</li>
+            <li class="con-raw">23:22:29.078 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective browserstack.enabled (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:32.575 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.browser.slowMo (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:32.578 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.browser.timeout (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:32.601 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.browser.chromium.args (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:32.603 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.w.l.PlaywrightManager - Browser args: [--window-position=0,0, --window-size=1536,864, --disable-blink-features=AutomationControlled, --disable-pinch, --disable-web-security, --disable-background-timer-throttling, --disable-backgrounding-occluded-windows, --disable-renderer-backgrounding, --disable-features=CalculateNativeWinOcclusion]</li>
+            <li class="con-raw">23:22:33.789 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.context.proxy.enabled (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:33.793 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.context.recordVideo.enabled (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:33.831 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.browser.downloadsPath (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:33.837 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.page.navigationTimeout (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:33.839 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.element.wait.timeout (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:34.146 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.stabilize.wait.timeout (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:34.148 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.page.load.state (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:34.311 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.RouteCapturePolicy - [Route] capture policy frozen: allTypes=false (layer=DEFAULT), inlineMaxBytes=262144 (layer=DEFAULT), gzipMaxBytes=8388608 (layer=DEFAULT), assertBodyMaxBytes=2097152 (layer=DEFAULT)</li>
+            <li class="con-raw">23:22:34.357 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] WARN  c.h.c.h.d.a.f.r.diag.CoverageScope - [Route] API coverage scope = [ROUTE_SYNC, HTTP_CACHE_DISABLED_BY_ROUTE, SERVICE_WORKER_UNVERIFIED, DOWNLOADS_UNMODELLED]. Note: BrowserContext.route() bypasses the HTTP cache (cache-related observations are NOT representative); Service Worker is not set to BLOCK, so requests intercepted/served inside a Service Worker are invisible; downloads are not not attributed to their trigger request (a late response from a previous navigation may satisfy a later wait — use waitForApiSince(..) or waitForApiFromOwner(..) to scope waits to records produced after your action).</li>
+            <li class="con-raw">23:22:34.379 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] armed case &#39;login-capture&#39; BEFORE logon (page url=about:blank)</li>
+      </ul>
+    </details>
+        </li>
+        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">And logon DBB &quot;O63_SIT1&quot; environment as user &quot;WP7UAT2_2&quot;</span>
+                <span class="step-time">62,154 ms</span>
+            </div>
+            
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">29</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:22:34.397 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================</li>
+            <li class="con-raw">23:22:34.397 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - LogonGlue - Scenario: O63_SIT1 as WP7UAT2_2</li>
+            <li class="con-raw">23:22:34.398 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Effective browser: chromium</li>
+            <li class="con-raw">23:22:34.398 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Default browser: chromium</li>
+            <li class="con-raw">23:22:34.398 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================</li>
+            <li class="con-raw">23:22:34.400 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Get DBB login info - Environment: O63_SIT1, Username: WP7UAT2_2</li>
+            <li class="con-raw">23:22:34.405 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Successfully retrieved DBB login info - Environment: O63_SIT1, User: WP7UAT2_2, URL: https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon, Profile: W1-HKHBAP001060698838PUSER1</li>
+            <li class="con-raw">23:22:34.413 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================</li>
+            <li class="con-raw">23:22:34.414 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - LoginSteps - SessionKey: O63_SIT1_WP7UAT2_2</li>
+            <li class="con-raw">23:22:34.415 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================</li>
+            <li class="con-raw">23:22:34.436 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - No valid session, performing login for: O63_SIT1_WP7UAT2_2</li>
+            <li class="con-raw">23:22:37.824 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.c.config.ConfigSource - [ConfigSource] effective playwright.polling.interval (layer=CONFIG_FILE)</li>
+            <li class="con-raw">23:22:48.472 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.s.TestServices - Creating BaseStep with null entity (dynamic configuration)</li>
+            <li class="con-raw">23:22:48.599 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.e.EntityBuilder - Building Entity with null configuration (for dynamic setup)</li>
+            <li class="con-raw">23:22:48.621 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Loading config from classpath root: application.conf</li>
+            <li class="con-raw">23:22:48.622 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Framework paths loaded from application.conf successfully</li>
+            <li class="con-raw">23:22:48.623 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - === ConfigProvider Initializing ===</li>
+            <li class="con-raw">23:22:48.624 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Framework Base Path: ./src/test/resources/</li>
+            <li class="con-raw">23:22:48.624 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Config Directory: ./src/test/resources/config/\</li>
+            <li class="con-raw">23:22:48.626 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Payload Directory: ./src/test/resources/payload/\</li>
+            <li class="con-raw">23:22:48.627 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Default config file path: ./src/test/resources/config/\application.conf</li>
+            <li class="con-raw">23:22:48.628 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] WARN  c.h.c.h.d.a.f.a.c.ConfigProvider - Context config not initialized, loading default config for current thread</li>
+            <li class="con-raw">23:22:48.629 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Loading config from file path: ./src/test/resources/config/\application.conf</li>
+            <li class="con-raw">23:22:48.671 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Set base URI: https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk</li>
+            <li class="con-raw">23:22:48.673 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Set endpoint: /getotp.htm</li>
+            <li class="con-raw">23:22:48.676 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: username = 9900196198</li>
+            <li class="con-raw">23:22:48.678 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: type = 1</li>
+            <li class="con-raw">23:22:48.679 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: key = 10gkfnqf7i53bv1at0n7mvcfrt</li>
+            <li class="con-raw">23:22:48.680 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.a.c.r.RestJobProvider - Parsed URL - BaseUri: https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk, Endpoint: /getotp.htm, Query params count: 3</li>
+      </ul>
+    </details>
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">21</span></summary>
+      <ul class="con-lines">
+            <li class="con-kv"><span class="con-k">Request method</span><span class="con-v">GET</span></li>
+            <li class="con-kv"><span class="con-k">Request URI</span><span class="con-v">https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk/getotp.htm?type=1&amp;key=***&amp;username=9900196198</span></li>
+            <li class="con-kv"><span class="con-k">Query params</span><span class="con-v">type=1</span></li>
+            <li class="con-cont">key=10gkfnqf7i53bv1at0n7mvcfrt</li>
+            <li class="con-cont">username=9900196198</li>
+            <li class="con-kv"><span class="con-k">Headers</span><span class="con-v">Accept=*/*</span></li>
+            <li class="con-raw">HTTP/1.1 200 OK</li>
+            <li class="con-kv"><span class="con-k">Access-Control-Allow-Origin</span><span class="con-v">http://localhost:9080</span></li>
+            <li class="con-kv"><span class="con-k">Access-Control-Allow-Methods</span><span class="con-v">GET, POST, OPTIONS</span></li>
+            <li class="con-kv"><span class="con-k">Access-Control-Allow-Headers</span><span class="con-v">Content-Type, Authorization, x-hsbc-chnl-countrycode, x-hsbc-chnl-group-member, x-hsbc-global-channel-id, X-HSBC-GBGF, Language</span></li>
+            <li class="con-kv"><span class="con-k">Access-Control-Allow-Credentials</span><span class="con-v">true</span></li>
+            <li class="con-kv"><span class="con-k">Strict-Transport-Security</span><span class="con-v">max-age=16070400; includeSubDomains</span></li>
+            <li class="con-kv"><span class="con-k">Content-Type</span><span class="con-v">text/html</span></li>
+            <li class="con-kv"><span class="con-k">Content-Encoding</span><span class="con-v">gzip</span></li>
+      </ul>
+    </details>
+        </li>
+        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">Then the capture facade exposes the calls captured for case &quot;login-capture&quot;</span>
+                <span class="step-time">2,012 ms</span>
+            </div>
+            
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">10</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:23:38.453 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://qualityassurance-amh-dbbsp-mauth-sit.p2g.netd2.hsbc.com.hk/api/v2/auth/assert?aid=webapplication_cxp_sit1&amp;did=56ab36e6-ee54-4de1-926c-af0b4316631d&amp;sid=c1e3e1a1-481a-4fed-b9bc-43a5ecce9bab&amp;locale=Cam40HardTokenLogin (pattern=auth/assert)</li>
+            <li class="con-raw">23:23:38.462 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=profile/list)</li>
+            <li class="con-raw">23:23:38.476 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] GET https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=leftmenu/permissionLeftMenuConfig)</li>
+            <li class="con-raw">23:23:38.484 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/services/rest/pinned-accounts (pattern=pinned-account)</li>
+            <li class="con-raw">23:23:38.488 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=insight/retrieve)</li>
+            <li class="con-raw">23:23:38.495 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=profile/list)</li>
+            <li class="con-raw">23:23:38.512 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] GET https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=leftmenu/permissionLeftMenuConfig)</li>
+            <li class="con-raw">23:23:38.529 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/services/rest/pinned-accounts (pattern=pinned-account)</li>
+            <li class="con-raw">23:23:38.547 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.r.monitor.CaptureSink - [Route] captured api [status=200] POST https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.[SCRUBBED] (pattern=insight/retrieve)</li>
+            <li class="con-raw">23:23:38.563 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] capture facade ok: 9 条（URL 集合与 DTO 门面一致，sample=https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/services/rest/pinned-accounts）</li>
+      </ul>
+    </details>
+        </li>
+        <li class="st-PASS">
+            <span class="node"></span>
+            <div class="step-row">
+                <span class="step-desc">And route v2 e2e case &quot;login-capture&quot; assertions pass</span>
+                <span class="step-time">3 ms</span>
+            </div>
+            
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">2</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:23:38.569 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] login-capture ok: 9 条采集</li>
+            <li class="con-raw">23:23:38.570 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [LEAK-REPORT] unconfirmedRetirements=0, isClean=true, activeRuntimes=1</li>
+      </ul>
+    </details>
+        </li>
+</ul>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon"></span>Evidence</h3>
+    <ul class="evidence"><li>TRACE: route v2 e2e - 登录期真实接口采集（CAPTURE） = trace=trace.zip
+window=23:22:28.803 → 23:23:38.707 (69904ms)  [覆盖本用例执行窗口]</li></ul>
+  </div>
+
+
+  <div class="card">
+    <h3><span class="icon"></span>Route registrations (9)</h3>
+    <ul class="route-lines"><li>[Route] register MONITOR route for &#39;profile/list&#39; timeout=30s</li><li>[Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; timeout=30s</li><li>[Route] register MONITOR route for &#39;insight/retrieve&#39; timeout=30s</li><li>[Route] register MONITOR route for &#39;pinned-account&#39; timeout=30s</li><li>[Route] register MONITOR route for &#39;/error/profile-error.jsp&#39; expectStatus=200 timeout=60s</li><li>[Route] register MONITOR route for &#39;auth/assert&#39; expectStatus=200 timeout=60s</li><li>[Route] register MONITOR route for &#39;j_spring_security-check_v2&#39; expectStatus=302 timeout=60s</li><li>[Route] register MONITOR route for &#39;leftmenu/permissionLeftMenuConfig&#39; expectStatus=200 jsonPath=[enableAdminTools=Y] timeout=60s</li><li>[Route] register MOCK route for &#39;profile/list&#39; status=real-response intercept=true body=[intercepted] replacePaths=[updateContctOverlayFlag, isOverBlockedDate]</li></ul>
+  </div>
+
+
+
+  <div class="card">
+    <h3><span class="icon"></span>Console &amp; API activity</h3>
+    <details class="con-group con-log">
+      <summary>Application log<span class="con-count">1</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">23:23:44.416 [main] [route v2 e2e - 登录期真实接口采集（CAPTURE）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @481135566: dispatches=9, hits=9, retiredByPurpose=2, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=44639, pinned-account=70039, j_spring_security-check_v2=44473, auth/assert=36661, leftmenu/permissionLeftMenuConfig=36620, insight/retrieve=70047, profile/list=44467}, delayDeliveries(directed=0, queued=0)</li>
+      </ul>
+    </details>
+    <details class="con-group con-out">
+      <summary>Console output<span class="con-count">1</span></summary>
+      <ul class="con-lines">
+            <li class="con-raw">[1;32m✔ SCENARIO PASSED : route v2 e2e - 登录期真实接口采集（CAPTURE）  (69795 ms)[0m</li>
+      </ul>
+    </details>
+  </div>
+
+
+  <footer>Scenario page · reportVersion 1 · outcomeId route-capability-e2e-22-route-v2-e2e-capture</footer>
+</div>
+
+<script>
+(function(){
+  var OUTCOME_ID = "route-capability-e2e-22-route-v2-e2e-capture";
+  window.__doPatch = function(files) {
+    if (!files || !files.length) return;
+    var results = [];
+    var readers = [];
+    for (var i = 0; i < files.length; i++) {
+      (function(f) {
+        readers.push(new Promise(function(resolve) {
+          var r = new FileReader();
+          r.onload = function() { results.push({filename: f.name, dataBase64: r.result.split(',')[1]}); resolve(); };
+          r.readAsDataURL(f);
+        }));
+      })(files[i]);
+    }
+    Promise.all(readers).then(function() {
+      var payload = JSON.stringify({outcomeId: OUTCOME_ID, screenshots: results});
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/patch', {method: 'POST', body: payload})
+          .then(function(r){ return r.json(); })
+          .then(function(d){ if (d.ok) { alert('Uploaded ' + results.length + ' screenshot(s), reloading...'); setTimeout(function(){location.reload()}, 800); } else { alert('Failed: ' + (d.error || 'unknown')); } })
+          .catch(function(e){ alert('Upload failed: ' + e); });
+      } else {
+        var blob = new Blob([payload], {type: 'application/json'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = OUTCOME_ID + '.patch.json';
+        a.click();
+        alert('Patch downloaded: ' + a.download + '\nApply locally with ManualCaseRecorder --apply-patch ' + a.download);
+      }
+    });
+  };
+
+  //  失败用例操作按钮：上传补图 + 标记通过
+  var upBtn = document.getElementById('btn-upload');
+  var msBtn = document.getElementById('btn-marksuccess');
+  var input = document.getElementById('shot-input');
+  if (upBtn && input) {
+    upBtn.addEventListener('click', function() { input.click(); });
+    input.addEventListener('change', function() {
+      if (input.files && input.files.length) { window.__doPatch(input.files); input.value = ''; }
+    });
+  }
+  if (msBtn) {
+    msBtn.addEventListener('click', function() {
+      if (location.protocol === 'http:' || location.protocol === 'https:') {
+        fetch('api/mark-success', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcomeId: OUTCOME_ID })
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) { alert('Marked success, reloading...'); setTimeout(function() { location.reload(); }, 600); }
+            else { alert('Failed: ' + (d.error || 'unknown')); }
+          })
+          .catch(function(e) { alert('Failed: ' + e); });
+      } else {
+        alert('Mark case success requires the report server (http/https).');
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

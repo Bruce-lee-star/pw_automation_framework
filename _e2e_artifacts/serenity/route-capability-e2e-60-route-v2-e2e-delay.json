@@ -1,0 +1,80 @@
+{
+  "reportVersion" : 1,
+  "outcomeId" : "route-capability-e2e-60-route-v2-e2e-delay",
+  "name" : "route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）",
+  "title" : "route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）",
+  "userStory" : {
+    "storyName" : "route_capability_e2e",
+    "displayName" : "route_capability_e2e",
+    "path" : "file:///D:/IdeaProject/test-automation/src/test/resources/features/web/route_capability_e2e.feature",
+    "type" : "feature"
+  },
+  "tags" : [ "@regression", "@route", "@route-e2e", "@route-e2e-delay" ],
+  "result" : "FAILURE",
+  "startTime" : "2026-10-19T23:27:24.022+08:00",
+  "endTime" : "2026-10-19T23:28:46.133+08:00",
+  "duration" : 80065,
+  "testSteps" : [ {
+    "stepId" : "s1",
+    "description" : "Given I arm route v2 e2e case \"login-delay\"",
+    "result" : "SUCCESS",
+    "duration" : 501,
+    "startTime" : "2026-10-19T23:27:24.0329997+08:00",
+    "lineNumber" : 61,
+    "children" : [ ],
+    "evidence" : [ ],
+    "attachments" : [ ],
+    "consoleOutput" : [ "23:27:24.033 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.w.session.SessionStore - Session cleared successfully: O63_SIT1_WP7UAT2_2", "23:27:24.519 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.r.RouteCapturePolicy - [Route] capture policy frozen: allTypes=false (layer=DEFAULT), inlineMaxBytes=262144 (layer=DEFAULT), gzipMaxBytes=8388608 (layer=DEFAULT), assertBodyMaxBytes=2097152 (layer=DEFAULT)", "23:27:24.530 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register DELAY route for 'leftmenu/permissionLeftMenuConfig' delay=2s", "23:27:24.531 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.route.dsl.RouteDsl - [Route] register MONITOR route for 'leftmenu/permissionLeftMenuConfig' expectStatus=200 timeout=60s", "23:27:24.532 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.glue.RouteE2EGlue - [RouteE2E] armed case 'login-delay' BEFORE logon (page url=about:blank)" ],
+    "consoleError" : [ ],
+    "apiOperations" : [ ]
+  }, {
+    "stepId" : "s2",
+    "description" : "And logon DBB \"O63_SIT1\" environment as user \"WP7UAT2_2\"",
+    "result" : "FAILURE",
+    "duration" : 79543,
+    "startTime" : "2026-10-19T23:27:24.5346075+08:00",
+    "lineNumber" : 62,
+    "children" : [ ],
+    "evidence" : [ "Interaction Diagnostics (Failure) = [导航轨迹 - 失败前页面去过]\n[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon\n[frame] about:blank\n[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/gbbr/en-US/home?lang=en_US\n[main] https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon\n[frame] about:blank" ],
+    "screenshot" : "step-001-and-logon-dbb-o63-sit1-environment-as-user-wp7uat2-2.png",
+    "attachments" : [ ],
+    "consoleOutput" : [ "23:27:24.534 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================", "23:27:24.535 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - LogonGlue - Scenario: O63_SIT1 as WP7UAT2_2", "23:27:24.535 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Effective browser: chromium", "23:27:24.535 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue -   Default browser: chromium", "23:27:24.536 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.glue.LogonGlue - ========================================", "23:27:24.536 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Get DBB login info - Environment: O63_SIT1, Username: WP7UAT2_2", "23:27:24.537 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.utils.BDDUtils - Successfully retrieved DBB login info - Environment: O63_SIT1, User: WP7UAT2_2, URL: https://www.qualityassurance-amh-gbb-sit.p2g.netd2.hsbc.com.hk/portalserver/logon, Profile: W1-HKHBAP001060698838PUSER1", "23:27:24.543 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================", "23:27:24.543 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - LoginSteps - SessionKey: O63_SIT1_WP7UAT2_2", "23:27:24.544 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - ========================================", "23:27:24.546 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.tests.steps.LoginSteps - No valid session, performing login for: O63_SIT1_WP7UAT2_2", "23:27:32.501 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.s.TestServices - Creating BaseStep with null entity (dynamic configuration)", "23:27:32.502 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.e.EntityBuilder - Building Entity with null configuration (for dynamic setup)", "23:27:32.503 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] WARN  c.h.c.h.d.a.f.a.c.ConfigProvider - Context config not initialized, loading default config for current thread", "23:27:32.503 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.ConfigProvider - Loading config from file path: ./src/test/resources/config/\\application.conf", "23:27:32.508 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Set base URI: https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk", "23:27:32.509 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Set endpoint: /getotp.htm", "23:27:32.509 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: username = 9900196198", "23:27:32.510 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: type = 1", "23:27:32.510 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.AbstractApiJobHelper - Added query parameter: key = 10gkfnqf7i53bv1at0n7mvcfrt", "23:27:32.511 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.a.c.r.RestJobProvider - Parsed URL - BaseUri: https://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk, Endpoint: /getotp.htm, Query params count: 3", "Request method:\tGET", "Request URI:\thttps://qualityassurance-amh-gbbsp-dev2.p2g.netd2.hsbc.com.hk/getotp.htm?type=1&key=***&username=9900196198", "Proxy:\t\t\t<none>", "Request params:\t<none>", "Query params:\ttype=1", "\t\t\t\tkey=10gkfnqf7i53bv1at0n7mvcfrt", "\t\t\t\tusername=9900196198", "Form params:\t<none>", "Path params:\t<none>", "Headers:\t\tAccept=*/*", "Cookies:\t\t<none>", "Multiparts:\t\t<none>", "Body:\t\t\t<none>", "HTTP/1.1 200 OK", "Access-Control-Allow-Origin: http://localhost:9080", "Access-Control-Allow-Methods: GET, POST, OPTIONS", "Access-Control-Allow-Headers: Content-Type, Authorization, x-hsbc-chnl-countrycode, x-hsbc-chnl-group-member, x-hsbc-global-channel-id, X-HSBC-GBGF, Language", "Access-Control-Allow-Credentials: true", "Strict-Transport-Security: max-age=16070400; includeSubDomains", "Content-Type: text/html", "Content-Encoding: gzip", "S: DWSGSP02HK", "Content-Length: 127", "Date: Mon, 19 Oct 2026 15:27:31 GMT", "Connection: keep-alive", "Vary: Accept-Encoding", "Set-Cookie: ***", "Set-Cookie: ***", "<html>" ],
+    "consoleError" : [ ],
+    "apiOperations" : [ ],
+    "exception" : {
+      "message" : "Element not visible within 60 seconds: [id='topnav.profileswitcher.dropdown'],.current-profile",
+      "errorType" : "ERROR"
+    }
+  }, {
+    "stepId" : "s3",
+    "description" : "Then route v2 e2e case \"login-delay\" assertions pass",
+    "result" : "SKIPPED",
+    "duration" : 1,
+    "startTime" : "2026-10-19T23:28:44.0828211+08:00",
+    "lineNumber" : 63,
+    "children" : [ ],
+    "evidence" : [ ],
+    "attachments" : [ ],
+    "consoleOutput" : [ ],
+    "consoleError" : [ ],
+    "apiOperations" : [ ]
+  } ],
+  "testFailureCause" : {
+    "message" : "Element not visible within 60 seconds: [id='topnav.profileswitcher.dropdown'],.current-profile",
+    "errorType" : "ERROR"
+  },
+  "testFailureClassname" : "com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException",
+  "testFailureMessage" : "Element not visible within 60 seconds: [id='topnav.profileswitcher.dropdown'],.current-profile",
+  "testFailureSummary" : "[unknown] waitForVisible on '[id='topnav.profileswitcher.dropdown'],.current-profile' | cause: TimeoutError\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.lambda$waitForVisible$26(PageElement.java:590)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.waitForState(PageElement.java:772)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement.waitForVisible(PageElement.java:589)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.switchProfile(LoginSteps.java:236)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.performLogin(LoginSteps.java:198)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionStore.lambda$wrapLeaderAction$0(SessionStore.java:722)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionStore.restoreSession(SessionStore.java:701)\r\n\tat com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionManager.restoreSession(SessionManager.java:68)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.steps.LoginSteps.logonDBBEnvironmentAsUser(LoginSteps.java:78)\r\n\tat com.hsbc.cmb.hk.dbb.automation.tests.glue.LogonGlue.logonDBBEnvironmentAsUserGlue(LogonGlue.java:53)\r\n\tat ✽.logon DBB \"O63_SIT1\" environment as user \"WP7UAT2_2\"(file:///D:/IdeaProject/test-[SCRUBBED]route_capability_e2e.feature:62)\r\nCaused by: com.microsoft.playwright.TimeoutError: Error {\n  message='Timeout 59999ms exceeded.\n  name='TimeoutError\n  stack='TimeoutError: Timeout 59999ms exceeded.\n    at _ProgressController.run (D:\\IdeaProject\\test-automation\\.playwright\\driver\\playwright-java-10497438925272316505\\package\\lib\\coreBundle.js:12135:32)\n    at DispatcherConnection.dispatch (D:\\IdeaProject\\test-automation\\.playwright\\driver\\playwright-java-10497438925272316505\\package\\lib\\coreBundle.js:18775:44)\n}\nCall log:\n-   - waiting for locator(\"[id='topnav.profileswitcher.dropdown'],.current-profile\") to be visible\n\r\n\tat com.microsoft.playwright.impl.WaitableResult.get(WaitableResult.java:52)\r\n\tat com.microsoft.playwright.impl.Cha…[truncated]",
+  "evidence" : [ "TRACE: route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中） = trace=trace.zip\nwindow=23:27:24.021 → 23:28:44.106 (80085ms)  [覆盖本用例执行窗口]" ],
+  "apiOperations" : [ ],
+  "apiMonitorFailures" : [ ],
+  "routeRegistrations" : [ "[Route] register DELAY route for 'leftmenu/permissionLeftMenuConfig' delay=2s", "[Route] register MONITOR route for 'leftmenu/permissionLeftMenuConfig' expectStatus=200 timeout=60s", "[Route] register MONITOR route for '/error/profile-error.jsp' expectStatus=200 timeout=60s", "[Route] register MONITOR route for 'auth/assert' expectStatus=200 timeout=60s", "[Route] register MONITOR route for 'j_spring_security-check_v2' expectStatus=302 timeout=60s", "[Route] register MONITOR route for 'leftmenu/permissionLeftMenuConfig' expectStatus=200 jsonPath=[enableAdminTools=Y] timeout=60s", "[Route] register MOCK route for 'profile/list' status=real-response intercept=true body=[intercepted] replacePaths=[updateContctOverlayFlag, isOverBlockedDate]" ],
+  "attachments" : [ ],
+  "consoleOutput" : [ "\u001B[1;31m✘ SCENARIO FAILED : route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）  (80085 ms)  ↳ ElementOperationException\u001B[0m", "23:28:46.082 [main] [route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）] INFO  c.h.c.h.d.a.f.route.RouteRuntimeImpl - [Route] case metrics @1221092801: dispatches=1, hits=1, retiredByPurpose=4, unconfirmedRetirements=0, rulesArmedMs={/error/profile-error.jsp=60002, j_spring_security-check_v2=60013, auth/assert=60000, leftmenu/permissionLeftMenuConfig=72757, profile/list=72755}, delayDeliveries(directed=0, queued=0)" ],
+  "consoleError" : [ ],
+  "tracePath" : "route-capability-e2e-60-route-v2-e2e-delay/trace.zip",
+  "manual" : false,
+  "browserConsole" : [ ],
+  "browserErrors" : [ ]
+}

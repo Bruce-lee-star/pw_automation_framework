@@ -1,9 +1,13 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.junit;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.PwReportPlugin;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwReportObjectFactory;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkCucumberEventListener;
 import io.cucumber.junit.Cucumber;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.junit.runner.Description;
 import org.junit.runner.Runner;
 import org.junit.runner.manipulation.Filter;
@@ -38,6 +42,8 @@ import java.util.Set;
  * ObjectFactory 仅在业务<b>未指定</b>时才填默认值——业务显式指定了自己的实现时以业务为准。</p>
  */
 public final class CucumberWithPw extends Runner implements Filterable {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CucumberWithPw.class);
 
     /** Cucumber 插件系统属性（逗号分隔）。 */
     public static final String PLUGIN_PROPERTY = "cucumber.plugin";
@@ -75,6 +81,19 @@ public final class CucumberWithPw extends Runner implements Filterable {
         String factory = System.getProperty(OBJECT_FACTORY_PROPERTY);
         if (factory == null || factory.isBlank()) {
             System.setProperty(OBJECT_FACTORY_PROPERTY, FRAMEWORK_OBJECT_FACTORY);
+        }
+        //  features 根目录：framework.features.root 决定 Cucumber 去哪里找 .feature 文件。
+        //  通过 cucumber.options 注入 --features，业务无需在 @CucumberOptions 里硬编码路径；
+        //  仅当业务未显式用 cucumber.options 指定 --features 时才注入，尊重其显式配置。
+        String featuresRoot = ConfigSource.resolve(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT.key(), null);
+        if (featuresRoot != null && !featuresRoot.isBlank()) {
+            String cucumberOpts = System.getProperty("cucumber.options");
+            if (cucumberOpts == null || !cucumberOpts.contains("--features")) {
+                String injected = ((cucumberOpts == null || cucumberOpts.isBlank()) ? "" : cucumberOpts + " ")
+                        + "--features " + featuresRoot.trim();
+                System.setProperty("cucumber.options", injected);
+                LOGGER.debug("framework.features.root -> cucumber.options --features {}", featuresRoot.trim());
+            }
         }
     }
 

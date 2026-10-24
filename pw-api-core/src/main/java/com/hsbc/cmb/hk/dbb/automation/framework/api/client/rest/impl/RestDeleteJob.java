@@ -20,4 +20,9 @@ public class RestDeleteJob extends AbstractRestJob {
     public void perform(final Entity entity) {
         execute(entity, spec -> spec.when().delete(entity.getEndpoint()).then(), true);
     }
+
+    @Override
+    protected String httpMethod() {
+        return "DELETE";
+    }
 }

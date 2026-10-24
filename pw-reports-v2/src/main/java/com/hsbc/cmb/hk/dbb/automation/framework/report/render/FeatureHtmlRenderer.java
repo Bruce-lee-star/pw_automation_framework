@@ -58,9 +58,15 @@ public final class FeatureHtmlRenderer {
             for (Map<String, Object> g : groups) {
                 Map<String, Object> model = new LinkedHashMap<>(index);
                 model.putAll(featureModel(g));
-                // 本 feature 自己的耗时分布（覆盖继承来的全量桶）。
-                model.put("durationBuckets",
-                        ReportView.durationBuckets(featureOutcomes(outcomes, String.valueOf(g.get("feature")))));
+                // 本 feature 自己的耗时分布与耗时汇总（覆盖继承来的全量口径）。
+                List<TestOutcome> featureList = featureOutcomes(outcomes, String.valueOf(g.get("feature")));
+                model.put("durationBuckets", ReportView.durationBuckets(featureList));
+                model.put("timings", SummaryHtmlRenderer.timings(featureList));
+                //  顶栏时间信息用【本 feature 自己】的执行窗口（该 feature 全部用例的最早开始 /
+                //  最晚结束），不再是整个运行的窗口——2026-10-22 用户核对时发现 feature 页与
+                //  index 页的 start/end 完全一样（同源全量口径），feature 页应反映自己的范围。
+                //  口径分工：index = 整个运行；feature = 该 feature；per-case = 该用例；邮件 = 整个运行。
+                model.put("run", SummaryHtmlRenderer.runWindow(featureList));
                 Files.writeString(dir.resolve(String.valueOf(g.get("link"))),
                         render(template, model), StandardCharsets.UTF_8);
                 written.add(dir.resolve(String.valueOf(g.get("link"))));
@@ -100,6 +106,8 @@ public final class FeatureHtmlRenderer {
         m.put("manualPct", ReportView.pct(manual, total));
         m.put("baseHref", PwReportsConfig.baseUrl());
         m.put("traceViewerBaseUrl", PwReportsConfig.traceViewerBaseUrl());
+        //  CI / 构建信息（顶栏构建链接）；per-case / feature / index / 邮件四处同源
+        m.put("ci", ReportView.ciBuild());
         m.put("mixSegments", ReportView.segments(
                 "auto", "#3b82f6", auto,
                 "manual", "#0d9488", manual));

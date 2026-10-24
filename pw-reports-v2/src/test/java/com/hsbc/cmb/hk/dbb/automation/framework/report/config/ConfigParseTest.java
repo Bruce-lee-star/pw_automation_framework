@@ -39,12 +39,12 @@ class ConfigParseTest {
     class Defaults {
 
         @Test
-        @DisplayName("四项决策全取默认：启用、target/site/serenity、ON_FAILURE、不推送")
+        @DisplayName("四项决策全取默认：启用、target/site/serenity、FOR_FAILURES、不推送")
         void defaultsAreUsableOutOfBox() {
             PwReportsConfig c = PwReportsConfig.builder().build();
             assertThat(c.isEnabled()).isTrue();
             assertThat(c.getOutputDir()).isEqualTo(Paths.get("target/site/serenity"));
-            assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.ON_FAILURE);
+            assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.FOR_FAILURES);
             assertThat(c.isPushEnabled()).isFalse();
             assertThat(c.getPushUrl()).isNull();
         }
@@ -126,12 +126,15 @@ class ConfigParseTest {
     class ScreenshotParsing {
 
         @Test
-        @DisplayName("Serenity 别名映射到自有枚举")
+        @DisplayName("历史别名映射到规范四值（与框架 ScreenshotStrategy 同词汇）")
         void aliasesMap() {
-            assertThat(ScreenshotMode.parse("AFTER_FAILING_STEP", null)).isEqualTo(ScreenshotMode.ON_FAILURE);
+            assertThat(ScreenshotMode.parse("AFTER_FAILING_STEP", null)).isEqualTo(ScreenshotMode.FOR_FAILURES);
+            assertThat(ScreenshotMode.parse("ON_FAILURE", null)).isEqualTo(ScreenshotMode.FOR_FAILURES);
+            assertThat(ScreenshotMode.parse("FOR_EACH_STEP", null)).isEqualTo(ScreenshotMode.AFTER_EACH_STEP);
             assertThat(ScreenshotMode.parse("BEFORE_AND_AFTER_EACH_STEP", null))
-                    .isEqualTo(ScreenshotMode.AFTER_EACH_STEP);
+                    .isEqualTo(ScreenshotMode.BEFORE_AND_AFTER_EACH_STEP);
             assertThat(ScreenshotMode.parse("off", null)).isEqualTo(ScreenshotMode.DISABLED);
+            assertThat(ScreenshotMode.parse("none", null)).isEqualTo(ScreenshotMode.DISABLED);
         }
 
         @Test
@@ -185,7 +188,7 @@ class ConfigParseTest {
             try {
                 PwReportsConfig c = PwReportsConfig.load();   // 不得抛异常
                 assertThat(c.isPushEnabled()).as("旧 push.enabled 不再被识别").isFalse();
-                assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.ON_FAILURE);
+                assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.FOR_FAILURES);
                 assertThat(c.getMaxEvidenceLines()).isEqualTo(50);
             } finally {
                 for (String k : Set.of("pw.report.push.enabled", "pw.report.history.enabled",

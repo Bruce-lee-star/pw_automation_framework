@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.integration;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ApiOperationKind;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
 import org.slf4j.Logger;
@@ -33,7 +34,7 @@ public final class DefaultNetworkEvidenceBridge implements NetworkEvidenceBridge
         if (call == null) {
             return;
         }
-        String line = "NET " + call.toOneLine();
+        String line = ApiOperationKind.CAPTURED + " " + call.toOneLine();
         try {
             bus.attachEvidence(handle, line);
             bus.recordApiOperation(handle, line);

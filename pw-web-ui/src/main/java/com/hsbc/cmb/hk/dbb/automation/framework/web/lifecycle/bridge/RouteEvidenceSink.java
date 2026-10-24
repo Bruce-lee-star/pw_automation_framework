@@ -29,7 +29,7 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
     private static final int MAX_PENDING =
             Integer.getInteger("serenity.route.maxPendingRecords", 500);
 
-    /** 待报告记录：{operation, 脱敏 url, detail}。 */
+    /** 待报告记录：{@code operation, 脱敏 url, detail, stepId}。 */
     private static final Queue<String[]> PENDING = new ConcurrentLinkedQueue<>();
 
     /** 待报告条数（O(1) 近似值，仅用于上限判定与日志）。 */
@@ -44,7 +44,11 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
                 LOGGER.warn("[Route] pending evidence queue exceeded {} records — dropping the oldest "
                         + "(is a flush missing?)", MAX_PENDING);
             }
-            PENDING.offer(new String[] {operation == null ? "-" : operation, maskUrl(url), detail});
+            //  在证据【产生时】抓取步骤归属：本方法跑在 Playwright 事件线程，没有测试线程的
+            //  ThreadLocal 上下文；若等主线程 flush 时再解析，只会拿到用例级句柄，
+            //  per-case 页的 Route Captured 就全部掉进「用例级兜底」卡片而不是挂在步骤下。
+            PENDING.offer(new String[] {operation == null ? "-" : operation, maskUrl(url), detail,
+                    ReportingBridgeRegistry.get().currentStepId()});
         } catch (Exception e) {
             // 上报是旁路：入队失败绝不影响路由主流程
             LOGGER.debug("[Route] evidence enqueue skipped: {}", e.toString());
@@ -71,8 +75,15 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
         while ((item = PENDING.poll()) != null) {
             PENDING_COUNT.decrementAndGet();
             try {
-                ReportingBridgeRegistry.get().recordReportData(
-                        String.format("[Route %s] %s", item[0], item[1]), item[2]);
+                String title = String.format("[Route %s] %s", item[0], item[1]);
+                ReportingBridgeRegistry.get().recordReportData(title, item[2]);
+                //  同时进结构化的 apiOperations：报告页按「每个抓取到的 API」逐条展示，
+                //  证据区不再渲染（见 test-outcome 模板），仅保留 JSON 侧诊断。
+                //  stepId 为入队时抓到的归属步骤：有则挂到该步骤下（与 Route Register 一致），
+                //  无（钩子 / 场景边界产生）则按用例级兜底。
+                String stepId = item.length > 3 ? item[3] : null;
+                ReportingBridgeRegistry.get().recordApiOperation(stepId,
+                        item[2] == null || item[2].isEmpty() ? title : title + " — " + item[2]);
                 written++;
             } catch (Exception e) {
                 LOGGER.debug("[Route] evidence write skipped: {}", e.toString());

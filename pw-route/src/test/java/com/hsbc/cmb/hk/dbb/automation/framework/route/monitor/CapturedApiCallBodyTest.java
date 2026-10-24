@@ -60,15 +60,16 @@ public class CapturedApiCallBodyTest {
     }
 
     @Test
-    public void evidenceBodyIsBoundedWhileTheStoredBodyIsNot() {
+    public void evidenceBodyIsNotBoundedAndTheStoredBodyIsNotEither() {
+        // 2026-10-22 用户要求：报告里的响应体不得被截断，必须完整可见 —— 证据文本与存储体一致
         String big = "x".repeat(5000);
         CapturedApiCall call = new CapturedApiCall("p", "GET", "https://host/big", null, null, 200, null,
                 big, false, 1L, false, 2L);
         String detail = call.detailWith();
-        assertTrue("证据须标注有界化与总长度",
-                detail.contains("[evidence limited to first 4096 of 5000 chars]"));
-        assertFalse("证据不得把整份 5000 字符体灌进去", detail.contains(big));
-        // 有界化只作用于证据文本：原体与字节组件不受影响
+        assertFalse("证据不得再有有界化标记", detail.contains("[evidence limited"));
+        assertFalse("证据不得再有截断标记", detail.contains("[truncated]"));
+        assertTrue("证据必须包含整份 5000 字符响应体", detail.contains(big));
+        // 存储侧同样整响应保留
         assertEquals(5000, call.responseBody().length());
         assertNull("证据路径无载体 ⇒ 字节组件保持 null（语义不变）", call.responseBodyBytes());
     }

@@ -6,7 +6,10 @@ import com.hsbc.cmb.hk.dbb.automation.framework.api.security.SecurityAudit;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.EnvironmentUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.domain.enums.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ApiOperationKind;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.typesafe.config.Config;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.restassured.RestAssured;
 import io.restassured.config.HttpClientConfig;
 import io.restassured.config.LogConfig;
@@ -29,6 +32,12 @@ import java.util.function.Function;
 public abstract class AbstractRestJob {
 
     private static final Logger logger = LoggerFactory.getLogger(AbstractRestJob.class);
+
+    /** 上报到报告的请求/响应体预览上限（字符）——防止大文件/二进制灌进 JSON 与页面。 */
+    private static final int BODY_PREVIEW_MAX_CHARS = 512;
+
+    /** JSON 美化专用 mapper（只读树 → pretty string，不做类型绑定，容错最好）。 */
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private static RestAssuredConfig restAssuredConfig;
 
@@ -172,11 +181,189 @@ public abstract class AbstractRestJob {
     protected void execute(Entity entity,
                            Function<RequestSpecification, ValidatableResponse> invoker,
                            boolean idempotent) {
-        ValidatableResponse response = executeWithRetry(entity, invoker, idempotent);
+        long startedAt = System.nanoTime();
+        ValidatableResponse response;
+        try {
+            response = executeWithRetry(entity, invoker, idempotent);
+        } catch (RuntimeException e) {
+            //  失败同样要进报告：业务在报告里看到的“缺少 API 调用”往往正是失败那次（如 getotp 500）。
+            reportApiOperation(entity, elapsedMillis(startedAt), null, e);
+            throw e;
+        }
         if (entity.isApiRequestResponseLogsEnabled()) {
             response.log().all();
         }
         applyResponse(entity, response);
+        reportApiOperation(entity, elapsedMillis(startedAt), entity.getResponseCode(), null);
+    }
+
+    /** HTTP 方法名（子类覆写，仅用于报告展示；默认 {@code HTTP} 保证不影响既有实现）。 */
+    protected String httpMethod() {
+        return "HTTP";
+    }
+
+    private static long elapsedMillis(long startedAtNanos) {
+        return Math.max(0L, (System.nanoTime() - startedAtNanos) / 1_000_000L);
+    }
+
+    /**
+     * 把一次 API 调用上报到测试报告（<b>尽力而为</b>，任何异常都不影响用例结果）。
+     *
+     * <p>动机（2026-10-20 用户反馈）：{@code getotp.htm} 这类经 RestAssured 发出的请求不在浏览器内，
+     * Playwright 的 route 抓包看不到它，报告里只出现浏览器请求、缺少 API 调用记录。这里在
+     * “所有 Rest*Job 共同的唯一出口”上报 method / url / 状态码 / 耗时，由
+     * {@code ReportingBridge} 落到 per-case 的 {@code apiOperations}（按发生步骤归位）。
+     *
+     * <p><b>行格式（管道分隔的多行块）</b>——报告侧按此前缀拆成结构化卡片（方法徽标 / URL /
+     * 状态 / 耗时 + Request/Response 分区），单行纯文本既不分方法也没法分区
+     * （2026-10-20 用户反馈"没有区分 request method、request headers 等信息"）：
+     * <pre>
+     * REST|GET|https://host/getotp.htm?type=1|200|5771 ms
+     * REQH|Request headers|Accept=application/json
+     * REQB|Request body|&lt;none&gt;
+     * RESH|Response headers|Content-Type=text/html
+     * RESB|Response body|{"token":"..."}
+     * </pre>
+     * 失败时状态列为 {@code FAILED}，并以 {@code ERR|Error|...} 行替代两个 Response 行。
+     *
+     * <p>脱敏由报告侧（{@code ScrubGate}）统一完成：URL query 与 header 中的
+     * token/key/password 会被替换为 {@code [SCRUBBED]}，因此这里可携带完整 URL
+     * （业务需要靠它定位环境）。响应体仍做长度截断，防止把大文件/二进制灌进报告。
+     */
+    private void reportApiOperation(Entity entity, long elapsedMs, Integer status, Throwable failure) {
+        try {
+            StringBuilder block = new StringBuilder(256);
+            block.append(ApiOperationKind.REST).append('|')
+                    .append(httpMethod()).append('|')
+                    .append(cell(resolveRequestUrl(entity))).append('|')
+                    .append(failure != null ? "FAILED" : String.valueOf(status == null ? "-" : status))
+                    .append('|').append(elapsedMs).append(" ms");
+            block.append("\nREQH|Request headers|").append(cell(describeKeys(entity.getRequestHeaders())));
+            block.append("\nREQB|Request body|").append(cell(describeBody(entity.getRequestPayload())));
+            if (failure != null) {
+                block.append("\nERR|Error|").append(cell(failure.getClass().getSimpleName()
+                        + (StringUtils.isNotBlank(failure.getMessage()) ? ": " + failure.getMessage() : "")));
+            } else {
+                block.append("\nRESH|Response headers|")
+                        .append(cell(describeEntries(entity.getResponseHeaders())));
+                block.append("\nRESB|Response body|").append(cell(describeBody(entity.getResponsePayload())));
+            }
+            ReportingBridgeRegistry.get().recordApiOperation(block.toString());
+        } catch (Throwable t) {
+            logger.debug("API 调用上报失败（忽略，不影响用例）: {}", t.toString());
+        }
+    }
+
+    /**
+     * 单元格消毒：{@code |} 是行内分隔符，内容里的管道符编码为 {@code %7C}
+     * （URL 的合法编码）以防破坏分栏。
+     *
+     * <p><b>换行必须保留</b>：JSON 美化后的请求/响应体含换行（缩进排版），
+     * 折叠成空格就失去"按 JSON 显示"的意义。多行 value 由报告侧
+     * {@code ApiCallBlock} 的"行首 KEY 识别"解析兼容，不会破坏结构。
+     */
+    private static String cell(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.indexOf('|') < 0 ? value : value.replace("|", "%7C");
+    }
+
+    /**
+     * 单值 map（请求头）→ 只列键名（值可能含敏感信息，不在此展开），{@code "; "} 分隔。
+     *
+     * <p>刻意<b>不加</b> {@code [ ]} 包裹：报告侧 ScrubGate 的头脱敏正则会一路吃到行尾，
+     * 外层括号会被吞掉留下“没闭合”的残串（2026-10-20 实测）。
+     */
+    private static String describeKeys(Map<String, Object> map) {
+        if (map == null || map.isEmpty()) {
+            return "<none>";
+        }
+        return String.join("; ", map.keySet());
+    }
+
+    /**
+     * 键值 map（响应头）→ {@code k=v; k=v}，值交给报告侧 ScrubGate 脱敏。
+     *
+     * <p>两个刻意的选择：① 分隔符用 {@code "; "} 而非 {@code ", "}——HTTP 头值自身常含逗号
+     * （如 {@code Access-Control-Allow-Methods=GET, POST, OPTIONS}），逗号分隔会把一头拆成
+     * 看上去像三头的歧义文本；② 不加外层 {@code [ ]}，理由同 {@link #describeKeys}。
+     */
+    private static String describeEntries(Map<String, ?> map) {
+        if (map == null || map.isEmpty()) {
+            return "<none>";
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (Map.Entry<String, ?> entry : map.entrySet()) {
+            if (!first) {
+                sb.append("; ");
+            }
+            String value = String.valueOf(entry.getValue());
+            String pretty = prettyJson(value);
+            sb.append(entry.getKey()).append('=').append(pretty != null ? pretty : value);
+            first = false;
+        }
+        return sb.toString();
+    }
+
+    /** 请求/响应体：空白 → {@code <none>}；JSON 则 pretty-print；否则截断到上限并标注原始长度。 */
+    private static String describeBody(String body) {
+        if (StringUtils.isBlank(body)) {
+            return "<none>";
+        }
+        String pretty = prettyJson(body);
+        String shown = pretty != null ? pretty : body;
+        if (shown.length() <= BODY_PREVIEW_MAX_CHARS) {
+            return shown;
+        }
+        return shown.substring(0, BODY_PREVIEW_MAX_CHARS)
+                + "… [truncated, total " + body.length() + " chars]";
+    }
+
+    /**
+     * JSON 美化：请求/响应体（以及 header 值）只要是合法 JSON 就按 2 空格缩进排版，
+     * 便于人读；非 JSON 返回 {@code null}（调用方回落原文）。
+     *
+     * <p>刻意不引入新依赖：{@code pw-api-core} 已在用 Jackson（{@code BaseStep}）。
+     */
+    private static String prettyJson(String raw) {
+        String trimmed = raw.strip();
+        if (trimmed.isEmpty() || (trimmed.charAt(0) != '{' && trimmed.charAt(0) != '[')) {
+            return null;
+        }
+        try {
+            return JSON_MAPPER.readTree(trimmed).toPrettyString();
+        } catch (Exception e) {
+            return null; //  不是 JSON（或非法 JSON）——按原文展示，绝不因排版失败丢内容
+        }
+    }
+
+    /** 还原请求 URL（baseUri + basePath + endpoint + query）用于报告展示。 */
+    static String resolveRequestUrl(Entity entity) {
+        StringBuilder url = new StringBuilder(96);
+        if (entity.getBaseUri() != null) {
+            url.append(entity.getBaseUri());
+        }
+        if (StringUtils.isNotBlank(entity.getBasePath())) {
+            url.append(entity.getBasePath());
+        }
+        if (StringUtils.isNotBlank(entity.getEndpoint())) {
+            url.append(entity.getEndpoint());
+        }
+        Map<String, Object> query = entity.getQueryParams();
+        if (query != null && !query.isEmpty()) {
+            url.append('?');
+            boolean first = true;
+            for (Map.Entry<String, Object> entry : query.entrySet()) {
+                if (!first) {
+                    url.append('&');
+                }
+                url.append(entry.getKey()).append('=').append(entry.getValue());
+                first = false;
+            }
+        }
+        return url.toString();
     }
 
     /**
