@@ -21,13 +21,6 @@ public final class RoleElementAssertionGenerator {
     public static String assertStatement(String pageVar, String field, RoleEntry e) {
         String op = (e == null) ? null : RoleElementStepGenerator.operationFor(e);
         String value = (e == null) ? null : e.getValue();
-        // 对齐 page.pause() 自动插入的状态断言：checkbox/radio 带已知勾选态时，断言 isChecked()（而非仅可见性）
-        if (e != null && e.isRoleStrategy()) {
-            String r = (e.getRole() == null ? "" : e.getRole()).toLowerCase();
-            if (("checkbox".equals(r) || "radio".equals(r)) && e.getChecked() != null) {
-                return "assertThat(" + pageVar + "." + field + ".isChecked(), equalTo(" + e.getChecked() + "))";
-            }
-        }
         if (op != null && op.startsWith("fill(") && value != null && !value.isEmpty()) {
             return "assertThat(" + pageVar + "." + field + ".inputValue(), equalTo(\""
                     + RoleElementStepGenerator.escapeJava(value) + "\"))";

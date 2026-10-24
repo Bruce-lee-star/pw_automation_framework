@@ -36,11 +36,11 @@
 | `reporting` | 报告层：`framework.common.reporting`（`SerenityReporter`）+ 顶层 `report`（汇总报告 `SummaryReportGenerator`、趋势、trace 索引、ZIP 打包） |
 | `api` | API / HTTP 测试层：`framework.api`（连接池、幂等重试、JSONPath / JSON Schema 校验、出口脱敏） |
 | `web` | Web / UI 层：`framework.web`（PageObject / RoleElement、并发 Context 执行器、浏览器生命周期、截图 / trace）；**不含 `route`** |
-| `codegen` | 元素拾取与代码生成：RolePicker、NLS 名称翻译、`RoleElementPageGenerator` |
+| `codegen-v2` | 元素拾取与代码生成（V2，独立模块）：RolePicker、NLS 名称翻译、`RoleElementPageGenerator` |
 | `route` | 网络拦截层：`RouteDsl` 声明式 **monitor / mock / modify / delay**，并发安全分发、按目的撤销与响应采集 |
 | `test-automation` | 测试工程：features、step definitions、`CucumberTestRunnerIT`；聚合全部框架模块 |
 
-依赖方向：`core` ← `reporting` / `api` ← `web`；`codegen` / `route` 独立模块；`test-automation` 聚合。
+依赖方向：`core` ← `reporting` / `api` ← `web`；`codegen-v2` / `route` 独立模块；`test-automation` 聚合。
 分层与依赖规则由 ArchUnit 守卫（`test-automation` 的 `ArchitectureTest` / `LayeringArchTest`）。
 
 ## 快速开始

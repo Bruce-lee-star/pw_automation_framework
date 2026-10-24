@@ -1,0 +1,741 @@
+package com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan;
+
+import com.google.gson.Gson;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.Frame;
+import com.microsoft.playwright.Page;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 上下文级「浏览器桥 / 面板命令抽干」注册中心（T5-1 拆分）：
+ * 把 {@link RoleElementPicker} 中"向 Playwright {@link BrowserContext} 一次性注册命令桥 /
+ * 拾取桥 / 删除桥 / 控制台兜底桥 / 动态 iframe 监听，以及面板命令队列抽干"等
+ * 【扫描/捕获桥】职责收敛到本类，使 {@link RoleElementPicker} 退化为拾取编排门面。
+ *
+ * <p>行为与原实现逐字等价：仅物理搬移，逻辑 / 日志标签 / 去重键口径完全不变。
+ * 桥方法经 {@link RoleElementPicker#pickerEval} 与浏览器交互（同包静态调用）。
+ */
+final class RolePickerBridgeRegistry {
+
+    static final Logger log = LoggerFactory.getLogger(RolePickerBridgeRegistry.class);
+
+    /** 反序列化任意拾取态 JSON 的 Gson 实例（桥方法统一用其解析回传）。 */
+    static final Gson GSON = new Gson();
+
+    /**
+     * 拾取回调→面板「即时回灌」线程池（事件驱动，替代主循环 1s 轮询）。
+     *
+     * <p>背景：原设计把拾取权威态放在 Java 业务层（javaPickBySig），浏览器侧面板只是展示页面对象层；
+     * 但面板刷新只发生在主循环 {@code poll(1s)} 的空闲轮里，遇 busy 页 / 跨域 iframe 的硬超时 evaluate 时
+     * 整轮被卡，导致"点了元素、面板列表 1~12s 才出现"。
+     * 现改为：拾取桥回调合并进权威态后，<b>立即</b>异步把面板回灌推回浏览器（页面对象层），与分层无冲突。</p>
+     *
+     * <p>设计约束：exposeBinding 回调跑在 Playwright 的<b>调度线程</b>上，绝不能在此线程内同步做
+     * {@code page.evaluate}（会阻塞同上下文其余事件），故用<b>单线程 daemon</b>线程池把
+     * {@code syncPanelToBrowser} 异步化；其内部用 soft 2s 上限超时、ETag 幂等，失败仅是下一轮补回。
+     * 队列有界 + DiscardOldestPolicy：极端 busy 页下丢弃最旧待回灌，下一轮（主循环 / 下次点击）自然补上，不堆积。</p>
+     */
+    static final ExecutorService PICK_SYNC_POOL =
+            new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
+                    new LinkedBlockingQueue<>(64),
+                    r -> { Thread t = new Thread(r, "picker-pick-sync"); t.setDaemon(true); return t; },
+                    new ThreadPoolExecutor.DiscardOldestPolicy());
+
+
+    /**
+     * 面板命令事件：由页面内 {@code window.__rolePickerCmd(c)}（经 {@link Page#exposeFunction} 暴露的
+     * Java 回调）投递，携带"哪个页面发的命令"。主循环从阻塞队列取出后据此驱动，避免忙轮询所有页面。
+     */
+    static final class CmdEvent {
+        final Page page;
+        final String cmd;
+        CmdEvent(Page page, String cmd) { this.page = page; this.cmd = cmd; }
+    }
+
+    /**
+     * 把"面板命令桥 + 点击拾取桥 + 控制台兜底桥"一次性注册到 {@link BrowserContext}
+     * （对齐 {@code page.pause()}：Recorder 用 {@code context.exposeBinding} 注册跨页面/跨导航存活的回传桥）。
+     * <ul>
+     *   <li>命令桥：页面内 {@code window.__rolePickerCmd(c)} → (来源 page, cmd) 投递进阻塞队列，主循环事件驱动消费；</li>
+     *   <li>拾取桥：页面内 {@code window.__roleOnPick(json)} → 单个拾取元素 O(1) 回传进 Java 权威内存态；</li>
+     *   <li>控制台桥：捕获 {@code __roleOnPick::<json>} 兜底回传（exposeBinding 异常失效时拾取不丢失）。</li>
+     * </ul>
+     * context 下所有当前与未来页面自动持有绑定，无需逐页注册/跟踪；每个 context 仅注册一次（幂等），
+     * 会话级队列/状态经 CTX_* Map 动态解析，二次打开只换 Map 指向。
+     */
+    static void registerContextBridges(BrowserContext ctx,
+                                               BlockingQueue<CmdEvent> queue,
+                                               LinkedHashMap<String, RoleEntry> javaPickBySig) {
+        RolePickerSessionState.CTX_CMD_QUEUES.put(ctx, queue);
+        // 【关键修复"二次 openPanel 导致已拾元素清零"】二次 openPanel（设计上支持，见类注释"二次打开只换 Map 指向"）
+        // 会 new 一个空 javaPickBySig 并传入；若此处直接 put 覆盖，context 权威内存态会被空 map 替换，
+        // 后续 __roleOnPick 回调（RolePickerSessionState.CTX_PICK_STATES.get(ctx)）全部写进空 map → 此前 LogonPage+SetupSecondPwdPage
+        // 已拾的全部元素丢失（日志现象：内存态 49→1）。故二次打开时把旧会话历史迁移合并进本次 map（保留去重顺序），
+        // 让 openPanel 后续代码（RolePickerSessionState.CTX_PICK_STATES / 命令队列等）拿到"含历史"的同一引用，历史不丢。
+        LinkedHashMap<String, RoleEntry> prev = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+        // 【diag-migrate】追踪跨会话迁移是否把脏 pickNos/seq 带入本轮（定位 user_name 首号恒为 2 的根因）。
+        if (prev != null) {
+            for (java.util.Map.Entry<String, RoleEntry> e : prev.entrySet()) {
+                if (e.getValue() != null && (e.getKey() != null && e.getKey().contains("user_name"))) {
+                    log.info("[picker][diag-migrate] prev key={} pickNos={} seq={} (prev==javaPickBySig? {})",
+                            e.getKey(), e.getValue().getPickNos(), e.getValue().getSeq(), (prev == javaPickBySig));
+                }
+            }
+        }
+        if (prev != null && prev != javaPickBySig) {
+            for (java.util.Map.Entry<String, RoleEntry> e : prev.entrySet()) {
+                if (!javaPickBySig.containsKey(e.getKey())) {
+                    // 【修复"跨会话脏序号污染本轮（后拾取元素首号偏小，如 user_name 拿到 2 而非 4/5）"】
+                    // 旧实现直接复用 prev 的 RoleEntry 引用（含上一轮被旧 bug 污染的 pickNos，如 [2]）。
+                    // 新会话是全新拾取，序号需按本轮点击顺序重新生成；若沿用 prev 的 [2]，syncPanelToBrowser
+                    // 会用它覆盖浏览器侧本轮正确累计的 [5]，最终 step 序号错乱。
+                    // 修复：迁移历史仅为"保留已拾元素不丢"（见上方二次 openPanel 场景），但其 pickNos 必须清零，
+                    // 让面板回退到 [-]，本轮重新点击时从干净状态按真实次序重新累计，杜绝脏序号串台。
+                    RoleEntry migrated = e.getValue();
+                    if (migrated != null) { migrated.setPickNos(new java.util.ArrayList<>()); migrated.setSeq(0); }
+                    javaPickBySig.put(e.getKey(), migrated);
+                }
+            }
+        }
+        RolePickerSessionState.CTX_PICK_STATES.put(ctx, javaPickBySig);
+        boolean first = RolePickerSessionState.CTX_BRIDGED.add(ctx);
+        log.info("[picker] context bridges registerContextBridges: firstReg={} (command/pick/console bridges, registered once per context)", first);
+        if (!first) return;
+        // 命令桥：BindingCallback 的 Source 自带来源 Page，天然区分命令来自哪个页面
+        // （新页/默认页共享同一绑定，CmdEvent.page 记录来源）。绑定对 context 下所有页面、所有导航存活。
+        registerCmdBridge(ctx);
+        // 拾取桥：浏览器端经 window.__roleOnPick(JSON.stringify(pick)) 异步投递，零往返回传 Java 内存态。
+        registerPickBridge(ctx);
+        // 文档起始自举桥：新文档在文档起始主动拉取权威态（消除"新页面回灌等导航事件 ⇒ 10~20s"）。
+        registerPullStateBridge(ctx);
+        // 删除桥：面板「垃圾桶」删除选中元素时，同步落到 Java 侧权威内存态（否则主循环 syncPanelToBrowser 会"复活"被删元素）。
+        registerDeleteBridge(ctx);
+        // 控制台兜底桥：context 级 onConsoleMessage 捕获所有页面的兜底回传与拾取链路报错，即使绑定失效回传也不丢失。
+        registerConsoleBridge(ctx);
+        // 动态 iframe 监听器：context 级对每个（含弹窗/新开）页面挂 onFrameAttached，覆盖运行时新附加/动态创建的 iframe。
+        registerFrameAttachListener(ctx);
+    }
+
+    /**
+     * 【页类纠偏】按【回传来源页】当场修正 pick 携带的旧页类（详见上方 binding 通道内的根因说明）。
+     *
+     * <p>必须在 {@code parsePick} 之前改【原始回传字段】：{@code RoleEntry.pageClass} 为 final 且无 setter，
+     * 而去重键 {@code pickDedupKey} 也读该字段，故统一在源头纠正。
+     *
+     * <p>【为何抽成公共方法】此前只有 binding 通道做了纠偏，console 兜底通道没有 ⇒ 跨源 iframe /
+     * 绑定失效时经 console 到达的 pick 仍带旧页类（现场：QR #3 在页类已纠正为 SetupSecondPwdPage
+     * 之后仍以 LogonPage 落库，同一元素在 Java 侧变成两条、分属两个页面类，产物出现
+     * {@code logonPage.qrCodeToDownloadTheMobileApp.click()}）。两条通道必须同口径。
+     */
+    private static void retagPickPageClass(java.util.Map<Object, Object> m, Page srcPage, String channel) {
+        if (m == null) return;
+        try {
+            String pickCls = (m.get("_pageClass") == null) ? null : String.valueOf(m.get("_pageClass"));
+            String fixedCls = RolePickerPageTracker.retagStalePickClass(srcPage, pickCls);
+            if (fixedCls == null) return;
+            m.put("_pageClass", fixedCls);
+            // 【必须同时修正去重键 _sigKey】浏览器侧 __sigKey 格式是 JSON 数组 [sig, pageClass]，且是在
+            // 【纠正之前】算出来的：只改 _pageClass 会让 pickDedupKey 仍按带旧页类的 _sigKey 去重，
+            // 于是同一元素在 Java 侧落成【两条】条目。故用同一 sig + 新页类重建 _sigKey。
+            Object sigObj = m.get("_sig");
+            if (sigObj != null) {
+                m.put("_sigKey", GSON.toJson(java.util.Arrays.asList(String.valueOf(sigObj), fixedCls)));
+            }
+            log.info("[picker][nav] pick page class corrected at callback time ({}): {} -> {} (url={})",
+                    channel, pickCls, fixedCls, (srcPage == null ? "" : srcPage.url()));
+        } catch (Exception ignoreRetag) {
+            RolePickerQuiet.ignore("RolePickerBridgeRegistry#retag", ignoreRetag);
+        }
+    }
+
+    /** 命令桥：浏览器侧经 window.__rolePickerCmd 投递，零往返把命令入队；BindingCallback 的 Source 自带来源 Page，天然区分命令来自哪个页面。 */
+    private static void registerCmdBridge(BrowserContext ctx) {
+        ctx.exposeBinding("__rolePickerCmd", (source, args) -> {
+            BlockingQueue<CmdEvent> q = RolePickerSessionState.CTX_CMD_QUEUES.get(ctx);
+            if (q == null) return null;
+            String c = null;
+            try {
+                if (args != null && args.length > 0) {
+                    Object v = args[0];
+                    if (v == null) {
+                        c = null;
+                    } else if (v instanceof String) {
+                        // 浏览器侧若以 JSON 字符串传入（如 window.__rolePickerCmd(JSON.stringify({...}))），原样使用
+                        c = (String) v;
+                    } else {
+                        // Playwright 会把 JS 对象反序列化为 Java Map/List/Number/Boolean，
+                        // 其 toString() 不是合法 JSON（单等号、无引号），直接 Gson 解析会抛 MalformedJsonException。
+                        // 故统一用 GSON 规范序列化为 JSON 字符串再入队（markList 等对象命令依赖此路径）。
+                        c = GSON.toJson(v);
+                    }
+                }
+            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+            q.offer(new CmdEvent(source.page(), c));
+            return null;
+        });
+    }
+
+    /** 拾取桥：浏览器端经 window.__roleOnPick(JSON.stringify(pick)) 异步投递，零往返回传 Java 内存态，带回补 framePath 与去重合并。 */
+    private static void registerPickBridge(BrowserContext ctx) {
+        ctx.exposeBinding("__roleOnPick", (source, args) -> {
+            LinkedHashMap<String, RoleEntry> map = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+            if (map == null) return null;
+            try {
+                if (args == null || args.length == 0) return null;
+                Object v = args[0];
+                if (v == null) return null;
+                // 【diag-raw】原始回传参数：确认浏览器经 binding 实际投递给 Java 的 JSON 是否含 _pickNos 字段。
+                log.debug("[picker][diag-raw] __roleOnPick raw arg type={} value={}", (v == null ? "null" : v.getClass().getSimpleName()), String.valueOf(v));
+                @SuppressWarnings("unchecked")
+                Map<Object, Object> m = GSON.fromJson(String.valueOf(v), Map.class);
+                // 【修复"URL 变化后拾取的元素被打上旧页类 ⇒ 生成不出新页面"】
+                // History API（pushState）导航不触发 onFrameNavigated，页类名只能由主循环每轮幂等刷新
+                // （RolePickerPageTracker.refreshPageClass），最快也要 ≤1s；而用户点击可能恰好落在刷新之前
+                // —— 实测：拾取 20:10:20.805（被打成 LogonPage）→ 刷新 20:10:20.880（→ SetupSecondPwdPage），
+                // 相差 75ms。结果：新页元素归入旧页，生成结果里只有 LogonSteps、没有 SetupSecondPwdSteps。
+                // 此处按【回传来源页】当场纠正：若 pick 携带的类名正是该页刚被替换掉的旧类名、且该页当前已有新
+                // 类名，则改标（详见 RolePickerPageTracker#retagStalePickClass）。
+                // 必须在 parsePick 之前改【原始回传字段】：RoleEntry.pageClass 为 final 且无 setter（实体不可变），
+                // 而下方 pickDedupKey 也读该字段，故统一在源头纠正。
+                // 仅作用于"来源页自身的类名漂移"；跨页搬运的 pick 走 syncPanelToBrowser / merge 等其它路径，不受影响。
+                retagPickPageClass(m, source.page(), "binding");
+                RoleEntry e = RolePickerPickParser.parsePick(m);
+                if (e == null) return null;
+                // 【关键修复"iframe 元素丢失所属框架上下文 / 监听器好像没起作用"】
+                // 旧逻辑仅用浏览器回传的 framePath（parsePick 内部 parseFramePath(m.get("framePath"))）。
+                // 在 file:// / 跨源场景下，子 frame 内 window.frameElement 会抛 SecurityError，
+                // 浏览器侧 __framePathOf 的兜底（window.name）常取不到值 → 回传的 framePath 为空，
+                // 于是生成的代码里 iframe 内元素被当成主页元素：既无 frameOne 前缀、也无 switchToFrame，
+                // 直接 .click() 点到的是 <iframe> 节点本身而非进入框架——表现为"框架监听/归属失效"。
+                // getEntries 走的是另一条带 Java 侧 computeFramePath backfill 的路径（故 verify 测试通过），
+                // 但代码生成读的是本 path 的 javaPickBySig，二者必须一致。故在此用 source.frame().frameElement()
+                // 做一次与 getEntries 同源的 backfill：浏览器给了就用浏览器的，否则用 Java 计算的真实框架路径。
+                if (e.getFramePath() == null || e.getFramePath().isEmpty()) {
+                    try {
+                        List<String> fp = RolePickerFramePath.computeFramePath(source.page(), source.frame());
+                        if (fp != null && !fp.isEmpty()) e.setFramePath(fp);
+                    } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+                }
+                // 去重键与浏览器端保持一致但更精确：定位器唯一型策略（id/css/i18n/text/...）按 locator 签名（_sig）
+                // 去重，避免同一元素在"主页↔弹窗"间被重复收录；角色/closeOp 仍按 [sig, pageClass|URL]（_sigKey）区分。
+                // 重复点击以最近一次交互为准整条替换（RoleEntry 不可变，更新须替换）；首次插入保序。
+                String key = RolePickerPickParser.pickDedupKey(m, e);
+                synchronized (map) {
+                    RoleEntry existing = map.get(key);
+                    // 【diag-onpick】i18n 首次回传前，打印权威 map 里该 key 是否已有脏 pickNos/seq（区分"Java 内存态脏"还是"浏览器直接发 [2]"）。
+                    if (key != null && key.contains("user_name")) {
+                        log.debug("[picker][diag-onpick][PRE] key={} mapExistingPickNos={} mapExistingSeq={} incomingRawNos={}",
+                                key, (existing == null ? "null" : existing.getPickNos()), (existing == null ? "null" : existing.getSeq()), m.get("_pickNos"));
+                    }
+                    // 去重回传：自愈/重挂 START_SCRIPT 会重放已有拾取（__rolePicks 重建），主循环每轮
+                    // ensurePickingActive 又按 ~1s 重挂，导致同一 pick 被重复回传数十次、日志刷屏。
+                    // 若 key 已存在且实体未变化（sigKey/framePath/dialog/popup 均一致），仅静默合并、不打日志；
+                    // 仅在「新元素」或「已有元素被增强（补 framePath/弹窗/对话框）」时记录。
+                    boolean changed = (existing == null)
+                            || !RolePickerPickParser.roleEq(existing.getSigKey(), e.getSigKey())
+                            || !RolePickerPickParser.framePathEq(existing.getFramePath(), e.getFramePath())
+                            || (existing.isDialog() != e.isDialog())
+                            || (existing.isPopup() != e.isPopup());
+                    RoleEntry merged = RolePickerPickParser.mergePickIntoMap(map, key, e);
+                    // 【当轮进行中记录】供"边拾边生成"预览构造 steps = 已封存 + 当轮，使预览与"停止"生成
+                    // 在两个 Tab（步骤代码 / 断言）上完全一致（每轮一个 step / 一个 assertStep、跨轮累积）。
+                    // 与 javaPickBySig 同键、同对象引用（合并后即最新态）；停止时由 cmdStop 清空。
+                    RolePickerContext roundCtx = RolePickerPageTracker.contextFor(ctx);
+                    if (roundCtx != null) {
+                        synchronized (roundCtx.roundPicks) { roundCtx.roundPicks.put(key, merged); }
+                    }
+                    log.debug("[picker][diag-onpick][BIND] key={} pickNos(after-merge)={} changed={} rawNos={} strategy={} keys={}", key, merged.getPickNos(), changed, m.get("_pickNos"), (e != null ? e.getStrategy() : null), (m != null ? m.keySet() : null));
+                    if (changed) {
+                        List<String> fpLog = merged.getFramePath();
+                        log.info("[picker] __roleOnPick callback written to in-memory state: key={} pageClass={} framePath={} (current in-memory size={})", key, (merged.getPageClass() == null ? "" : merged.getPageClass()), (fpLog == null || fpLog.isEmpty() ? "" : fpLog.toString()), map.size());
+                        // 【事件驱动即时回灌】拾取合并进权威态后，立即把面板回灌推回浏览器（页面对象层），
+                        // 消除"靠主循环 1s 轮询 + busy 页硬超时卡整轮"导致的面板列表延迟 1~12s 才出现。
+                        // 不在 Playwright 回调线程内同步 evaluate（会阻塞同上下文事件），改用 daemon 线程池异步推；
+                        // syncPanelToBrowser 内部软超时 2s + ETag 幂等，失败仅下一轮补回。
+                        final com.microsoft.playwright.Page srcPage = source.page();
+                        if (srcPage != null && !srcPage.isClosed()) {
+                            try {
+                                // ① 即时回灌面板（消除"靠主循环 1s 轮询 + busy 页硬超时卡整轮"导致的列表延迟 1~12s）；
+                                // ② 【push 化：不再在每次拾取时协议级遍历 frame】拾取本身已由本回调事件上行
+                                //    （__roleOnPick），跨源 iframe 的 straggler 改由 debounce 自愈
+                                //    （scheduleSelfHeal → selfHealPage）按页低频兜底，且该兜底已带
+                                //    「跳过 about:* + 连续失败 frame 永久跳过 + 单帧 300ms + 整轮 600ms 预算」。
+                                //    旧实现每次拾取都全量遍历 page.frames()（含广告/跟踪 frame，每个最长 2s），
+                                //    是"新页面回灌 10~20s / 拾取越久越卡"的主要成本来源。
+                                final LinkedHashMap<String, RoleEntry> snap = map;
+                                PICK_SYNC_POOL.execute(() -> {
+                                    RolePickerPanelSync.syncPanelToBrowser(srcPage, null, snap);
+                                });
+                            } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("[picker] failed to parse __roleOnPick callback: {}", ex.getMessage());
+            }
+            return null;
+        });
+    }
+
+    /**
+     * 【文档起始自举桥】新文档在自己的文档起始阶段调用 {@code window.__rolePullPickState()}，
+     * 由 Java 把权威拾取态**合并**回该文档（只合并、不动激活态，见 merge-pick-state-js.js）。
+     *
+     * <p>动机：回灌原先挂在 {@code onFrameNavigated} 之后；该事件在"重定向链 + 广告/跟踪资源密集"的
+     * 页面上实测可迟到 10~20s（现场：新页面出现 12s 后才 applyPickState ⇒ "已拾元素迟迟不出现"）。
+     * 让新文档自己开口要，就不再依赖任何事件时序 —— 跨源新页同样适用（binding 是 context 级）。
+     *
+     * <p>约束（与既有桥一致）：exposeBinding 回调跑在 Playwright <b>调度线程</b>上，绝不能在回调线程内
+     * 直接 {@code page.evaluate}（页面正等待 binding 返回，同步 evaluate 有互等风险），故一律异步到
+     * {@link #PICK_SYNC_POOL}；且用 soft 超时、幂等合并，失败仅由导航事件 / 主循环下一轮兜底补回。
+     */
+    private static void registerPullStateBridge(BrowserContext ctx) {
+        ctx.exposeBinding("__rolePullPickState", (source, args) -> {
+            LinkedHashMap<String, RoleEntry> map = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+            if (map == null) return null;
+            Page pg;
+            try { pg = source.page(); } catch (Exception ignore) { return null; }
+            if (pg == null || pg.isClosed()) return null;
+            String json;
+            int skippedNoClass = 0;
+            synchronized (map) {
+                if (map.isEmpty()) return null;
+                // 【归属必须明确】只下发【带 pageClass】的条目：面板行的归属判据是
+                //   p._pageClass || window.__rolePageName
+                // 缺 _pageClass 的条目会被算进"当前文档的页名"下 —— 现场：LogonPage 上拾取的 i18n 元素
+                // 在自举合并进 setup-second-pwd 文档后，被显示到了 SetupSecondPwdPage 的 Tab 里。
+                // 这类条目既不能定位也不能按页分组，宁可不下发（Java 权威态仍在，生成链路不受影响）。
+                java.util.List<RoleEntry> picks = new java.util.ArrayList<>(map.size());
+                for (RoleEntry e : map.values()) {
+                    if (e == null) continue;
+                    String pc = e.getPageClass();
+                    if (pc == null || pc.isEmpty()) { skippedNoClass++; continue; }
+                    picks.add(e);
+                }
+                if (picks.isEmpty()) return null;
+                java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+                payload.put("picks", picks);
+                // 【代码 Tab 一并下发】跨源新页读不到原 origin 的 localStorage 代码缓存，故把最近一次
+                // 生成的页面类 / 步骤 / 断言码表随自举下发，由浏览器侧直接填充三个 Tab。
+                try {
+                    RolePickerContext pc = RolePickerPageTracker.contextFor(ctx);
+                    if (pc != null) {
+                        // 【已封存 step 清单随自举下发】修复"跳转到新页面后，已生成的 step 清单不见了"：
+                        // __steps 只存在于页面文档里（window.__steps），而自举载荷此前只有 picks，新文档
+                        // 无从得知此前封存过哪些 step ⇒ 面板的 step 计数与 step1/step2…清单在新页整体消失。
+                        // 各跟踪页窗口持有的是【并集】（跟随新页 / 关页时都会合并），故取快照中 step 最多的
+                        // 一份即可；不做跨页合并 —— 否则同一 step 会被多页各计一次。
+                        try {
+                            java.util.List<Object> best = null;
+                            for (String sj : pc.snapshots.values()) {
+                                if (sj == null || sj.isEmpty()) continue;
+                                java.util.Map<String, Object> sm =
+                                        GSON.fromJson(sj, RoleElementPicker.MAP_STRING_OBJECT_TYPE);
+                                Object st = (sm == null) ? null : sm.get("steps");
+                                if (st instanceof java.util.List && !((java.util.List<?>) st).isEmpty()
+                                        && (best == null || ((java.util.List<?>) st).size() > best.size())) {
+                                    best = new java.util.ArrayList<Object>((java.util.List<?>) st);
+                                }
+                            }
+                            if (best != null && !best.isEmpty()) payload.put("steps", best);
+                        } catch (Exception ignore) {
+                            RolePickerQuiet.ignore("RolePickerBridgeRegistry#stepsPayload", ignore);
+                        }
+                        if (!pc.lastPageByPage.isEmpty()) payload.put("pageByPage", pc.lastPageByPage);
+                        if (!pc.lastStepByPage.isEmpty()) payload.put("stepByPage", pc.lastStepByPage);
+                        if (!pc.lastAssertByPage.isEmpty()) payload.put("assertByPage", pc.lastAssertByPage);
+                        if (pc.lastCodeMsg != null && !pc.lastCodeMsg.isEmpty()) payload.put("msg", pc.lastCodeMsg);
+                    }
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry#codePayload", ignore); }
+                json = GSON.toJson(payload);
+            }
+            if (skippedNoClass > 0) {
+                log.warn("[picker][bootstrap] {} pick(s) skipped: no pageClass (cannot be attributed to a page tab)", skippedNoClass);
+            }
+            if (json == null || json.isEmpty()) return null;
+            final Page target = pg;
+            final String stateJson = json;
+            // 可见性：自举是"新页面回灌慢"的根治手段，必须能观测到它何时、合并了多少元素。
+            // 注意：lambda 只能捕获 effectively final 的局部变量，故先求值再转 final 别名。
+            String url;
+            try { url = target.url(); } catch (Exception ignore) { url = null; }
+            final String targetUrl = url;
+            log.info("[picker][bootstrap] new document pulled authoritative state: {} pick(s) -> {}",
+                    map.size(), targetUrl);
+            PICK_SYNC_POOL.execute(() -> {
+                long t0 = System.currentTimeMillis();
+                try {
+                    RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.MERGE_PICK_STATE_JS,
+                            RolePickerScripts.args("stateJson", stateJson));
+                    // 结果日志：自举是"新页面回灌慢"的根治手段，成败与耗时必须可观测（失败往往意味着
+                    // 该页最终要靠慢兜底链补回，表现为"十几秒后才出现元素"）。
+                    log.info("[picker][bootstrap] merged authoritative state into {} ({} pick(s), {}ms)",
+                            targetUrl, map.size(), (System.currentTimeMillis() - t0));
+                    // 【新页面板就地挂载】数据已在 66ms 内合并完，但面板本身此前只能等迟到的
+                    // onFrameNavigated → followPage → injectPanelAndLib（现场：新页出现 11s 后面板才注入，
+                    // 用户观感即"已拾取元素回灌很慢"）。根因是新文档的门控脚本常在 about:blank 阶段执行
+                    // （gateInit.switchOn=false）⇒ 面板不自启，而跨源页又读不到原 origin 的 localStorage 标记。
+                    // 自举能触发即证明"会话在、且有权威数据"，故这里在合并后立刻补挂：已挂载则零成本。
+                    try {
+                        Object has = RoleElementPicker.pickerEvalSoft(target,
+                                "!!(document.getElementById('__rolePanel') && window.__renderPicks)");
+                        if (!Boolean.TRUE.equals(has)) {
+                            RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.PANEL_SCRIPT);
+                            RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.RENDER_PICKS_JS);
+                            log.info("[picker][bootstrap] panel mounted into {} ({}ms)",
+                                    targetUrl, (System.currentTimeMillis() - t0));
+                        }
+                    } catch (Exception panelEx) {
+                        log.debug("[picker][bootstrap] panel auto-mount skipped for {}: {}", targetUrl, panelEx.getMessage());
+                        RolePickerQuiet.ignore("RolePickerBridgeRegistry#bootstrapPanel", panelEx);
+                    }
+                } catch (Exception ex) {
+                    log.warn("[picker][bootstrap] merge failed for {} after {}ms (fallback restore will retry): {}",
+                            targetUrl, (System.currentTimeMillis() - t0), ex.getMessage());
+                    RolePickerQuiet.ignore("RolePickerBridgeRegistry", ex);
+                }
+            });
+            return null;
+        });
+    }
+
+    /** 删除桥：面板「垃圾桶」删除选中元素时，浏览器端经 window.__roleOnDelete 回传，精确同步到 Java 侧权威内存态（含值级兜底匹配，杜绝删除残留）。 */
+    private static void registerDeleteBridge(BrowserContext ctx) {
+        ctx.exposeBinding("__roleOnDelete", (source, args) -> {
+            LinkedHashMap<String, RoleEntry> map = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+            if (map == null) return null;
+            try {
+                if (args == null || args.length == 0) return null;
+                Object v = args[0];
+                if (v == null) return null;
+                // 入参可能是：① 完整 pick 对象数组（新格式，推荐）或 ② 纯 key 字符串数组（旧格式兼容）。
+                // 对完整 pick 对象，用与入库时完全一致的 pickDedupKey 重新算出内存态 map key 再删，
+                // 从而精确命中「定位器唯一型策略」(key=_sig) 与「role 策略」(key=_sigKey)，彻底修复删除无效。
+                @SuppressWarnings("unchecked")
+                List<?> raw = GSON.fromJson(String.valueOf(v), List.class);
+                java.util.Set<String> dead = RolePickerPickParser.collectDeleteKeys(raw);
+                if (dead.isEmpty()) return null;
+                // 【修复"跨域/iframe 内元素只进 Java 内存态、不进浏览器 __rolePicks"导致删不掉的残留】
+                // 典型：StatusConfirmationLightIcon（testid 策略，位于 crossdomain iframe）。
+                // 跨域 iframe 因同源策略无法被 window.frames 访问，浏览器侧删除永远拿不到它，dead 里无它的键，
+                // 值级兜底也救不了（兜底仍是用 dead 的键比对）。用户点删除的语义是"删除该页全部拾取元素"，
+                // 故这里收集 dead 涉及的 pageClass，把内存态中【同一 pageClass 的其余元素】一并整桶删除。
+                // 严格绑定 pageClass，绝不会波及另一页的共用元素（LoginPage 的 footer/HSBC App tab/Language 等）。
+                java.util.Set<String> deadPages = new java.util.LinkedHashSet<>();
+                for (Object o : raw) {
+                    if (o instanceof java.util.Map) {
+                        java.util.Map<?, ?> m = (java.util.Map<?, ?>) o;
+                        Object pc = m.get("_pageClass");
+                        if (pc == null) pc = m.get("pageClass");
+                        if (pc != null && !String.valueOf(pc).isEmpty()) deadPages.add(String.valueOf(pc));
+                    }
+                }
+                // 也从 dead 键里反向解析 pageClass（键形如 pc|... 或 ["sig","pc"]）
+                for (String d : dead) {
+                    if (d == null) continue;
+                    int bar = d.indexOf('|');
+                    if (bar > 0) {
+                        deadPages.add(d.substring(0, bar));
+                    } else if (d.startsWith("[") && d.contains("\",\"")) {
+                        int c2 = d.lastIndexOf('"');
+                        int c1 = d.lastIndexOf('"', c2 - 1);
+                        if (c1 >= 0 && c2 > c1) deadPages.add(d.substring(c1 + 1, c2));
+                    }
+                }
+                synchronized (map) {
+                    int before = map.size();
+                    // ① 按 map key 直接移除；再兜底扫一遍实体上固化的 sigKey，覆盖 key 与 sigKey 不一致的历史数据。
+                    map.keySet().removeIf(dead::contains);
+                    map.entrySet().removeIf(en -> {
+                        RoleEntry re = en.getValue();
+                        return re != null && re.getSigKey() != null && dead.contains(re.getSigKey());
+                    });
+                    // ② 【根治"删除所有元素后页面类没删除干净"——值级匹配兜底】
+                    // 只按 map key / 固化 sigKey 匹配时，id/css 型元素的 key 是 Java 侧 locatorKey（含 selector），
+                    // 而删除回传的精简 delPick 常缺 selector，collectDeleteKeys 算出的 locatorKey 对不上 →
+                    // 这类元素删除 miss，残留在权威内存态，refreshCode 生成页面类时仍出现。
+                    // 这里遍历 map 每个 entry，把该 RoleEntry 的所有可识别定位标识（重算 locatorKey /
+                    // role+name / strategy+selector / strategy+name / 去索引 sig）逐一与 dead 交叉比对，
+                    // 任一命中即删除，彻底摆脱"删除请求 key 与内存态 key 格式不一致"导致的残留。
+                    map.entrySet().removeIf(en -> {
+                        RoleEntry re = en.getValue();
+                        if (re == null) return false;
+                        // 【方案 B：页面级隔离】值级兜底也必须绑定 pageClass，否则与 collectDeleteKeys 的
+                        // "pc|裸键" 口径脱钩，会退化成跨页裸键匹配（如 LoginPage / SetupSecondPwdPage 同名
+                        // 页脚、HSBC App tab、Language 的 _sig 都是裸 "role:link:Language:#0"，裸键比对会
+                        // 把另一页同名元素一并删掉）。故所有兜底键一律前缀所属 pageClass。
+                        String rpc = (re.getPageClass() != null) ? re.getPageClass() : "";
+                        if (dead.contains(en.getKey())) return true;
+                        String sigKey = re.getSigKey();
+                        if (sigKey != null && dead.contains(sigKey)) return true;
+                        // 重算 locatorKey（与入库时同源），覆盖 id/css 型 selector 缺失导致的 key 偏差
+                        String lk;
+                        try { lk = RoleElementPageGenerator.locatorKey(re); } catch (Exception ignore) { lk = null; }
+                        // 必须带 pageClass 前缀比对（同 collectDeleteKeys 的 k1 = pc|lk），杜绝跨页命中
+                        if (lk != null && !lk.isEmpty() && dead.contains(rpc + "|" + lk)) return true;
+                        // role+name / strategy+selector / strategy+name 兜底（同样前缀 pc）
+                        String strategy = re.getStrategy() == null ? "role" : re.getStrategy();
+                        if ("role".equals(strategy)) {
+                            String rk = "role:" + (re.getRole() == null ? "" : re.getRole()).toLowerCase(java.util.Locale.ROOT)
+                                    + ":" + (re.getName() == null ? "" : re.getName());
+                            if (dead.contains(rpc + "|" + rk)) return true;
+                        } else if ("id".equals(strategy) || "css".equals(strategy)) {
+                            if (re.getSelector() != null && dead.contains(rpc + "|" + strategy + ":" + re.getSelector())) return true;
+                        } else {
+                            if (re.getName() != null && dead.contains(rpc + "|" + strategy + ":" + re.getName())) return true;
+                        }
+                        return false;
+                    });
+                    // ③ 【已禁用"整桶删除同页残留"】
+                    // 原逻辑：收集被删元素的 pageClass，把同 pageClass 的所有元素全部删除。
+                    // 问题：用户点击垃圾箱只删除单个元素，但此逻辑会把同页所有元素一并删除，
+                    // 导致"删一个丢全部"。JS 侧 __deleteSinglePick 已正确处理浏览器侧删除和重编号，
+                    // Java 侧只需精确移除目标元素即可，不再做整桶删除。
+                    // 【修复"已删除元素无法重新拾取"】
+                    // 旧逻辑：会话级"已删集合"（STATE_DELETED，N-18 已删除）永久记录已删键，导致已删判定命中后跳过元素，
+                    // 用户永远无法重新拾取已删除的元素。
+                    // 新逻辑：允许用户重新拾取（该会话级已删集合已按 N-18 一并删除，不存在任何永久屏蔽）。删除的语义是"从当前拾取列表移除"，
+                    // 而非"永久封杀该元素"。若需防止本会话内已删元素复活，应由浏览器侧 __deletedSigs 临时屏蔽。
+                }
+                // 【已禁用"清空所有 frame 的 __rolePicks"】
+                // 原逻辑：删除元素时清空所有 frame 的 __rolePicks/__rolePickSigs/__currentStep。
+                // 问题：用户点击垃圾箱只删除单个元素，但此逻辑会清空所有 frame 的全部元素，
+                // 导致"删一个丢全部"。JS 侧 __deleteSinglePick 已正确处理浏览器侧删除和重编号，
+                // Java 侧只需精确移除目标元素即可，不再做全量清空。
+            } catch (Exception ex) {
+                log.warn("[picker] failed to parse __roleOnDelete callback: {}", ex.getMessage());
+            }
+            return null;
+        });
+    }
+
+    /** 控制台兜底桥：context 级 onConsoleMessage 捕获所有页面的 __roleOnPick::/__roleOnDelete:: 兜底回传与拾取链路报错，即使绑定失效回传也不丢失。 */
+    private static void registerConsoleBridge(BrowserContext ctx) {
+        // 【F4 续：context 级 dialog 兜底 —— context 级"唯一处理点"】
+        // 逐页 page.onDialog 只覆盖"已被 picker 跟踪并注册过的页"；未跟踪页 / 注册完成前弹出的
+        // alert-confirm-prompt 此前无人处理（只依赖 Playwright 对未监听弹窗的默认 dismiss）。这里在
+        // context 级补一道，覆盖该 context 下所有页；口径与逐页版一致：beforeunload 放行且不记录、
+        // confirm/prompt 拒绝、其余接受。
+        // 【为什么不会重复处理而丢标记】逐页版的 accept/dismiss 已单独包 try/catch（见
+        // RolePickerPanelController 的 page.onDialog）：本处若先关掉弹窗，逐页版那次 accept/dismiss 只会
+        // 抛 "No dialog is showing" 被吞掉，而其后的"回填 dialog 标记"照常执行（该标记只依赖
+        // window.__lastPickSig，不依赖 dialog 是否仍处于打开状态），故标记不会丢，最多多一条 debug。
+        ctx.onDialog(dialog -> {
+            try {
+                if (dialog == null) return;
+                String t = dialog.type() != null ? dialog.type().toLowerCase() : "alert";
+                if ("beforeunload".equals(t)) {
+                    dialog.accept();
+                    return;
+                }
+                if ("confirm".equals(t) || "prompt".equals(t)) dialog.dismiss();
+                else dialog.accept();
+                log.info("[picker] context-level onDialog handled a {} dialog on {}", t,
+                        dialog.page() != null ? dialog.page().url() : "(unknown page)");
+            } catch (Exception ex) {
+                log.warn("[picker] context-level onDialog handling error (ignored): {}", ex.getMessage());
+            }
+        });
+        ctx.onConsoleMessage(msg -> {
+            String t = msg.text();
+            if (t == null) return;
+            // 【诊断通道】把浏览器侧以 [picker-diag] 开头的 console 输出原样转发进 Java 日志。
+            // 此前只捕获 __roleOnPick:: 前缀，页面侧诊断（如 [picker-diag][mint-stack] 铸号调用栈探针）
+            // 在 Java 日志里完全看不到，排查时被误判为"探针未触发"。带前缀即可被转发，便于一份日志定位。
+            // 【优化-降噪】[picker-diag]* 是每次点击都会触发的探针行（record/mint/seq-baseline 等），
+            // 长会话下会刷屏；默认级别降到 DEBUG，需要复现拾取/序号问题再开 DEBUG 查看，INFO 只保留
+            // start/stop/nav 等生命周期事件。
+            if (t.startsWith("[picker-diag]")) {
+                log.debug("[browser] {}", t);
+                return;
+            }
+            if (t.startsWith("__roleOnPick::")) {
+                LinkedHashMap<String, RoleEntry> map = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+                if (map == null) return;
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<Object, Object> m = GSON.fromJson(t.substring("__roleOnPick::".length()), Map.class);
+                    // 【与 binding 通道同口径的页类纠偏】console 兜底常正是"绑定失效 / 跨源 iframe"时的唯一通路，
+                    // 若不纠偏，这类 pick 会带着旧页类落库 ⇒ 同一元素在 Java 侧变成两条、分属两个页面类
+                    //（现场：QR #3 同时以 LogonPage 与 SetupSecondPwdPage 存在）。来源页取 msg.page()。
+                    retagPickPageClass(m, msg.page(), "console");
+                    RoleEntry e = RolePickerPickParser.parsePick(m);
+                    if (e == null) return;
+                    // 【关键修复"iframe 元素丢失所属框架上下文"——console 通道对称回补】
+                    // 绑定通道（exposeBinding）有 source.frame() 可 computeFramePath 回补 framePath；
+                    // 但在内嵌 iframe 内绑定桥常失效（file:// 跨 origin / 上下文隔离），只经 console.log
+                    // 兜底到达。浏览器侧 __framePathOf 在跨源 file:// 下 window.frameElement 受限、
+                    // 整个 while 循环抛异常被吞为空数组 → pick 无 framePath → 生成 step 缺 switchToFrame。
+                    // 此处利用 msg.page() + iframe 页的 URL（e.getPageClass() 即 location.href）遍历
+                    // page.frames() 定位到目标 frame，调用 computeFramePath 回补，与绑定通道对称。
+                    if (e.getFramePath() == null || e.getFramePath().isEmpty()) {
+                        // 定位 iframe 所在 frame 的 URL：优先浏览器侧记录的 _frameUrl（仅 iframe 内写入，
+                        // origin+pathname，不污染 _pageClass）；退化用 _pageClass。file:// 无 query/hash 时
+                        // origin+pathname 与 f.url() 通常相等。
+                        String pc = null;
+                        try { Object fu0 = m.get("_frameUrl"); if (fu0 != null) pc = String.valueOf(fu0); } catch (Exception fuIgn) { RolePickerQuiet.ignore("RolePickerBridgeRegistry#frameUrl", fuIgn); }
+                        if ((pc == null || pc.isEmpty()) && e.getPageClass() != null && !e.getPageClass().isEmpty()) pc = e.getPageClass();
+                        if (pc != null && !pc.isEmpty()) {
+                            try {
+                                Page p = msg.page();
+                                if (p != null && !p.isClosed()) {
+                                    for (Frame f : p.frames()) {
+                                        // pc 是 origin+pathname（无 query/hash）；f.url() 可能是完整 URL，
+                                        // 归一化（去 query/hash、去末尾斜杠）后比较，避免 query/hash 抖动导致漏匹配。
+                                        String fu = f.url();
+                                        if (fu == null) continue;
+                                        int q = fu.indexOf('?');
+                                        if (q >= 0) fu = fu.substring(0, q);
+                                        int h = fu.indexOf('#');
+                                        if (h >= 0) fu = fu.substring(0, h);
+                                        while (fu.endsWith("/")) fu = fu.substring(0, fu.length() - 1);
+                                        if (pc.equals(fu) || pc.equals(f.url())) {
+                                            try {
+                                                List<String> fp = RolePickerFramePath.computeFramePath(p, f);
+                                                if (fp != null && !fp.isEmpty()) {
+                                                    e.setFramePath(fp);
+                                                }
+                                            } catch (Exception frameErr) { RolePickerQuiet.ignore("RolePickerBridgeRegistry#frames", frameErr); }
+                                            break;
+                                        }
+                                    }
+                                }
+                            } catch (Exception backfillErr) { RolePickerQuiet.ignore("RolePickerBridgeRegistry#backfill", backfillErr); }
+                        }
+                    }
+                    String key = RolePickerPickParser.pickDedupKey(m, e);
+                    synchronized (map) {
+                        RoleEntry existing = map.get(key);
+                        boolean changed = (existing == null)
+                                || !RolePickerPickParser.roleEq(existing.getSigKey(), e.getSigKey())
+                                || !RolePickerPickParser.framePathEq(existing.getFramePath(), e.getFramePath())
+                                || (existing.isDialog() != e.isDialog())
+                                || (existing.isPopup() != e.isPopup());
+                        RoleEntry merged = RolePickerPickParser.mergePickIntoMap(map, key, e);
+                        // 【当轮进行中记录】（与 binding 通道对称）：console 兜底通道经跨源冒泡到达，
+                        // 同样把该元素记入"当轮"，保证跨源 iframe 拾取在实时预览里也归入正确 step。
+                        RolePickerContext roundCtx = RolePickerPageTracker.contextFor(ctx);
+                        if (roundCtx != null) {
+                            synchronized (roundCtx.roundPicks) { roundCtx.roundPicks.put(key, merged); }
+                        }
+                        log.debug("[picker][diag-onpick][CONSOLE] key={} pickNos(after-merge)={} changed={} rawNos={} strategy={} keys={}", key, merged.getPickNos(), changed, m.get("_pickNos"), (e != null ? e.getStrategy() : null), (m != null ? m.keySet() : null));
+                        if (changed) {
+                            List<String> fplog = merged.getFramePath();
+                            log.info("[picker] __roleOnPick(console) callback written to in-memory state: key={} pageClass={} framePath={} (current in-memory size={})", key, (merged.getPageClass() == null ? "" : merged.getPageClass()), (fplog == null || fplog.isEmpty() ? "" : fplog.toString()), map.size());
+                            // 事件驱动即时回灌（与 binding 通道对称）：console 通道经跨源冒泡到达。
+                            // 【push 化】此处同样不再协议级遍历 frame（理由见 binding 通道同位置说明），
+                            // 跨源 iframe 的 straggler 由 debounce 自愈低频兜底。
+                            final Page cp = msg.page();
+                            if (cp != null && !cp.isClosed()) {
+                                final LinkedHashMap<String, RoleEntry> snap = map;
+                                PICK_SYNC_POOL.execute(() -> {
+                                    RolePickerPanelSync.syncPanelToBrowser(cp, null, snap);
+                                });
+                            }
+                        }
+                    }
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+            } else if (t.startsWith("__roleOnDelete::")) {
+                // 删除的控制台兜底：与 __roleOnPick:: 对称，绑定失效时删除同样不丢（按键移除天然幂等）。
+                LinkedHashMap<String, RoleEntry> map = RolePickerSessionState.CTX_PICK_STATES.get(ctx);
+                if (map == null) return;
+                try {
+                    @SuppressWarnings("unchecked")
+                    List<?> raw = GSON.fromJson(t.substring("__roleOnDelete::".length()), List.class);
+                    java.util.Set<String> dead = RolePickerPickParser.collectDeleteKeys(raw);
+                    if (dead.isEmpty()) return;
+                    synchronized (map) {
+                        map.keySet().removeIf(dead::contains);
+                        map.entrySet().removeIf(en -> {
+                            RoleEntry re = en.getValue();
+                            return re != null && re.getSigKey() != null && dead.contains(re.getSigKey());
+                        });
+                        // 【修复"i18n元素删除不干净"——值级匹配兜底】
+                        // console桥的删除兜底必须与exposeBinding桥的删除逻辑完全一致（见 __roleOnDelete 的删除桥接实现），
+                        // 否则i18n/text/css等定位器型策略的元素因key格式不一致导致删除miss。
+                        // 复制自exposeBinding __roleOnDelete处理器的值级匹配逻辑。
+                        map.entrySet().removeIf(en -> {
+                            RoleEntry re = en.getValue();
+                            if (re == null) return false;
+                            String rpc = (re.getPageClass() != null) ? re.getPageClass() : "";
+                            if (dead.contains(en.getKey())) return true;
+                            String sigKey = re.getSigKey();
+                            if (sigKey != null && dead.contains(sigKey)) return true;
+                            String lk;
+                            try { lk = RoleElementPageGenerator.locatorKey(re); } catch (Exception ignore) { lk = null; }
+                            if (lk != null && !lk.isEmpty() && dead.contains(rpc + "|" + lk)) return true;
+                            String strategy = re.getStrategy() == null ? "role" : re.getStrategy();
+                            if ("role".equals(strategy)) {
+                                String rk = "role:" + (re.getRole() == null ? "" : re.getRole()).toLowerCase(java.util.Locale.ROOT)
+                                        + ":" + (re.getName() == null ? "" : re.getName());
+                                if (dead.contains(rpc + "|" + rk)) return true;
+                            } else if ("id".equals(strategy) || "css".equals(strategy)) {
+                                if (re.getSelector() != null && dead.contains(rpc + "|" + strategy + ":" + re.getSelector())) return true;
+                            } else {
+                                if (re.getName() != null && dead.contains(rpc + "|" + strategy + ":" + re.getName())) return true;
+                            }
+                            return false;
+                        });
+                        // 【修复"已删除元素无法重新拾取"】
+                        // 与 exposeBinding 通道保持一致：不记录会话级已删集合（该状态已按 N-18 删除），允许用户重新拾取已删除的元素。
+                        // 删除的语义是"从当前拾取列表移除"，而非"永久封杀该元素"。
+                        //（N-18 已删除的写法：RolePickerSessionState.STATE_DELETED.computeIfAbsent(map, k -> ConcurrentHashMap.newKeySet()).addAll(dead);）
+                    }
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+            } else if (t.startsWith("__roleOnUrlChanged::")) {
+                // 浏览器侧 URL 变化信号（gate-init.js 在 pushState/replaceState/popstate/hashchange 时发出）：
+                // History API 导航不触发 onFrameNavigated，页类名不会自动刷新 ⇒ 新页拾取的元素会被打上旧页类
+                // （现场："url change 没有创建新页面、所有元素都在 LogonPage"）。此处反查本会话上下文，对来源页
+                // 调度一次 debounced 自愈（refreshPageClass 即时刷新页类 + iframe 聚合 + 面板回灌），
+                // 事件驱动补齐该空档，无需恢复轮询。
+                RolePickerContext pc = RolePickerPageTracker.contextFor(ctx);
+                if (pc != null) {
+                    Page urlChangedPage = msg.page();
+                    if (urlChangedPage != null && !urlChangedPage.isClosed()) {
+                        RolePickerPanelController.scheduleSelfHeal(pc, urlChangedPage);
+                    }
+                }
+            } else if ("error".equals(msg.type())
+                    && (t.contains("rolePick") || t.contains("__record") || t.contains("__role"))) {
+                log.info("[browser][error] {}", t);
+            } else if (t.startsWith("[roleMouseDiag]")) {
+                // 鼠标事件诊断（mousedown/up/dblclick/contextmenu）实时转发，前缀过滤避免误吞其它字节。
+                // 拾取过程中每条鼠标动作一条 ⇒ 持续刷屏（实测每次点击 1~2 条），故降为 DEBUG：
+                // 默认级别下静默，需要复现鼠标/拾取问题时再开 DEBUG 查看。
+                log.debug("[browser]{}", t);
+            }
+        });
+    }
+
+    /** 动态 iframe 监听器：context 级对每个（含弹窗/新开）页面挂 onFrameAttached，覆盖运行时新附加/动态创建的 iframe。 */
+    private static void registerFrameAttachListener(BrowserContext ctx) {
+        ctx.onPage(p -> RolePickerScriptInjector.registerFrameInjection(p, RolePickerSessionState.CTX_PICKER_NLS.get(ctx)));
+    }
+
+    /**
+     * 抽干浏览器端兜底命令队列 window.__panelCmds 并入 Java 命令队列 cmdQueue。
+     * 当 exposeFunction 绑定（window.__rolePickerCmd）尚未就绪时，面板按钮的 pushCmd 会把命令
+     * 暂存进 window.__panelCmds（见 PANEL_SCRIPT）。若不消费，这些命令会静默丢失，导致"点了开始却
+     * 拾取不了"。此处由 Java 主循环周期性抽干，保证命令零丢失。与 exposeFunction 投递幂等、不会重复。
+     */
+    static void drainPanelCmds(Page page, BlockingQueue<CmdEvent> cmdQueue) {
+        if (page == null || page.isClosed() || cmdQueue == null) return;
+        try {
+            Object raw = RoleElementPicker.pickerEval(page, RolePickerScripts.DRAIN_PANEL_CMDS_JS);
+            if (raw instanceof List) {
+                for (Object o : (List<?>) raw) {
+                    String c = o == null ? null : o.toString();
+                    cmdQueue.offer(new CmdEvent(page, c));
+                }
+            }
+        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerBridgeRegistry", ignore); }
+    }
+}

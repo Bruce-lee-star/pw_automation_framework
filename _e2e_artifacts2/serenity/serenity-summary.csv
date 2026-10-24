@@ -1,8 +1,0 @@
-outcomeId,feature,scenario,result,durationMs,startTime,endTime,tags,failureClass,failureMessage
-route-capability-e2e-22-route-v2-e2e-capture,route_capability_e2e,route v2 e2e - 登录期真实接口采集（CAPTURE）,SUCCESS,94169,2026-10-20T00:04:31.452+08:00,2026-10-20T00:06:10.343+08:00,@regression;@route;@route-e2e;@route-e2e-capture,,
-route-capability-e2e-32-route-v2-e2e-monitor,route_capability_e2e,route v2 e2e - 登录期 MONITOR 断言真实接口,SUCCESS,51769,2026-10-20T00:06:10.592+08:00,2026-10-20T00:07:04.845+08:00,@regression;@route;@route-e2e;@route-e2e-monitor,,
-route-capability-e2e-39-route-v2-e2e-mock,route_capability_e2e,route v2 e2e - 登录期 MOCK 静态体（真实夹具 + 字段替换 + 自定义头）,SUCCESS,45016,2026-10-20T00:07:04.862+08:00,2026-10-20T00:07:51.794+08:00,@regression;@route;@route-e2e;@route-e2e-mock,,
-route-capability-e2e-46-route-v2-e2e-mock-when-then,route_capability_e2e,route v2 e2e - 登录期 MOCK 条件替换 when/then（命中 + 不命中两分支）,SUCCESS,46185,2026-10-20T00:07:51.811+08:00,2026-10-20T00:08:39.894+08:00,@regression;@route;@route-e2e;@route-e2e-mock-when,,
-route-capability-e2e-53-route-v2-e2e-modify,route_capability_e2e,route v2 e2e - 登录期 MODIFY 改写请求（自定义请求头到达服务端）,SUCCESS,48282,2026-10-20T00:08:39.909+08:00,2026-10-20T00:09:30.027+08:00,@regression;@route;@route-e2e;@route-e2e-modify,,
-route-capability-e2e-60-route-v2-e2e-delay,route_capability_e2e,route v2 e2e - 登录期 DELAY 延时（链路完整 + 规则命中）,SUCCESS,85889,2026-10-20T00:09:30.066+08:00,2026-10-20T00:10:58.096+08:00,@regression;@route;@route-e2e;@route-e2e-delay,,
-route-capability-e2e-67-route-v2-e2e-modify-mock-monitor-pattern,route_capability_e2e,route v2 e2e - 登录期能力并存与执行顺序（MODIFY + MOCK + MONITOR 同 pattern）,SUCCESS,50157,2026-10-20T00:10:58.139+08:00,2026-10-20T00:11:50.974+08:00,@regression;@route;@route-e2e;@route-e2e-priority,,
