@@ -480,4 +480,71 @@ pw-codegen/src/main/java/.../scan/RolePickerSessionState.java  加 CTX_CDP_SESSI
 RolePickerCommandEngine / RolePickerCodeAssembler /
 RoleElementPageGenerator / RolePickerNlsCache /
 RolePickerPanelController / RolePickerScriptInjector（仅在 CDP 模式下不被调用）
+
+---
+
+## 十四、scan 包层级分类（企业级重分包）【2026-10-24 增补】
+
+> 注：本文件前十三章按旧模块 `pw-codegen` 命名；当前实现已迁至 `pw-codegen-v2`，包路径
+> `com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan` 不变，子包方案见本章。
+
+### 14.1 现状问题
+- `scan` 根包挤了 **27 个生产类**（capture / state / naming / record / generate / spi / 常量），
+  另 `scan.model/` 已有 6 个 POJO（PickMode / PickerAction / PickerResult / PickSnapshot / StepRec / PageOp）。
+- 这些类高度内聚、靠**包级私有（默认访问）**互相协作：`RolePickerContext` / `RolePickerQuiet` /
+  `RolePickerSessionState` / `RolePickerPanelSync` 等都是包级私有，被其它引擎类直接访问。
+
+### 14.2 为什么不能物理拆成 7 层
+1. **封装破坏**：若把 capture / state / naming / record 各拆成独立子包，跨包就不可访问 →
+   必须把这 ~20 个内部类（及被跨包访问的成员）提为 `public`，削弱内聚封装。
+2. **真实循环依赖（更关键）**：`RoleRecordSession`（record）直接调用
+   `RoleElement*Generator`（generate），而生成器又用 `RolePickerClassNameResolver`（naming/engine）
+   与 `RoleEntry`（model），形成 **`engine ↔ generate` 循环**。若把 generate 拆成独立包，会出现
+   包级循环依赖（坏味道，违背分层初衷）。
+3. 结论：capture / state / naming / record / generate 五组不是分层关系，而是**同一高内聚引擎**，
+   必须留在同一包。
+
+### 14.3 推荐结构（无环 · 零封装破坏）
+| 包 | 内容 | 依赖 |
+|---|---|---|
+| `scan.model` | `RoleEntry` + 现有 6 个 POJO | 仅 `web.page.element.RoleElement`（叶子层，零引擎依赖） |
+| `scan.engine` | 全部引擎类：capture / state / naming / record / generate + `RolePickerConstants` + `RolePickerBridgeRegistry` | → `model` |
+| `scan.spi` | `RoleElementPickerBridge`（SPI 实现，web 经 ServiceLoader 注入） | → `engine`（仅引用其 **public** API） |
+| `scan`（根） | 仅做父包，不再放类 | — |
+
+依赖方向：`model ← engine ← spi`，**无环**；引擎内部包级私有协作原样保留，**零可见性改动**。
+`RoleElementPickerBridge` 经核查只引用 engine 的 public API（`RoleElementPicker.*`、
+`RoleElementPageGenerator.collectFromPage`、`RoleEntry`），单独成 `spi` 包不破坏封装。
+
+### 14.4 类到层映射
+- **model（7）**：`RoleEntry` + `PickMode` / `PickerAction` / `PickerResult` / `PickSnapshot` / `StepRec` / `PageOp`
+- **engine（25）**：`RolePickerCaptureDispatcher` / `RolePickerCdpConfig` / `RolePickerCdpNodeExtractor` /
+  `RolePickerCdpSession` / `RolePickerFramePath` / `RolePickerPageTracker` / `RolePickerScriptInjector` /
+  `RolePickerScripts` / `RolePickerContext` / `RolePickerNlsCache` / `RolePickerQuiet` / `RolePickerSessionState` /
+  `RolePickerClassNameResolver` / `RolePickerPickParser` / `RolePickerSnapshotParser` / `RoleElementPicker` /
+  `RolePickerCommandEngine` / `RolePickerPanelController` / `RolePickerPanelSync` / `RoleRecordSession` /
+  `RoleElementAssertionGenerator` / `RoleElementPageGenerator` / `RoleElementStepGenerator` /
+  `RolePickerCodeAssembler` / `RolePickerConstants` / `RolePickerBridgeRegistry`
+- **spi（1）**：`RoleElementPickerBridge`
+
+### 14.5 为什么不做"generate 独立成包 + 抽编排器"的更细拆法
+更彻底的拆法：把 `RoleRecordSession.generate()` 的编排逻辑抽成 `scan.generate` 包里的
+`RolePickerSynthesis` 编排器，让 engine 不再调用生成器，从而 `generate` 可独立成包。但这要改动
+"谁触发出码" 的调用链（属于行为级重构，有回归风险），且收益仅是多一层目录。当前先用 14.3 的
+**低风险的纯物理搬移**（零行为变更）落地分层；若日后要进一步解耦，再按上述抽编排器方案演进。
+
+### 14.6 迁移方式（幂等 · 可回退）
+1. `git mv` 把 27 个根包类按 14.4 移入 `model` / `engine` / `spi`；更新被移动文件的 `package` 声明。
+2. 全局重写 import：引用方按新包路径改写（`scan.<C>` → `scan.model.<C>` / `scan.engine.<C>` / `scan.spi.<C>`）；
+   同包引用不变。测试类（`test/.../scan` 与 `test/.../scan/model`）原本无 import 直接引用生产类，
+   搬移后补 `import`。
+3. `META-INF/services/...RoleCodegenBridge` 的实现类 FQN 由 `scan.RoleElementPickerBridge` 改为
+   `scan.spi.RoleElementPickerBridge`。
+4. `web` 模块零编译依赖 scan（仅经 SPI 反射 / ServiceLoader），无需改动。
+5. 验证：`mvn -o -pl pw-codegen-v2 test-compile` + 跑 pw-codegen-v2 全量测试。
+
+### 14.7 落地校验清单
+- `RoleElementPickerBridge` 仅引用 engine 的 public API；若 `RoleElementPageGenerator.collectFromPage`
+  为包级私有，提升为 `public` 并加 `@apiNote("codegen SPI 入口，稳定公开契约")`。
+- 搬移后 `RolePickerConstants` 与引擎类同包（`engine`），保持包级私有即可，无需提升可见性。
 ```

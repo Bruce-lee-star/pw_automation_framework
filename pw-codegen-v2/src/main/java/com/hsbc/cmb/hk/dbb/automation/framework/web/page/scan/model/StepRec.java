@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RoleEntry;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.RoleEntry;
 import java.util.List;
 
 /**

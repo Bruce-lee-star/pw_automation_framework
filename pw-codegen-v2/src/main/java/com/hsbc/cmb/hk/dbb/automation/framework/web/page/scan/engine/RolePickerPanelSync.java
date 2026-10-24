@@ -1,0 +1,292 @@
+package com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine;
+
+import com.google.gson.Gson;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.Frame;
+import com.microsoft.playwright.Page;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.pickerEval;
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.safeOrigin;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.RoleEntry;
+
+/**
+ * 面板同步引擎：把 Java 权威拾取内存态（javaPickBySig）合并 iframe 拾取、回灌浏览器面板，
+ * 并维护按 Page 的 ETag 签名缓存以短路静止期同步。
+ * 从 {@link RoleElementPicker} 抽出，方法体原样迁移，行为零变更。
+ */
+final class RolePickerPanelSync {
+
+    private static final Logger log = LoggerFactory.getLogger(RolePickerPanelSync.class);
+
+    /** 与 RoleElementPicker 同语义的 JSON 序列化器（Gson 无状态，独立实例行为等价）。 */
+    private static final Gson GSON = new Gson();
+
+    // O2：syncPanelToBrowser 的 ETag 缓存——按 Page 记录上次同步的内容签名，未变则跳过整轮同步。
+    static final Map<Page, String> LAST_SYNC_SIG = new ConcurrentHashMap<>();
+
+    private RolePickerPanelSync() {}
+
+    /**
+     * CT2-20：释放指定 Page 的同步签名缓存（页面关闭 / 拾取会话结束）。
+     *
+     * <p>{@code LAST_SYNC_SIG} 以 {@link Page} <b>强引用</b>为键，而清理点此前全仓唯一
+     * （{@code RolePickerCommandEngine} 重编号后为强制刷新 ETag 而 remove）——
+     * 普通拾取会话的页面<b>永不被移除</b>，长跑套件下按 Page 无界增长并阻止已关闭 Page 回收。
+     */
+    static void cleanupPage(Page page) {
+        if (page != null) {
+            LAST_SYNC_SIG.remove(page);
+        }
+    }
+
+    /** CT2-20：释放属于指定 Context 的全部同步签名缓存。 */
+    static void cleanupContext(BrowserContext ctx) {
+        if (ctx == null) {
+            return;
+        }
+        LAST_SYNC_SIG.keySet().removeIf(p -> {
+            if (p == null) {
+                return true;
+            }
+            try {
+                return p.context() == ctx;
+            } catch (Exception ignore) {
+                return true; // 页面已关闭，保守清理
+            }
+        });
+    }
+
+    /**
+     * 作废某页的同步签名（ETag），使下一轮回灌【必然重写】该页。
+     *
+     * <p>用途：整页导航会新建文档、浏览器侧 {@code __rolePicks}/计数器全部清空，而 ETag 只比较
+     * 「Java 权威态是否变化」——导航前后 Java 态没变，于是判为"无需回灌"，新文档便永远收不到已拾元素：
+     * 表现为「URL 变化后面板缺少变化之前的元素」，且新页从 1 起号（两页都出现 1）。
+     * 故在检测到页类变化（= 换了文档）时调用本方法，强制下一轮全量重写。
+     */
+    static void invalidateSync(Page page) {
+        if (page != null) LAST_SYNC_SIG.remove(page);
+    }
+
+    /** CT2-20：清空全部同步签名缓存（JVM 关闭 / 集群重置）。 */
+    static void clearAll() {
+        LAST_SYNC_SIG.clear();
+    }
+
+    /**
+     * 【关键修复"iframe 内元素不进面板"】（原标题为"整页/区域扫描后…"，扫描功能已整体移除，
+     * 手动拾取 iframe 元素同样需要本合并）。
+     * 由 Java 侧遍历 page.frames()，读回各 iframe 自己的 window.__rolePicks（Playwright 协议访问不受
+     * file:// 跨源限制），按 sigKey 去重后显式合并进【主框架】window.__rolePicks 并触发渲染，使面板与
+     * readPickSnapshot（读主框架）都能看到 iframe 内元素。
+     */
+    /** 单帧读回超时：兜底动作，必须远小于常规软超时（2s）。 */
+    private static final long FRAME_MERGE_TIMEOUT_MS =
+            Integer.getInteger("codegen.picker.frameMerge.timeout.ms", 300);
+    /** 单轮合并总预算：超出即放弃剩余 frame（幂等，下一轮自然重试）。 */
+    private static final long FRAME_MERGE_BUDGET_MS =
+            Integer.getInteger("codegen.picker.frameMerge.budget.ms", 600);
+    /** 连续失败达到该次数的 frame URL 之后各轮直接跳过（广告/跟踪 frame 的读回成本一次性收敛为 0）。 */
+    private static final int FRAME_MERGE_DEAD_AFTER = 2;
+    /** frame URL → 连续失败次数（有界：超限整体清空，防长跑累积）。 */
+    private static final java.util.Map<String, java.util.concurrent.atomic.AtomicInteger> FRAME_MERGE_FAILS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    static void mergeFramePicksToMain(Page page, LinkedHashMap<String, RoleEntry> javaPickBySig) {
+        if (page == null || page.isClosed()) return;
+        final long deadline = System.currentTimeMillis() + FRAME_MERGE_BUDGET_MS;
+        // 【优化-降噪/去卡顿】跨域 iframe（第三方追踪/广告/反欺诈，如 h.online-metrix.net/fp/tags）内几乎不存在
+        // 用户要拾取的 role 元素，且其 evaluate 常因脚本阻塞而挂起（实测 WARN "failed to merge iframe picks
+        // ... pickerEval timed out after 300ms"）。默认跳过跨域 frame 的合并：既消除 300ms 卡顿与 WARN 噪声，
+        // 也避免对第三方 frame 做无谓读回。同域 iframe（如 SetupSecondPwdPage 内的二维码图）仍正常合并。
+        // 用 -Dcodegen.picker.iframe.merge.skipCrossOrigin=false 可退回逐帧读回（保留对真正跨域可拾取 frame 的兼容）。
+        final boolean skipCrossOrigin = Boolean.getBoolean("codegen.picker.iframe.merge.skipCrossOrigin");
+        final String mainOrigin = skipCrossOrigin ? safeOrigin(page.url()) : "";
+        for (Frame f : page.frames()) {
+            if (f == null || f.equals(page.mainFrame())) continue;
+            // 【整轮预算】读回只是兜底（拾取本身走 __roleOnPick 事件上行），故必须封顶：
+            // 超出预算即放弃剩余 frame，绝不让"广告 frame 集合"把本轮拖住（幂等，下一轮自然重试）。
+            if (System.currentTimeMillis() > deadline) {
+                log.debug("[picker] frame merge budget ({}ms) exhausted; remaining frames deferred: {}",
+                        FRAME_MERGE_BUDGET_MS, page.url());
+                break;
+            }
+            String fu = null;
+            try { fu = f.url(); } catch (Exception ignore) { fu = null; }
+            // about:blank / about:srcdoc 从不承载业务拾取（且常因跨源或已被销毁而 evaluate 失败），直接跳过。
+            if (fu == null || fu.isEmpty() || fu.startsWith("about:")) continue;
+            // 【优化-跨域早退】跨域 frame 直接跳过，不再发起 300ms 的 pickerEvalSoft（省卡顿、去 WARN）。
+            if (skipCrossOrigin) {
+                String fOrigin = safeOrigin(fu);
+                if (!fOrigin.isEmpty() && !mainOrigin.isEmpty() && !fOrigin.equals(mainOrigin)) {
+                    log.debug("[picker] skipping cross-origin iframe merge (frame origin={}, page origin={}): {}",
+                            fOrigin, mainOrigin, fu);
+                    continue;
+                }
+            }
+            java.util.concurrent.atomic.AtomicInteger fails = FRAME_MERGE_FAILS.get(fu);
+            if (fails != null && fails.get() >= FRAME_MERGE_DEAD_AFTER) continue;
+            try {
+                // 【必须用更短的超时】主循环/自愈每轮对子 frame 的读取：跨域/过渡期 frame 的 evaluate 会失败或
+                // 长时间挂起（现场 WARN "failed to merge iframe picks ...: pickerEval failed" 即此处）。
+                // 页面上的广告/跟踪 frame（如 match.adsrvr.org）常因脚本阻塞而挂住，旧实现逐个吃满 2s，
+                // 十几帧即累加到 10~20s —— 这正是"新页面回灌非常慢"的主因，故此处取 300ms。
+                Object frameJson = RoleElementPicker.pickerEvalSoft(f, RolePickerScripts.READ_FRAME_PICKS_RAW_JS, FRAME_MERGE_TIMEOUT_MS);
+                if (fails != null) fails.set(0);   // 读回成功：复位该 frame 的连续失败计数
+                if (frameJson instanceof String) {
+                    final String json = (String) frameJson;
+                    if (!json.isEmpty() && !"[]".equals(json.trim())) {
+                        try {
+                            @SuppressWarnings("unchecked")
+                            List<?> arr = GSON.fromJson(json, List.class);
+                            if (arr != null) {
+                                synchronized (javaPickBySig) {
+                                    for (Object item : arr) {
+                                        try {
+                                            if (!(item instanceof Map)) continue;
+                                            @SuppressWarnings("unchecked")
+                                            Map<Object, Object> m = (Map<Object, Object>) item;
+                                            String strat = RoleElementPicker.asString(m.get("strategy"));
+                                            String nm = RoleElementPicker.asString(m.get("name"));
+                                            if (RolePickerConstants.STRATEGY_TEXT.equals(strat) && nm != null && nm.length() >= 25) continue;
+                                            RoleEntry e = RolePickerPickParser.parsePick(m);
+                                            if (e == null) continue;
+                                            if (e.getFramePath() == null || e.getFramePath().isEmpty()) {
+                                                try {
+                                                    List<String> fp = RolePickerFramePath.computeFramePath(page, f);
+                                                    if (fp != null && !fp.isEmpty()) e.setFramePath(fp);
+                                                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+                                            }
+                                            String key = RolePickerPickParser.pickDedupKey(m, e);
+                                            if (key != null && !key.isEmpty()) {
+                                                //  N-18：此处原有「会话级已删集合（STATE_DELETED）命中即跳过」的分支，
+                                                //    自删除语义改为「仅从当前拾取列表移除、允许重新拾取」后该集合已无写入点，
+                                                //    判定恒为 false —— 纯死分支，已连同那个死状态一起删除。
+                                                //    留着它的唯一效果是让人误以为「已删元素复活」已被防住。
+                                                RolePickerPickParser.mergePickIntoMap(javaPickBySig, key, e);
+                                            }
+                                        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+                                    }
+                                }
+                            }
+                        } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+                    }
+                }
+            } catch (Exception fe) {
+                // 【自适应跳过】同一批慢/失败 frame（多为广告、跟踪位）每轮都会被遍历到并吃满超时；
+                // 这里对 frame URL 记一次连续失败，达到阈值后各轮直接跳过，使该项成本一次性收敛为 0。
+                // 表有界：条目过多时整体清空，避免长跑套件下无界增长。
+                try {
+                    FRAME_MERGE_FAILS.computeIfAbsent(fu,
+                            k -> new java.util.concurrent.atomic.AtomicInteger()).incrementAndGet();
+                    if (FRAME_MERGE_FAILS.size() > 1024) FRAME_MERGE_FAILS.clear();
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+                try {
+                    String feMsg = fe.getMessage() == null ? "" : fe.getMessage();
+                    if (feMsg.contains("closed") || feMsg.contains("detached")
+                            || feMsg.contains("TargetClosed") || feMsg.contains("Target page")) {
+                        log.debug("[picker] skipping closed/detached iframe (url={}): {}", f.url(), feMsg);
+                    } else {
+                        log.warn("[picker] failed to merge iframe picks into the main frame (url={}): {}", f.url(), feMsg);
+                    }
+                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+            }
+        }
+    }
+
+    /**
+     * 把 Java 权威拾取内存态（javaPickBySig）按目标页 pageClass 过滤后同步到该页浏览器面板展示数组
+     * window.__rolePicks 并触发渲染。
+     * 修复"当前跟随页(current[0])不是用户正在点击的页时，那个页面的面板空白、看不到已拾元素"：
+     * 改为对每个被跟踪页面分别同步（调用处遍历 pageNames），使任一页面的面板都能实时反映 Java 侧已拾内容。
+     * 仅用于面板展示；代码生成仍走 javaPickBySig（见 runPickerCommand），不受影响。
+     * 注意：不再清空 window.__rolePickSigs，避免干扰浏览器端真实点击的去重计数。
+     */
+    /**
+     * 把 Java 权威内存态回灌浏览器侧 __rolePicks。
+     *
+     * <p>序号合并策略恒为「保留更长」：浏览器侧已有的 _pickNos 与 Java 下发的取并（不整体覆盖），
+     * 以修复 i18n 并发回传导致的丢号竞态。面板序号编辑（原 {@code repickNos} 对象命令及其
+     * {@code overwriteNos=true} 覆盖路径）已整体移除，故不再需要该开关。
+     */
+    static void syncPanelToBrowser(Page page, LinkedHashSet<String> pageClasses, LinkedHashMap<String, RoleEntry> state) {
+        if (page == null || page.isClosed() || state == null) return;
+        //  N-20（doc 21 MEDIUM）：快照必须【在锁内完成对可变 RoleEntry 的全部读取】。
+        //  原实现只在锁内拷了 values() 的【引用】（浅快照），随后在锁外读 getPageClass / getSigKey /
+        //  getStrategy / getSelector / getIndex / getPickNos，并执行 GSON.toJson(filtered)（会遍历
+        //  RoleEntry 的全部字段）、还要打印 diag 日志 —— 而写方（派发线程）正是在 synchronized(state)
+        //  内改结构并（如 setFramePath）改字段：读方在锁外读这些可变字段属数据竞态，可能观测到撕裂 /
+        //  半更新状态（getPickNos 还可能返回正在被修改的集合）。
+        //  现把「过滤 + ETag 签名 + JSON 序列化 + diag 日志」整体移入同一把锁；锁【不】延伸到
+        //  page.evaluate 阻塞调用与 CHM 读写，避免把网络等待带进临界区。
+        StringBuilder sig = new StringBuilder();
+        sig.append(pageClasses == null ? "*" : pageClasses.toString());
+        List<RoleEntry> filtered = new ArrayList<>();
+        String json;
+        // 写回明细：锁内采集（读的是可变字段，见上方 N-20 竞态说明），锁外仅在真正写回时输出。
+        List<String> syncDetail = null;
+        synchronized (state) {
+            for (RoleEntry e : state.values()) {
+                String pc = e.getPageClass();
+                if (pageClasses != null && pc != null && !pc.isEmpty() && !pageClasses.contains(pc)) {
+                    continue;
+                }
+                filtered.add(e);
+                sig.append('\u0001').append(e.getSigKey()).append('|')
+                   .append(e.getStrategy()).append('|').append(e.getSelector())
+                   .append('|').append(e.getIndex())
+                   .append('|').append(e.getPickNos() == null ? "" : e.getPickNos());
+            }
+            json = GSON.toJson(filtered);
+            // 【修复"空闲时同一批元素每秒刷屏"】这里原先对每个元素直接 log.info 一条 [diag-sync]，
+            // 而 ETag 判重（下方 newSig.equals(prev)）在其之后才做 ⇒ 面板空闲、状态完全没变的每一轮
+            // （主循环 ~1s）都会把同一批元素重打一遍（实测同 3 个元素每秒重复、pickNos 恒为 []）。
+            // 该日志又必须在锁内（读的是可变字段，见上方 N-20 竞态说明），故改为：锁内只把明细收进
+            // 字符串（仅 DEBUG 开启时才算），真正发生写回时再输出——空闲轮次零日志、零字符串开销。
+            if (log.isDebugEnabled()) {
+                syncDetail = new ArrayList<>(filtered.size());
+                for (RoleEntry e : filtered) {
+                    Map<Object, Object> keySrc = new LinkedHashMap<>();
+                    keySrc.put("_sigKey", e.getSigKey());
+                    keySrc.put("_pageClass", e.getPageClass());
+                    syncDetail.add("[picker][diag-sync] write-back key=" + RolePickerPickParser.pickDedupKey(keySrc, e)
+                            + " sigKey=" + e.getSigKey() + " strategy=" + e.getStrategy()
+                            + " pickNos=" + e.getPickNos());
+                }
+            }
+        }
+        try {
+            String newSig = sig.toString();
+            String prev = LAST_SYNC_SIG.get(page);
+            if (newSig.equals(prev)) return;
+            // 只在"确实变了、要写回"时输出一条 INFO（空闲轮次在上一行就 return 了，不再刷屏）。
+            if (log.isInfoEnabled()) {
+                log.info("[picker][sync] panel write-back: {} element(s) changed", filtered.size());
+            }
+            if (syncDetail != null) {
+                for (String line : syncDetail) {
+                    log.debug("{}", line);
+                }
+            }
+            String delJson = "[]";
+            String syncJsonB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String syncDelB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(delJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // 【必须用短超时】面板回灌是"每轮都会重做、丢掉无害"的幂等动作；若沿用 30s 默认超时，页面在
+            // 导航瞬间抖动会把同一轮的关键动作（页类刷新、计数器垫高、监听重挂）一起卡住（实测 30s 停摆）。
+            RoleElementPicker.pickerEvalSoft(page, RolePickerScripts.SYNC_PANEL_TO_BROWSER_JS,
+                    java.util.Arrays.asList(syncJsonB64, syncDelB64));
+            // 【修复 ETag 毒化】必须在浏览器侧写回成功后才记签名：否则写回失败时签名已被标为"已同步"，
+            // 后续相同状态永不重投，面板便再也不更新（表现为"点了元素、面板列表不刷新"）。
+            LAST_SYNC_SIG.put(page, newSig);
+        } catch (Exception syncE) {
+            try { log.warn("[picker] failed to sync the panel to the browser: {}", syncE.getMessage()); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+        }
+    }
+
+}
