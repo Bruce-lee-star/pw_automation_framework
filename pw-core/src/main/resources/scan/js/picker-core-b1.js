@@ -1162,6 +1162,21 @@
               }
 
 
+              // 上溯到最近可交互祖先（对齐 page.pause() 的 Inspector 无上限上溯）。
+              // 从 startEl 自身起逐层 parentElement 向上；每层先经 resolveLabel（label→控件）
+              // 再按 INTERACTIVE_ROLES 判定。命中即返回该祖先；走到 document 根
+              // （html.parentElement === null）仍无命中则返回 null，由调用方保持原节点
+              // （与 Inspector 对非可操作元素返回自身一致）。不加数字上限，完全等价 Inspector。
+              function __raiseToInteractive(startEl) {
+                var cur = startEl;
+                while (cur) {
+                  var node = resolveLabel(cur);
+                  if (INTERACTIVE_ROLES[(getRole(node) || '').toLowerCase()]) return node;
+                  cur = cur.parentElement;
+                }
+                return null;
+              }
+
               window.__computePick = function(t) {
 
 
@@ -1238,17 +1253,8 @@
                 // skip the interactive-ancestor redirect so the label keeps being picked
                 // independently from its associated input (fix: label independent from input).
                 if (!(originalIsLabel && el === t)) {
-                  var cur = t, guard = 0;
-                  // 对齐 page.pause() 的 Inspector 上溯：从点击节点向上找最近可交互祖先，原 5 层硬上限会
-                  // 在深层组件 / 嵌套 Web Component 下停在精确点击节点，导致拾取元素偏离 Inspector。
-                  // 改为「直到根或命中可交互角色」，保留 50 层安全上限以防极端异常 DOM 死循环。
-                  while (cur && guard++ < 50) {
-                    var node = resolveLabel(cur);
-                    if (INTERACTIVE_ROLES[(getRole(node) || '').toLowerCase()]) {
-                      el = node; break;
-                    }
-                    cur = cur.parentElement;
-                  }
+                  var raised = __raiseToInteractive(t);
+                  if (raised) el = raised;
                 }
                 window.__lastPickEl = el;
 
