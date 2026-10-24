@@ -87,6 +87,13 @@
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- 架构分层门禁（固化 scan.model/engine/spi 依赖方向，企业级分层守护；版本由 BOM 管理） -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>
 
