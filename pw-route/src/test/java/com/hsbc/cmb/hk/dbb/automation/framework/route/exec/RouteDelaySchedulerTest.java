@@ -57,4 +57,43 @@ public class RouteDelaySchedulerTest {
     public void nullTaskIsIgnored() {
         RouteDelayScheduler.delay(1L, null);
     }
+
+    /**
+     * P1-7 收口：此前 {@code ScheduledThreadPoolExecutor} 默认无界队列 + AbortPolicy 下，
+     * executor 级 {@code RejectedExecutionException} 只在 shutdown 后触发 —— 正常运营中
+     * {@link RouteDelayScheduler#rejectedCount()} 恒为 0（死信号）。改为准入阶段软上限后，
+     * 真实饱和（积压超 maxPending）必须触发丢弃并计数，让"调度池饱和"诊断信号可观测。
+     */
+    @Test
+    public void schedulerSaturatesAndCountsRejections() throws Exception {
+        final int savedMax = currentMaxPending();
+        RouteDelayScheduler.setMaxPending(8); // 缩小软上限，构造真实饱和
+        try {
+            long before = RouteDelayScheduler.rejectedCount();
+            // 一次性投递远超上限的微任务（50ms 延迟，2 线程来不及排空，积压必超 8）
+            for (int i = 0; i < 2000; i++) {
+                RouteDelayScheduler.delay(50L, () -> { /* 空任务：只占位，不碰连接 */ });
+            }
+            // 真实饱和下 rejectedCount 必须较基线增长（此前恒为 0，是死信号）
+            assertTrue("P1-7：饱和时 rejectedCount 必须可触发（此前恒为 0，是死信号）",
+                    RouteDelayScheduler.rejectedCount() > before);
+            // 主动观测：backlog 已被软上限钳制，不应无限堆积（<= maxPending 量级）
+            assertTrue("backlog 必须被软上限钳制，不得无限堆积",
+                    RouteDelayScheduler.backlog() <= 8 + 64); // 容差：在途 2 + 排队上限 8 + 收尾抖动
+        } finally {
+            RouteDelayScheduler.setMaxPending(savedMax);
+            Thread.sleep(120); // 让已排队的微任务排空，避免影响后续用例
+        }
+    }
+
+    /** 读取当前软上限（同包可访问 setMaxPending，这里用反射兜底以免暴露 getter）。 */
+    private static int currentMaxPending() {
+        try {
+            var f = RouteDelayScheduler.class.getDeclaredField("maxPending");
+            f.setAccessible(true);
+            return (int) f.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 }

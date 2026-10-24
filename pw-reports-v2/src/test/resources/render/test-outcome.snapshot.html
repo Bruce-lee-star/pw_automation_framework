@@ -432,6 +432,7 @@
 <script>
 (function(){
   var OUTCOME_ID = "login-12-user-logs-in-with-valid-credentials";
+  var OUTCOME_OVERRIDE_NOTE = null;
   var VERDICT_KEY = 'pw-manual-scenario-success';
 
   /* 底部 Tab 切换（Console log / Playwright trace / Playwright records）：
@@ -548,9 +549,8 @@
     });
   };
 
-  //  失败用例操作按钮：上传补图 + 标记通过
+  //  失败用例 / 已标记用例操作按钮：上传补图 + 标记通过（可改备注）+ 撤销标记
   var upBtn = document.getElementById('btn-upload');
-  var msBtn = document.getElementById('btn-marksuccess');
   var input = document.getElementById('shot-input');
   if (upBtn && input) {
     upBtn.addEventListener('click', function() { input.click(); });
@@ -558,22 +558,41 @@
       if (input.files && input.files.length) { window.__doPatch(input.files); input.value = ''; }
     });
   }
-  if (msBtn) {
-    msBtn.addEventListener('click', function() {
-      var applied = function() {
-        saveVerdict(OUTCOME_ID);
-        applyVerdicts();
-        alert('Scenario marked as success (this browser only).');
-      };
+  function markSuccessWithNote(existingNote) {
+    var note = window.prompt('Mark note (optional):', existingNote || '');
+    if (note === null) { return; }
+    var applied = function() {
+      saveVerdict(OUTCOME_ID);
+      applyVerdicts();
+      alert('Scenario marked as success (this browser only).');
+    };
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      postJson('api/mark-success', { outcomeId: OUTCOME_ID, note: note })
+        .then(function(d) { if (d && d.ok) { setTimeout(function() { location.reload(); }, 400); } else { applied(); } })
+        .catch(function() { applied(); });
+    } else {
+      applied();
+    }
+  }
+  var msBtn = document.getElementById('btn-marksuccess');
+  if (msBtn) { msBtn.addEventListener('click', function() { markSuccessWithNote(''); }); }
+  var editBtn = document.getElementById('btn-editnote');
+  if (editBtn) {
+    editBtn.addEventListener('click', function() { markSuccessWithNote(OUTCOME_OVERRIDE_NOTE || ''); });
+  }
+  var revertBtn = document.getElementById('btn-revert');
+  if (revertBtn) {
+    revertBtn.addEventListener('click', function() {
+      if (!confirm('Revert this scenario to its original (failed) result?')) { return; }
       if (location.protocol === 'http:' || location.protocol === 'https:') {
-        postJson('api/mark-success', { outcomeId: OUTCOME_ID })
+        postJson('api/mark-revert', { outcomeId: OUTCOME_ID })
           .then(function(d) {
-            if (d && d.ok) { applied(); setTimeout(function() { location.reload(); }, 600); }
-            else { applied(); }
+            if (d && d.ok) { setTimeout(function() { location.reload(); }, 400); }
+            else { alert('Revert failed (this browser only).'); }
           })
-          .catch(function() { applied(); });
+          .catch(function() { alert('Revert requires the report server (not available in static preview).'); });
       } else {
-        applied();
+        alert('Revert requires the report server (not available in static preview).');
       }
     });
   }

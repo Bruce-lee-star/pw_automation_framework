@@ -94,35 +94,67 @@
 
 ## P1 — 报表失真 / 可观测性失效 / 热路径损耗
 
-### P1-5 `ReportBus.startRun()` 复位不完整
-`pw-reports-v2/.../event/ReportBus.java:145-151` 只 `sessions.clear()` + `runFinished.set(false)`。未重置进程级 `activeStep` / `activeOutcomeId`（并行时为"最近开始的用例"单值），未清 `sinkErrors`（`:83`），也未向 sink 派发 startRun 事件。同 JVM 内多次 run（rerun、多 feature 分轮）时，残留的活动用例指针会让**第一轮收尾之后**的跨线程事件（trace/video/证据 flush）挂到上一轮的 outcomeId 上；`getSinkErrorCount()`（`:919`）变成累计值，无法判断"本轮是否安全"。
+### P1-5 `ReportBus.startRun()` 复位不完整 ✅ 已修复（2026-10-24）
 
-### P1-6 `QueuedNetworkEvidenceBridge.record(NetworkCall)` 在事件线程恒丢证据
-`pw-reports-v2/.../integration/QueuedNetworkEvidenceBridge.java:201-205` 用调用方线程的 `bus.captureHandle()` → `record(NOOP, call)`；而 `ReportBus.attachEvidence`（`:466-467`）与 `recordApiOperation`（`:487-488`）对 NOOP 直接 `return`。该重载若从路由事件/调度线程调用即**静默无产出**，且**不计入 dropped**（与 `pending` 队列的 `dropped` 计数口径不一致），排查时看不到任何信号。同文件 `:178` 的无参 `flush()` 有同样问题（好在当前只在主线程调用）。
+- **原问题**：`ReportBus.startRun()` 只 `sessions.clear()` + `runFinished.set(false)`，未重置跨线程可见的 `activeStep` / `activeOutcomeId`（并行时为"最近开始的用例"单值），未清累计 `sinkErrors`，也未向 sink 派发 startRun 事件 → 上一轮收尾后的跨线程事件挂到上一轮 outcomeId、`getSinkErrorCount()` 变累计值。
+- **改动**：`startRun()` 复位 `activeStep = null` / `activeOutcomeId = null` / `current.remove()`（本线程残留 ThreadLocal 防御）/ `sinkErrors.set(0)`；并遍历 `sinks` 调新增的 `ReportSink.onRunStarted()`（默认 no-op），由 sink 侧清进程级残留态（见 P1-9）。
+- **验证**：`pw-reports-v2` 263/0 绿（新增 `ReportBusRunLifecycleTest.startRunResetsActiveOutcomeForOtherThreads`——模拟 CloseGuard 收尾线程读活动用例，证明 `startRun` 后归零）；`pw-reports-v2` 主代码编译通过。
 
-### P1-7 `RouteDelayScheduler` 是全局 2 线程节拍器，且"饱和告警"是死信号
-`pw-route/.../exec/RouteDelayScheduler.java:49-60` 固定 2 线程、`ScheduledThreadPoolExecutor` 队列无界。`:76-85` 用 `RejectedExecutionException` 计 `REJECTED`，但无界队列 + 未重写拒绝策略 ⇒ 该异常**只可能在 shutdown 后出现**，`rejectedCount()`（`:94`）在正常运行中永远为 0，"调度池饱和"这一诊断信号实际上无法触发。而上游 `RouteRuntimeImpl.java:209-215` 的响应轮询以 25→50→100ms 递推、每个在途观测请求每拍占一次调度 → 并行度高时 2 条线程成为**全进程**路由节拍上限，且入队无背压，堆积只体现在内存上。
+### P1-6 `QueuedNetworkEvidenceBridge.record(NetworkCall)` 在事件线程恒丢证据 ✅ 已修复（2026-10-24）
 
-### P1-8 `executeWithRetry` 的 `Supplier<Boolean>` 契约未实现，且两条重试路径异常处理不对称
-`pw-web-ui/.../element/ElementOperationSupport.java:104-126`：首次 `action.get()`（`:109`）与重试 `action.get()`（`:115`）**都丢弃返回值** —— `false` 与 `true` 语义等价，所谓"带成功检查"不成立，失败只能靠抛异常。另：重试失败分支 `:117` catch `RuntimeException`，而 `executeSafely` 的同位置 `:56` 只 catch `PlaywrightException` → 非 Playwright 异常在 `executeSafely` 中会**绕过诊断收集与异常包装直接逃逸**，两条"同一模板"的行为不一致。附带的判据问题：`:175` 用 `m.contains("navigat")` 做导航/上下文丢失识别，子串过宽，任何含 navigate 的错误都会触发一次额外 DOM 等待 + 重试，放大真实失败的耗时。
+- **原问题**：`record(NetworkCall)` 走 `bus.captureHandle()` → 路由事件/调度线程无 ThreadLocal 步骤上下文 → `captureHandle()` 恒 NOOP → `attachEvidence`/`recordApiOperation` 对 NOOP 早退**静默丢弃**，且不计入 `dropped`（与队列溢出口径不一致）。
+- **改动**：`record(NetworkCall)` 改为经 `record(call.method(), call.url(), call.toDetailLine())` **入队**（与 `record(String,String,String)` 同路径），由主线程 `flush()` 用先前 `capture()` 的有效句柄写出；队列溢出仍按 `dropped` 口径上报。`NetworkCall` 新增 `toDetailLine()`（不含前置 `method url`），`toOneLine()` 复用，确保落盘格式与旧直接写入路径完全一致。显式句柄的 `record(StepHandle, NetworkCall)` 保持原直接写入语义（调用方已持有效句柄）。
+- **验证**：`pw-reports-v2` 263/0 绿（新增 `QueuedNetworkEvidenceBridgeTest.recordNetworkCallEnqueuesWithoutHandle`——事件线程 `record(NetworkCall)` 后 `pendingCount()==1` 且 flush 后证据落报告、敏感 query 被 ScrubGate 遮蔽）；主代码编译通过。
 
-### P1-9 `LocalReportSink` 跨 run 不重置，且在事件派发线程串行做全部渲染
-`pw-reports-v2/.../sink/LocalReportSink.java:47` `writtenIds`、`:48-49` `errors` 都是实例级且从不 `clear()`。同 JVM 第二轮 run 若出现相同 `outcomeId`，`:74` 会判定"已写"直接跳过 → **per-case JSON（真相源）缺失**。`finishAll`（`:86-164`）在 `RunFinished` 的派发线程上同步完成全部 HTML/JSON/CSV/JUnit/资产渲染，无并发、无超时；套件越大，越可能被 CI 整体超时砍在"汇总产物尚未落盘"的窗口里（per-case JSON 有实时保，汇总没有）。
+### P1-7 `RouteDelayScheduler` 是全局 2 线程节拍器，且"饱和告警"是死信号 ✅ 已修复（2026-10-24）
 
-### P1-10 `getPage(cls, strategy)` 静默丢弃自定义供应商与钩子
+- **原问题**：`RouteDelayScheduler` 用 `Executors.newScheduledThreadPool`（默认无界 `DelayedWorkQueue` + 默认 `AbortPolicy`）。无界队列下 `RejectedExecutionException` **只可能在 `shutdown()` 后触发** → 正常运营中 `rejectedCount()` **恒为 0**，"调度池饱和"诊断信号是死信号；且 2 线程是全进程路由节拍上限、入队无背压，堆积只体现在内存上。
+- **改动**：在 `delay()` 入口加**准入阶段软上限**——`SCHED.getQueue().size() >= maxPending`（默认 1024，经 `setMaxPending` 可覆盖）即 fail-open 丢弃并计数（`REJECTED`）。这样：① 真实饱和时 `rejectedCount()` 可触发（信号"活"了）；② 对内存有界（不再无限堆积）；③ 被丢弃的延迟/轮询由 sweep 兜底，请求不悬挂。并新增 `backlog()` 主动观测（比 `rejectedCount()` 更前置，积压攀升即预示将触达上限）。`SCHED` 字段类型由 `ScheduledExecutorService` 改为 `ScheduledThreadPoolExecutor` 以读取 `getQueue()`。类注释相应更正（"饱和可观测"段落）。
+- **验证**：`pw-route` 353/0 绿（新增 `RouteDelaySchedulerTest.schedulerSaturatesAndCountsRejections`——将软上限压到 8、突发 2000 个 50ms 微任务，断言 `rejectedCount()` 较基线增长且 `backlog()` 被钳制；日志实证 `#4…#1024` 拒绝计数随积压触发）。
+
+### P1-8 `executeWithRetry` 的 `Supplier<Boolean>` 契约未实现，且两条重试路径异常处理不对称 ✅ 已修复（2026-10-24）
+
+- **问题①（契约未实现）**：`executeWithRetry` 首次与重试的 `action.get()` 都丢弃返回值 → `false`/`true` 等价，"带成功检查"不成立。
+- **改动①**：`executeWithRetry` 改为 **honors `Supplier<Boolean>`**——`action.get()` 返回 `false`/`null`（未抛异常）即按逻辑失败收口为 `ElementOperationException`（含 DOM 诊断 + 截图）；抽 `handleNavRetry` 承载导航重试，避免重复包裹。已核实**所有真实调用方都 `return true`**（`isVisible`/`exists`/`isChecked` 等 `waitFor*` 自包含 try-catch、不经 `executeWithRetry`），故该修正零误伤。
+- **问题②（异常处理不对称）**：`executeSafely` 重试分支 `:56` 只 catch `PlaywrightException`，非 Playwright 异常绕过诊断收集与包装直接逃逸；而 `executeWithRetry` 首 catch 已 catch `RuntimeException`。
+- **改动②**：`executeSafely` 重试分支改为 catch `RuntimeException`，与 `executeWithRetry` 对齐（非 Playwright 异常也收集 DOM 诊断并包装为 `ElementOperationException`）。
+- **问题③（判据过宽）**：导航/上下文丢失判定用 `m.contains("navigat")` 子串过宽，任何含 navigate 的报文都会触发额外 DOM 等待 + 重试，放大真实失败耗时。该判定在 `ElementOperationSupport`/`PageElement`/`PageInteractions` 三处**同源重复**。
+- **改动③**：三处统一收窄为 `m.contains("navigation") || m.contains("navigating")`（保留真实导航语义，去除宽子串），覆盖 `during navigation` / `navigating to` 等真实报文。
+- **验证**：`pw-web-ui` 414/0 绿（新增 `ElementOperationSupportTest`——`falseReturnIsLogicalFailureNotSilentSuccess` 锁定契约、`trueReturnSucceeds` 锁正向路径、`isNavigationOrContextLoss_*` 锁定判据收窄与既有签名）。
+
+### P1-9 `LocalReportSink` 跨 run 不重置，且在事件派发线程串行做全部渲染 ✅ 已修复（2026-10-24）
+
+- **问题①（跨 run 不重置，已修）**：`LocalReportSink` 的 `writtenIds` / `errors` 实例级且从不 `clear()`，同 JVM 第二轮 run 出现相同 `outcomeId` 时被判"已写"跳过 → per-case JSON 真相源缺失。
+- **改动①**：`ReportSink` 接口新增 `default void onRunStarted()`；`LocalReportSink` 覆写它清 `writtenIds.clear()` + `errors.set(0)`；`ReportBus.startRun()` 复位时向各 sink 派发 `onRunStarted()`（见 P1-5）。
+- **问题②（串行渲染，已修）**：`finishAll`（原 `:86-164`）在 `RunFinished` 派发线程上**串行**完成全部 HTML/JSON/CSV/JUnit/资产渲染，无并发、无超时 → 大轮次墙钟耗时高，且极端情况下可能阻塞/挂死派发线程。
+- **改动②**：重写为**分片 + 并行 + 有界超时**——各独立产物（per-case HTML ×N + summary JSON + index + features + email + monitor + CSV + JUnit + 资产）作为独立任务提交到有界固定线程池并行渲染；沿用既有**单步 try/catch 隔离**（失败计入 `errors`、severe 项升级 error 日志）；`invokeAll(tasks, timeout, SECONDS)` 在 `renderTimeoutSeconds()`（默认 300s，可经 `-Dpw.report.render.timeout.seconds` 覆盖）内 join，**正常规模在超时内全部完成（契约不变：finishAll 返回时报告已落盘），病理性超时则取消未启动任务并告警**（JSON 真相源已实时落盘不丢）。使用 **daemon 线程**，避免渲染线程阻止 JVM 退出。FreeMarker 各渲染器均用静态 `Configuration`（`getTemplate`/`process` 线程安全、`setSharedVariable` 仅静态块配置一次），并发安全。
+- **验证**：`pw-reports-v2` 265/0 绿（基线 263 + 新增 `LocalReportSinkRenderTest` 2 例——`finishAllRendersAllArtifactsAfterParallelSharding` 锁死并行后仍产出 index/summary-json/CSV/JUnit/email/per-case HTML+JSON 全部产物；`finishAllToleratesZeroOutcomes` 零用例不抛、空 index/summary 仍生成；既有 `ReportBusRunLifecycleTest` 2 例无回归）。
+
+### P1-10 `getPage(cls, strategy)` 静默丢弃自定义供应商与钩子 ✅ 已修复（2026-10-24）
 `pw-web-ui/.../page/factory/PageObjectFactory.java:278-288`：策略与当前配置不同时新建 `Builder`，只搬 `lifecycle` 与 `lazy`，`customSuppliers` / `postCreateHooks` / `properties` 全部丢失。`newInstance`（`:383-387`）先查全局 `GLOBAL_SUPPLIERS` 再查 `config.getCustomSuppliers()`，所以 `register()` 路径不受影响，但**通过 `Builder.customSupplier()/postCreateHook()` 配置的调用点**在显式传 strategy 时会静默失去注入与钩子 —— 典型表现是 `AbstractManagedPage.getPage()` NPE 或钩子不执行。
 
-### P1-11 `PageObjectFactory` 的只读 API 会写状态，且泄漏指标口径不一致
+- **改动**：临时重建分支改为把 `base`（`=currentConfig`）的 `customSuppliers` / `postCreateHooks` / `properties` 一并 `putAll` / `addAll` 到新 config，与当前配置对齐。
+- **验证**：`pw-web-ui` 417/0 绿（新增 `PageObjectFactoryInternalTest.explicitStrategyPreservesCustomSupplierAndHook`——仅经 Builder 配 customSupplier + postCreateHook、显式传 SINGLETON，断言 supplier 被使用、hook 被执行；旧实现下两者均不生效）。
+
+### P1-11 `PageObjectFactory` 的只读 API 会写状态，且泄漏指标口径不一致 ✅ 已修复（2026-10-24）
 `:193-196` `threadInstances()` 用 `TestContextHolder.get().computeIfAbsent(...)` —— `hasInstance()`（`:580-589`）、`getInstanceCount()`（`:596-602`）、`getStatistics()`（`:609-630`）、`getRegisteredPageClasses()`（`:637-647`）这些**纯查询**都会为当前线程创建 TestContext（并在 `ThreadContextRegistry` 里注册一条）。同时 `getInstanceCount()` 只统计当前线程，而 `clearAll()`（`:543-549`）跨线程统计 → "实例数"这个泄漏观测指标本身不可信。
 
-### P1-12 `requestScopedInstances` 的键在收尾时可能已改口径 → 条目永久滞留
+- **改动**：① 新增 `TestContextHolder.peek()`（非创建式，用例级优先、回退线程级，与 `get()` 同优先序）+ `ThreadContextRegistry.peek()`；只读路径改用 `threadInstancesView()`（基于 `peek()`，绝不创建）。② 新增 `TestContextHolder.forEachAllContext`（遍历线程键 + 用例级上下文）+ `ScenarioContext.forEachContext`（包级私有）；`getInstanceCount()` / `getStatistics()` / `getRegisteredPageClasses()` 改用 `threadIsolatedInstanceCount()` / `allThreadInstancesView()`（**跨所有已登记上下文**聚合），与 `clearAll()` 口径对齐；`clearAll()` 自身改用 `forEachAllContext` 清理（顺带覆盖用例级上下文下残留的线程隔离实例）。
+- **验证**：`pw-web-ui` 417/0 绿（新增 `PageObjectFactoryInternalTest.readOnlyApisDoNotCreateContext`——`resetForCurrentThread` 后 `peek()` 为 null，连调四个只读 API 后 `peek()` 仍为 null，证明不再创建/登记上下文）。
+
+### P1-12 `requestScopedInstances` 的键在收尾时可能已改口径 → 条目永久滞留 ✅ 已修复（2026-10-24）
 `:463-469` `getCurrentRequestId()` 优先 `ScenarioContext.currentScenarioId()`，回落 `thread:<tid>`；`:511-518` `endRequestScope()` 重新调用该函数取键。若收尾时刻场景身份已解绑，键变成 `thread:<tid>`，写入时的 `scenario:<id>` 条目就再也删不掉 —— 静态 Map 随用例数单调增长，且持有整个 PageObject 图（含 Page/Context 引用）。
 
-### P1-13 `AsyncPool.schedule*` 拒绝时返回 `null`，与"静默丢弃"并存
-`pw-core/.../common/async/AsyncPool.java:386`、`:410` 在拒绝路径 `return null`。调用方普遍按"必有 future"使用，后续 `cancel()` 即 NPE。更微妙的是拒绝策略为 `DiscardOldestPolicy`（`:168`）时**不抛异常**，所以"被拒绝"有两种互斥表现（`null` 返回 / 静默丢别人的任务），调用方无法用同一套判据处理。
+- **改动**：新增线程级 `ThreadLocal<String> CURRENT_REQUEST_SCOPE_KEY`，在 `beginRequestScope` 与 `resolveInstance` REQUEST_SCOPED 创建时**记录写入所用键**；`endRequestScope` 优先取该记录键删除（未记录才回退 `getCurrentRequestId()`），删除键恒与写入键一致，不受场景解绑影响；`clearAll()` 一并清理该 ThreadLocal 残留。
+- **验证**：`pw-web-ui` 417/0 绿（新增 `PageObjectFactoryInternalTest.endRequestScopeRemovesEntryEvenIfScenarioUnbound`——`begin` 场景、REQUEST_SCOPED 创建后 `ScenarioContext.endCurrent()` 模拟场景解绑，再 `endRequestScope`，断言该类型已从 `getRegisteredPageClasses()` 移除；旧实现下 `scenario:<id>` 条目滞留）。
 
-### P1-14 `activeThreadCount()` 用未 purge 的 `WeakHashMap.size()`
-`pw-core/.../core/context/ThreadContextRegistry.java:90-92` 直接返回 `CONTEXTS.size()`。线程消亡后条目仍在，直到下一次对该 map 的操作触发 purge → 指标只增不减，且 `PageObjectFactory.clearAll()` 的日志（`:551-553`）引用的 `activeContextCount()` 同样偏大。
+### P1-13 `AsyncPool.schedule*` 拒绝时返回 `null`，与"静默丢弃"并存（已缓解，契约保持，2026-10-24）
+`pw-core/.../common/async/AsyncPool.java:386`、`:410` 在拒绝路径 `return null`。代码注释已明确：唯一生产调用方 `RouteMonitorSession` **已 null-check**，且拒绝语义经 `droppedOnRejectionCount` 计数 + ERROR 日志可观测。拒绝策略 `DiscardOldestPolicy`（`:168`）不抛异常时由 `SCHEDULER` 正常返回 future（任务被替换而非调用方侧 null），两种路径各自有确定行为。改动契约（返回假 future）反而会误导调用方以为任务已执行，故**保持 null 契约不改为上策**；若后续新增调用方，必须以 null-check 为前置条件（已在方法 javadoc 强调）。
+
+### P1-14 `activeThreadCount()` 用未 purge 的 `WeakHashMap.size()`` ✅ 已修复（2026-10-24）
+- **原问题**：`activeThreadCount()` 直接返回 `CONTEXTS.size()`，`WeakHashMap` 的 stale 条目 expunge 依赖 GC 时机与 size() 的触发，计数可能虚高；`PageObjectFactory.clearAll()` 的 `activeContextCount()` 同样偏大。
+- **改动**：`activeThreadCount()` 改为在 `CONTEXTS` 锁内**显式遍历 entrySet**——强制触发 `WeakHashMap` 的 stale 弱键 expunge，保证任意 JDK 版本下都拿到"已回收线程上下文已被移除"的准确计数（仍 `synchronized` 保证与 `get()`/`remove()` 同锁，无并发漂移）。
+- **验证**：`pw-core` 主代码编译通过（Checkstyle 0 violations）。
 
 ---
 
@@ -179,18 +211,20 @@
 - **验证**：`SessionStoreSessionExpiryTest` 3/0 绿；`pw-web-ui` 安装 SUCCESS。
 - **同源限制**：同 P0-3，是"串行正确、并行无新问题"的单点修复，未引入新的跨线程归属问题。
 
-### P0-2 ⚠️ 部分修复（症状级）+ 对评审的重要更正
+### P0-2 ✅ per-context 下沉（根治并行互毒化，2026-10-24）
 
-- **更正（评审偏活跃）**：核对主源码发现 `DriverFailureSignal.report()` **无任何生产调用方**——全仓仅 `RouteFailFastTest` 调用；`ScenarioLifecycle` 只 `reset()`，`RouteRuntimeImpl` 只 `reported()`。即评审所述"一个用例驱动抖动即时毒化所有并行用例"当前**并非活跃故障**，是**休眠的设计缺陷**（若日后接上 UI 上报才会触发）。
-- **改动（防御）**：`RouteRuntimeImpl.scheduleResponsePoll` 在信号置位时由"断链 `return`"改为"跳过本轮、继续按节拍调度、待对应 runtime `close()` 的 `reset()` 后自愈"（受 `deadlineNs` 兜底，不会无限空转）。
-- **验证**：`pw-route` 351/0 绿。
-- **未做（建议另立任务）**：把信号下沉为 **per-context**（键用 `Object` 身份以遵守 pw-core "不引用 Playwright 类型"约束），并接上真实的 UI 失败上报（目前该 feature 可能根本没接线）。
+- **更正（评审偏活跃）**：核对主源码发现 `DriverFailureSignal.report()` **无任何生产调用方**——全仓仅 `RouteFailFastTest` 调用；`ScenarioLifecycle` 只 `reset()`，`RouteRuntimeImpl` 只 `reported()`。即评审所述"一个用例驱动抖动即时毒化所有并行用例"此前是**休眠的设计缺陷**（若日后接上 UI 上报才会触发）。
+- **根因（本轮已除）**：`DriverFailureSignal` 的 `FAILED` 是 `static AtomicBoolean` **JVM 级单值**——任一场景 `report()` 会令**所有**并行 runtime 的响应轮询/派发判 true → 断链毒化其它并行用例（与 P0-7"驱动信道进程级单例"同族）。
+- **机制（per-context 键控）**：`FAILED` 改为 `ConcurrentHashMap<Object, AtomicBoolean>`（键 = `BrowserContext` 身份；pw-core 不引用 Playwright 类型，故用 `Object` 身份承载），新增 `report(Object)` / `reported(Object)` / `reset(Object)` / `resetAll()`；`RouteRuntimeImpl` 三处判定（`scheduleResponsePoll` / `recordObservation` / `dispatch`）与收尾清零（`close()`）均改用 `context` 作键 → 只有**上报信号那个 context 所属**的 runtime 受影响，其余并行用例的 MONITOR/CAPTURE 轮询与派发互不牵连。`ScenarioLifecycle` 场景边界清零改为 `resetAll()` 兜底清扫。
+- **保留的防御（来自早期部分修复）**：`scheduleResponsePoll` 在信号置位时仍为"跳过本轮、继续按节拍调度、待对应 runtime `close()` 的 `reset(context)` 后自愈"（受 `deadlineNs` 兜底，不会无限空转）—— 与 per-context 键控叠加，P0-2 彻底闭环。
+- **已知边界**：`report()` 仍**无生产调用方**（UI 失败上报 feature 未接线），但信号结构已按 per-context 预备好：未来接线时 UI 侧 `report(context)` 即可，无需再改 route 侧。
+- **验证**：`pw-route` **352/0 绿**（新增 `RouteFailFastTest.failSignalIsolationAcrossContexts` 锁定"ctxA 上报不影响 ctxB"隔离语义）；`pw-core`+`pw-route` 已装本地仓；`pw-web-ui` 主代码编译通过。
 
-### P0-1 ⚠️ 症状级缓解 + 根因未除（架构级）
+### P0-1 ✅ 根因已除（per-context 信道，见 P0-7）
 
-- **改动**：`GuardedDriverCallImpl.guarded()` 增加 `CancellationException` catch——被其它调用 `shutdownNow()` 取消的 `future.get()` 不再逃逸成 `IllegalStateException`（假失败），而是降级（即使 `FAIL_FAST` 也降级而非抛）。
-- **验证**：`pw-route` 351/0 绿（含现成的 `DriverChannelContainmentTest`）。
-- **根因（评审方向，未做）**：`DRIVER` 是 `static` 单线程执行器，`guarded()` 接口不携带连接身份 → 无法 per-context 隔离。彻底修法需 per-`Playwright`/per-context 信道 + 改 `GuardedDriverCall.guarded` 接口及调用方（`PatternBinder`、`RouteAction.fetch`）。属**架构级重构、高风险**，建议作为专门任务 + 并行驱动超时集成测试，而非顺手改。
+- **早期症状级缓解**：`GuardedDriverCallImpl.guarded()` 增加 `CancellationException` catch——被其它调用 `shutdownNow()` 取消的 `future.get()` 不再逃逸成 `IllegalStateException`（假失败），而是降级（即使 `FAIL_FAST` 也降级而非抛）。
+- **根因（已由 P0-7 根除，2026-10-24）**：原 `DRIVER` 是 `static` 单线程执行器（进程级单例），`guarded()` 不携带连接身份 → 无法 per-context 隔离、一个连接的 `shutdownNow()` 会取消另一连接在途调用（即"跨用例信道毒化"）。P0-7 把 `GuardedDriverCallImpl` 全部信道状态改为**实例字段**，并经 `GuardedDriverCallRegistry.channelFor(BrowserContext)` 为每连接创建专属串行化线程，`PatternBinder` 走 `channelFor(context)` 生产调用 —— 根因彻底消除。
+- **验证**：`pw-route` 351→352/0 绿（P0-7 + P0-2 合计）；详见 P0-7。
 
 ### P0-5 ✅ 彻底去兜底（trace/video 直接生成到 per-case，消除副本逻辑，2026-10-24）
 
@@ -212,6 +246,19 @@
 - **语义收益**：在任何线程（含 CloseGuard 收尾线程）、任何并行度下，trace/video 都精确归属到"被关闭的 context 所属用例"的 per-case 目录——**不再是"最近开始的用例"最佳努力，也永不搬/拷**。
 - **适用范围**：项目已无 feature 模式，每个 scenario 都会重建 context（context 与 scenario 一一对应），故 `createContext` 绑定的 outcomeId 与所关闭 context 始终一致，per-context 绑定在任意 scenario 级路径下完全正确（trace/video 均为 scenario 级别产物）。
 - **验证**：`pw-reports-v2` 260/0 绿（新增 3 例：`ReportingBridgeImplOutcomeBindTest`——`currentOutcomeId` 返回活动用例 id、`attachTrace(outcomeId,…)` / `attachVideo(outcomeId,…)` 精确挂载 tracePath/videoPath）；`pw-web-ui` 新增 `ContextOutcomeBindingTest` 4 例（bind/get/unbind、distinct context 互不串扰、null/empty 忽略）全绿，主代码编译通过；`pw-core`+`pw-reports-v2` 已装本地仓。
+
+### P0-7 ✅ 驱动信道去"进程级单例"（per-context 实例化，2026-10-24）
+
+- **根因（本轮处理）**：`GuardedDriverCallImpl` 把驱动线程执行器 `DRIVER` 及 `DRIVER_EPOCH` / `POISON_RESETS` / `CHANNEL_FAILURES` / `UNUSABLE` 等全部做成 **`static`**——即 JVM 级进程级单例信道。关键事实（`PlaywrightRuntimeState.playwrightInstances` 按 `threadId:configId` 键控）：**每个 worker 线程拥有独立 Playwright 连接**。于是该单例不仅"静态异味"，更在并行下把不同连接的协议调用不必要地串到一条全局线程，且一个连接的超时 `shutdownNow()` 会取消**另一个连接**的在途调用（即 `CancellationException` 注释里的"跨用例信道毒化"）。
+- **机制**：
+  1. `GuardedDriverCallImpl` 去除全部 static 信道状态，改为**实例字段**（每条驱动线程执行器 / 代际 / 计数 / 标记均 per-instance）；原静态兼容桥（`channelFailureCount` / `driverEpochForTest` / `poisonResetCount` / `resetChannel` / `resetChannelForTeardown`）保留为转发到"当前线程信道"的静态方法，调用方零改动。
+  2. `GuardedDriverCallRegistry` 新增 `channelFor(BrowserContext)`（按连接缓存每实例信道，复用 `DownloadRegistry` 的 `ConcurrentHashMap<BrowserContext,…>` 范式）、`remove(BrowserContext)`（context 关闭时清退、释放 daemon 线程）、`currentChannel()`（ThreadLocal 当前线程信道）、`resetAllForTeardown()`；`instance()` / `setInstance` / `reset()` 兼容保留（注入优先）。
+  3. `PatternBinder` 的 `route` / `unroute`（唯一生产调用点）改走 `channelFor(context)`——并行下每个用例（独立连接）拥有专属串行化线程，互不干扰。
+  4. `RouteLifecycleImpl.isConnectionUnresponsive(ctx)` 改按 `channelFor((BrowserContext) ctx)` 判定（非 context 入参回落 `currentChannel()`）；`RouteEngine.isDriverChannelUsable()` / `driverChannelFailures()` / `resetDriverChannel()` / `shutdownAll` 全部经 `currentChannel()` / `resetAllForTeardown()` 定位本线程所属连接。
+  5. `RouteRuntimeImpl.closeAfterContextClosed()` 调 `GuardedDriverCallRegistry.remove(context)` 对称清退。
+- **语义收益**：彻底消除进程级单例；并行场景下每个用例的驱动协议调用**隔离串行**在自家连接信道上，某连接的超时 `shutdownNow()` 只取消**该连接**在途调用，根除"跨用例信道毒化"；性能上不同连接不再被不必要地串到一条全局线程。
+- **正确性保证**：串行化粒度仍是"连接"（`route`/`unroute` 按 `BrowserContext` → 同连接串行），未引入连接级协议竞态；每连接一条串行化线程与 Playwright 客户端"单连接外部串行"要求一致。
+- **验证**：`pw-route` **351/0 绿**（含 `GuardedDriverCallSingleThreadTest` 32 例串行化断言、`GuardedDriverCallRegistryTest`、`DriverChannelContainmentTest`、`RouteEngineChannelVerdictTest`、`RouteLifecycleChannelProbeTest`），`mvn -o -pl pw-route -am test` BUILD SUCCESS；主代码编译通过。
 
 ### 代码冗余 / 职责冗余 审查（本轮逐区扫出）
 

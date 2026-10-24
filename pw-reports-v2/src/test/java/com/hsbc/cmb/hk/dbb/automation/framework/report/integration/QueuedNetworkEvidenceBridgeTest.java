@@ -193,4 +193,50 @@ class QueuedNetworkEvidenceBridgeTest {
         assertThat(bridge.discard()).isEqualTo(2);
         assertThat(bridge.pendingCount()).isZero();
     }
+
+    @Test
+    @DisplayName("P1-6：record(NetworkCall) 在事件线程（captureHandle=NOOP）也入队，主线程 flush 后落报告，不再静默丢弃")
+    void recordNetworkCallEnqueuesWithoutHandle() throws Exception {
+        StepHandle caseHandle = bus.startCase("net-q-6", "features/api", "networkCall", List.of());
+        StepHandle step = bus.stepStarted("call");
+        QueuedNetworkEvidenceBridge bridge = new QueuedNetworkEvidenceBridge(bus);
+        StepHandle captured = bridge.capture(); // 主线程捕获有效句柄
+
+        // 事件线程（与主线程无 ThreadLocal 关联）调用 record(NetworkCall)：
+        //   旧实现走 record(bus.captureHandle(), call) —— 事件线程 captureHandle() 恒 NOOP →
+        //   attachEvidence/recordApiOperation 对 NOOP 早退，证据被静默丢弃且不计入 dropped。
+        AtomicReference<Throwable> error = new AtomicReference<>();
+        Thread eventThread = new Thread(() -> {
+            try {
+                bridge.record(NetworkCall.builder()
+                        .method("POST")
+                        .url("https://api.example.com/pay?token=SEC")
+                        .status(200)
+                        .durationMs(12)
+                        .build());
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        }, "pw-playwright-event");
+        eventThread.start();
+        eventThread.join(5_000);
+        assertThat(error.get()).isNull();
+        //  关键不变量：证据已入队（不再被 NOOP 静默吞掉，也不漏计 dropped）
+        assertThat(bridge.pendingCount()).isEqualTo(1);
+
+        bus.stepFinished(step, TestResult.SUCCESS, null);
+        bridge.flush(captured);
+        bus.finishCase(caseHandle, TestResult.SUCCESS, null, 5);
+        bus.finishRun();
+
+        TestOutcome o = JsonWriter.mapper()
+                .readValue(dir.resolve("net-q-6").resolve("net-q-6.json").toFile(), TestOutcome.class);
+        List<String> evidence = o.getTestSteps().stream()
+                .flatMap(s -> s.getEvidence().stream()).toList();
+        assertThat(evidence).hasSize(1);
+        assertThat(evidence.get(0)).contains("POST").contains("api.example.com");
+        //  敏感 query 必须被总线 ScrubGate 遮蔽
+        assertThat(evidence.get(0)).doesNotContain("SEC");
+        assertThat(bridge.pendingCount()).isZero();
+    }
 }

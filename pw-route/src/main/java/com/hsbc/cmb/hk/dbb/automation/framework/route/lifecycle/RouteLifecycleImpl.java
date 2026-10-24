@@ -4,6 +4,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.route.CaptureContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycle;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.RouteEngine;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCall;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCallRegistry;
 import com.microsoft.playwright.BrowserContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,7 +102,12 @@ public class RouteLifecycleImpl implements RouteLifecycle {
      */
     @Override
     public boolean isConnectionUnresponsive(Object ctx) {
-        return !RouteEngine.isDriverChannelUsable();
+        //  按连接（context）定位专属信道：并行场景下每个用例（独立 Playwright 连接）拥有独立信道，
+        //    某连接的不可用不会误判其它连接的用例；ctx 不可用时（异常/非 context 入参）回落当前线程信道。
+        GuardedDriverCall channel = (ctx instanceof BrowserContext)
+                ? GuardedDriverCallRegistry.channelFor((BrowserContext) ctx)
+                : GuardedDriverCallRegistry.currentChannel();
+        return channel == null || !channel.isChannelUsable();
     }
 
     @Override

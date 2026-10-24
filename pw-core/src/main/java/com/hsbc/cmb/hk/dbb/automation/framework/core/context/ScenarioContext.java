@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.core.context;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +51,26 @@ public final class ScenarioContext {
     /** 当前线程绑定的用例 id（无绑定则 null），供数据隔离域派生主键。 */
     public static String currentScenarioId() {
         return CURRENT.get();
+    }
+
+    /**
+     * 对所有已登记的用例级上下文执行受控遍历（读取 / 清理）。
+     *
+     * <p>供跨上下文聚合（如 {@code PageObjectFactory} 的线程隔离实例计数 / 收尾），与
+     * {@link TestContextHolder#forEachThreadContext} 互补：后者仅覆盖线程键上下文，
+     * 无法触及用例级上下文下存放的线程隔离实例（P1-11）。单个上下文异常不影响其余（D7-3）。</p>
+     */
+    static void forEachContext(Consumer<TestContext> visitor) {
+        if (visitor == null) {
+            return;
+        }
+        for (TestContext ctx : SCENARIO_CONTEXTS.values()) {
+            try {
+                visitor.accept(ctx);
+            } catch (Throwable t) {
+                LOGGER.warn("[ScenarioContext] forEachContext: visitor failed for one context: {}", t.toString());
+            }
+        }
     }
 
     /** 用例结束：清理上下文并解除线程指针；与当前线程不符时仅解除指针。 */

@@ -213,7 +213,9 @@ public final class ScenarioTraceRecorder {
      * 兜底导出为 {@code ONCLOSE} 文件；随后结束 tracing。
      */
     public static void onContextClosing(BrowserContext context) {
-        if (context == null || !traceEnabled()) {
+        //  注意：不以实时 traceEnabled() 早退——运行中若关闭 trace 开关，仍须把已开启的 tracing 落盘，
+        //  否则 context 关闭时 trace 残留未 flush（P2-21）。未开启 tracing 时走 else 分支的 stop() 被 try/catch 兜底。
+        if (context == null) {
             return;
         }
         try {

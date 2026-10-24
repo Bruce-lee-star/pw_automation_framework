@@ -110,6 +110,33 @@ public final class TestOutcome {
     /** 手动备注。 */
     private String manualNote;
 
+    /**
+     * 是否已应用「标记成功」覆盖（非破坏性）。additive-only。
+     *
+     * <p>用 {@code Boolean}（而非 boolean）以便未覆盖时序列化为 null、不污染每个用例 JSON。
+     * 配合 {@code original*} 字段，标记后可经 ReportServer {@code /api/mark-revert} 还原原始失败态，
+     * 亦可重复调 {@code /api/mark-success} 修改 {@link #overrideNote}。
+     */
+    private Boolean overridden;
+
+    /** 当前「标记成功」覆盖备注（可修改）。additive-only。 */
+    private String overrideNote;
+
+    /** 覆盖前的原始结果（非破坏性保留）。additive-only。 */
+    private TestResult originalResult;
+
+    /** 覆盖前的原始失败原因（非破坏性保留）。additive-only。 */
+    private FailureCause originalTestFailureCause;
+
+    /** 覆盖前的原始失败摘要（非破坏性保留）。additive-only。 */
+    private String originalTestFailureSummary;
+
+    /** 覆盖前的原始失败类名（非破坏性保留）。additive-only。 */
+    private String originalTestFailureClassname;
+
+    /** 覆盖前的原始失败消息（非破坏性保留）。additive-only。 */
+    private String originalTestFailureMessage;
+
     /** 浏览器控制台输出（page console，脱敏，限行）。additive-only。 */
     private List<String> browserConsole = new CopyOnWriteArrayList<>();
 
@@ -381,6 +408,62 @@ public final class TestOutcome {
 
     public void setManualNote(String manualNote) {
         this.manualNote = manualNote;
+    }
+
+    public Boolean getOverridden() {
+        return overridden;
+    }
+
+    public void setOverridden(Boolean overridden) {
+        this.overridden = overridden;
+    }
+
+    public String getOverrideNote() {
+        return overrideNote;
+    }
+
+    public void setOverrideNote(String overrideNote) {
+        this.overrideNote = overrideNote;
+    }
+
+    public TestResult getOriginalResult() {
+        return originalResult;
+    }
+
+    public void setOriginalResult(TestResult originalResult) {
+        this.originalResult = originalResult;
+    }
+
+    public FailureCause getOriginalTestFailureCause() {
+        return originalTestFailureCause;
+    }
+
+    public void setOriginalTestFailureCause(FailureCause originalTestFailureCause) {
+        this.originalTestFailureCause = originalTestFailureCause;
+    }
+
+    public String getOriginalTestFailureSummary() {
+        return originalTestFailureSummary;
+    }
+
+    public void setOriginalTestFailureSummary(String originalTestFailureSummary) {
+        this.originalTestFailureSummary = originalTestFailureSummary;
+    }
+
+    public String getOriginalTestFailureClassname() {
+        return originalTestFailureClassname;
+    }
+
+    public void setOriginalTestFailureClassname(String originalTestFailureClassname) {
+        this.originalTestFailureClassname = originalTestFailureClassname;
+    }
+
+    public String getOriginalTestFailureMessage() {
+        return originalTestFailureMessage;
+    }
+
+    public void setOriginalTestFailureMessage(String originalTestFailureMessage) {
+        this.originalTestFailureMessage = originalTestFailureMessage;
     }
 
     public List<String> getBrowserConsole() {

@@ -89,7 +89,7 @@ public final class PatternBinder implements AutoCloseable {
         // timeout" trick is gone -- it could not be made reliable (the guard interrupts the abandoned call,
         // whose interrupt fallout then looked like a genuine error) and it re-introduced exception sniffing.
         boolean failClosed = spec.capability() != RouteCapability.MONITOR;
-        AutoCloseable handle = GuardedDriverCallRegistry.instance().guarded(
+        AutoCloseable handle = GuardedDriverCallRegistry.channelFor(context).guarded(
                 "bind:" + spec.pattern(), bindBoundMs,
                 failClosed ? GuardedDriverCall.OnTimeout.FAIL_FAST
                         : GuardedDriverCall.OnTimeout.WARN_AND_ABANDON,
@@ -167,7 +167,7 @@ public final class PatternBinder implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return true;
         }
-        Object ack = GuardedDriverCallRegistry.instance().guarded("unroute:" + pattern,
+        Object ack = GuardedDriverCallRegistry.channelFor(context).guarded("unroute:" + pattern,
                 GuardedDriverCall.unrouteBoundMs(), GuardedDriverCall.OnTimeout.WARN_AND_ABANDON, () -> {
                     nativeHandle.close();
                     return Boolean.TRUE;

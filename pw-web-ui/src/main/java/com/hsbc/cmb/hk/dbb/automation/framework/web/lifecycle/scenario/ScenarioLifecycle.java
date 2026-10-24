@@ -67,9 +67,10 @@ public final class ScenarioLifecycle {
         TestContextHolder.get().remove(PlaywrightManager.CONTEXT_KEY);
 
         // F2 收口：失败信号在场景边界统一清零（幂等；route runtime close 内亦消费一次）。
-        // 放在所有清理之后 —— 本场景的 route 收尾（可能触发 unroute 确证）已完成，不再需要信号；
-        // 若放在开头，closeContext 阶段的 fail-fast 检查会失效（unroute 可能再次等待超时）。
-        DriverFailureSignal.reset();
+        // per-context 键控后，此处兜底清扫全部信号（下一场景重新开始）；放在所有清理之后 —— 本场景的
+        // route 收尾（可能触发 unroute 确证）已完成，不再需要信号；若放在开头，closeContext 阶段的
+        // fail-fast 检查会失效（unroute 可能再次等待超时）。
+        DriverFailureSignal.resetAll();
     }
 
     /**

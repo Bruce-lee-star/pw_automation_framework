@@ -720,8 +720,8 @@ public class PageElement {
         m = m.toLowerCase();
         return m.contains("execution context") || m.contains("context was destroyed")
                 || m.contains("object doesn't exist") || m.contains("does not exist")
-                || m.contains("navigat") || m.contains("frame detached")
-                || m.contains("frame was detached");
+                || m.contains("navigation") || m.contains("navigating")
+                || m.contains("frame detached") || m.contains("frame was detached");
     }
 
     /** 取异常首行，避免重试日志刷屏长堆栈。 */

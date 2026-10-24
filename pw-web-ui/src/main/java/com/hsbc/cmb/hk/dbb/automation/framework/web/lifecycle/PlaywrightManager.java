@@ -287,6 +287,17 @@ public class PlaywrightManager {
         return provider.getPage();
     }
 
+    /**
+     * 本线程当前 Page 的「变更世代」信号（P2-18 热路径优化）。
+     *
+     * <p>仅当本线程当前页发生过切换 / 重建时自增；{@code PageContextState.ensurePageValid}
+     * 在 page 已有效时据此跳过昂贵的 {@link #getPage()} 全链路比对，避免每个 element op 的静态调用链开销。
+     * 读取开销仅为一次线程级 {@code ThreadLocal.get()}，远小于 {@link #getPage()}（provider seam + 注册表查表 + 可能建页）。</p>
+     */
+    public static long currentPageEpoch() {
+        return PlaywrightRuntime.instance().pageRegistry.currentPageEpoch();
+    }
+
 
 
 

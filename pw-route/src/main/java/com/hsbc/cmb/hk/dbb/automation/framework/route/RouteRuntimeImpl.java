@@ -4,6 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GenerationRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GuardedDriverCallRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.PatternBinder;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.HangWatchdog;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.RouteBinderRegistry;
@@ -198,10 +199,10 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         if (closed.get()) {
             return; // runtime 已关闭 → 停止轮询
         }
-        if (DriverFailureSignal.reported()) {
-            //  F4：全局信号被置位（任一场景判驱动连接不可信）。原实现此处直接 return 会【永久断链】
-            //  —— 其它并行用例的 MONITOR/CAPTURE 轮询就此停摆且无法自愈（P0-2）。
-            //  改为：本轮跳过定案、但仍按节拍继续调度，待信号被对应 runtime 收尾 reset 后下一轮自动恢复
+        if (DriverFailureSignal.reported(context)) {
+            //  F4：本 context 的失败信号被置位（该场景判驱动连接不可信）。per-context 键控（P0-2 收口）：
+            //  只影响上报信号那个 context 所属的 runtime，其余并行用例不受影响。
+            //  （此处仍"本轮跳过定案、按节拍继续调度"，待信号被对应 runtime 收尾 reset 后下一轮自动恢复，
             //  （deadline 已兜底，不会无限空转）。
             long next = Math.min(RESPONSE_POLL_MAX_MS, intervalMs * 2);
             RouteDelayScheduler.delay(intervalMs,
@@ -317,9 +318,9 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public void recordObservation(Request request, ApiSpec spec) {
-        if (DriverFailureSignal.reported()) {
-            // F1/F4：驱动连接已不可信 → 不再启动响应侧观测轮询
-            //（避免调度线程在失败后继续泵连接，与主线程并发驱动同一条连接）。
+        if (DriverFailureSignal.reported(context)) {
+            // F1/F4：本 context 驱动连接已不可信 → 不再启动响应侧观测轮询
+            //（避免调度线程在失败后继续泵连接，与主线程并发驱动同一条连接）。per-context 键控（P0-2）。
             return;
         }
         // MONITOR 能力位已停止（stop* / 目的退役）⇒ 不再为其做响应侧观测轮询；
@@ -544,8 +545,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public void dispatch(Route route, String pattern) {
-        if (closed.get() || DriverFailureSignal.reported()) {
-            // context 关闭中 / F1：UI 侧已上报"本场景驱动连接不可信" → fail-open 直通，
+        if (closed.get() || DriverFailureSignal.reported(context)) {
+            // context 关闭中 / F1：UI 侧已上报"本场景驱动连接不可信" → fail-open 直通（per-context 键控，P0-2），
             // 绝不 resume / fulfill / abort（那些是拦截路径，失败信号下不得再碰驱动协议）。
             try {
                 route.fallback();
@@ -682,6 +683,8 @@ public final class RouteRuntimeImpl implements RouteRuntime {
     private void closeAfterContextClosed() {
         markContextClosing();
         close();
+        //  context 已销毁 ⇒ 清退其专属驱动信道（释放 daemon 线程、防泄漏；与运行时内存收尾对称）。
+        GuardedDriverCallRegistry.remove(context);
     }
 
     /**
@@ -721,7 +724,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
             recordArmedDuration(e.getKey()); // T1：定稿剩余规则的 armed 时长
         }
         binders.clear();
-        DriverFailureSignal.reset();   // B：消费即清零（本场景收尾已过，下一个场景重新开始）
+        DriverFailureSignal.reset(context);   // B：消费即清零（本场景收尾已过，下一个场景重新开始）
         VerboseLogging.logInfoIfVerbose(LOGGER,
                 "[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown",
                 retiredByPurpose.get(), flushed);

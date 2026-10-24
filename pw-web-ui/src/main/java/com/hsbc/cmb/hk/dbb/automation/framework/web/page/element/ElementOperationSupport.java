@@ -53,8 +53,9 @@ final class ElementOperationSupport {
                 waitForDomSettled(page, operation, selector);
                 try {
                     return action.get();
-                } catch (PlaywrightException e2) {
-                    // 等 DOM 落定后仍失败（极罕见连续导航），按原语义抛出
+                } catch (RuntimeException e2) {
+                    //  P1-8：与 executeWithRetry 对齐 —— 等 DOM 落定后仍失败（含非 Playwright 异常，如框架 NPE）
+                    //  也收集 DOM 诊断并包装为 ElementOperationException，不再直接逃逸。
                     ElementOperationException ex = new ElementOperationException(operation, selector,
                         "Failed: " + operation, e2);
                     captureDiagnosticsAndLog(locatorFn, selector, page, operation, ex);
@@ -105,23 +106,52 @@ final class ElementOperationSupport {
                                  BasePage page, Supplier<Boolean> action,
                                  String operation, String testName) {
         awaitFrameQuiet(page, operation);
+        Boolean first;
         try {
-            action.get();
+            first = action.get();
         } catch (PlaywrightException e) {
-            if (isNavigationOrContextLoss(e)) {
-                // 检测到路由/导航变化：等 DOM 加载完毕（仅一次），再操作一次
-                waitForDomSettled(page, operation, selector);
-                try {
-                    action.get();
-                    return;
-                } catch (RuntimeException e2) {
-                    throw buildRetryException(locatorFn, selector, page, operation, testName, e2);
-                }
-            }
-            throw buildRetryException(locatorFn, selector, page, operation, testName, e);
+            handleNavRetry(locatorFn, selector, page, action, operation, testName, e);
+            return; // handleNavRetry 内部：导航重试成功即 return；仍失败已抛诊断异常
         } catch (RuntimeException e) {
-            // 非 Playwright 异常（如框架自身 NPE）不重试，按原语义包装抛出
+            // 非 Playwright 异常（如框架自身 NPE）不重试，按原语义包装抛出（P1-8 对齐 executeSafely 首 catch）
             throw buildRetryException(locatorFn, selector, page, operation, testName, e);
+        }
+        if (first != null && first) {
+            return; // 成功（honors Supplier<Boolean> 契约）
+        }
+        //  P1-8：action 返回 false / null 而未抛异常 = 逻辑失败，此前被静默吞掉（false 与 true 等价）。
+        //  现按失败收口（含 DOM 诊断 + 截图），使 Supplier<Boolean> 契约真正成立。
+        throw buildRetryException(locatorFn, selector, page, operation, testName,
+                new ElementOperationException(operation, selector,
+                        "Action returned false (logical failure, no exception)", null));
+    }
+
+    /**
+     * 导航/上下文丢失分支：等 DOM 落定后重试一次。成功即返回；仍失败（抛 PlaywrightException 或返回 false）
+     * 则抛带 DOM 诊断的 {@link ElementOperationException}。非 Playwright 异常同样包诊断（P1-8 对齐）。
+     */
+    private static void handleNavRetry(Supplier<Locator> locatorFn, String selector, BasePage page,
+                                       Supplier<Boolean> action, String operation, String testName,
+                                       PlaywrightException e) {
+        if (!isNavigationOrContextLoss(e)) {
+            throw buildRetryException(locatorFn, selector, page, operation, testName, e);
+        }
+        // 检测到路由/导航变化：等 DOM 加载完毕（仅一次），再操作一次
+        waitForDomSettled(page, operation, selector);
+        try {
+            Boolean r2 = action.get();
+            if (r2 != null && r2) {
+                return; // 重试成功
+            }
+            // 重试后仍逻辑失败（返回 false / null）
+            throw buildRetryException(locatorFn, selector, page, operation, testName,
+                    new ElementOperationException(operation, selector,
+                            "Action returned false after nav settle (logical failure)", null));
+        } catch (PlaywrightException e2) {
+            throw buildRetryException(locatorFn, selector, page, operation, testName, e2);
+        } catch (RuntimeException e2) {
+            // 非 Playwright（P1-8 对齐：重试失败也包诊断，与 executeWithRetry 首 catch 一致）
+            throw buildRetryException(locatorFn, selector, page, operation, testName, e2);
         }
     }
 
@@ -172,8 +202,8 @@ final class ElementOperationSupport {
         m = m.toLowerCase();
         return m.contains("execution context") || m.contains("context was destroyed")
                 || m.contains("object doesn't exist") || m.contains("does not exist")
-                || m.contains("navigat") || m.contains("frame detached")
-                || m.contains("frame was detached");
+                || m.contains("navigation") || m.contains("navigating")
+                || m.contains("frame detached") || m.contains("frame was detached");
     }
 
     /**

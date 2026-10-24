@@ -17,6 +17,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ScenarioContext;
+import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
 /**
@@ -194,10 +195,80 @@ public class PageObjectFactory {
         return (Map<Class<?>, Object>) TestContextHolder.get()
                 .computeIfAbsent(THREAD_INSTANCES_KEY, ConcurrentHashMap::new);
     }
+
+    /**
+     * 不写状态：取当前线程 / 用例<b>已存在</b>的隔离实例 Map（无则空 Map），<b>绝不创建</b> ThreadContext
+     * （P1-11）。纯查询（hasInstance / getInstanceCount / getStatistics / getRegisteredPageClasses）
+     * 必须走本方法而非 {@link #threadInstances()}，否则会为当前线程凭空创建上下文并登记进
+     * {@link TestContextHolder}，引入意料之外的 side-effect。
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<Class<?>, Object> threadInstancesView() {
+        TestContext ctx = TestContextHolder.peek();
+        if (ctx == null) {
+            return Collections.emptyMap();
+        }
+        Object v = ctx.get(THREAD_INSTANCES_KEY);
+        if (v instanceof Map) {
+            return (Map<Class<?>, Object>) v;
+        }
+        return Collections.emptyMap();
+    }
+
+    /**
+     * 不写状态：遍历<b>所有</b>已登记上下文（线程键 + 用例级）合并线程隔离实例 Map（P1-11）。
+     * 与 {@link #clearAll()} 跨上下文口径一致，供统计 / 注册类查询使用。
+     */
+    private static Map<Class<?>, Object> allThreadInstancesView() {
+        Map<Class<?>, Object> acc = new HashMap<>();
+        TestContextHolder.forEachAllContext(ctx -> mergeThreadInstances(acc, ctx));
+        return acc;
+    }
+
+    private static void mergeThreadInstances(Map<Class<?>, Object> acc, TestContext ctx) {
+        Object v = ctx.get(THREAD_INSTANCES_KEY);
+        if (v instanceof Map) {
+            acc.putAll((Map<Class<?>, Object>) v);
+        }
+    }
+
+    /**
+     * 不写状态：统计<b>所有</b>已登记上下文（线程键 + 用例级）下的线程隔离实例总数（P1-11）。
+     * 此前 {@link #getInstanceCount()} 只数当前线程，而 {@link #clearAll()} 跨线程统计 →
+     * "实例数"泄漏观测指标口径不一致、不可信；现统一为跨上下文口径。
+     */
+    private static long threadIsolatedInstanceCount() {
+        AtomicLong total = new AtomicLong(0);
+        TestContextHolder.forEachAllContext(ctx -> addThreadInstanceCount(total, ctx));
+        return total.get();
+    }
+
+    private static void addThreadInstanceCount(AtomicLong total, TestContext ctx) {
+        Object v = ctx.get(THREAD_INSTANCES_KEY);
+        if (v instanceof Map) {
+            total.addAndGet(((Map<?, ?>) v).size());
+        }
+    }
     
     // 请求作用域实例存储
     private static final ConcurrentMap<String, Map<Class<?>, Object>> requestScopedInstances =
             new ConcurrentHashMap<>();
+
+    /**
+     * 记录「本次请求作用域实际写入所用的键」（P1-12 修复）。
+     *
+     * <p>背景：{@link #getCurrentRequestId()} 优先场景身份、回落线程身份；请求作用域实例在
+     * {@link #resolveInstance} 创建时按该函数取键写入。若收尾时刻（{@link #endRequestScope}）场景身份
+     * 已解绑，键口径会翻转为 {@code thread:<tid>}，写入时的 {@code scenario:<id>} 条目就此永久滞留
+     * （静态 Map 随用例数单调增长，且持有整张 PageObject 图）。故在<b>写入同线程</b>用本 ThreadLocal
+     * 记录真实键，收尾时优先取之 —— 即便场景已解绑，删除键仍与写入键一致。</p>
+     */
+    private static final ThreadLocal<String> CURRENT_REQUEST_SCOPE_KEY = new ThreadLocal<>();
+
+    /** 记录请求作用域键（P1-12）：存于线程级，跨「场景解绑」仍可被收尾读取。 */
+    private static void recordRequestScopeKey(String reqId) {
+        CURRENT_REQUEST_SCOPE_KEY.set(reqId);
+    }
     
     // 当前配置
     private static volatile CreationConfig currentConfig = DEFAULT_CONFIG;
@@ -278,11 +349,17 @@ public class PageObjectFactory {
     public static <T> T getPage(Class<T> pageClass, LifecycleStrategy strategy) {
         CreationConfig config = currentConfig;
         if (config.getLifecycleStrategy() != strategy) {
-            // 临时使用指定策略
+            // 临时使用指定策略：必须连同 customSuppliers / postCreateHooks / properties 一并迁移，
+            // 否则经 Builder.customSupplier()/postCreateHook()/property() 配置的注入与钩子，在显式传
+            // strategy 时被静默丢弃（典型表现：AbstractManagedPage.getPage() NPE 或钩子不执行）—— P1-10。
+            CreationConfig base = config;
             config = new Builder()
                     .lifecycle(strategy)
-                    .lazy(config.isLazy())
+                    .lazy(base.isLazy())
                     .build();
+            config.getCustomSuppliers().putAll(base.getCustomSuppliers());
+            config.getPostCreateHooks().addAll(base.getPostCreateHooks());
+            config.getProperties().putAll(base.getProperties());
         }
         return getPage(pageClass, config);
     }
@@ -329,8 +406,10 @@ public class PageObjectFactory {
             case THREAD_ISOLATED:
                 return getOrCreate(threadInstances(), pageClass, config);
             case REQUEST_SCOPED:
+                String reqId = getCurrentRequestId();
+                recordRequestScopeKey(reqId); // P1-12：记下写入所用键，供 endRequestScope 精确删除
                 Map<Class<?>, Object> requestMap = requestScopedInstances
-                        .computeIfAbsent(getCurrentRequestId(), k -> new ConcurrentHashMap<>());
+                        .computeIfAbsent(reqId, k -> new ConcurrentHashMap<>());
                 return getOrCreate(requestMap, pageClass, config);
             case SINGLETON:
             default:
@@ -499,6 +578,7 @@ public class PageObjectFactory {
      */
     public static void beginRequestScope() {
         String requestId = getCurrentRequestId();
+        recordRequestScopeKey(requestId); // P1-12：记录本次作用域键
         if (!requestScopedInstances.containsKey(requestId)) {
             requestScopedInstances.put(requestId, new ConcurrentHashMap<>());
             logger.debug("Started request scope for: {}", requestId);
@@ -509,7 +589,13 @@ public class PageObjectFactory {
      * 结束当前请求作用域
      */
     public static void endRequestScope() {
-        String requestId = getCurrentRequestId();
+        //  P1-12：优先用写入时记录的键（即便收尾时场景身份已解绑，删除键仍与写入键一致）；
+        //  未记录时回退到 getCurrentRequestId()（兼容未走 REQUEST_SCOPED 创建却调用本方法的边界）。
+        String requestId = CURRENT_REQUEST_SCOPE_KEY.get();
+        if (requestId == null) {
+            requestId = getCurrentRequestId();
+        }
+        CURRENT_REQUEST_SCOPE_KEY.remove();
         Map<Class<?>, Object> instances = requestScopedInstances.remove(requestId);
         if (instances != null) {
             logger.debug("Ended request scope for: {}, cleaned up {} instances", 
@@ -538,15 +624,18 @@ public class PageObjectFactory {
         requestScopedInstances.clear();
 
         // CT2-08：跨线程清理线程隔离实例 + 聚合真实总数（原实现只清/只数当前线程）。
+        //  P1-11：扩展为「所有已登记上下文」（线程键 + 用例级）—— 即便未走 CT2-08 修复也可能
+        //  残留于用例级上下文下的线程隔离实例，现一并清理，使计数与清理口径对齐。
         //  注意：遍历过程中「读值统计」必须早于「remove 键」，否则统计恒为 0。
         AtomicLong threadCount = new AtomicLong();
-        TestContextHolder.forEachThreadContext(ctx -> {
+        TestContextHolder.forEachAllContext(ctx -> {
             Object value = ctx.get(THREAD_INSTANCES_KEY);
             if (value instanceof Map) {
                 threadCount.addAndGet(((Map<?, ?>) value).size());
             }
             ctx.remove(THREAD_INSTANCES_KEY);
         });
+        CURRENT_REQUEST_SCOPE_KEY.remove(); // 清理本线程的请求作用域键残留（P1-12）
 
         VerboseLogging.logInfoIfVerbose(logger,
                 "Cleared all PageObject instances: {} singletons, {} thread-isolated (across {} thread context(s)), {} request-scoped",
@@ -579,7 +668,7 @@ public class PageObjectFactory {
      */
     public static boolean hasInstance(Class<?> pageClass) {
         if (singleInstances.containsKey(pageClass))  {return true;} 
-        if (threadInstances().containsKey(pageClass))  {return true;} 
+        if (threadInstancesView().containsKey(pageClass))  {return true;} 
         
         for (Map<Class<?>, Object> requestMap : requestScopedInstances.values()) {
             if (requestMap.containsKey(pageClass))  {return true;} 
@@ -594,11 +683,11 @@ public class PageObjectFactory {
      * @return 实例数量
      */
     public static int getInstanceCount() {
-        int count = singleInstances.size() + threadInstances().size();
+        long count = (long) singleInstances.size() + threadIsolatedInstanceCount();
         for (Map<Class<?>, Object> requestMap : requestScopedInstances.values()) {
             count += requestMap.size();
         }
-        return count;
+        return (int) Math.min(count, Integer.MAX_VALUE);
     }
     
     /**
@@ -612,7 +701,7 @@ public class PageObjectFactory {
         sb.append(String.format("Total Creations: %d%n", totalCreations.get()));
         sb.append(String.format("Total Access: %d%n", totalAccess.get()));
         sb.append(String.format("Singleton Instances: %d%n", singleInstances.size()));
-        sb.append(String.format("Thread-Isolated Instances: %d%n", threadInstances().size()));
+        sb.append(String.format("Thread-Isolated Instances: %d%n", allThreadInstancesView().size()));
         sb.append(String.format("Request-Scoped Instances: %d%n", requestScopedInstances.size()));
         sb.append("\nCreation Count by Class:\n");
         
@@ -637,7 +726,7 @@ public class PageObjectFactory {
     public static Set<Class<?>> getRegisteredPageClasses() {
         Set<Class<?>> classes = new HashSet<>();
         classes.addAll(singleInstances.keySet());
-        classes.addAll(threadInstances().keySet());
+        classes.addAll(allThreadInstancesView().keySet());
         
         for (Map<Class<?>, Object> requestMap : requestScopedInstances.values()) {
             classes.addAll(requestMap.keySet());

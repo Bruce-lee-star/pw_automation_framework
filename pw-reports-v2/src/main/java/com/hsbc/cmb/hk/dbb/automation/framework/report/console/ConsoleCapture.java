@@ -72,10 +72,12 @@ public final class ConsoleCapture {
         }
         SINKS.remove();
         try {
-            if (originalOut != null) {
+            //  仅当当前流仍是我们安装的 tee 时才还原——避免安装期间被第三方库 System.setOut 替换后，
+            //  卸载反而把第三方流覆盖掉（P2-20）。否则只复位本框架状态，不触碰外来流。
+            if (System.out instanceof TeePrintStream && originalOut != null) {
                 System.setOut(originalOut);
             }
-            if (originalErr != null) {
+            if (System.err instanceof TeePrintStream && originalErr != null) {
                 System.setErr(originalErr);
             }
         } catch (Throwable ignored) {
@@ -155,27 +157,32 @@ public final class ConsoleCapture {
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
             ByteArrayOutputStream b0 = buf.get();
+            int lineStart = off;
             for (int i = off; i < off + len; i++) {
-                int c = b[i] & 0xFF;
-                if (c == '\n') {
+                if (b[i] == '\n') {
+                    //  整段（不含 '\n'）先入行缓冲，遇换行才解码整行——多字节字符跨 write 拆分时，
+                    //  字节仍留在缓冲、下次 write 补齐，绝不在半行上提前解码（P2-20）。
+                    b0.write(b, lineStart, i - lineStart);
                     flushLine(b0);
-                } else {
-                    b0.write(c);
+                    lineStart = i + 1;
                 }
+            }
+            if (lineStart < off + len) {
+                b0.write(b, lineStart, (off + len) - lineStart); // 行尾残字节留待下次 write / close
             }
             delegate.write(b, off, len);
         }
 
         @Override
         public void flush() throws IOException {
-            flushLine(buf.get());
+            //  仅冲刷原始流；不解码半行——避免 autoflush 在行未写完 / 多字节拆分时把残字节解码成替换字符并投递半行（P2-20）。
             delegate.flush();
         }
 
-        /** close 必须 no-op：绝不能关闭原始 {@code System.out/err}。 */
+        /** close 必须 no-op：绝不能关闭原始 {@code System.out/err}；但行尾无换行符的残留字节需在此冲刷。 */
         @Override
         public void close() throws IOException {
-            flush();
+            flushLine(buf.get());
             // 故意不调用 delegate.close()
         }
 

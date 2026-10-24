@@ -32,4 +32,14 @@ public interface PageRegistry {
      * @return 本线程当前 Page；无则 {@code null}
      */
     Page currentPageForThread();
+
+    /**
+     * 本线程当前 Page 的「变更世代」信号（P2-18 热路径优化）。
+     *
+     * <p>仅当本线程当前页发生过切换 / 重建（{@code setPage}/{@code closePage}/建页）时自增。
+     * 供 {@code PageContextState.ensurePageValid} 在 page 已有效时据此跳过昂贵的 {@code getPage()} 全链路比对。</p>
+     *
+     * @return 当前 epoch 值（线程级，只读）
+     */
+    long currentPageEpoch();
 }

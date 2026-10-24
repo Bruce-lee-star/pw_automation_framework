@@ -15,6 +15,17 @@ public interface ReportSink {
 
     void accept(ReportEvent event);
 
+    /**
+     * 整场开始（总线 {@code startRun()} 复位时回调）——sink 借此清掉上一轮 run 残留的<b>进程级</b>状态。
+     *
+     * <p>典型用途：{@code LocalReportSink} 清 {@code writtenIds}（否则同 JVM 第二轮 run 出现相同
+     * outcomeId 时会被判"已写"而跳过 per-case JSON 真相源）与累计 {@code errors}。</p>
+     *
+     * <p>默认无操作（不破坏既有无状态 sink）；有进程级残余态的 sink 才需覆写。</p>
+     */
+    default void onRunStarted() {
+    }
+
     /** 释放资源（推送线程等）。默认无操作。 */
     default void close() {
     }

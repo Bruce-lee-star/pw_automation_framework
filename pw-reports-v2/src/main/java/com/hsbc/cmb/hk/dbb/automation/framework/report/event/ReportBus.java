@@ -148,6 +148,21 @@ public final class ReportBus {
         }
         sessions.clear();
         runFinished.set(false);
+        //  P1-5：复位跨线程可见的"活动步骤 / 活动用例"指针 —— 否则上一轮收尾之后、本轮刚开始的
+        //    跨线程事件（route 命中线程 / CloseGuard 收尾线程的 trace/video/证据 flush）会挂到上一轮
+        //    的 outcomeId 上，造成"报告归属串到上一轮用例"。
+        activeStep = null;
+        activeOutcomeId = null;
+        current.remove(); // 本线程残留的用例级 ThreadLocal 句柄（防御性；其它线程在各自 startCase 覆盖）
+        sinkErrors.set(0); // 让 getSinkErrorCount() 反映"本轮"而非跨轮累计值
+        //  向各 sink 派发整场开始：清掉 sink 侧进程级残留（LocalReportSink 的 writtenIds/errors 等，P1-9）。
+        for (ReportSink sink : sinks) {
+            try {
+                sink.onRunStarted();
+            } catch (Throwable t) {
+                log.warn("sink {} onRunStarted failed", sink.name(), t);
+            }
+        }
     }
 
     /**

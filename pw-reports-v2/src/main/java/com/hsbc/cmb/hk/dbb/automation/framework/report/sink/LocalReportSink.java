@@ -21,9 +21,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 本地文件出口——JSON 真相源 + HTML 展示 + index + 静态资产。
@@ -47,6 +53,9 @@ public final class LocalReportSink implements ReportSink {
     private final Set<String> writtenIds = ConcurrentHashMap.newKeySet();
     private final java.util.concurrent.atomic.AtomicInteger errors =
             new java.util.concurrent.atomic.AtomicInteger();
+    /** 渲染线程名序号（仅用于可观测性，线程安全）。 */
+    private static final java.util.concurrent.atomic.AtomicInteger renderSeq =
+            new java.util.concurrent.atomic.AtomicInteger();
 
     public LocalReportSink(PwReportsConfig config) {
         this.config = config;
@@ -55,6 +64,15 @@ public final class LocalReportSink implements ReportSink {
     @Override
     public String name() {
         return "local";
+    }
+
+    @Override
+    public void onRunStarted() {
+        //  P1-9：同 JVM 多轮 run（rerun / 多 feature 分轮）时，上一轮的 writtenIds / errors 残留会让
+        //  第二轮相同 outcomeId 被判"已写"而跳过 per-case JSON 真相源，且 errors 变成累计值。
+        //  整场开始即清，保证每轮产物从零开始。
+        writtenIds.clear();
+        errors.set(0);
     }
 
     @Override
@@ -88,79 +106,119 @@ public final class LocalReportSink implements ReportSink {
         // 行 outcomes 的 per-case JSON/HTML/monitor-failures 仍照常产出（保 real-time 产物与父页面跳转目标）。
         List<TestOutcome> aggregated = OutlineAggregator.aggregate(outcomes);
 
-        // sweep 补写漏网 JSON：先写 rows + standalone，再写聚合父（父含 examples，rows 已写则不重写）
+        // sweep 补写漏网 JSON（串行、实时真相源兜底；必须在其它渲染前完成，且属轻量 IO）
         for (TestOutcome o : outcomes) {
             writeOutcomeJson(o); // sweep：未写过的一补（防御 CaseFinished 丢失）
         }
         for (TestOutcome o : aggregated) {
             writeOutcomeJson(o);
         }
-        // per-case HTML：rows + standalone（父页面跳转目标）+ 聚合父页面
+
+        //  P1-9（问题②）：原 finishAll 在 RunFinished 派发线程上<b>串行</b>渲染全部 HTML/JSON/CSV/JUnit/资产，
+        //  无并发、无超时 —— 大轮次墙钟耗时高，且极端情况下可能阻塞/挂死派发线程。
+        //  现改为<b>分片 + 并行 + 有界超时</b>：各独立产物并行渲染（单步隔离保留），整体 join 受超时保护；
+        //  正常规模在超时内全部完成（契约不变：finishAll 返回时报告已落盘），病理性超时则取消剩余任务并告警
+        //  （JSON 真相源已实时落盘，不丢；超时任务多为 HTML/资产展示层，非真相源）。
+        List<Callable<Object>> tasks = new ArrayList<>();
+        // per-case HTML：rows + standalone（父页面跳转目标）+ 聚合父页面（各自独立文件，可并行）
         for (TestOutcome o : outcomes) {
-            try {
-                HtmlRenderer.renderOutcome(dir(), o);
-            } catch (Throwable t) {
-                errors.incrementAndGet();
-                log.warn("per-case HTML render failed for {}", o.getOutcomeId(), t);
-            }
+            tasks.add(Executors.callable(() -> renderOutcomeSafe(o)));
         }
         for (TestOutcome o : aggregated) {
-            try {
-                HtmlRenderer.renderOutcome(dir(), o);
-            } catch (Throwable t) {
-                errors.incrementAndGet();
-                log.warn("per-case HTML render failed for {}", o.getOutcomeId(), t);
-            }
+            tasks.add(Executors.callable(() -> renderOutcomeSafe(o)));
         }
-        try {
-            JsonWriter.writeSummary(dir(), aggregated);
-        } catch (Throwable t) {
-            errors.incrementAndGet();
-            log.error("serenity-summary.json write failed", t);
-        }
-        try {
-            AggregateBuilder.writeIndex(dir(), aggregated);
-        } catch (Throwable t) {
-            errors.incrementAndGet();
-            log.warn("index.html write failed", t);
-        }
-        try {
-            // 新设计第二级：每个 feature 一页（总览页的 Feature 行链到这里）
-            FeatureHtmlRenderer.writeFeatures(dir(), aggregated);
-        } catch (Throwable t) {
-            log.warn("feature pages write failed (non-fatal)", t);
-        }
-        try {
-            // 邮件用单页报告：自包含（无外部 CSS/JS），可直接作附件或贴入正文
-            EmailReportRenderer.writeEmailReport(dir(), aggregated);
-        } catch (Throwable t) {
-            log.warn("email-report.html write failed (non-fatal)", t);
-        }
-        try {
-            // 无监控失败时不落文件（对齐旧版：文件存在即有失败）；
-            // monitor 失败挂在 rows 上，故用原始 outcomes（聚合父不携带 apiMonitorFailures）
-            SummaryHtmlRenderer.writeMonitorFailures(dir(), outcomes);
-        } catch (Throwable t) {
-            log.warn("monitor-failures.html write failed (non-fatal)", t);
-        }
-        try {
-            CsvWriter.writeCsv(dir(), aggregated);
-        } catch (Throwable t) {
-            log.warn("serenity-summary.csv write failed (non-fatal)", t);
-        }
-        try {
-            JunitXmlWriter.writeXml(dir(), aggregated);
-        } catch (Throwable t) {
-            log.warn("serenity-junit.xml write failed (non-fatal)", t);
-        }
-        try {
-            StaticAssets.copyAssets(dir());
-        } catch (Throwable t) {
-            log.warn("static asset copy failed", t);
-        }
+        tasks.add(Executors.callable(() -> runRender("serenity-summary.json", true,
+                () -> { JsonWriter.writeSummary(dir(), aggregated); return null; })));
+        tasks.add(Executors.callable(() -> runRender("index.html", false,
+                () -> { AggregateBuilder.writeIndex(dir(), aggregated); return null; })));
+        tasks.add(Executors.callable(() -> runRender("feature pages", false,
+                () -> { FeatureHtmlRenderer.writeFeatures(dir(), aggregated); return null; })));
+        tasks.add(Executors.callable(() -> runRender("email-report.html", false,
+                () -> { EmailReportRenderer.writeEmailReport(dir(), aggregated); return null; })));
+        tasks.add(Executors.callable(() -> runRender("monitor-failures.html", false,
+                () -> { SummaryHtmlRenderer.writeMonitorFailures(dir(), outcomes); return null; })));
+        tasks.add(Executors.callable(() -> runRender("serenity-summary.csv", false,
+                () -> { CsvWriter.writeCsv(dir(), aggregated); return null; })));
+        tasks.add(Executors.callable(() -> runRender("serenity-junit.xml", false,
+                () -> { JunitXmlWriter.writeXml(dir(), aggregated); return null; })));
+        tasks.add(Executors.callable(() -> runRender("static assets", false,
+                () -> { StaticAssets.copyAssets(dir()); return null; })));
+
+        renderInParallel(tasks);
+
         if (errors.get() > 0) {
             log.warn("LocalReportSink completed with {} error(s); JSON preserved where written", errors.get());
         }
+    }
+
+    private void renderOutcomeSafe(TestOutcome o) {
+        runRender("per-case HTML " + o.getOutcomeId(), false,
+                () -> { HtmlRenderer.renderOutcome(dir(), o); return null; });
+    }
+
+    /** 单步隔离渲染：异常不向外传播，失败计入 {@link #errors}（severe=true 时升级为 error 级日志）。 */
+    private void runRender(String label, boolean severe, Callable<Object> r) {
+        try {
+            r.call();
+        } catch (Throwable t) {
+            errors.incrementAndGet();
+            if (severe) {
+                log.error("{} render failed (non-fatal)", label, t);
+            } else {
+                log.warn("{} render failed (non-fatal)", label, t);
+            }
+        }
+    }
+
+    /**
+     * 分片并行渲染：提交所有任务到有界线程池，{@link ExecutorService#invokeAll(java.util.Collection, long, java.util.concurrent.TimeUnit)}
+     * 在 {@link #renderTimeoutSeconds()} 内等待全部完成；超时则取消未启动任务并告警（已启动任务由 finally 的
+     * shutdownNow 中断）。使用 daemon 线程，避免渲染线程阻止 JVM 退出（P1-9 韧性）。
+     */
+    private void renderInParallel(List<Callable<Object>> tasks) {
+        if (tasks.isEmpty()) {
+            return;
+        }
+        int threads = Math.max(2, Runtime.getRuntime().availableProcessors());
+        ExecutorService pool = Executors.newFixedThreadPool(threads, r -> {
+            Thread t = new Thread(r, "pw-report-render-" + renderSeq.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+        try {
+            long timeout = renderTimeoutSeconds();
+            List<Future<Object>> futures = pool.invokeAll(tasks, timeout, TimeUnit.SECONDS);
+            long cancelled = 0;
+            for (Future<Object> f : futures) {
+                if (f.isCancelled()) {
+                    cancelled++;
+                }
+            }
+            if (cancelled > 0) {
+                log.warn("LocalReportSink render: {} task(s) cancelled due to {}s timeout", cancelled, timeout);
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            log.warn("LocalReportSink render interrupted before completion", ie);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** 渲染整体有界超时（秒）：默认 300s，可经系统属性 {@code pw.report.render.timeout.seconds} 覆盖。 */
+    private static long renderTimeoutSeconds() {
+        String v = System.getProperty("pw.report.render.timeout.seconds");
+        if (v != null) {
+            try {
+                long parsed = Long.parseLong(v.trim());
+                if (parsed > 0) {
+                    return parsed;
+                }
+            } catch (NumberFormatException ignore) {
+                // 非法值回落默认
+            }
+        }
+        return 300L;
     }
 
     private Path dir() {

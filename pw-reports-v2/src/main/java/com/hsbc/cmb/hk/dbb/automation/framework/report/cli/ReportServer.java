@@ -49,7 +49,8 @@ import java.util.zip.ZipInputStream;
  *   <li>{@code POST /{project}/runs}            → 上传 serenity.zip，返回 runId 和 URL</li>
  *   <li>{@code GET /{project}/{runId}/...}      → 静态文件</li>
  *   <li>{@code POST /{project}/{runId}/api/patch} → 补图</li>
- *   <li>{@code POST /{project}/{runId}/api/mark-success} → 标记用例通过（覆盖结果）</li>
+ *   <li>{@code POST /{project}/{runId}/api/mark-success} → 标记用例通过（非破坏性覆盖，可改备注 / 可还原）</li>
+ *   <li>{@code POST /{project}/{runId}/api/mark-revert} → 撤销标记，还原回被覆盖前的原始结果</li>
  * </ul>
  */
 public final class ReportServer {
@@ -113,6 +114,11 @@ public final class ReportServer {
         // POST /{project}/{runId}/api/mark-success
         if ("api/mark-success".equals(rest) && "POST".equalsIgnoreCase(ex.getRequestMethod())) {
             handleMarkSuccess(ex, project, runId);
+            return;
+        }
+        // POST /{project}/{runId}/api/mark-revert
+        if ("api/mark-revert".equals(rest) && "POST".equalsIgnoreCase(ex.getRequestMethod())) {
+            handleMarkRevert(ex, project, runId);
             return;
         }
         // static file
@@ -224,11 +230,69 @@ public final class ReportServer {
                 return;
             }
             TestOutcome outcome = mapper.readValue(existingJson.toFile(), TestOutcome.class);
-            //  标记通过：覆盖用例结果为 SUCCESS，并清掉失败原因 / 堆栈（override，保留失败步骤供追溯）。
+            //  标记通过：非破坏性覆盖——首次标记时暂存原始结果 / 失败原因，之后可重复调用修改备注
+            //  （不清原始），亦可经 /api/mark-revert 还原回原始失败态。失败步骤保留供追溯。
+            if (!Boolean.TRUE.equals(outcome.getOverridden())) {
+                outcome.setOriginalResult(outcome.getResult());
+                outcome.setOriginalTestFailureCause(outcome.getTestFailureCause());
+                outcome.setOriginalTestFailureSummary(outcome.getTestFailureSummary());
+                outcome.setOriginalTestFailureClassname(outcome.getTestFailureClassname());
+                outcome.setOriginalTestFailureMessage(outcome.getTestFailureMessage());
+                outcome.setOverridden(true);
+            }
             outcome.setResult(TestResult.SUCCESS);
             outcome.setTestFailureCause(null);
             outcome.setTestFailureSummary(null);
+            outcome.setTestFailureClassname(null);
+            outcome.setTestFailureMessage(null);
+            outcome.setOverrideNote(note);
             outcome.getEvidence().add("[marked success]" + (note.isEmpty() ? "" : " " + note));
+
+            JsonWriter.writeOutcome(runDir, outcome);
+            reindex(runDir);
+            writeJson(ex, 200, Map.of("ok", true, "outcomeId", pid));
+        } catch (Exception e) {
+            e.printStackTrace();
+            writeJson(ex, 500, Map.of("error", e.toString()));
+        }
+    }
+
+    /**
+     * 撤销「标记成功」覆盖：把结果 / 失败原因恢复到被覆盖前的原始态，清除覆盖标记与备注。
+     *
+     * <p>因标记是非破坏性的（原始态保留在 {@code original*} 字段），此处可无损还原。
+     */
+    private void handleMarkRevert(HttpExchange ex, String project, String runId) throws IOException {
+        Path runDir = root.resolve(project).resolve(runId);
+        try {
+            byte[] body = ex.getRequestBody().readAllBytes();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> req = mapper.readValue(body, Map.class);
+            String pid = (String) req.get("outcomeId");
+
+            Path existingJson = runDir.resolve(pid).resolve(pid + ".json");
+            if (!Files.exists(existingJson)) {
+                writeJson(ex, 404, Map.of("error", "outcome not found: " + pid));
+                return;
+            }
+            TestOutcome outcome = mapper.readValue(existingJson.toFile(), TestOutcome.class);
+            if (!Boolean.TRUE.equals(outcome.getOverridden())) {
+                writeJson(ex, 409, Map.of("error", "outcome not overridden: " + pid));
+                return;
+            }
+            outcome.setResult(outcome.getOriginalResult());
+            outcome.setTestFailureCause(outcome.getOriginalTestFailureCause());
+            outcome.setTestFailureSummary(outcome.getOriginalTestFailureSummary());
+            outcome.setTestFailureClassname(outcome.getOriginalTestFailureClassname());
+            outcome.setTestFailureMessage(outcome.getOriginalTestFailureMessage());
+            outcome.setOriginalResult(null);
+            outcome.setOriginalTestFailureCause(null);
+            outcome.setOriginalTestFailureSummary(null);
+            outcome.setOriginalTestFailureClassname(null);
+            outcome.setOriginalTestFailureMessage(null);
+            outcome.setOverridden(false);
+            outcome.setOverrideNote(null);
+            outcome.getEvidence().add("[reverted to original result]");
 
             JsonWriter.writeOutcome(runDir, outcome);
             reindex(runDir);

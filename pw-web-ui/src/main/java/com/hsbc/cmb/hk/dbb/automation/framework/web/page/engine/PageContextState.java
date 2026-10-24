@@ -62,6 +62,14 @@ final class PageContextState {
     private final BasePage owner;
 
     /**
+     * 本线程当前 Page 的「变更世代」上一次同步值（P2-18 热路径优化）：
+     * {@link #ensurePageValid()} 在 page 已有效时，仅当 {@code PlaywrightManager.currentPageEpoch()}
+     * 与本品不同才走昂贵的 {@link PlaywrightManager#getPage()} 全链路做一致性比对，否则跳过。
+     * 取值 -1 表示尚未与当前世代同步（首次比对必执行）。
+     */
+    private long syncedPageEpoch = -1;
+
+    /**
      * 线程归属标记（WEB 多线程强化，对齐 playwright-java 1.58.0 官方并发模型）：
      * 记录首次使用本状态机的 scenario 线程。Playwright 的 Page/Context/Locator 非线程安全，
      * 一个 BasePage 实例只应被绑定它的线程使用；跨线程访问
@@ -144,18 +152,25 @@ final class PageContextState {
                     Page resolved = owner.resolveManagedPage();
                     owner.page = (resolved != null) ? resolved : PlaywrightManager.getPage();
                     resetFrameAndShadowContext(); // 页面重建后重置 iframe/shadow 上下文
+                    syncedPageEpoch = PlaywrightManager.currentPageEpoch(); // 同步世代（含 getPage() 可能新建的 bump）
                 }
             }
         } else {
-            // 检测 PlaywrightManager 中的 page 是否已被其他实例切换（如 switchToPage/switchNewPage）
-            Page managerPage = PlaywrightManager.getPage();
-            if (managerPage != owner.page) {
-                owner.page = managerPage;
-                resetFrameAndShadowContext();
-            } else {
-                // 防御：页面内导航可能已使当前 iframe Frame detached，自动清理避免状态泄漏（C1/C5）
-                clearStaleFrameContextIfNeeded();
+            //  P2-18：page 已有效时，仅当「本线程当前页发生过切换 / 重建」（epoch 变化）才走
+            //  PlaywrightManager.getPage() 全链路做一致性比对，避免每个 element op 都付出静态调用链开销；
+            //  世代未变则跳过该昂贵比对，仅保留轻量的 stale-frame 防御清理。
+            long epoch = PlaywrightManager.currentPageEpoch();
+            if (epoch != syncedPageEpoch) {
+                Page managerPage = PlaywrightManager.getPage();
+                if (managerPage != owner.page) {
+                    owner.page = managerPage;
+                    resetFrameAndShadowContext();
+                }
+                syncedPageEpoch = PlaywrightManager.currentPageEpoch(); // 捕获 getPage() 可能的新建 bump
             }
+            //  防御：页面内导航可能已使当前 iframe Frame detached，自动清理避免状态泄漏（C1/C5）；
+            //  该检查轻量、不依赖 getPage()，每次都执行，不受 epoch 短路影响。
+            clearStaleFrameContextIfNeeded();
         }
     }
 

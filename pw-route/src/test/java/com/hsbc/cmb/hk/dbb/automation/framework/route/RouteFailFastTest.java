@@ -28,7 +28,7 @@ import static org.mockito.Mockito.when;
  * F1 RouteFailFast（route 失败即收敛）回归 —— 对照问题清单 C6「失败后 route 继续拦截/观测」。
  *
  * <ul>
- *   <li><b>断言① 失败即直通</b>：{@link DriverFailureSignal#report()} 之后，dispatch 不再拦截/观测，
+ *   <li><b>断言① 失败即直通</b>：{@link DriverFailureSignal#report(Object)} 之后，dispatch 不再拦截/观测，
  *       直接 {@code fallback()}（真实网络放行），绝不 resume / fulfill / abort；</li>
  *   <li><b>断言② 挂起收敛</b>：失败信号后第一个 dispatch 触发一次幂等的挂起收敛
  *       （{@code claims.closeAll()}）—— 之前已进入 DELAY 挂起（IO_AWAIT）的请求立即 fallback，
@@ -51,7 +51,7 @@ public class RouteFailFastTest {
 
     @After
     public void cleanup() {
-        DriverFailureSignal.reset(); // 静态信号，必须清（防污染其它测试）
+        DriverFailureSignal.resetAll(); // per-context 信号，按场景边界统一清零（防污染其它测试）
         if (ctx != null) {
             RouteEngine.shutdown(ctx);
         }
@@ -105,7 +105,7 @@ public class RouteFailFastTest {
                 .done()
                 .start();
         Consumer<Route> handler = handlerFor("/api/error/**");
-        DriverFailureSignal.report();
+        DriverFailureSignal.report(ctx);
 
         Route route = mockRoute("http://h/api/error/boom");
         handler.accept(route); // 事件线程 dispatch
@@ -134,7 +134,7 @@ public class RouteFailFastTest {
         verify(pending, never()).resume(); // 确实在延迟窗口内（未被立即放行）
 
         // 驱动失败 → 后续任意 dispatch 触发收敛（幂等，一次）
-        DriverFailureSignal.report();
+        DriverFailureSignal.report(ctx);
         Route second = mockRoute("http://h/api/slow/2");
         handler.accept(second); // fail-fast 直通
         verify(second).fallback();
@@ -167,5 +167,33 @@ public class RouteFailFastTest {
 
         verify(route, never()).fallback(); // 未失败 → 走正常调度链（轮询观测），不直通
         verify(route, never()).fulfill(any());
+    }
+
+    /**
+     * P0-2 收口：失败信号按 context 隔离 —— 仅在 ctxA 上 {@link DriverFailureSignal#report(Object)}，
+     * ctxB 所属 runtime 不受影响（不直通、走正常调度链），杜绝"跨用例信道毒化"式的并行互毒化。
+     */
+    @Test
+    public void failSignalIsolationAcrossContexts() {
+        BrowserContext ctxA = mockContext();   // runtime A（字段 ctx 现为 ctxA）
+        BrowserContext ctxB = mockContext();   // runtime B（字段 ctx 现为 ctxB，独立 context）
+        RouteDsl.on(ctxB)
+                .api("/api/ok/**")
+                .monitor()
+                .expectStatus(200)
+                .timeout(30)
+                .done()
+                .start();
+        Consumer<Route> handlerB = handlerFor("/api/ok/**"); // 解析 ctxB 的 handler
+
+        DriverFailureSignal.report(ctxA); // 仅 ctxA 上报失败信号
+
+        Route routeB = mockRoute("http://h/api/ok/1");
+        handlerB.accept(routeB);
+
+        // ctxB 未上报 ⇒ 正常调度链（不直通、未被 ctxA 牵连）
+        verify(routeB, never()).fallback();
+        verify(routeB, never()).fulfill(any());
+        verify(routeB, never()).abort(anyString());
     }
 }

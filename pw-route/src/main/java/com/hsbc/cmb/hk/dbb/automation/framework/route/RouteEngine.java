@@ -119,19 +119,25 @@ public final class RouteEngine {
         }
     }
     /**
-     * 驱动信道当前是否可确证可用（{@code false} ⇒ 存在未收尾的在途协议调用）。
+     * 当前线程所属连接的驱动信道是否可确证可用（{@code false} ⇒ 存在未收尾的在途协议调用）。
+     *
+     * <p>2026-10-24 起驱动信道为<b>按连接（{@code BrowserContext}）的实例</b>（见
+     * {@link GuardedDriverCallRegistry#channelFor}）：每个用例（独立 Playwright 连接）拥有专属串行化线程，
+     * 某连接的超时 {@code shutdownNow()} 只取消<b>该连接</b>在途调用，不再牵连其它连接的用例。</p>
      *
      * <p>对外 API 里没有"复位连接 / 取消在途调用"的手段，唯一的"换连接"是关闭并重建 {@code Playwright} 实例。
      * 故本方法只暴露**可查询状态**，供会话层决定是否重建会话；重建后请调用 {@link #resetDriverChannel()}
      * 让信道与新连接对齐。</p>
      */
     public static boolean isDriverChannelUsable() {
-        return GuardedDriverCallRegistry.instance().isChannelUsable();
+        GuardedDriverCallImpl channel = GuardedDriverCallRegistry.currentChannel();
+        return channel == null || channel.isChannelUsable();
     }
 
     /** 驱动信道故障（超时）累计次数（单调递增；跨用例比较差值即可判断"本用例是否污染过信道"）。 */
     public static long driverChannelFailures() {
-        return GuardedDriverCallImpl.channelFailureCount();
+        GuardedDriverCallImpl channel = GuardedDriverCallRegistry.currentChannel();
+        return channel == null ? 0L : channel.channelFailureCountInstance();
     }
 
     /**
@@ -173,7 +179,9 @@ public final class RouteEngine {
      *   <li><b>规则 / 拦截</b>：Context 粒度（{@code BrowserContextImpl.routes} 是实例字段）
      *       ⇒ 用 {@link #clearRules(BrowserContext)}，<b>不需要</b>换实例；</li>
      *   <li><b>业务态</b>（cookies / 登录态）：Context 粒度 ⇒ 新 Context 或 session 缓存恢复；</li>
-     *   <li><b>协议信道</b>：Connection = <b>Playwright 实例</b>粒度 ⇒ 只有换实例能复位（本方法判定）；</li>
+     *   <li><b>协议信道</b>：Connection = <b>Playwright 实例</b>粒度 ⇒ 只有换实例能复位（本方法判定）；
+     *       驱动信道封装本身为<b>按连接实例</b>（见 {@link GuardedDriverCallRegistry#channelFor}），
+     *       故某连接的毒化<b>不再</b>牵连其它连接；</li>
      *   <li><b>框架 JVM 级静态态</b>：换实例也复位不了 ⇒ 由 {@link #resetDriverChannel()} 与
      *       {@link #shutdownAll()} 负责。</li>
      * </ul>
@@ -301,7 +309,7 @@ public final class RouteEngine {
             return; // 同一收尾窗口已复位过驱动信道
         }
         if (LAST_TEARDOWN_RESET_MS.compareAndSet(last, now)) {
-            GuardedDriverCallImpl.resetChannelForTeardown();
+            GuardedDriverCallRegistry.resetAllForTeardown();
         }
     }
 

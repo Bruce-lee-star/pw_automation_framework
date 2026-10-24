@@ -72,10 +72,13 @@ public class PlaywrightContextManager {
      * （页面此前已被 {@code page-close} 关掉 / 通道已失效），于是"明明录了却报没有录像"。
      * 关闭时只做兜底补充，主来源是这张表。</p>
      *
-     * <p>BrowserContext 未覆写 equals/hashCode → 按身份匹配；条目在 closeContext 末尾移除，不会泄漏。</p>
+     * <p>弱键（WeakHashMap 经 synchronizedMap 包装）：BrowserContext 未覆写 equals/hashCode → 按身份匹配。
+     * 正常路径仍在 closeContext 末尾显式 {@code remove(context)}（：420）；<b>未走 closeContext 的路径</b>
+     * （进程被杀 / 异常提前返回）下，Context 不再被强引用后即被 GC，对应录屏登记随之回收，
+     * 不再永久持有已死 Context 与 Video 句柄（P2-17）。WeakHashMap 非并发安全，用 synchronizedMap 兜底基本互斥。</p>
      */
     private static final java.util.Map<BrowserContext, java.util.List<com.microsoft.playwright.Video>>
-            CONTEXT_VIDEOS = new java.util.concurrent.ConcurrentHashMap<>();
+            CONTEXT_VIDEOS = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     //  trace 的启停 / 分段 / 导出 / 报告挂载已收口到
     //  {@link com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace.ScenarioTraceRecorder}
@@ -462,6 +465,9 @@ public class PlaywrightContextManager {
                     }
                     VerboseLogging.logInfoIfVerbose(logger, "Page closed");
                 }
+            } catch (BrowserException e) {
+                //  已是一层语义化异常（内部 CloseGuard 捕获的真实错误），直接抛出，避免同类再包一层把原始原因埋深。
+                throw e;
             } catch (Exception e) {
                 logger.error("Failed to close page: {}", e.getMessage(), e);
                 throw new BrowserException("Failed to close page", e);

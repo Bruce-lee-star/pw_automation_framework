@@ -461,7 +461,7 @@
        下方底部 Tab 卡窄一截，右边缘不齐。改为<b>始终单栏</b>：Case actions 以全宽卡片并入主列，
        于是标题卡 / Case actions / 执行步骤 / 底部 Tab 卡左右边界严格同宽。
        （Playwright Trace / Records 已在页面底部 Tab 区，不再需要右栏承载。） -->
-  <#assign hasSidePanel = (caseKey == "FAILURE" || caseKey == "ERROR")>
+  <#assign hasSidePanel = (caseKey == "FAILURE" || caseKey == "ERROR" || (outcome.overridden!false))>
   <div class="case-layout is-single">
 
     <#-- 主列：失败用例操作入口 + 执行步骤（Route Register / API Request 已按发生步骤归位） + 用例级证据/附件/示例 -->
@@ -475,8 +475,16 @@
         <h3><span class="icon"></span>Case actions</h3>
         <div class="action-row">
           <button type="button" id="btn-upload" class="btn-action">⬆ Upload screenshot</button>
+          <#if !(outcome.overridden!false)>
           <button type="button" id="btn-marksuccess" class="btn-action btn-ok">✓ Make Scenario success</button>
+          <#else>
+          <button type="button" id="btn-editnote" class="btn-action btn-ok">✎ Edit mark note</button>
+          <button type="button" id="btn-revert" class="btn-action">↩ Revert to original</button>
+          </#if>
         </div>
+        <#if (outcome.overridden!false) && outcome.overrideNote??>
+        <div class="sub" style="margin-top:6px">Mark note: ${outcome.overrideNote?html}</div>
+        </#if>
         <input type="file" id="shot-input" accept="image/png,image/jpeg" multiple style="display:none"/>
       </div>
       </#if>
@@ -749,6 +757,7 @@
 <script>
 (function(){
   var OUTCOME_ID = "${outcome.outcomeId}";
+  var OUTCOME_OVERRIDE_NOTE = <#if (outcome.overridden!false) && outcome.overrideNote??>"${outcome.overrideNote?js_string}"<#else>null</#if>;
   var VERDICT_KEY = 'pw-manual-scenario-success';
 
   /* 底部 Tab 切换（Console log / Playwright trace / Playwright records）：
@@ -865,9 +874,8 @@
     });
   };
 
-  //  失败用例操作按钮：上传补图 + 标记通过
+  //  失败用例 / 已标记用例操作按钮：上传补图 + 标记通过（可改备注）+ 撤销标记
   var upBtn = document.getElementById('btn-upload');
-  var msBtn = document.getElementById('btn-marksuccess');
   var input = document.getElementById('shot-input');
   if (upBtn && input) {
     upBtn.addEventListener('click', function() { input.click(); });
@@ -875,22 +883,41 @@
       if (input.files && input.files.length) { window.__doPatch(input.files); input.value = ''; }
     });
   }
-  if (msBtn) {
-    msBtn.addEventListener('click', function() {
-      var applied = function() {
-        saveVerdict(OUTCOME_ID);
-        applyVerdicts();
-        alert('Scenario marked as success (this browser only).');
-      };
+  function markSuccessWithNote(existingNote) {
+    var note = window.prompt('Mark note (optional):', existingNote || '');
+    if (note === null) { return; }
+    var applied = function() {
+      saveVerdict(OUTCOME_ID);
+      applyVerdicts();
+      alert('Scenario marked as success (this browser only).');
+    };
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      postJson('api/mark-success', { outcomeId: OUTCOME_ID, note: note })
+        .then(function(d) { if (d && d.ok) { setTimeout(function() { location.reload(); }, 400); } else { applied(); } })
+        .catch(function() { applied(); });
+    } else {
+      applied();
+    }
+  }
+  var msBtn = document.getElementById('btn-marksuccess');
+  if (msBtn) { msBtn.addEventListener('click', function() { markSuccessWithNote(''); }); }
+  var editBtn = document.getElementById('btn-editnote');
+  if (editBtn) {
+    editBtn.addEventListener('click', function() { markSuccessWithNote(OUTCOME_OVERRIDE_NOTE || ''); });
+  }
+  var revertBtn = document.getElementById('btn-revert');
+  if (revertBtn) {
+    revertBtn.addEventListener('click', function() {
+      if (!confirm('Revert this scenario to its original (failed) result?')) { return; }
       if (location.protocol === 'http:' || location.protocol === 'https:') {
-        postJson('api/mark-success', { outcomeId: OUTCOME_ID })
+        postJson('api/mark-revert', { outcomeId: OUTCOME_ID })
           .then(function(d) {
-            if (d && d.ok) { applied(); setTimeout(function() { location.reload(); }, 600); }
-            else { applied(); }
+            if (d && d.ok) { setTimeout(function() { location.reload(); }, 400); }
+            else { alert('Revert failed (this browser only).'); }
           })
-          .catch(function() { applied(); });
+          .catch(function() { alert('Revert requires the report server (not available in static preview).'); });
       } else {
-        applied();
+        alert('Revert requires the report server (not available in static preview).');
       }
     });
   }

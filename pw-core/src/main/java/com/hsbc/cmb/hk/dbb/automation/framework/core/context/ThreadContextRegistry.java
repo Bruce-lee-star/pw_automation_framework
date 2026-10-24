@@ -59,6 +59,11 @@ final class ThreadContextRegistry {
         }
     }
 
+    /** 非创建式读取当前线程上下文（供纯查询，避免登记 side-effect）；无则返回 {@code null}。 */
+    static TestContext peek() {
+        return CONTEXTS.get(Thread.currentThread());
+    }
+
     /** 移除并清理指定线程的上下文（线程池复用前复位，防串扰）。 */
     static void remove(Thread thread) {
         TestContext ctx;
@@ -88,7 +93,16 @@ final class ThreadContextRegistry {
 
     /** 当前活跃线程上下文数（可观测 / 泄漏排查）。 */
     static int activeThreadCount() {
-        return CONTEXTS.size();
+        //  WeakHashMap 的 size() 虽会在 size!=0 时触发 stale 条目 expunge，但 expunge 只处理已被 GC 且
+        //  入队的弱键，计数精度依赖 GC 时机。此处显式遍历一次，在任意 JDK 版本下都拿到"已回收线程的
+        //  上下文已被移除"的准确计数，避免指标虚高（P1-14）。
+        synchronized (CONTEXTS) {
+            int n = 0;
+            for (Map.Entry<Thread, TestContext> ignored : CONTEXTS.entrySet()) {
+                n++;
+            }
+            return n;
+        }
     }
 
     /**

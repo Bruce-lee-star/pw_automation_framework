@@ -53,6 +53,15 @@ public final class RecordingPageProxy {
 
     private static final int MAX_DETAIL_LEN = 256;
 
+    /**
+     * 录制代理缓存：按底层真实对象身份（弱键）复用动态代理——录制开启时，
+     * 避免每次 {@code getPage()} / 每个可录制返回值都 {@code Proxy.newProxyInstance} 新建代理
+     * （一次 {@code locator(x).click()} 会因此产生多次动态代理分配，P2-19）。
+     * 弱键：真实对象被回收即自动失效，不泄漏；synchronizedMap 兜底基本互斥（WeakHashMap 非并发安全）。
+     */
+    private static final java.util.Map<Object, Object> PROXY_CACHE =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
     private RecordingPageProxy() {
     }
 
@@ -78,10 +87,17 @@ public final class RecordingPageProxy {
         if (PlaywrightManager.getProvider().isTestDouble()) {
             return real; // D6：测试替身（mock）不包装，避免污染测试
         }
-        return (Page) Proxy.newProxyInstance(
+        //  复用按真实 Page 身份缓存的代理；同一受管 Page 全程共享一个代理，消除重复分配。
+        Page cached = (Page) PROXY_CACHE.get(real);
+        if (cached != null) {
+            return cached;
+        }
+        Page proxy = (Page) Proxy.newProxyInstance(
                 RecordingPageProxy.class.getClassLoader(),
                 new Class<?>[]{Page.class},
                 new RecordingHandler(real));
+        PROXY_CACHE.put(real, proxy);
+        return proxy;
     }
 
     /**
@@ -108,10 +124,17 @@ public final class RecordingPageProxy {
             }
         }
         if (iface != null && RECORDABLE_INTERFACES.contains(iface) && iface.isInstance(ret)) {
-            return (T) Proxy.newProxyInstance(
+            //  复用按真实对象身份缓存的代理，避免在递归包装（Locator / Frame 等）时重复分配。
+            Object cached = PROXY_CACHE.get(ret);
+            if (cached != null) {
+                return (T) cached;
+            }
+            Object proxy = Proxy.newProxyInstance(
                     RecordingPageProxy.class.getClassLoader(),
                     new Class<?>[]{iface},
                     new RecordingHandler(ret));
+            PROXY_CACHE.put(ret, proxy);
+            return (T) proxy;
         }
         return (T) ret;
     }

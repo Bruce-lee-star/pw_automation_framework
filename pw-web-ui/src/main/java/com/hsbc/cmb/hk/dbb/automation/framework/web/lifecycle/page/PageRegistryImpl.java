@@ -31,7 +31,17 @@ public final class PageRegistryImpl implements PageRegistry {
      */
     private static final ThreadLocal<Page> CURRENT_PAGE_BY_THREAD = new ThreadLocal<>();
 
+    /**
+     * 本线程当前 Page 的「变更世代」信号（P2-18 热路径优化）：仅当本线程当前页发生过
+     * 切换 / 重建（setPage/closePage/建页）时自增。供 ensurePageValid 据此跳过昂贵的 getPage() 比对。
+     */
+    private static final ThreadLocal<Long> PAGE_EPOCH = ThreadLocal.withInitial(() -> 0L);
+
     private PageRegistryImpl() {
+    }
+
+    private static void bumpPageEpoch() {
+        PAGE_EPOCH.set(PAGE_EPOCH.get() + 1);
     }
 
     public Page getPage() {
@@ -78,6 +88,7 @@ public final class PageRegistryImpl implements PageRegistry {
                 BrowserContext context = PlaywrightManager.getContext();
                 current = createPage(context);
                 TestContextHolder.get().set(PlaywrightManager.PAGE_KEY, current);
+                bumpPageEpoch(); //  新页创建＝线程当前页身份变更
             }
             CURRENT_PAGE_BY_THREAD.set(current);
             return current;
@@ -109,6 +120,7 @@ public final class PageRegistryImpl implements PageRegistry {
                 } finally {
                     TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
                     CURRENT_PAGE_BY_THREAD.remove();
+                    bumpPageEpoch(); //  页面关闭＝线程当前页身份变更
                 }
             }
         });
@@ -121,6 +133,7 @@ public final class PageRegistryImpl implements PageRegistry {
         if (page != null && !page.isClosed()) {
             TestContextHolder.get().set(PlaywrightManager.PAGE_KEY,page);
             CURRENT_PAGE_BY_THREAD.set(page);
+            bumpPageEpoch(); //  显式切换页面＝线程当前页身份变更
         } else {
             logger.warn("[PlaywrightManager] setPage() ignored: page is {}",
                     page == null ? "null" : "closed");
@@ -130,6 +143,11 @@ public final class PageRegistryImpl implements PageRegistry {
     /** 本线程当前 Page（线程级记录；供收尾可靠关闭与 feature 复用判定使用）。 */
     public Page currentPageForThread() {
         return CURRENT_PAGE_BY_THREAD.get();
+    }
+
+    @Override
+    public long currentPageEpoch() {
+        return PAGE_EPOCH.get();
     }
 
 }

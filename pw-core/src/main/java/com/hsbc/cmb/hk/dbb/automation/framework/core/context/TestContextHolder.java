@@ -83,6 +83,32 @@ public final class TestContextHolder {
         return ThreadContextRegistry.get();
     }
 
+    /**
+     * 非创建式读取当前上下文（供纯查询，避免登记 / 创建 side-effect）。
+     *
+     * <p>返回已存在的用例级 / 线程级上下文；当前线程与场景均无上下文时返回 {@code null}
+     * （不登记、不创建）。取数优先序与 {@link #get()} 一致（用例级优先，回退线程级）。
+     * 用于 {@code PageObjectFactory} 等只读 API，使其不再为当前线程凭空创建 {@link TestContext}
+     * 并登记进 {@link ThreadContextRegistry}（P1-11）。</p>
+     */
+    public static TestContext peek() {
+        TestContext scenarioCtx = ScenarioContext.current();
+        if (scenarioCtx != null) {
+            return scenarioCtx;
+        }
+        return ThreadContextRegistry.peek();
+    }
+
+    /**
+     * 对所有已登记上下文（线程键 + 用例级）执行受控遍历（读取 / 清理），供跨上下文聚合
+     * （如 {@code PageObjectFactory} 的线程隔离实例计数 / 收尾）。与 {@link #forEachThreadContext}
+     * （仅线程键上下文）互补，后者无法覆盖用例级上下文下的线程隔离实例（P1-11）。
+     */
+    public static void forEachAllContext(Consumer<TestContext> visitor) {
+        forEachThreadContext(visitor);
+        ScenarioContext.forEachContext(visitor);
+    }
+
     /** 父线程调用：把当前上下文快照发布为「可继承」，之后派生的子线程将自动继承（需 INHERIT_MODE=true）。 */
     public static void publishInheritance() {
         if (INHERIT_MODE) {

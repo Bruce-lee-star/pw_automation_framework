@@ -67,9 +67,17 @@ public record NetworkCall(
 
     /** 格式化为一行（含 header 摘要），供 bridge 交给总线脱敏后落证据。 */
     public String toOneLine() {
+        return (method == null ? "?" : method.toUpperCase(java.util.Locale.ROOT))
+                + ' ' + (url == null ? "<no-url>" : url) + toDetailLine();
+    }
+
+    /**
+     * 单行明细（<b>不含</b>前置的 {@code method url}），供 bridge 按字段入队时作为 detail 拼接。
+     *
+     * <p>{@link #toOneLine()} = {@code method url} + 本方法返回值，二者口径一致。</p>
+     */
+    public String toDetailLine() {
         StringBuilder sb = new StringBuilder();
-        sb.append(method == null ? "?" : method.toUpperCase(java.util.Locale.ROOT));
-        sb.append(' ').append(url == null ? "<no-url>" : url);
         if (status >= 0) {
             sb.append(" -> ").append(status);
         }
@@ -85,7 +93,7 @@ public record NetworkCall(
         if (responseDigest != null && !responseDigest.isBlank()) {
             sb.append(" resp=").append(responseDigest);
         }
-        List<String> hdrKeys = new java.util.ArrayList<>(requestHeaders.keySet());
+        java.util.List<String> hdrKeys = new java.util.ArrayList<>(requestHeaders.keySet());
         if (!hdrKeys.isEmpty()) {
             sb.append(" reqHdr=").append(String.join(",", hdrKeys));
         }

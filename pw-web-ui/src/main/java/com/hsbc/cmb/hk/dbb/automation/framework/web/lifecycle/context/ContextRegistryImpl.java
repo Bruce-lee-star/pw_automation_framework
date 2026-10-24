@@ -242,11 +242,10 @@ public final class ContextRegistryImpl implements ContextRegistry {
         }
         PlaywrightRuntime.instance().browserCleanup.safeClean("RoleCodegenBridge.cleanupContext", () -> {
             // 经 codegen 桥接（未注册=no-op，等价于默认关闭，零回归）。
-            RoleCodegenBridgeRegistry.getBridge().ifPresent(b -> {
-                if (b.isCodegenEnabled()) {
-                    b.cleanupContext(context);
-                }
-            });
+            // P2-15：不在清理时再读实时 isCodegenEnabled() 门控——运行中若关闭 codegen 开关，清理会被跳过，
+            // 导致 RoleElementPicker 的每 Context 会话态（静态 Map）残留泄漏。cleanupContext 按 context
+            // 维度幂等清理（无状态则 no-op），故直接调用，与开关时机解耦。
+            RoleCodegenBridgeRegistry.getBridge().ifPresent(b -> b.cleanupContext(context));
         });
         //  T8-5：本方法的三条调用路径（closeContext / scheduleContextRebuild /
         //  recreateContextIfCustomConfigNeeded）**末尾都会执行下面的 context.close()**，

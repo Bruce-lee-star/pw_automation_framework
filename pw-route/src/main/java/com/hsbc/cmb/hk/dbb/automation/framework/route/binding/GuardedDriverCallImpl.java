@@ -11,26 +11,31 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * {@link GuardedDriverCall} 默认实现：<b>单一专用驱动线程</b> + 主线程有界等待（行为零回归）。
+ * {@link GuardedDriverCall} 默认实现：单连接专用驱动线程 + 主线程有界等待（行为零回归）。
  *
  * <p>经 {@code META-INF/services} 注册为 {@link GuardedDriverCall} 的 SPI 默认实现；
  * classpath 无显式注册时由 {@link GuardedDriverCallRegistry} 回退到本类。</p>
  *
+ * <p><b>实例语义（2026-10-24 收口）—— 根治"驱动信道进程级单例"</b>：本类<b>不再持有任何 static 信道状态</b>，
+ * 每条驱动线程执行器、代际、毒化/故障计数、不可用标记均为<b>实例字段</b>。信道按连接（{@code BrowserContext}）
+ * 由 {@link GuardedDriverCallRegistry#channelFor} 创建与缓存，故<b>并行场景下每个用例（各自独立 Playwright 连接）
+ * 拥有专属串行化线程</b>，互不干扰；某连接的超时 {@code shutdownNow()} 只取消<b>该连接</b>在途调用，
+ * 不再牵连其它连接的在途调用（根除"跨用例信道毒化"）。全局查询 / 复位方法经
+ * {@link GuardedDriverCallRegistry#currentChannel()}（ThreadLocal）定位"本线程所属连接的信道"。</p>
+ *
  * <p><b>单线程化（T6，2026-09-29）</b>：Playwright 客户端要求对连接<b>外部串行</b>，
  * {@code Object doesn't exist} 是并发协议调用的直接产物。故所有同步驱动协议调用
- * （{@code context.route} / {@code unroute} 等）收敛到<b>单一专用驱动线程</b>
- * （守护线程、全局复用、不随 case 泄漏），消除共享连接上的并发竞态。
- * 实现形态：{@code volatile} 执行器 + 工厂构造、可复位重建（同一模式此前用于 AsyncPool 的 V1
- * Monitor 回调执行器，该执行器已随"不订阅 {@code context.onResponse}"的决策一并移除）。</p>
+ * （{@code context.route} / {@code unroute} 等）在本实例的<b>单一专用驱动线程</b>上收敛
+ * （守护线程、随连接生命周期、context 关闭即由注册表清退）。</p>
  *
  * <p><b>毒化重置（T6，2026-09-29）</b>：某次调用在界内无回包（超时）→ 主线程按策略 fail-fast / 降级返回，
- * 同时<b>仅重置驱动线程</b>：{@code compareAndSet} 把执行器换成新建实例、旧执行器 {@code shutdownNow()}
+ * 同时<b>仅重置本实例驱动线程</b>：{@code compareAndSet} 把执行器换成新建实例、旧执行器 {@code shutdownNow()}
  * （卡死线程为 native 不可中断，仅遗弃为守护线程，随 GC 回收）。<b>绝不关闭 / 重建 BrowserContext 与 Page</b>
  * （Context 生命周期由 sessionKey 判据唯一掌管，见 FIX_PLAN I-9 / T2 裁定：路由是辅助设施，不得绑架会话）。</p>
  *
@@ -38,46 +43,46 @@ import java.util.concurrent.atomic.AtomicReference;
  * 拦截期 {@code route.fetch} / {@code page.request} 经 {@code GuardedRunner} 在调用线程就地执行
  * （串行化会回归并发请求吞吐，且其 channel 竞态已由 T2 的 claim / closeConfirmed 收敛），不在 T6 范围内。</p>
  *
- * <p><b>2026-09-29 全新评审（P0）—— 上文"毒化重置"段落已被取代</b>：{@code compareAndSet} 换新建实例的前提是
+ * <p><b>2026-09-29 全新评审（P0）—— 上文"毒化重置"段落中"换线程即自愈"已被取代</b>：{@code compareAndSet} 换新建实例的前提是
  * <b>在途调用确实结束了</b>。Native 调用不可中断时，换线程只会在同一连接上留下<b>第二个消息泵</b>，回包互相错取，
  * 实测新线程同样拿不到 ack（{@code reset#=2} 之后仍卡满 30s、用例依旧失败）。现行处置见 {@link #handleTimeout}：
- * 先摘后判，<b>未确认收尾则绝不新建线程</b>，复位交由会话层换 {@code Playwright} 实例（对外 API 里唯一"换连接"手段）。
+ * 先摘后判，<b>未确认收尾则绝不新建线程</b>，复位交由会话层换 {@code Playwright} 实例（对外 API 里唯一"换连接"手段）。</p>
  */
 public final class GuardedDriverCallImpl implements GuardedDriverCall {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GuardedDriverCallImpl.class);
 
-    /**
-     * 单一专用驱动线程执行器（T6）：所有 guarded 驱动协议调用收敛于此线程。
-     *
-     * <p>{@code volatile} + 工厂构造，毒化时 CAS 换新建实例、旧实例遗弃，支持复位重建。
-     * 守护线程、全局复用、不随 case 泄漏。</p>
-     */
     /** 驱动线程代际（毒化重建后递增，便于日志区分新旧信道）。 */
-    private static final AtomicInteger DRIVER_EPOCH = new AtomicInteger(0);
+    private final AtomicInteger driverEpoch = new AtomicInteger(0);
 
     /** 毒化重置累计次数（可观测，对齐 AsyncPool 计数风格；供单测与指标消费）。 */
-    private static final AtomicLong POISON_RESETS = new AtomicLong(0);
+    private final AtomicLong poisonResets = new AtomicLong(0);
+
     /** 信道故障（超时）累计次数：单调递增，供会话层判断"本用例是否污染过信道"。 */
-    private static final AtomicLong CHANNEL_FAILURES = new AtomicLong(0);
+    private final AtomicLong channelFailures = new AtomicLong(0);
 
     /** 信道是否已被判定不可用（存在未收尾的在途调用）；成功调用后自动恢复。 */
-    private static final AtomicBoolean UNUSABLE = new AtomicBoolean(false);
+    private final AtomicBoolean unusable = new AtomicBoolean(false);
 
     /** 超时后等待在途调用收尾的窗口（毫秒）：超过即认定"真卡死"，不再新建线程（避免第二个消息泵）。 */
     private static final long POISON_DRAIN_MS = 1_000L;
 
-    /**
-     * 单一专用驱动线程执行器（T6）：所有 guarded 驱动协议调用收敛于此线程。
-     *
-     * <p>{@code volatile} + 工厂构造，毒化时 CAS 换新建实例、旧实例遗弃，支持复位重建。
-     * 守护线程、全局复用、不随 case 泄漏。</p>
-     */
-    private static final AtomicReference<ExecutorService> DRIVER =
-            new AtomicReference<>(newDriverExecutor());
+    /** 上一次按 ERROR 报过的 reset 时刻（毫秒）；同一故障窗口内的重复 reset 降级为 WARN，避免一次故障刷多条 ERROR。 */
+    private final AtomicLong lastResetErrorMs = new AtomicLong(0L);
 
-    private static ExecutorService newDriverExecutor() {
-        int epoch = DRIVER_EPOCH.incrementAndGet();
+    /** 重复 reset 的降噪窗口（毫秒）：窗口内只报一次 ERROR。 */
+    private static final long RESET_ERROR_DEDUP_MS = 10_000L;
+
+    /** 本实例专属的单一专用驱动线程执行器（T6）：所有 guarded 驱动协议调用收敛于此线程。 */
+    private final AtomicReference<ExecutorService> driver = new AtomicReference<>(newDriverExecutor(this));
+
+    /** 构造：登记为当前线程的活动信道（供全局查询 / 复位方法定位"本连接的信道"）。 */
+    public GuardedDriverCallImpl() {
+        GuardedDriverCallRegistry.setCurrent(this);
+    }
+
+    private static ExecutorService newDriverExecutor(GuardedDriverCallImpl self) {
+        int epoch = self.driverEpoch.incrementAndGet();
         ThreadFactory tf = r -> {
             Thread t = new Thread(r, "route-driver-" + epoch);
             t.setDaemon(true);
@@ -87,22 +92,17 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
         return Executors.newSingleThreadExecutor(tf);
     }
 
-    /** 当前毒化重置累计次数（framework-internal 可观测）。 */
-    static long poisonResetCount() {
-        return POISON_RESETS.get();
-    }
-
     @Override
     public <T> T guarded(String opName, long boundMs, OnTimeout policy, Callable<T> action) {
-        ExecutorService driver = DRIVER.get();
+        ExecutorService driverThread = driver.get();
         Future<T> future;
         try {
-            future = driver.submit(action);
+            future = driverThread.submit(action);
         } catch (RejectedExecutionException rejected) {
             //  信道已被判定不可用（执行器已停）：绝不新起线程 —— 在途调用未收尾时另起线程会在同一连接上
             //  产生第二个消息泵，回包互相错取。按策略确定处置：不静默吞、也不把辅助设施的不确定性升级为
             //  Context 重建（复位由会话层换 Playwright 实例完成）。
-            UNUSABLE.set(true);
+            unusable.set(true);
             if (policy == OnTimeout.FAIL_FAST) {
                 throw new IllegalStateException("[Route] driver channel unusable (an earlier call did not stop); "
                         + "call '" + opName + "' rejected — rebuild the session to reset the channel", rejected);
@@ -115,7 +115,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
         try {
             result = future.get(boundMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException timedOut) {
-            // 驱动对协议调用无响应：毒化重置（仅驱动线程，不波及 Context），再按策略处置。
+            // 驱动对协议调用无响应：毒化重置（仅本实例驱动线程，不波及 Context），再按策略处置。
             handleTimeout(opName, boundMs);
             if (policy == OnTimeout.FAIL_FAST) {
                 throw new IllegalStateException("[Route] driver call '" + opName
@@ -142,28 +142,22 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             }
             throw new IllegalStateException("[Route] driver call '" + opName + "' failed", cause);
         } catch (java.util.concurrent.CancellationException cancelled) {
-            //  P0-1 缓解：本调用被「其它调用」的超时处置 shutdownNow() 取消（跨用例信道毒化）。
+            //  P0-1 缓解：本调用被「其它调用」的超时处置 shutdownNow() 取消（本实例内跨调用信道毒化）。
             //  任务尚未执行/被中断，并非本用例自身超时，故降级而非把别人的故障判成本用例的失败。
             Thread.currentThread().interrupt();
             if (policy == OnTimeout.FAIL_FAST) {
                 LOGGER.warn("[Route] driver call '{}' was cancelled by another call's timeout reset "
-                        + "(cross-case channel poisoning) — degrading this case instead of failing it", opName);
+                        + "(same-connection channel poisoning) — degrading this case instead of failing it", opName);
                 return null;
             }
-            LOGGER.warn("[Route] driver call '{}' cancelled (cross-case channel reset) — abandoning", opName);
+            LOGGER.warn("[Route] driver call '{}' cancelled (same-connection reset) — abandoning", opName);
             return null;
         }
         //  调用成功 ⇒ 信道可确证可用（超时标记自动恢复；信道故障计数保持单调，供会话层判断是否被污染）
-        UNUSABLE.set(false);
+        unusable.set(false);
         return result;
     }
 
-    /**
-     * 毒化重置：仅把卡死的驱动线程信道重建为新建执行器，绝不波及 Context / Page。
-     *
-     * <p>只有「我们提交的同一执行器仍是当前实例」时才换（首个超时者负责重建，避免并发超时级联毒化健康线程）；
-     * 若已被其他调用者先行重建，则仅记录，复用既有新建执行器（丢弃本次多余新建实例）。</p>
-     */
     /**
      * 超时处置：先把在途调用从线程上摘掉，再**按"它是否真的结束"决定是否重建执行器**。
      *
@@ -178,7 +172,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
      *   <li>{@code shutdownNow()} 先让<b>可中断</b>的在途调用结束（interrupt）；</li>
      *   <li>在有界窗口 {@link #POISON_DRAIN_MS} 内等待其收尾：
      *     <ul>
-     *       <li><b>已收尾</b> ⇒ 信道无残留泵，重建干净执行器（保留既有"自愈"语义，计数 {@code POISON_RESETS}）；</li>
+     *       <li><b>已收尾</b> ⇒ 信道无残留泵，重建干净执行器（保留既有"自愈"语义，计数 {@code poisonResets}）；</li>
      *       <li><b>仍未收尾</b>（native 不可中断）⇒ <b>绝不新建线程</b>：标记信道
      *           {@link #isChannelUsable() 不可用}，复位交由会话语义（换 {@code Playwright} 实例 ——
      *           对外 API 里唯一"换连接"的手段，配 session 缓存恢复登录态）。</li>
@@ -188,9 +182,9 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
      *
      * <p>该处置<b>不波及 Context / Page</b>：路由是辅助设施，其信道不确定性不得绑架会话生命周期。</p>
      */
-    private static void handleTimeout(String opName, long boundMs) {
-        CHANNEL_FAILURES.incrementAndGet();
-        ExecutorService current = DRIVER.get();
+    private void handleTimeout(String opName, long boundMs) {
+        channelFailures.incrementAndGet();
+        ExecutorService current = driver.get();
         current.shutdownNow();
         boolean drained;
         try {
@@ -200,7 +194,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             drained = false;
         }
         if (!drained) {
-            UNUSABLE.set(true);
+            unusable.set(true);
             LOGGER.error("[Route] driver call '{}' timed out {}ms and the in-flight call did NOT stop within {}ms — "
                             + "channel marked UNUSABLE and NO new driver thread is created (a second message pump on the "
                             + "same connection would steal the acks). Rebuild the session (new Playwright instance; the "
@@ -208,13 +202,13 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
                     opName, boundMs, POISON_DRAIN_MS);
             return;
         }
-        ExecutorService fresh = newDriverExecutor();
-        if (DRIVER.compareAndSet(current, fresh)) {
-            long resets = POISON_RESETS.incrementAndGet();
+        ExecutorService fresh = newDriverExecutor(this);
+        if (driver.compareAndSet(current, fresh)) {
+            long resets = poisonResets.incrementAndGet();
             LOGGER.error("[Route] route driver thread RESET after '{}' timed out {}ms — in-flight call confirmed "
                             + "stopped within {}ms, so no orphan pump is left on the connection (reset#={}, epoch -> {}, "
                             + "Context/Page untouched)",
-                    opName, boundMs, POISON_DRAIN_MS, resets, DRIVER_EPOCH.get());
+                    opName, boundMs, POISON_DRAIN_MS, resets, driverEpoch.get());
         } else {
             fresh.shutdownNow();
             LOGGER.warn("[Route] driver call '{}' timed out {}ms but the channel was already reset by another caller",
@@ -225,17 +219,22 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
     /** 信道当前是否可确证可用（{@code false} ⇒ 存在未收尾的在途调用；成功调用后自动恢复）。 */
     @Override
     public boolean isChannelUsable() {
-        return !UNUSABLE.get();
+        return !unusable.get();
     }
 
-    /** 信道故障（超时）累计次数（单调递增；跨用例比较差值即可判断"本用例是否污染过信道"）。 */
-    public static long channelFailureCount() {
-        return CHANNEL_FAILURES.get();
+    /** 信道故障（超时）累计次数（单调递增；跨调用比较差值即可判断"本调用是否污染过信道"）。 */
+    public long channelFailureCountInstance() {
+        return channelFailures.get();
     }
 
     /** 当前驱动线程代际（测试用：断言"没有新建线程"）。 */
-    static int driverEpochForTest() {
-        return DRIVER_EPOCH.get();
+    int driverEpochForTestInstance() {
+        return driverEpoch.get();
+    }
+
+    /** 毒化重置累计次数（framework-internal 可观测 / 测试）。 */
+    long poisonResetCountInstance() {
+        return poisonResets.get();
     }
 
     /**
@@ -244,53 +243,84 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
      * <p><b>只在确认连接已换（或套件收尾）之后调用</b>：在途调用未收尾时单方面换线程正是本类要杜绝的
      * "第二个消息泵"。会话层换 {@code Playwright} 实例后调用它，即可让信道与新连接对齐。</p>
      */
-    /** 上一次按 ERROR 报过的 reset 时刻（毫秒）；同一故障窗口内的重复 reset 降级为 WARN，避免一次故障刷多条 ERROR。 */
-    private static final java.util.concurrent.atomic.AtomicLong LAST_RESET_ERROR_MS =
-            new java.util.concurrent.atomic.AtomicLong(0L);
+    void resetChannelInstance() {
+        resetChannelInstance(true);
+    }
 
-    /** 重复 reset 的降噪窗口（毫秒）：窗口内只报一次 ERROR。 */
-    private static final long RESET_ERROR_DEDUP_MS = 10_000L;
+    /** 套件收尾专用的信道复位：与 {@link #resetChannelInstance()} 相同的换线程 + 清除不可用标记，但<b>不打 ERROR/WARN</b>。 */
+    void resetChannelForTeardownInstance() {
+        resetChannelInstance(false);
+    }
 
-    public static void resetChannel() {
-        ExecutorService fresh = newDriverExecutor();
-        ExecutorService previous = DRIVER.getAndSet(fresh);
-        if (previous != null) {
-            previous.shutdownNow();
-        }
-        UNUSABLE.set(false);
-        //  降噪（2026-10-09）：一次驱动故障常伴随多次 channel reset（epoch 每次都变，故按 epoch 去重无效）。
-        //  同一 10s 窗口内只报一条 ERROR，其余降为 WARN 并标注"同一故障窗口内重复" —— 既保留首条真信号，
-        //  又不把一次故障刷成多条 ERROR 与用例失败混在一起。
-        long now = System.currentTimeMillis();
-        long last = LAST_RESET_ERROR_MS.get();
-        if (now - last > RESET_ERROR_DEDUP_MS && LAST_RESET_ERROR_MS.compareAndSet(last, now)) {
-            LOGGER.error("[Route] driver channel explicitly RESET (epoch -> {}); caller must have rebuilt the connection first",
-                    DRIVER_EPOCH.get());
-        } else {
-            LOGGER.warn("[Route] driver channel RESET again (epoch -> {}); same failure window, already reported",
-                    DRIVER_EPOCH.get());
+    /** 释放本信道驱动线程（context 关闭 / 注册表清退时调用，防 daemon 线程泄漏）。 */
+    public void shutdownNow() {
+        ExecutorService ex = driver.get();
+        if (ex != null) {
+            ex.shutdownNow();
         }
     }
 
-    /**
-     * 套件收尾专用的信道复位（2026-10-10）：与 {@link #resetChannel()} 相同的换线程 + 清除不可用标记，
-     * 但<b>不打 ERROR/WARN</b>。
-     *
-     * <p><b>为什么需要区分</b>：{@code resetChannel()} 的 ERROR/WARN 是"换连接后对齐"的<b>恢复动作</b>
-     * （真信号）；而套件收尾时多个钩子（{@code stopAllContextEngines}/{@code drainForSuiteTeardown}/
-     * 框架 收尾）会幂等重复触发 {@code shutdownAll}，每次都换线程 + 报 ERROR —— 把<b>例行清理</b>
-     * 伪装成故障信号，污染真实诊断（E2E 实证：单轮 1 ERROR + 3 WARN，epoch 2→5）。本方法只保留
-     * 换线程 + 清除不可用标记的实际效果，记录降为 TRACE。</p>
-     */
-    public static void resetChannelForTeardown() {
-        ExecutorService fresh = newDriverExecutor();
-        ExecutorService previous = DRIVER.getAndSet(fresh);
+    private void resetChannelInstance(boolean warn) {
+        ExecutorService fresh = newDriverExecutor(this);
+        ExecutorService previous = driver.getAndSet(fresh);
         if (previous != null) {
             previous.shutdownNow();
         }
-        UNUSABLE.set(false);
-        if (LOGGER.isTraceEnabled()) {
-            LOGGER.trace("[Route] driver channel reset for suite teardown (epoch -> {})", DRIVER_EPOCH.get());
+        unusable.set(false);
+        long now = System.currentTimeMillis();
+        long last = lastResetErrorMs.get();
+        if (warn) {
+            if (now - last > RESET_ERROR_DEDUP_MS && lastResetErrorMs.compareAndSet(last, now)) {
+                LOGGER.error("[Route] driver channel explicitly RESET (epoch -> {}); caller must have rebuilt "
+                        + "the connection first", driverEpoch.get());
+            } else {
+                LOGGER.warn("[Route] driver channel RESET again (epoch -> {}); same failure window, already reported",
+                        driverEpoch.get());
+            }
+        } else {
+            if (LOGGER.isTraceEnabled()) {
+                LOGGER.trace("[Route] driver channel reset for suite teardown (epoch -> {})", driverEpoch.get());
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  下列 static 方法为历史调用入口（测试 / RouteEngine 全局查询）的<b>兼容桥</b>，
+    //  全部委托到"当前线程所属连接的信道"（见 GuardedDriverCallRegistry.currentChannel()）。
+    //  2026-10-24 起信道为实例语义，故这里只做转发，不再持有静态状态 —— 进程级单例已消除。
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** @see #channelFailureCountInstance() */
+    public static long channelFailureCount() {
+        GuardedDriverCallImpl c = GuardedDriverCallRegistry.currentChannel();
+        return c == null ? 0L : c.channelFailureCountInstance();
+    }
+
+    /** @see #driverEpochForTestInstance() */
+    public static int driverEpochForTest() {
+        GuardedDriverCallImpl c = GuardedDriverCallRegistry.currentChannel();
+        return c == null ? 0 : c.driverEpochForTestInstance();
+    }
+
+    /** @see #poisonResetCountInstance() */
+    public static long poisonResetCount() {
+        GuardedDriverCallImpl c = GuardedDriverCallRegistry.currentChannel();
+        return c == null ? 0L : c.poisonResetCountInstance();
+    }
+
+    /** @see #resetChannelInstance() */
+    public static void resetChannel() {
+        GuardedDriverCallImpl c = GuardedDriverCallRegistry.currentChannel();
+        if (c != null) {
+            c.resetChannelInstance();
+        }
+    }
+
+    /** @see #resetChannelForTeardownInstance() */
+    public static void resetChannelForTeardown() {
+        GuardedDriverCallImpl c = GuardedDriverCallRegistry.currentChannel();
+        if (c != null) {
+            c.resetChannelForTeardownInstance();
         }
     }
 }

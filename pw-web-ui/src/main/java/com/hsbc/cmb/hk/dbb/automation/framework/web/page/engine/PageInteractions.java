@@ -104,8 +104,8 @@ public final class PageInteractions {
         m = m.toLowerCase();
         return m.contains("execution context") || m.contains("context was destroyed")
                 || m.contains("object doesn't exist") || m.contains("does not exist")
-                || m.contains("navigat") || m.contains("frame detached")
-                || m.contains("frame was detached");
+                || m.contains("navigation") || m.contains("navigating")
+                || m.contains("frame detached") || m.contains("frame was detached");
     }
 
     public static void acceptAlert(BasePage bp) {

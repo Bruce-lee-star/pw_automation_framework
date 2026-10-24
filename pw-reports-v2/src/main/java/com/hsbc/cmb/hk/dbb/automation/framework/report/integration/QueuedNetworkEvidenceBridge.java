@@ -199,9 +199,15 @@ public final class QueuedNetworkEvidenceBridge implements NetworkEvidenceBridge 
 
     @Override
     public void record(NetworkCall call) {
-        if (call != null) {
-            record(bus.captureHandle(), call);
+        if (call == null) {
+            return;
         }
+        //  P1-6：任意线程（含 Playwright 事件线程）入队，绝不走 captureHandle()。
+        //  事件线程拿不到 ThreadLocal 步骤上下文 → captureHandle() 恒 NOOP → 直接写会被
+        //  attachEvidence/recordApiOperation 对 NOOP 的早退静默丢弃，且不计入 dropped（与队列溢出
+        //  口径不一致，排查无信号）。改为与 record(String,String,String) 同路径入队，由主线程
+        //  flush() 用先前 capture() 的有效句柄写出，队列溢出时也按 dropped 口径上报。
+        record(call.method(), call.url(), call.toDetailLine());
     }
 
     @Override

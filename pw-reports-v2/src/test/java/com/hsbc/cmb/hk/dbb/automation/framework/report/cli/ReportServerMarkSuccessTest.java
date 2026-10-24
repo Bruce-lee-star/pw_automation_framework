@@ -53,12 +53,100 @@ public class ReportServerMarkSuccessTest {
         String raw = new String(Files.readAllBytes(json), StandardCharsets.UTF_8);
         TestOutcome after = new ObjectMapper().readValue(json.toFile(), TestOutcome.class);
         assertEquals(TestResult.SUCCESS, after.getResult());
-        //  失败原因 / 堆栈应被清空（NON_NULL 省略字段）
-        assertFalse(raw.contains("失败堆栈应被清空"), "失败原因应被清空");
-        assertFalse(raw.contains("testFailureSummary"), "不应残留 testFailureSummary 字段");
-        assertFalse(raw.contains("testFailureCause"), "不应残留 testFailureCause 字段");
+        //  失败原因 / 堆栈应被清空（NON_NULL 省略字段；原始值已暂存到 original* 字段供还原）
+        assertFalse(raw.contains("\"testFailureSummary\""), "不应残留 testFailureSummary 字段");
+        assertFalse(raw.contains("\"testFailureCause\""), "不应残留 testFailureCause 字段");
+        assertTrue(raw.contains("\"originalTestFailureSummary\""), "应暂存 originalTestFailureSummary");
+        assertEquals("boom", after.getOriginalTestFailureSummary());
+        assertTrue(after.getOverridden());
         assertTrue(after.getEvidence().stream().anyMatch(e -> e.contains("marked success")),
                 "应写入标记成功证据");
+    }
+
+    @Test
+    void markSuccessThenRevertRestoresOriginal() throws Exception {
+        Path root = Files.createTempDirectory("rptroot3");
+        Path runDir = root.resolve("proj").resolve("run1");
+        Files.createDirectories(runDir);
+
+        TestOutcome o = new TestOutcome();
+        o.setOutcomeId("c1");
+        o.setName("c1");
+        o.setResult(TestResult.FAILURE);
+        o.setTestFailureSummary("boom");
+        JsonWriter.writeOutcome(runDir, o);
+
+        ReportServer server = new ReportServer(root, 0);
+        FakeExchange mark = new FakeExchange(
+                new ObjectMapper().writeValueAsBytes(Map.of("outcomeId", "c1", "note", "manual")));
+        invoke(server, mark);
+        assertEquals(200, mark.status);
+
+        FakeExchange revert = new FakeExchange(
+                new ObjectMapper().writeValueAsBytes(Map.of("outcomeId", "c1")));
+        invokeRevert(server, revert);
+        assertEquals(200, revert.status);
+
+        Path json = runDir.resolve("c1").resolve("c1.json");
+        TestOutcome after = new ObjectMapper().readValue(json.toFile(), TestOutcome.class);
+        //  还原：结果 / 失败摘要回到覆盖前的原始态，覆盖标记清空
+        assertEquals(TestResult.FAILURE, after.getResult());
+        assertEquals("boom", after.getTestFailureSummary());
+        assertFalse(after.getOverridden());
+        assertTrue(after.getEvidence().stream().anyMatch(e -> e.contains("reverted to original")),
+                "应写入还原证据");
+    }
+
+    @Test
+    void reMarkUpdatesNoteKeepsOriginal() throws Exception {
+        Path root = Files.createTempDirectory("rptroot4");
+        Path runDir = root.resolve("proj").resolve("run1");
+        Files.createDirectories(runDir);
+
+        TestOutcome o = new TestOutcome();
+        o.setOutcomeId("c1");
+        o.setName("c1");
+        o.setResult(TestResult.FAILURE);
+        o.setTestFailureSummary("boom");
+        JsonWriter.writeOutcome(runDir, o);
+
+        ReportServer server = new ReportServer(root, 0);
+        //  首次标记
+        FakeExchange first = new FakeExchange(
+                new ObjectMapper().writeValueAsBytes(Map.of("outcomeId", "c1", "note", "first")));
+        invoke(server, first);
+        assertEquals(200, first.status);
+        //  二次标记：只改备注，不破坏 original*
+        FakeExchange second = new FakeExchange(
+                new ObjectMapper().writeValueAsBytes(Map.of("outcomeId", "c1", "note", "second")));
+        invoke(server, second);
+        assertEquals(200, second.status);
+
+        Path json = runDir.resolve("c1").resolve("c1.json");
+        TestOutcome after = new ObjectMapper().readValue(json.toFile(), TestOutcome.class);
+        assertEquals(TestResult.SUCCESS, after.getResult());
+        assertEquals("second", after.getOverrideNote());
+        assertEquals("boom", after.getOriginalTestFailureSummary());
+        assertTrue(after.getOverridden());
+    }
+
+    @Test
+    void revertWithoutOverrideReturns409() throws Exception {
+        Path root = Files.createTempDirectory("rptroot5");
+        Path runDir = root.resolve("proj").resolve("run1");
+        Files.createDirectories(runDir);
+
+        TestOutcome o = new TestOutcome();
+        o.setOutcomeId("c1");
+        o.setName("c1");
+        o.setResult(TestResult.FAILURE);
+        JsonWriter.writeOutcome(runDir, o);
+
+        ReportServer server = new ReportServer(root, 0);
+        FakeExchange ex = new FakeExchange(
+                new ObjectMapper().writeValueAsBytes(Map.of("outcomeId", "c1")));
+        invokeRevert(server, ex);
+        assertEquals(409, ex.status);
     }
 
     @Test
@@ -78,6 +166,13 @@ public class ReportServerMarkSuccessTest {
     private static void invoke(ReportServer server, HttpExchange ex) throws Exception {
         Method m = ReportServer.class.getDeclaredMethod(
                 "handleMarkSuccess", HttpExchange.class, String.class, String.class);
+        m.setAccessible(true);
+        m.invoke(server, ex, "proj", "run1");
+    }
+
+    private static void invokeRevert(ReportServer server, HttpExchange ex) throws Exception {
+        Method m = ReportServer.class.getDeclaredMethod(
+                "handleMarkRevert", HttpExchange.class, String.class, String.class);
         m.setAccessible(true);
         m.invoke(server, ex, "proj", "run1");
     }

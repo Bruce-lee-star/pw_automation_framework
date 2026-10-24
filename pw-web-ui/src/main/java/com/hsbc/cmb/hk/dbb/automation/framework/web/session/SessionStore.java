@@ -348,8 +348,21 @@ final class SessionStore {
         }
         // 冷启动：本地文件是唯一来源，校验后加载并回填缓存
         SessionMeta meta = loadSessionMeta(sessionKey);
-        if (meta == null || !meta.sessionFileExists || isSessionExpired(meta)) {
+        if (meta == null || !meta.sessionFileExists) {
             INVALIDATED_KEYS.add(sessionKey);
+            return null;
+        }
+        if (isSessionExpired(meta)) {
+            //  与 evictIfExpired（：378）对齐：过期快照物理删除 + 标记 ABSENT_META，
+            //  避免下次冷启动又读到同一条过期快照再判一次过期，把过期文件永久留在磁盘（P2-22）。
+            INVALIDATED_KEYS.add(sessionKey);
+            try {
+                Files.delete(getSessionPath(sessionKey));
+                Files.delete(getMetaPath(sessionKey));
+            } catch (Exception e) {
+                LOGGER.warn("Failed to delete expired session: {}", sessionKey, e);
+            }
+            META_CACHE.put(sessionKey, ABSENT_META);
             return null;
         }
         try {
