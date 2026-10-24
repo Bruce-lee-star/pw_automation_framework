@@ -1239,7 +1239,10 @@
                 // independently from its associated input (fix: label independent from input).
                 if (!(originalIsLabel && el === t)) {
                   var cur = t, guard = 0;
-                  while (cur && guard++ < 5) {
+                  // 对齐 page.pause() 的 Inspector 上溯：从点击节点向上找最近可交互祖先，原 5 层硬上限会
+                  // 在深层组件 / 嵌套 Web Component 下停在精确点击节点，导致拾取元素偏离 Inspector。
+                  // 改为「直到根或命中可交互角色」，保留 50 层安全上限以防极端异常 DOM 死循环。
+                  while (cur && guard++ < 50) {
                     var node = resolveLabel(cur);
                     if (INTERACTIVE_ROLES[(getRole(node) || '').toLowerCase()]) {
                       el = node; break;

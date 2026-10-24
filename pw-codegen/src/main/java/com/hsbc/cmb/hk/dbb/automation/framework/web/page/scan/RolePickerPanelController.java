@@ -27,6 +27,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerSessionS
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerClassNameResolver;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerNlsCache;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.RolePickerCodeAssembler;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.PageDebugControl;
 
 // 行为保持零回归的桥接：openPanel / registerPopupFollow 原样搬自 RoleElementPicker，
 // 其依赖的私有静态助手已放宽到包内可见，此处显式静态导入以保留原调用形态。
@@ -132,6 +133,8 @@ public final class RolePickerPanelController {
             log.info("[picker] CI runtime detected, skipping picker panel (openPanel).");
             return;
         }
+        // ③联动：codegen 面板会话开启即发布「调试/录制暂停态」共享信号（对齐 page.pause 调试态），finally 清除。
+        PageDebugControl.markPaused(true);
         // 上下文级解耦（对齐 page.pause 的 DebugController/Recorder 架构）：
         // 面板重建脚本 + 门控拾取脚本 + 命令/拾取/控制台桥全部一次性注册到 BrowserContext，
         // context 下所有当前与未来页面（导航/弹窗/新标签页）自动生效，由浏览器原生保证存活。
@@ -350,6 +353,7 @@ public final class RolePickerPanelController {
                 }
             }
         } finally {
+            PageDebugControl.markPaused(false); // ③联动：面板会话结束，清除共享暂停态信号
             // 关闭开关并移除面板（撤销 docked 预留的右侧空间）：写墓碑 '0'（而非 remove），
             // 使 context 级引导注入脚本（无法撤销）在之后的导航中自行退出、不再重建面板。
             try { pickerEval(page, RolePickerScripts.DISABLE_PANEL_JS); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }

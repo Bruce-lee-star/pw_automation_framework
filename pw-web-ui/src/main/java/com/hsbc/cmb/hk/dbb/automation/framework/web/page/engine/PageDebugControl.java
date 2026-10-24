@@ -19,9 +19,15 @@ import org.slf4j.LoggerFactory;
  *
  * @apiNote Framework-internal — 由 BasePage 委派调用，业务代码请勿直接依赖。
  */
-final class PageDebugControl {
+public final class PageDebugControl {
 
     private static final Logger logger = LoggerFactory.getLogger(BasePage.class);
+
+    /**
+     * 共享「调试/录制暂停态」信号：原生 {@link #pause(BasePage)} 与自研 codegen 面板（pw-codegen 的
+     * RolePickerPanelController）皆可发布/读取，使两套系统对齐 page.pause() 的调试态（③联动基础，无反向依赖）。
+     */
+    private static final ThreadLocal<Boolean> PAUSED = new ThreadLocal<>();
 
     private PageDebugControl() {
         // 纯静态工具单元，禁止实例化
@@ -54,11 +60,29 @@ final class PageDebugControl {
         if (isDebugEnvironment()) {
             try {
                 bp.getPage().pause();
+                markPaused(true); // 发布共享「调试/录制暂停态」信号（③联动：对齐 page.pause 调试态）
             } catch (Exception e) {
                 logger.warn("Page pause failed, skip debug pause", e);
             }
         } else {
             logger.warn("[Security Control] Jenkins/BrowserStack environment, auto skip pause() to avoid block");
+        }
+    }
+
+    /**
+     * 读取当前线程是否处于「调试/录制暂停态」：原生 {@code page.pause()} 或自研 codegen 面板会话均可发布。
+     * 供 codegen 面板等消费，实现与 page.pause() 调试态联动，无需反向依赖。
+     */
+    public static boolean isPaused() {
+        return Boolean.TRUE.equals(PAUSED.get());
+    }
+
+    /** 发布/清除共享「调试/录制暂停态」信号。 */
+    public static void markPaused(boolean v) {
+        if (v) {
+            PAUSED.set(true);
+        } else {
+            PAUSED.remove();
         }
     }
 }

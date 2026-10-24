@@ -174,7 +174,8 @@
                   var w = startW + (startX - e.clientX);
                   if (w < 280) w = 280; if (w > 900) w = 900;
                   panel.style.width = w + 'px';
-                  if (document.body) document.body.style.marginRight = w + 'px';
+                  // 仅 docked 态（right 非 auto）才同步挤压页面右侧；浮动态不推走内容
+                  if (panel.style.right !== 'auto' && document.body) document.body.style.marginRight = w + 'px';
                 }
                 function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); }
                 document.addEventListener('mousemove', move);
@@ -215,6 +216,51 @@
               header.appendChild(title);
               header.appendChild(status);
               header.appendChild(closeBtn);
+
+              // 需求①：面板可拖动——标题栏（非按钮区）按下即可把面板从 docked 右侧吸附态拖到任意浮动位置；
+              // 拖到视口右缘附近则吸附回 docked（还原 marginRight 挤压布局）。拖动期间解除 docked 挤压，避免内容被推走。
+              (function() {
+                var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+                header.addEventListener('mousedown', function(e) {
+                  // 仅标题栏空白/标题文字可触发拖动；按钮（关闭 X）已 stopPropagation，不会进入此分支
+                  if (e.button !== 0) return;
+                  if (e.target && e.target.closest && e.target.closest('button')) return;
+                  dragging = true;
+                  var rect = panel.getBoundingClientRect();
+                  // 从 docked(right:0) 切换到 left/top 坐标体系
+                  panel.style.left = rect.left + 'px';
+                  panel.style.top = rect.top + 'px';
+                  panel.style.right = 'auto';
+                  if (document.body) document.body.style.marginRight = ''; // 解除 docked 挤压
+                  sx = e.clientX; sy = e.clientY;
+                  ox = rect.left; oy = rect.top;
+                  e.preventDefault();
+                });
+                document.addEventListener('mousemove', function(e) {
+                  if (!dragging) return;
+                  var nl = ox + e.clientX - sx;
+                  var nt = oy + e.clientY - sy;
+                  var w = panel.offsetWidth, h = panel.offsetHeight;
+                  if (nl < 0) nl = 0;
+                  if (nl + w > window.innerWidth) nl = window.innerWidth - w;
+                  if (nt < 0) nt = 0;
+                  if (h <= window.innerHeight && nt + h > window.innerHeight) nt = window.innerHeight - h;
+                  panel.style.left = nl + 'px';
+                  panel.style.top = nt + 'px';
+                });
+                document.addEventListener('mouseup', function() {
+                  if (!dragging) return;
+                  dragging = false;
+                  // 吸附回 docked：右缘贴近视口右且顶部贴近上沿时还原 right:0 + marginRight 挤压
+                  var rect = panel.getBoundingClientRect();
+                  if (rect.right >= window.innerWidth - 8 && rect.top <= 8) {
+                    panel.style.right = '0px';
+                    panel.style.left = 'auto';
+                    panel.style.top = '0px';
+                    if (document.body) document.body.style.marginRight = panel.offsetWidth + 'px';
+                  }
+                });
+              })();
 
               var toolbar = document.createElement('div');
               toolbar.style.cssText = 'padding:10px 14px;background:#252526;display:flex;gap:8px;align-items:center;';

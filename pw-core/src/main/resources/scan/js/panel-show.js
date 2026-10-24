@@ -6,7 +6,8 @@
 
               var overlay = document.createElement('div');
               overlay.id = '__roleCodeOverlay';
-              overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;' +
+              // 需求②：代码浮层 z-index 必须低于主面板 __rolePanel(2147483647)，否则全屏遮罩会盖住面板
+              overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483646;' +
                 'background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;';
 
               var panel = document.createElement('div');

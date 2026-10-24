@@ -76,6 +76,7 @@
                 return pick;
               };
               // 悬停高亮 + 悬停拾取（hover）模式：开启后鼠标停在元素上约 0.45s 即记录 hover 动作。
+              window.__hoverPickDelay = 450; // 悬停拾取延迟（ms），与 page.pause 悬停录制口径可调对齐
               window.__rolePickMove = function(ev) {
                 if (!window.__rolePickActive) {
                   if (window.__hoverRaf) { try { cancelAnimationFrame(window.__hoverRaf); } catch(e){} window.__hoverRaf = null; }
@@ -103,7 +104,7 @@
                           && !t.closest('#__rolePanel, #__roleCodeOverlay')) {
                         window.__recordPick(t, true);
                       }
-                    }, 450);
+                    }, window.__hoverPickDelay);
                   }
                 }
               };
@@ -147,8 +148,8 @@
                     if (!sig) return;
                     var pick = window.__sigToPick ? window.__sigToPick[sig] : null;
                     if (!pick) return;
-                    // alert 默认 accept；confirm/prompt 默认 dismiss（与 Java onDialog 约定一致）
-                    var action = (type === 'alert') ? 'accept' : 'dismiss';
+                    // alert/prompt 默认 accept；confirm 默认 dismiss（prompt 对齐 page.pause 的 dialog.accept() 默认）
+                    var action = (type === 'alert' || type === 'prompt') ? 'accept' : 'dismiss';
                     pick.dialog = true;
                     pick.dialogType = type;
                     pick.dialogAction = action;
@@ -457,8 +458,10 @@
                   if (typeof resolveLabel === 'function') dstEl = resolveLabel(dstEl);
                 } catch (_de) {}
                 window.__dragSrcEl = null;
-                if (!dstEl || dstEl === srcEl) return; // 未跨元素，非拖拽
-                if (window.__dragMoved < 12) return;  // 位移过小，视为普通点击
+                if (!dstEl || dstEl === srcEl) return; // 未跨元素，非拖拽（对齐 page.pause 源≠目标手势）
+                // 对齐 page.pause() 的 dragTo 手势口径：以「源≠目标元素」为主判定，欧氏位移仅作亚像素抖动去抖
+                var __dragDist = Math.hypot(e.clientX - window.__dragStartX, e.clientY - window.__dragStartY);
+                if (__dragDist < 10) return;  // 欧氏位移过小视为普通点击
                 try {
                   var dstPick = computePick(dstEl);
                   if (!dstPick || !dstPick.key) return;
@@ -471,8 +474,7 @@
               };
               window.__rolePickDragMove = function(e) {
                 if (!window.__dragSrcEl) return;
-                window.__dragMoved += Math.abs(e.clientX - window.__dragStartX) + Math.abs(e.clientY - window.__dragStartY);
-                window.__dragStartX = e.clientX; window.__dragStartY = e.clientY;
+                // 起点固定为 mousedown 坐标（DragUp 按欧氏距离判定），不再累加曼哈顿/覆盖起点（对齐 page.pause 手势口径）
               };
               document.addEventListener('mousedown', window.__rolePickDragDown, true);
               document.addEventListener('mousemove', window.__rolePickDragMove, true);
