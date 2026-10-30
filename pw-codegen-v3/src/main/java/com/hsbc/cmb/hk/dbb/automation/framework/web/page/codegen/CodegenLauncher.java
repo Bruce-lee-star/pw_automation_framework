@@ -265,7 +265,7 @@ public final class CodegenLauncher {
                 if (session == null) {
                     synchronized (initLock) {
                         if (session == null) {
-                            CodegenCdpSession s = new CodegenCdpSession(page, nlsLang);
+                            CodegenCdpSession s = openCdpSessionWithRetry();
                             CdpLocatorCounter c = new CdpLocatorCounter(page, s);
                             CodegenCdpNodeExtractor ex = new CodegenCdpNodeExtractor(s, nlsRef, c);
                             this.counter = c;
@@ -275,6 +275,38 @@ public final class CodegenLauncher {
                     }
                 }
                 return session;
+            }
+
+            /**
+             * 建立 CDP 会话，带<b>有界重试</b>。
+             *
+             * <p>实测竞态：{@code context().newCDPSession(page)} 偶发抛
+             * {@code PlaywrightException: Object doesn't exist: cdp-session@…}——驱动已返回会话句柄，
+             * 但 Java 侧对象表在解析该句柄前把它回收了（页面正在导航 / 驱动正在重挂 target 时最易触发）。
+             * 该失败是瞬时的：用户第二次点 Start 就能成功，说明通道本身可用；但首次失败会在面板上留下
+             * 一条 ERROR「failed to start pick mode」，被误读为功能性故障。
+             *
+             * <p>故在此做有界重试（最多 5 次、每次间隔 100ms，总计 ≤400ms），全部失败仍原样上抛——
+             * 绝不静默降级成「拾取中但没有通道」。
+             */
+            private CodegenCdpSession openCdpSessionWithRetry() {
+                com.microsoft.playwright.PlaywrightException last = null;
+                for (int attempt = 1; attempt <= 5; attempt++) {
+                    try {
+                        return new CodegenCdpSession(page, nlsLang);
+                    } catch (com.microsoft.playwright.PlaywrightException e) {
+                        last = e;
+                        log.warn("[codegen][cdp] newCDPSession attempt {}/5 失败 on {}: {} — 100ms 后重试",
+                                attempt, page.url(), e.getMessage());
+                        try {
+                            Thread.sleep(100L);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw e;
+                        }
+                    }
+                }
+                throw last;
             }
 
             /** 抽取器（首次访问时随 CDP 会话一并懒加载）。 */
@@ -841,6 +873,9 @@ public final class CodegenLauncher {
         // pumpClicks[0]=上一拍活动页 DOM 点击数，pumpClicks[1]=上一拍全局 binding 回调数；
         // 用于「点击静默丢弃」诊断（区分「DOM 事件没进来」与「事件进来了但没派发/没桥」）。
         final long[] pumpClicks = {0L, 0L};
+        // 连续偏差拍数：用于过滤「evaluate 响应 与 bindingCalled 消息」在协议层的排序竞态（一次性偏差），
+        // 只有连续两拍仍偏差才判为真正的桥缺失（详见泵内注释）。
+        final int[] skewTicks = {0};
         final ScheduledExecutorService eventPump = createEventPump();
         eventPump.scheduleWithFixedDelay(() -> {
             Page p = sessions.active.get();
@@ -858,22 +893,31 @@ public final class CodegenLauncher {
                 if (clicks > pumpClicks[0]) {
                     long deltaDom = clicks - pumpClicks[0];
                     long deltaBridge = bc - pumpClicks[1];
-                    // 本拍的 evaluate 顺带驱动 binding 派发：活动页本拍新增的 DOM 点击应已转为 binding 回调
-                    // （evaluate 与 binding 派发同批，无异步延迟，故阈值取 0：任一次 DOM 点击无对应 bridge 回调即报警）。
-                    // 若 DOM 点击涨了却没对应到 binding 回调，说明点击被静默丢弃（注入未就绪 / 监听未挂 / 跨源弹窗绑定缺失）
-                    // → 点名 URL 报警，避免「新页拾取不到」无声发生。
+                    // 若本拍 DOM 点击涨了却没有对应的 binding 回调，可能是两类原因：
+                    //  ① 协议排序竞态——同一拍的 p.evaluate 响应先到、bindingCalled 消息后到（探针已证明
+                    //     exposeBinding 在主页/新页/同页导航后均存在且回调可达），属一次性偏差，下一拍就补上；
+                    //  ② 真正的桥缺失——该页每拍都偏差（系统性）。
+                    // 故要求「连续两拍」仍偏差才 WARN：既滤掉 ① 的瞬时误报，又不漏 ② 的系统性故障。
                     if (deltaDom - deltaBridge > 0) {
-                        log.warn("[codegen][pump] active page DOM click dropped: DOM +{} but bridge +{} on {} "
-                                + "— instrumentation not firing (listener not attached / binding missing?). "
-                                + "Note: context.exposeBinding covers cross-origin popups, so a drop here means the "
-                                + "injected click listener or its window.__codegenEvent call failed on this page.",
-                                deltaDom, deltaBridge, p.url());
+                        if (++skewTicks[0] >= 2) {
+                            log.warn("[codegen][pump] active page DOM click dropped (consecutive {} ticks): "
+                                    + "DOM +{} but bridge +{} on {} — instrumentation not firing on this page "
+                                    + "(click listener or its window.__codegenEvent call is broken).",
+                                    skewTicks[0], deltaDom, deltaBridge, p.url());
+                            skewTicks[0] = 0;
+                        } else {
+                            log.debug("[codegen][pump] transient DOM/bridge skew (likely message ordering): "
+                                    + "DOM +{} bridge +{} on {} — will re-check next tick", deltaDom, deltaBridge, p.url());
+                        }
+                    } else {
+                        skewTicks[0] = 0;
                     }
                     domClicks.set(clicks);
                     log.debug("[codegen][pump] DOM clicks={} bridge callbacks={}", clicks, bc);
                 } else if (clicks < pumpClicks[0]) {
                     // 活动页切换 / 页面导航导致计数器被重置：放弃旧基线，不报丢弃
                     domClicks.set(clicks);
+                    skewTicks[0] = 0;
                 }
                 pumpClicks[0] = clicks;
                 pumpClicks[1] = bc;
