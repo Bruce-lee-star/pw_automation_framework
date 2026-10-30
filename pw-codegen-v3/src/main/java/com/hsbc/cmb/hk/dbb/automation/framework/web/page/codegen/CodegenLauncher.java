@@ -9,6 +9,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.Codegen
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenFieldSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenTarget;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.MultiPageCodegen;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.engine.CodegenEngine;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.inject.CodegenScriptInjector;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.LocatorStrategy;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
@@ -40,7 +41,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -218,8 +218,8 @@ public final class CodegenLauncher {
         final AtomicInteger sessionSeq = new AtomicInteger(0);
         // 录制器（在 Sessions 之前声明：Sessions 内的拾取回调需用它做增量代码生成，lambda 才能捕获）
         final CodegenRecorder recorder = new CodegenRecorder();
-        // 实时增量生成线程（同样必须在 Sessions 之前声明，拾取回调才能捕获；见 createLiveGenExecutor）
-        ExecutorService genExecutor = createLiveGenExecutor(lang);
+        // 全局单线程串行引擎（必须在 Sessions 之前声明，拾取/生成/注入/关页回调才能捕获）
+        CodegenEngine engine = new CodegenEngine(lang);
         // binding 回调计数（事件泵日志里与页面侧点击计数对照，用于区分「DOM 事件没进来」与「binding 未派发」）
         final AtomicLong bridgeCalls = new AtomicLong(0);
         // 页面侧（顶层文档）累计 click 计数，事件泵据此判断注入的监听器是否真的在工作
@@ -235,7 +235,7 @@ public final class CodegenLauncher {
             private volatile CdpLocatorCounter counter;
             private volatile CodegenCdpNodeExtractor extractor;
             // 拾取不再有 per-page 线程：所有页的拾取 / 解析任务统一提交到 startSession 作用域的共享单线程引擎
-            // genExecutor（见 submitPick）；此处仅保留 per-page 的 CDP 会话 / 抽取器数据结构。
+            // CodegenEngine（见 submitPick）；此处仅保留 per-page 的 CDP 会话 / 抽取器数据结构。
             /** CDP 拾取通道是否已开启（幂等标记）。 */
             volatile boolean pickChannelOn = false;
 
@@ -249,7 +249,7 @@ public final class CodegenLauncher {
              * 懒加载 CDP 会话 + 抽取器（double-checked locking，线程安全）。
              *
              * <p><b>调用方必须不在 onPage 回调 / 派发线程上</b>：{@code newCDPSession} 是一次真实协议往返，
-             * 会阻塞调用线程；故只在共享拾取引擎线程（{@link #submitPick} 包装内，即 genExecutor）或显式 Start 命令线程调用，
+             * 会阻塞调用线程；故只在共享拾取引擎线程（{@link #submitPick} 包装内，即 engine（CodegenEngine））或显式 Start 命令线程调用，
              * 实现「onPage 回调只登记、会话创建推迟到共享引擎」。
              */
             private CodegenCdpSession cdpSession() {
@@ -288,13 +288,13 @@ public final class CodegenLauncher {
             private final PickGuard guard = new PickGuard();
 
             /**
-             * 把解析任务交给共享拾取引擎（genExecutor 单线程）。任务前先懒加载 CDP 会话 + 开启通道（均在引擎线程），
+             * 把解析任务交给共享拾取引擎（CodegenEngine 单线程）。任务前先懒加载 CDP 会话 + 开启通道（均在引擎线程），
              * 实现「onPage 回调只登记、会话创建推迟到共享引擎」—— onPage 回调（派发线程）永不在此同步建会话；
              * 同时把 NLS 语言带到引擎线程（抽取器依赖 ThreadLocal 语言）。
              */
             void submitPick(String fingerprint, Runnable task) {
                 try {
-                    genExecutor.submit(() -> {
+                    if (!engine.submit(CodegenEngine.Kind.PICK, page, () -> {
                         if (nlsLang != null) {
                             com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState
                                     .setLanguage(nlsLang);
@@ -311,7 +311,9 @@ public final class CodegenLauncher {
                             return;
                         }
                         task.run();
-                    });
+                    })) {
+                        guard.finish(fingerprint, false);
+                    }
                 } catch (Exception e) {
                     // 入队失败必须释放占位，否则该元素会被永久当成「正在拾取中」。
                     guard.finish(fingerprint, false);
@@ -386,7 +388,7 @@ public final class CodegenLauncher {
 
             /** 关闭本页：detach CDP 会话（懒加载可能为 null，即该页从未被拾取）；残留拾取由共享引擎按序排空。 */
             void close() {
-                // 无 per-page 线程池可关：拾取任务统一在共享引擎（genExecutor）上，页面关闭只需 detach CDP 会话；
+                // 无 per-page 线程池可关：拾取任务统一在共享引擎（CodegenEngine）上，页面关闭只需 detach CDP 会话；
                 // 队列中该页的残留拾取会在本 close 任务之前按序执行（close 也经引擎入队），失败由任务内 try 捕获。
                 CodegenCdpSession s = session;
                 if (s != null) {
@@ -474,9 +476,9 @@ public final class CodegenLauncher {
                 newPage.onClose(p -> {
                     removeDialogAutoDismiss(newPage);
                     PageSession removed = map.remove(newPage);
-                    // 释放本页 CDP 会话 + 拾取线程：页面关掉后若不 close，其 PageSession（含 CDPSession / 抽取器）
-                    // 会悬空泄漏；放到 genExecutor，避免在 onClose 派发线程上同步 shutdown/awaitTermination 阻塞派发。
-                    if (removed != null) genExecutor.execute(removed::close);
+                    // 释放本页 CDP 会话（拾取任务已统一在引擎线程）：页面关掉后若不 close，其 PageSession（含 CDPSession / 抽取器）
+                    // 会悬空泄漏；放到 engine，避免在 onClose 派发线程上同步 shutdown/awaitTermination 阻塞派发。
+                    if (removed != null) engine.submit(CodegenEngine.Kind.CLOSE, newPage, removed::close);
                     // 从 MRU 移除已关页
                     synchronized (recentActive) { recentActive.remove(newPage); }
                     // 关掉的是当前活动页 ⇒ 回落到「上一个仍在打开的活动页」（嵌套弹窗：关子弹窗 → 回到父弹窗，
@@ -491,11 +493,11 @@ public final class CodegenLauncher {
                         if (fallback == null && !real.isClosed() && map.containsKey(real)) fallback = real;
                         if (fallback != null) {
                             active.set(fallback);
-                            // 在 genExecutor 上补开回落页的 CDP 通道（页面已加载，无 attach 竞态），避免阻塞 onClose
+                            // 在 engine 上补开回落页的 CDP 通道（页面已加载，无 attach 竞态），避免阻塞 onClose
                             // 派发线程；失败仅记 WARN（懒加载路径在下次拾取时会兜底）。
                             final Page fb = fallback;
                             if (pickOn.get()) {
-                                genExecutor.execute(() -> {
+                                engine.submit(CodegenEngine.Kind.ENABLE, fb, () -> {
                                     try { enablePick(fb); }
                                     catch (Exception e) { log.warn("[codegen][follow] re-enable pick on fallback {} failed: {}", fb.url(), e.toString()); }
                                 });
@@ -514,10 +516,10 @@ public final class CodegenLauncher {
                 // 而 context 级注入在部分打开方式 / Playwright 版本下不一定落到新页，且原实现从未对新页做自检，
                 // 一旦失败就是「点了没反应、且无声无息」。这里在后台线程显式补注一次（含 recorder + bridge 自检，
                 // 任一缺失会打 WARN），把静默失效变成可见诊断；context 已覆盖则本次幂等补强。
-                // 绝不在 onPage 派发线程上调用 page.evaluate（会与该连接的读线程互等死锁），故交给 genExecutor。
+                // 绝不在 onPage 派发线程上调用 page.evaluate（会与该连接的读线程互等死锁），故交给 engine。
                 final Page np = newPage;
-                // 注入（快，放 genExecutor 单线程，不阻塞实时生成）
-                genExecutor.execute(() -> {
+                // 注入（快，放 engine 单线程，不阻塞实时生成）
+                engine.submit(CodegenEngine.Kind.INJECT, np, () -> {
                     try {
                         CodegenScriptInjector.inject(np);
                         pushPickStatus(np, pickStatusArg(pickOn.get(), started.get(), stopped.get()));
@@ -529,10 +531,10 @@ public final class CodegenLauncher {
                 });
                 // 新页 CDP 目标常在 onPage 触发时尚未 attach，此刻 newCDPSession 会瞬时抛错；故此处<b>不</b>自己开裸线程去
                 // waitForLoadState + 轮询（既与现有异步模式不一致，又难管理生命周期）。改为与 onClose 回落页完全一致的写法：
-                // 在 genExecutor 上「单次」尝试 enablePick —— 页面通常此时已 attach，多数情况能直接开通道；
+                // 在 engine 上「单次」尝试 enablePick —— 页面通常此时已 attach，多数情况能直接开通道；
                 // 若仍撞 attach 竞态失败，则交给每帧点击的 submitPick 懒加载兜底（本就每条点击重试）。拾取进行中（pickOn）才开。
                 if (pickOn.get()) {
-                    genExecutor.execute(() -> {
+                    engine.submit(CodegenEngine.Kind.ENABLE, np, () -> {
                         try {
                             enablePick(np);
                             log.info("[codegen][follow] enabled pick channel on new page {}", np.url());
@@ -594,7 +596,7 @@ public final class CodegenLauncher {
                         "value", "fill".equals(type) ? value : ""));
             }
             if (firstSeen) {
-                requestLiveRegeneration(genExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+                requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
             }
         };
 
@@ -612,7 +614,7 @@ public final class CodegenLauncher {
             }
             panelRef[0].onPicked(pk.id, entry);
             // 实时增量生成：每次拾取后立即刷新 Page/Step/Assert，无需等到按 Stop 才看到代码。
-            requestLiveRegeneration(genExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+            requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
             log.info("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
                     pk.id, entry.name, entry.role, entry.selector);
         };
@@ -667,7 +669,7 @@ public final class CodegenLauncher {
                     break;
                 case "group":
                     handleGroup(picked, cmd, panelRef[0]);
-                    requestLiveRegeneration(genExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+                    requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
                     break;
                 case "stop": {
                     sessions.pickOn.set(false);
@@ -831,7 +833,7 @@ public final class CodegenLauncher {
         } catch (RuntimeException e) {
             // 面板没能打开（例如浏览器启动失败）：先收掉实时生成线程与事件泵，避免线程泄漏。
             eventPump.shutdownNow();
-            genExecutor.shutdownNow();
+            engine.shutdownGracefully();
             throw e;
         }
         panelRef[0] = panel;
@@ -889,7 +891,7 @@ public final class CodegenLauncher {
             if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception ignore) { } }
             sessions.closeAll();
             eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
-            genExecutor.shutdownNow();   // 面板即将关闭：停掉实时生成，避免关窗后仍在推送
+            engine.shutdownGracefully();   // 面板即将关闭：停掉实时生成，避免关窗后仍在推送
             // 面板窗口可能已随 X 关闭而连带销毁其浏览器上下文：panel.close() 在已关闭的上下文上可能阻塞。
             // 放到带 5s 超时join的守护线程里执行，确保"关掉窗口后主线程一定返回"，绝不卡死。
             final Thread closer = new Thread(() -> {
@@ -1190,26 +1192,7 @@ public final class CodegenLauncher {
         return out;
     }
 
-    /**
-     * 实时增量生成的专用线程：daemon 单线程，保证多次刷新按事件顺序串行落地。
-     *
-     * <p><b>为什么不在拾取回调里直接生成</b>：拾取回调跑在 Playwright 的 CDP 事件线程上，里面同步做
-     * "FreeMarker 渲染 + 3 次 {@code page.evaluate}"会长时间占住该线程（极端情况下与连接派发线程互相等待），
-     * 且{@code LanguageState} 是 ThreadLocal（NLS 反查需要它）。卸载到独立线程后回调立即返回，
-     * 并在线程创建时带上当前语言。
-     */
-    private static ExecutorService createLiveGenExecutor(String nlsLang) {
-        return java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(() -> {
-                if (nlsLang != null) {
-                    com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState.setLanguage(nlsLang);
-                }
-                r.run();
-            }, "codegen-live-gen");
-            t.setDaemon(true);
-            return t;
-        });
-    }
+
 
     /**
      * 事件泵线程：daemon 单线程调度器。
@@ -1230,25 +1213,25 @@ public final class CodegenLauncher {
      * 请求一次实时刷新（异步，合并执行）。停止后不再提交，避免覆盖定稿代码。
      *
      * <p><b>合并而非排队</b>：连续快速拾取（一次点击/输入即一次请求）若逐个提交全量代码重生，会在
-     * {@code genExecutor} 单线程里堆积 O(n²) 次生成，挤占注入/状态条推送，录制量大时明显卡顿。
+     * {@code CodegenEngine} 单线程里堆积 O(n²) 次生成，挤占注入/状态条推送，录制量大时明显卡顿。
      * 这里保证「同一时刻至多一个再生任务在跑」：期间到达的新请求只更新序号、不重复入队；
      * 在跑的任务生成一次后若发现序号又变（生成期间又来了新拾取），再补一次以覆盖最新状态，
      * 既限频又不丢最后一次结果。
      */
     private static final AtomicLong REGEN_SEQ = new AtomicLong();
     private static final AtomicBoolean REGEN_INFLIGHT = new AtomicBoolean(false);
-    private static void requestLiveRegeneration(ExecutorService genExecutor, CodegenPanel[] panelRef,
+    private static void requestLiveRegeneration(CodegenEngine engine, CodegenPanel[] panelRef,
                                                 List<Pick> picks, CodegenRecorder recorder,
                                                 List<DialogOp> dialogOps, String[] nlsFiles,
                                                 AtomicBoolean stopped) {
-        if (genExecutor == null || genExecutor.isShutdown() || stopped.get()) {
+        if (engine == null || stopped.get()) {
             return;
         }
         REGEN_SEQ.incrementAndGet();                       // 标记“有新请求”
         if (!REGEN_INFLIGHT.compareAndSet(false, true)) {
             return;                                        // 已有合并任务在跑/排队，本次由它兜底
         }
-        genExecutor.submit(() -> {
+        engine.submit(CodegenEngine.Kind.REGEN, null, () -> {
             try {
                 long started = REGEN_SEQ.get();
                 generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
