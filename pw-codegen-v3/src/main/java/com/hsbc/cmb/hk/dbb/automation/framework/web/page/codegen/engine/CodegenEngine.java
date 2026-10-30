@@ -6,7 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -19,6 +19,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * 调用方（{@code onPage} / {@code bindingCalled} / {@code onDialog} 等派发线程回调）<b>只登记 + submit，
  * 永不做协议往返</b>，保留既有防死锁原则。引擎线程上的协议调用与主线程阻塞互不相关。
  *
+ * <p>事件泵（驱动 Playwright 消息派发）也折叠进同一条线程（{@link #startPump}），与拾取/生成串行执行，
+ * 不再额外起线程；代价是长拾取（~170ms）会短暂推迟下一拍泵，属可接受的次级影响。
+ *
  * <p>任务带 {@link Kind} 与 {@code page.url()}，统一 {@code [engine#seq] KIND page=url} 前缀并写入 MDC，
  * 可观测、可回放。会话结束时 {@link #shutdownGracefully()} 先 drain 再关，避免残留任务覆盖定稿。
  */
@@ -26,7 +29,7 @@ public final class CodegenEngine {
 
     private static final Logger log = LoggerFactory.getLogger(CodegenEngine.class);
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "codegen-engine");   // 统一命名，固定 1 线程
         t.setDaemon(true);
         return t;
@@ -36,7 +39,7 @@ public final class CodegenEngine {
     private volatile boolean stopped = false;
 
     /** 引擎任务种类（用于日志前缀与 MDC，便于按类型回放）。 */
-    public enum Kind { PICK, REGEN, INJECT, ENABLE, STATUS, CLOSE }
+    public enum Kind { PICK, REGEN, INJECT, ENABLE, STATUS, CLOSE, PUMP }
 
     public CodegenEngine(String nlsLang) {
         this.nlsLang = nlsLang;
@@ -73,6 +76,25 @@ public final class CodegenEngine {
         } catch (RuntimeException re) {   // 极少数 shutdown 竞态下的 RejectedExecutionException
             log.debug("[engine] submit rejected after shutdown: {}", re.toString());
             return false;
+        }
+    }
+
+    /**
+     * 在引擎线程上以固定延迟调度一个周期性泵任务（用于驱动 Playwright 消息派发）。
+     * 泵与 {@link #submit} 的任务共用同一条 daemon 线程，串行执行。
+     *
+     * @param initialDelayMs 首次执行的延迟
+     * @param periodMs       周期间隔
+     * @param pump           每拍要执行的任务（自身须容错，异常不应向外传播）
+     */
+    public void startPump(long initialDelayMs, long periodMs, Runnable pump) {
+        if (stopped || executor.isShutdown()) {
+            return;
+        }
+        try {
+            executor.scheduleWithFixedDelay(pump, initialDelayMs, periodMs, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException re) {   // shutdown 竞态
+            log.debug("[engine] pump schedule rejected after shutdown: {}", re.toString());
         }
     }
 

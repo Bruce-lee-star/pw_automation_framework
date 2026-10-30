@@ -523,7 +523,7 @@ public final class CodegenLauncher {
                     try {
                         CodegenScriptInjector.inject(np);
                         pushPickStatus(np, pickStatusArg(pickOn.get(), started.get(), stopped.get()));
-                        log.info("[codegen][follow] injected recorder into new page {}", np.url());
+                        log.debug("[codegen][follow] injected recorder into new page {}", np.url());
                     } catch (Exception e) {
                         log.warn("[codegen][follow] inject recorder into new page failed: {} — {}",
                                 np.url(), e.getMessage());
@@ -537,7 +537,7 @@ public final class CodegenLauncher {
                     engine.submit(CodegenEngine.Kind.ENABLE, np, () -> {
                         try {
                             enablePick(np);
-                            log.info("[codegen][follow] enabled pick channel on new page {}", np.url());
+                            log.debug("[codegen][follow] enabled pick channel on new page {}", np.url());
                         } catch (Exception e) {
                             log.warn("[codegen][follow] enable pick on new page {} deferred (lazy retry on next click): {}",
                                     np.url(), e.getMessage());
@@ -615,7 +615,7 @@ public final class CodegenLauncher {
             panelRef[0].onPicked(pk.id, entry);
             // 实时增量生成：每次拾取后立即刷新 Page/Step/Assert，无需等到按 Stop 才看到代码。
             requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
-            log.info("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
+            log.debug("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
                     pk.id, entry.name, entry.role, entry.selector);
         };
 
@@ -763,7 +763,7 @@ public final class CodegenLauncher {
                 return null;
             }
             if ("click".equals(actionType)) {
-                log.info("[codegen][bridge] click at ({}, {}) on {} (coordSkipped={})",
+                log.debug("[codegen][bridge] click at ({}, {}) on {} (coordSkipped={})",
                         payload.get("x"), payload.get("y"), ps.page.url(), payload.get("coordSkipped"));
             }
             final Page eventPage = ps.page;
@@ -796,13 +796,13 @@ public final class CodegenLauncher {
             sessions.installDialogAutoDismiss(p);
         }
 
-        // ---- 事件泵：驱动 Playwright 的消息派发 ----
+        // ---- 事件泵：驱动 Playwright 的消息派发（折叠进引擎单线程，与拾取/生成共用，不再额外起线程）----
         // Playwright Java 的 driver 消息是「有线程阻塞等响应」时顺带派发的；codegen 会话把主线程阻塞在
         // closeLatch 上，期间若没有别的 API 调用，页面发来的 bindingCalled（click/fill）会一直缓冲不被派发，
         // 表现就是「点击页面毫无反应，日志里连 [bridge] 都没有」。旧版 CDP inspect 也是靠同样的泵活着的。
         // 泵同时读取页面侧 click 计数，用于区分「DOM 事件没进来」与「事件进来了但没派发」。
-        final ScheduledExecutorService eventPump = createEventPump();
-        eventPump.scheduleWithFixedDelay(() -> {
+        // 折叠后泵与拾取/生成串行于同一条引擎线程：长拾取（~170ms）会短暂推迟下一拍，属可接受的次级影响。
+        engine.startPump(0, 120, () -> {
             Page p = sessions.active.get();
             if (p == null) return;
             try {
@@ -816,13 +816,13 @@ public final class CodegenLauncher {
                 long clicks = v instanceof Number ? ((Number) v).longValue() : 0L;
                 if (clicks != domClicks.get()) {
                     domClicks.set(clicks);
-                    log.info("[codegen][pump] DOM clicks={} bridge callbacks={}", clicks, bridgeCalls.get());
+                    log.debug("[codegen][pump] DOM clicks={} bridge callbacks={}", clicks, bridgeCalls.get());
                 }
             } catch (Throwable ignore) {
                 // 页面正在导航 / 执行上下文已销毁：本拍失败不影响下一拍
             }
-        }, 0, 120, java.util.concurrent.TimeUnit.MILLISECONDS);
-        log.info("[codegen][pump] event pump started (120ms) — drives Playwright message dispatch");
+        });
+        log.info("[codegen][pump] event pump folded into engine (120ms) — drives Playwright message dispatch");
 
         Path panelHtml = PanelResource.resolvePanelHtml();
 
@@ -831,8 +831,7 @@ public final class CodegenLauncher {
         try {
             panel = CodegenPanel.open(panelHtml, commandHandler, lang);
         } catch (RuntimeException e) {
-            // 面板没能打开（例如浏览器启动失败）：先收掉实时生成线程与事件泵，避免线程泄漏。
-            eventPump.shutdownNow();
+            // 面板没能打开（例如浏览器启动失败）：收掉引擎（含事件泵），避免线程泄漏。
             engine.shutdownGracefully();
             throw e;
         }
@@ -890,8 +889,7 @@ public final class CodegenLauncher {
             com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.HangWatchdog.resume();
             if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception ignore) { } }
             sessions.closeAll();
-            eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
-            engine.shutdownGracefully();   // 面板即将关闭：停掉实时生成，避免关窗后仍在推送
+            engine.shutdownGracefully();   // 面板即将关闭：停掉引擎（含事件泵与实时生成），避免关窗后仍在推送
             // 面板窗口可能已随 X 关闭而连带销毁其浏览器上下文：panel.close() 在已关闭的上下文上可能阻塞。
             // 放到带 5s 超时join的守护线程里执行，确保"关掉窗口后主线程一定返回"，绝不卡死。
             final Thread closer = new Thread(() -> {
@@ -1193,21 +1191,6 @@ public final class CodegenLauncher {
     }
 
 
-
-    /**
-     * 事件泵线程：daemon 单线程调度器。
-     *
-     * <p>Playwright Java 的 driver 消息在「有线程阻塞等响应」时被顺带派发；codegen 会话把主线程阻塞在
-     * {@code closeLatch} 上，若期间没有 API 调用，页面侧的 {@code bindingCalled}（点击/输入）会一直缓冲，
-     * 表现为「点击完全没反应、日志里连 bridge 回调都没有」。泵用极轻量的 {@code evaluate} 持续驱动派发。
-     */
-    private static ScheduledExecutorService createEventPump() {
-        return java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "codegen-event-pump");
-            t.setDaemon(true);
-            return t;
-        });
-    }
 
     /**
      * 请求一次实时刷新（异步，合并执行）。停止后不再提交，避免覆盖定稿代码。
