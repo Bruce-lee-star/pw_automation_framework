@@ -779,6 +779,10 @@ public final class CodegenLauncher {
             pickSession.submitPick(fingerprint, () -> {
                 CodegenEntry e = null;
                 try {
+                    // P0-1 新页拾取兜底：极少数情况下（外网页加载慢、注入脚本尚未就绪 / addInitScript 尚未生效）
+                    // 页面上 __CODEGEN__ 缺失，录制器与坐标辅助函数不可用 → 拾取静默失效。拾取执行前先自检，
+                    // 缺失则同线程补注后再解析（不额外起线程、不阻塞派发线程）。注入脚本首行有幂等保护，重复求值安全。
+                    ensureInstrumented(eventPage);
                     e = pickSession.pickAt(actionType, payload.get("x"), payload.get("y"),
                             info != null ? info.get("cssSelector") : null, shadowHostsOf(info),
                             framePathOf(payload));
@@ -809,6 +813,9 @@ public final class CodegenLauncher {
         // 泵同时读取页面侧 click 计数，用于区分「DOM 事件没进来」与「事件进来了但没派发」。
         // 关键：泵必须独立于引擎线程——实测 REGEN 300–370ms、慢拾取 800ms+，若折叠进引擎，这些长任务会饿死泵，
         // 导致弹窗/新标签页上的点击回调不被派发（R1 回归）。独立泵确保点击派发窗口永不被引擎任务阻塞。
+        // pumpClicks[0]=上一拍活动页 DOM 点击数，pumpClicks[1]=上一拍全局 binding 回调数；
+        // 用于「点击静默丢弃」诊断（区分「DOM 事件没进来」与「事件进来了但没派发/没桥」）。
+        final long[] pumpClicks = {0L, 0L};
         final ScheduledExecutorService eventPump = createEventPump();
         eventPump.scheduleWithFixedDelay(() -> {
             Page p = sessions.active.get();
@@ -822,10 +829,26 @@ public final class CodegenLauncher {
                                 + " } catch (e) {} return (window.__CODEGEN_CLICK_COUNT__ || 0); }",
                         pickStatusArg(sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get()));
                 long clicks = v instanceof Number ? ((Number) v).longValue() : 0L;
-                if (clicks != domClicks.get()) {
+                long bc = bridgeCalls.get();
+                if (clicks > pumpClicks[0]) {
+                    long deltaDom = clicks - pumpClicks[0];
+                    long deltaBridge = bc - pumpClicks[1];
+                    // 本拍的 evaluate 顺带驱动 binding 派发：活动页本拍新增的 DOM 点击应已转为 binding 回调
+                    // （误差 >1 容忍 1 拍异步派发延迟）。若 DOM 点击涨了却没对应到 binding 回调，说明点击被
+                    // 静默丢弃（注入未就绪 / 监听未挂 / 跨源弹窗未覆盖）→ 点名 URL 报警，避免「新页拾取不到」无声发生。
+                    if (deltaDom - deltaBridge > 1) {
+                        log.warn("[codegen][pump] active page DOM clicks +{} but only +{} bridge callbacks — "
+                                + "clicks may be silently dropped on {} (instrumentation not ready?)",
+                                deltaDom, deltaBridge, p.url());
+                    }
                     domClicks.set(clicks);
-                    log.debug("[codegen][pump] DOM clicks={} bridge callbacks={}", clicks, bridgeCalls.get());
+                    log.debug("[codegen][pump] DOM clicks={} bridge callbacks={}", clicks, bc);
+                } else if (clicks < pumpClicks[0]) {
+                    // 活动页切换 / 页面导航导致计数器被重置：放弃旧基线，不报丢弃
+                    domClicks.set(clicks);
                 }
+                pumpClicks[0] = clicks;
+                pumpClicks[1] = bc;
             } catch (Throwable ignore) {
                 // 页面正在导航 / 执行上下文已销毁：本拍失败不影响下一拍
             }
@@ -1230,6 +1253,28 @@ public final class CodegenLauncher {
      * 在跑的任务生成一次后若发现序号又变（生成期间又来了新拾取），再补一次以覆盖最新状态，
      * 既限频又不丢最后一次结果。
      */
+    /**
+     * P0-1 新页拾取兜底：自检页面是否已注入 {@code codegen-inject.js}（{@code window.__CODEGEN__} 命名空间 +
+     * recorder 监听器），缺失则同线程补注后再继续拾取。仅在拾取执行线程（引擎线程）调用——协议往返本就归属此线程，
+     * 不阻塞派发线程。注入脚本首行带幂等保护（{@code if (window.__CODEGEN__) return;}），重复求值安全。
+     *
+     * <p>覆盖场景：外网页加载慢、{@code addInitScript} 尚未在新建弹窗/新标签页上生效前，用户已在上面点击，
+     * 此时录制器/坐标辅助函数不可用，若不补注则拾取静默失效。注意：本方法只能挽救「监听已挂但辅助函数缺失」
+     * 的情形；若点击发生在监听挂载之前（极窄窗口），该次点击已丢失，本方法为后续点击兜底。
+     */
+    private static void ensureInstrumented(Page page) {
+        try {
+            Object ok = page.evaluate("() => !!(window.__CODEGEN__ && window.__CODEGEN__.recorder)");
+            if (!Boolean.TRUE.equals(ok)) {
+                log.warn("[codegen][bridge] instrumentation missing on {} — lazy re-injecting codegen-inject.js",
+                        page.url());
+                CodegenScriptInjector.inject(page);
+            }
+        } catch (Throwable ignore) {
+            // 页面正在导航 / 执行上下文已销毁：本拍重试时再补，不在此报错
+        }
+    }
+
     private static final AtomicLong REGEN_SEQ = new AtomicLong();
     private static final AtomicBoolean REGEN_INFLIGHT = new AtomicBoolean(false);
     private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanel[] panelRef,

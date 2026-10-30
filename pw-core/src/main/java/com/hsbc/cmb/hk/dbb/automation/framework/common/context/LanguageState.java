@@ -3,6 +3,8 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Objects;
+
 /**
  * 多语言（NLS）「当前语言」状态收口 —— 从 web 的 {@code NLSUtils} 下沉，解耦 {@code route → web} 依赖。
  *
@@ -35,10 +37,19 @@ public final class LanguageState {
      */
     public static void setLanguage(String lang) {
         if (lang == null) {
-            LANG.remove();
-        } else {
-            LANG.set(lang);
+            // 仅在确实曾设置过时才清除并记日志，避免 reset 路径重复刷屏
+            if (LANG.get() != null) {
+                LANG.remove();
+                log.info("[NLS] language cleared");
+            }
+            return;
         }
+        // 同语言重复设置属幂等无操作（拾取引擎 / 生成线程每任务都会调用）：不打日志，
+        // 否则 80 秒内 30+ 条 [NLS] 刷屏会冲掉真正的诊断信息（含 console 输出被淹没）。
+        if (Objects.equals(lang, LANG.get())) {
+            return;
+        }
+        LANG.set(lang);
         log.info("[NLS] language switched to: {}", lang);
     }
 
