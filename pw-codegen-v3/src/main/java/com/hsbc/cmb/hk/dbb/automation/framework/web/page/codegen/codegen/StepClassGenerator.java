@@ -122,6 +122,10 @@ public final class StepClassGenerator {
                 out.add("        " + pageVar(a.target) + ".waitForNewPage(() -> " + pageVar(a.target) + "."
                         + a.fieldName + "." + a.action + ");");
                 break;
+            case NAVIGATION:
+                // 同标签页内 URL 跳转：不切页、不等待，仅提示（该页对象已在方法顶部实例化）。
+                out.add("        // " + (a.note == null ? "same-tab navigation" : a.note));
+                break;
             default:
                 break;
         }

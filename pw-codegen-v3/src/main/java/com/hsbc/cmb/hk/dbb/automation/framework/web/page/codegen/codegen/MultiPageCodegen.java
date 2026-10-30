@@ -12,17 +12,19 @@ import java.util.List;
  * <p>用户的录制习惯是「点开始拾取 → 操作一串元素 → 点停止」，这个 <b>Start→Pause 区间就是一步</b>。
  * 因此：
  * <ul>
- *   <li><b>Page</b>：仍然按「被测页面」归集字段（同一页面的元素永远落在同一个 Page 类，
- *       跨会话合并、字段名稳定）；</li>
+ *   <li><b>Page</b>：按「<b>拾取时的 URL</b>」归集字段——同一标签页内导航（A→B）会产出两个独立
+ *       Page 类（{@code APage} / {@code BPage}），旧类不被吞掉；同 URL 跨会话合并、字段名稳定；</li>
  *   <li><b>Step</b>：<b>一个会话 = 一个 {@code @Step} 方法</b>（{@code step1} / {@code step2} …）；</li>
  *   <li><b>Assert</b>：同理，一个会话 = 一个 {@code @Step} 方法（{@code assert1} / {@code assert2} …）。</li>
  * </ul>
  *
- * <h2>同一步跨多页怎么办</h2>
+ * <h2>同一步跨多页 / 同页导航怎么办</h2>
  * <p>一个会话里可能既操作了 A 页又操作了 B 页（例如点「个人中心」后进入新页再填表单）。
- * 此时该 step 方法<b>在方法体内同时实例化两个页面类</b>（局部变量），元素操作分别落到各自的
- * 页面对象上；页面切换处生成 {@code aPage.waitForNewPage(() -> aPage.trigger.click())}，
+ * 此时该 step 方法<b>在方法体内同时实例化多个页面类</b>（局部变量），元素操作分别落到各自的
+ * 页面对象上；跨标签页切换处生成 {@code aPage.waitForNewPage(() -> aPage.trigger.click())}，
  * 与 v2 的 {@code acceptNewPage} 语义一致（新页由框架接管为当前页，页面对象自动跟随）。
+ * <b>同一标签页内的 URL 跳转（A→B）不算切页</b>：不生成 {@code waitForNewPage}，只在步骤体插入
+ * 一条「已导航」注释，页面对象在方法顶部已实例化、直接复用即可（用户选择：不引入等待语义）。
  *
  * <p>本类只做<b>纯装配</b>（不依赖 Playwright）：Playwright 侧的页面/元素信息由
  * {@code CodegenLauncher} 先折算成 {@link PageUnit} / {@link SessionUnit} 再传进来，便于单测。
@@ -70,7 +72,9 @@ public final class MultiPageCodegen {
         /** 处理浏览器 dialog（{@code page.acceptAlert()/dismissAlert()}）。 */
         DIALOG,
         /** 跨页切换：{@code from.waitForNewPage(() -> from.trigger.action)}。 */
-        PAGE_SWITCH
+        PAGE_SWITCH,
+        /** 同标签页导航提示：不切页、不等待，仅注释「已导航到 X 页」（如需要可加 waitForLoadState）。 */
+        NAVIGATION
     }
 
     /** 会话内的一条动作。 */
@@ -92,10 +96,12 @@ public final class MultiPageCodegen {
         public final boolean accept;
         /** PAGE_SWITCH：目标页。 */
         public final CodegenTarget toTarget;
+        /** NAVIGATION：提示注释（同标签页 URL 跳转说明）。 */
+        public final String note;
 
         private SessionAction(ActionKind kind, CodegenTarget target, String fieldName, String action,
                               String todo, String frameSelector, String framePath, boolean accept,
-                              CodegenTarget toTarget) {
+                              CodegenTarget toTarget, String note) {
             this.kind = kind;
             this.target = target;
             this.fieldName = fieldName;
@@ -105,24 +111,33 @@ public final class MultiPageCodegen {
             this.framePath = framePath;
             this.accept = accept;
             this.toTarget = toTarget;
+            this.note = note;
         }
 
         public static SessionAction element(CodegenTarget target, String fieldName, String action, String todo) {
-            return new SessionAction(ActionKind.ELEMENT, target, fieldName, action, todo, null, null, false, null);
+            return new SessionAction(ActionKind.ELEMENT, target, fieldName, action, todo, null, null, false, null, null);
         }
 
         public static SessionAction frameSwitch(CodegenTarget target, String selector, String path) {
-            return new SessionAction(ActionKind.FRAME_SWITCH, target, null, null, null, selector, path, false, null);
+            return new SessionAction(ActionKind.FRAME_SWITCH, target, null, null, null, selector, path, false, null, null);
         }
 
         public static SessionAction dialog(CodegenTarget target, boolean accept) {
-            return new SessionAction(ActionKind.DIALOG, target, null, null, null, null, null, accept, null);
+            return new SessionAction(ActionKind.DIALOG, target, null, null, null, null, null, accept, null, null);
         }
 
         public static SessionAction pageSwitch(CodegenTarget from, String triggerField, String triggerAction,
                                                CodegenTarget toTarget) {
             return new SessionAction(ActionKind.PAGE_SWITCH, from, triggerField, triggerAction, null, null, null,
-                    false, toTarget);
+                    false, toTarget, null);
+        }
+
+        /** 同标签页导航提示：在步骤体插入「已导航」注释，不生成任何等待 / 切页代码。 */
+        public static SessionAction navigation(CodegenTarget from, CodegenTarget to) {
+            String note = "same-tab navigation: now on " + to.pageClassName
+                    + " (was " + from.pageClassName + " on the same tab); the page object is re-fetched below — "
+                    + "add waitForLoadState(...) here if the new page needs to settle before the next action";
+            return new SessionAction(ActionKind.NAVIGATION, null, null, null, null, null, null, false, null, note);
         }
     }
 

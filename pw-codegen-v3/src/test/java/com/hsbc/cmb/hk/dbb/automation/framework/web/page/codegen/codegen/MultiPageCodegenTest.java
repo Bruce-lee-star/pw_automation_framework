@@ -126,6 +126,58 @@ public class MultiPageCodegenTest {
     }
 
     @Test
+    public void sameTabNavigationInsertsCommentInsteadOfWaitForNewPage() {
+        // 同一标签页内导航：A 页点链接后 URL 跳到 B 页（而非弹新窗）。
+        // 此时不应生成 waitForNewPage（那是跨标签页语义），只插入「已导航」注释，两个页类都在方法顶部实例化。
+        CodegenEntry aClick = entry("link#go", "link", "goToB", "#go");
+        CodegenEntry bSubmit = entry("button#s", "button", "submit", "#s");
+        List<CodegenEntry> pageA = List.of(aClick);
+        List<CodegenEntry> pageB = List.of(bSubmit);
+        String[] nls = new String[0];
+        CodegenFieldPlanner.Plan planA = CodegenFieldPlanner.plan(pageA, nls, Map.of());
+        CodegenFieldPlanner.Plan planB = CodegenFieldPlanner.plan(pageB, nls, Map.of());
+        CodegenTarget tA = CodegenTarget.ofNamed("com.example.pages", "PrivacyAndSecurityPage");
+        CodegenTarget tB = CodegenTarget.ofNamed("com.example.pages", "BusinessIntegratedAccountPage");
+        CodegenFieldSpec go = spec(planA, aClick);
+        CodegenFieldSpec submit = spec(planB, bSubmit);
+        assertNotNull(go);
+        assertNotNull(submit);
+
+        // 同一步内：在 A 页点击 → 同标签页跳到 B 页 → 在 B 页提交
+        List<MultiPageCodegen.SessionAction> actions = List.of(
+                MultiPageCodegen.SessionAction.element(tA, go.fieldName, go.action, ""),
+                MultiPageCodegen.SessionAction.navigation(tA, tB),
+                MultiPageCodegen.SessionAction.element(tB, submit.fieldName, submit.action, ""));
+        MultiPageCodegen.SessionUnit s = new MultiPageCodegen.SessionUnit(1, tA, List.of(tA, tB), actions,
+                List.of(new MultiPageCodegen.PageEntries(tA, pageA, planA),
+                        new MultiPageCodegen.PageEntries(tB, pageB, planB)));
+
+        MultiPageCodegen.MultiPageResult result = MultiPageCodegen.build(
+                List.of(new MultiPageCodegen.PageUnit(tA, pageA, planA),
+                        new MultiPageCodegen.PageUnit(tB, pageB, planB)),
+                List.of(s), nls);
+
+        // 两个页面类都产出（不再被吞掉）
+        assertTrue("Page 产物应包含两个页面类",
+                result.pageCode.contains("class PrivacyAndSecurityPage")
+                        && result.pageCode.contains("class BusinessIntegratedAccountPage"));
+
+        String step1 = methodBody(result.stepCode, "step1");
+        // 两个页类都在方法顶部实例化
+        assertTrue("step1 应实例化 PrivacyAndSecurityPage",
+                step1.contains("PrivacyAndSecurityPage privacyAndSecurityPage = PageObjectFactory.getPage(PrivacyAndSecurityPage.class);"));
+        assertTrue("step1 应实例化 BusinessIntegratedAccountPage",
+                step1.contains("BusinessIntegratedAccountPage businessIntegratedAccountPage = PageObjectFactory.getPage(BusinessIntegratedAccountPage.class);"));
+        // 同标签页导航：不生成 waitForNewPage，而是「已导航」注释
+        assertFalse("同标签页导航不应生成 waitForNewPage", step1.contains("waitForNewPage"));
+        assertTrue("同标签页导航应插入「已导航」注释",
+                step1.contains("same-tab navigation: now on BusinessIntegratedAccountPage"));
+        // 导航后继续操作新页元素
+        assertTrue("导航后应继续操作 B 页元素",
+                step1.contains("businessIntegratedAccountPage." + submit.fieldName + "." + submit.action + ";"));
+    }
+
+    @Test
     public void frameSwitchAndDialogAreInlinedInTheSameStep() {
         CodegenEntry inFrame = entry("textbox#f", "textbox", "frameField", "#inner", -1, List.of("iframe#f"));
         List<CodegenEntry> page = List.of(inFrame);

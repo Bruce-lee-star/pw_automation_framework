@@ -112,6 +112,15 @@ public final class CodegenLauncher {
         /** 该元素所属的被测页（弹窗/新标签页场景下需在其所属页上高亮，而非主页面）。 */
         final Page page;
         /**
+         * 拾取发生时的页面 URL（快照）。
+         *
+         * <p>这是<b>生成粒度从「标签页」改为「URL」</b>的关键数据：同一标签页内发生导航（A→B）时，
+         * A 处拾取的元素按 A 的 URL 归到 {@code APage}，B 处拾取的按 B 的 URL 归到 {@code BPage}——
+         * 旧设计在 Stop 时重读当前 URL，会把 A 的元素也并入最终 URL 的类，旧类名因此消失。
+         * 此处把每一次拾取的 URL 冻结下来，保证两个 Page 类都产出、且字段各归各的 URL。
+         */
+        final String url;
+        /**
          * 该元素所属页的抽取器：role 引擎复核（{@code countRoleMatches}）的唯一入口。
          *
          * <p>复核必须落在<b>元素自己那一页</b>上（弹窗/新标签页的计数入口不同）。
@@ -125,13 +134,14 @@ public final class CodegenLauncher {
          */
         volatile boolean rolePending;
 
-        Pick(long id, long seq, int session, CodegenEntry entry, Page page, CodegenCdpNodeExtractor extractor,
-              boolean rolePending) {
+        Pick(long id, long seq, int session, CodegenEntry entry, Page page, String url,
+              CodegenCdpNodeExtractor extractor, boolean rolePending) {
             this.id = id;
             this.seq = seq;
             this.session = session;
             this.entry = entry;
             this.page = page;
+            this.url = url;
             this.extractor = extractor;
             this.rolePending = rolePending;
         }
@@ -657,7 +667,7 @@ public final class CodegenLauncher {
             if (entry == null) return;
             PageSession ps = sessions.of(pg);
             Pick pk = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(), currentSession(sessionSeq),
-                    entry, pg, ps.extractor(),
+                    entry, pg, safeUrl(pg), ps.extractor(),
                     ps.extractor().requiresDeferredRoleVerification(entry));
             picked.add(pk);
             if (panelRef[0] == null) {
@@ -1459,29 +1469,30 @@ public final class CodegenLauncher {
      */
     private static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
                                                                     List<DialogOp> dialogOps, String[] nlsFiles) {
-        // 1) 每页唯一目标（URL 派生，碰撞则追加 _2 / _3）
-        Map<Page, List<Pick>> byPage = new LinkedHashMap<>();
-        for (Pick p : picks) byPage.computeIfAbsent(p.page, k -> new ArrayList<>()).add(p);
-        Map<Page, CodegenTarget> targets = resolveTargets(byPage.keySet());
+        // 1) 每个「标签页 + 拾取 URL」唯一目标（URL 派生，碰撞则追加 _2 / _3）。
+        //    同一个标签页内发生导航（A→B）会产生两个不同的键，因此 A、B 各自产出独立的 Page 类。
+        Map<PageUrl, List<Pick>> byKey = new LinkedHashMap<>();
+        for (Pick p : picks) byKey.computeIfAbsent(new PageUrl(p.page, p.url), k -> new ArrayList<>()).add(p);
+        Map<PageUrl, CodegenTarget> targets = resolveTargets(byKey.keySet());
 
-        // 2) 每页按真实操作序列排序的 entries（字段命名基准，跨会话合并）
+        // 2) 每个键按真实操作序列排序的 entries（字段命名基准，跨会话合并）
         List<String> globalKeys = recorder.orderedFieldKeys();
-        Map<Page, List<CodegenEntry>> ordered = new LinkedHashMap<>();
-        for (Map.Entry<Page, List<Pick>> en : byPage.entrySet()) {
+        Map<PageUrl, List<CodegenEntry>> ordered = new LinkedHashMap<>();
+        for (Map.Entry<PageUrl, List<Pick>> en : byKey.entrySet()) {
             List<CodegenEntry> es = en.getValue().stream().map(p -> p.entry).collect(Collectors.toList());
             List<String> keys = globalKeys.stream()
                     .filter(k -> es.stream().anyMatch(e -> e.sigKey.equals(k))).collect(Collectors.toList());
             ordered.put(en.getKey(), orderBySequence(es, keys));
         }
 
-        // 3) 每页规划（字段名 / 动作 / fill 占位）：Page、Step、Assert 共用同一份，字段名严格一致
+        // 3) 每个键规划（字段名 / 动作 / fill 占位）：Page、Step、Assert 共用同一份，字段名严格一致
         Map<String, String> fillValues = fillValuesFromRecorder(recorder);
-        Map<Page, CodegenFieldPlanner.Plan> plans = new LinkedHashMap<>();
+        Map<PageUrl, CodegenFieldPlanner.Plan> plans = new LinkedHashMap<>();
         List<MultiPageCodegen.PageUnit> pageUnits = new ArrayList<>();
-        for (Page pg : byPage.keySet()) {
-            CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(ordered.get(pg), nlsFiles, fillValues);
-            plans.put(pg, plan);
-            pageUnits.add(new MultiPageCodegen.PageUnit(targets.get(pg), ordered.get(pg), plan));
+        for (PageUrl key : byKey.keySet()) {
+            CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(ordered.get(key), nlsFiles, fillValues);
+            plans.put(key, plan);
+            pageUnits.add(new MultiPageCodegen.PageUnit(targets.get(key), ordered.get(key), plan));
         }
 
         // 4) 按会话分组（未点 Start 的历史拾取归入第 1 个会话），会话号升序
@@ -1516,36 +1527,45 @@ public final class CodegenLauncher {
      * @param dialogs      本会话 dialog
      */
     private static MultiPageCodegen.SessionUnit buildSession(int index, List<Pick> sessionPicks, List<DialogOp> dialogs,
-                                                            Map<Page, CodegenTarget> targets,
-                                                            Map<Page, CodegenFieldPlanner.Plan> plans,
+                                                            Map<PageUrl, CodegenTarget> targets,
+                                                            Map<PageUrl, CodegenFieldPlanner.Plan> plans,
                                                             Map<String, String> fillValues) {
         List<Pick> timeline = new ArrayList<>(sessionPicks);
         timeline.sort(Comparator.comparingLong(p -> p.seq));
 
-        // 本会话涉及页面（首次使用顺序）——方法体内按此顺序实例化页面对象
-        List<Page> pages = new ArrayList<>();
+        // 本会话涉及的页面类（按首次出现顺序）——方法体内按此顺序实例化页面对象。
+        // 注意：同一标签页导航（A→B）会产生两个不同的目标，故此处是「目标」列表而非「标签页」列表。
+        List<CodegenTarget> pageTargets = new ArrayList<>();
+        Set<CodegenTarget> seenTargets = new LinkedHashSet<>();
         for (Pick p : timeline) {
-            if (!pages.contains(p.page)) pages.add(p.page);
+            CodegenTarget t = targets.get(new PageUrl(p.page, p.url));
+            if (t != null && seenTargets.add(t)) pageTargets.add(t);
         }
 
-        // 切页触发器：会话内活动页变化 ⇒ 变化前在上一页的最后一个操作升级为 waitForNewPage 触发器
+        // 切页 / 同标签页导航 判定：
+        //  · 跨标签页（p.page 变化）⇒ 变化前在上一页的最后一个操作升级为 waitForNewPage 触发器
+        //    （from.waitForNewPage(() -> from.trigger.action)），新页由框架接管为当前页；
+        //  · 同标签页、URL 变化（A→B）⇒ 不算切页，不生成 waitForNewPage，仅在该步骤处追加「已导航」注释
+        //    （用户选择：直接 getPage(B.class) 继续，不等待），避免同页内跳转被误判成弹新窗。
         Set<Long> triggerIds = new LinkedHashSet<>();
-        Map<Long, Page> triggerToPage = new LinkedHashMap<>();
-        Page current = null;
-        Pick lastOnPage = null;
+        Map<Long, CodegenTarget> triggerToPage = new LinkedHashMap<>();
+        PageUrl currentKey = null;
+        Pick lastOnKey = null;
         for (Pick p : timeline) {
-            if (current == null) {
-                current = p.page;
-                lastOnPage = p;
-            } else if (p.page != current) {
-                if (lastOnPage != null) {
-                    triggerIds.add(lastOnPage.id);
-                    triggerToPage.put(lastOnPage.id, p.page);
+            PageUrl key = new PageUrl(p.page, p.url);
+            if (currentKey == null) {
+                currentKey = key;
+                lastOnKey = p;
+            } else if (!key.equals(currentKey)) {
+                if (lastOnKey != null && p.page != currentKey.page) {
+                    // 仅跨标签页才升级为 waitForNewPage 触发器；同标签页导航不在此处理
+                    triggerIds.add(lastOnKey.id);
+                    triggerToPage.put(lastOnKey.id, targets.get(key));
                 }
-                current = p.page;
-                lastOnPage = p;
+                currentKey = key;
+                lastOnKey = p;
             } else {
-                lastOnPage = p;
+                lastOnKey = p;
             }
         }
 
@@ -1556,37 +1576,59 @@ public final class CodegenLauncher {
         items.sort(Comparator.comparingLong(i -> i.seq));
 
         List<MultiPageCodegen.SessionAction> actions = new ArrayList<>();
-        Map<Page, List<String>> frameByPage = new LinkedHashMap<>();
+        Map<CodegenTarget, List<String>> frameByTarget = new LinkedHashMap<>();
+        // dialog 没有 URL 快照，按「所属标签页的首个目标」解析（dialog 落在某个标签页上，取该页第一个 URL 的目标）。
+        Map<Page, CodegenTarget> pageToTarget = new LinkedHashMap<>();
+        for (Map.Entry<PageUrl, CodegenTarget> e : targets.entrySet()) {
+            pageToTarget.putIfAbsent(e.getKey().page, e.getValue());
+        }
+        // 目标 → 规划：Page / Step / Assert 共用同一份 plan，字段名严格一致（按目标对齐，而非按 URL 字符串）。
+        Map<CodegenTarget, CodegenFieldPlanner.Plan> planByTarget = new LinkedHashMap<>();
+        for (Map.Entry<PageUrl, CodegenFieldPlanner.Plan> e : plans.entrySet()) {
+            planByTarget.put(targets.get(e.getKey()), e.getValue());
+        }
         // 同一元素在本步被反复拾取（如连点同一按钮）→ 只保留首次动作，避免 step 出现重复 click / fill。
         Set<String> usedSig = new HashSet<>();
+        Pick prevPick = null;
         for (SessionItem item : items) {
             if (item.dialog != null) {
-                CodegenTarget t = targets.get(item.dialog.page);
+                CodegenTarget t = pageToTarget.get(item.dialog.page);
                 if (t != null) actions.add(MultiPageCodegen.SessionAction.dialog(t, item.dialog.accept));
+                prevPick = null;
                 continue;
             }
             Pick p = item.pick;
-            CodegenTarget t = targets.get(p.page);
-            if (t == null) continue;
+            CodegenTarget t = targets.get(new PageUrl(p.page, p.url));
+            if (t == null) { prevPick = p; continue; }
 
-            // 每页独立跟踪当前 frame：进入 iframe 时生成 switchToFrame（回到主帧不生成，字段本身带 frame 前缀）
-            List<String> currentFrame = frameByPage.getOrDefault(p.page, List.of());
+            // 同标签页导航（A→B）提示：与前一个拾取同页但不同目标 ⇒ 页面发生了 URL 跳转。
+            // 不生成 waitForNewPage，仅在步骤体插入「已导航」注释（用户选择：直接 getPage(B.class) 继续，不等待）。
+            if (prevPick != null) {
+                CodegenTarget prevT = targets.get(new PageUrl(prevPick.page, prevPick.url));
+                if (prevT != null && !prevT.equals(t) && p.page.equals(prevPick.page)) {
+                    actions.add(MultiPageCodegen.SessionAction.navigation(prevT, t));
+                }
+            }
+            prevPick = p;
+
+            // 每个页类独立跟踪当前 frame：进入 iframe 时生成 switchToFrame（回到主帧不生成，字段本身带 frame 前缀）
+            List<String> currentFrame = frameByTarget.getOrDefault(t, List.of());
             if (!p.entry.framePath.equals(currentFrame)) {
                 if (!p.entry.framePath.isEmpty()) {
                     String inner = p.entry.framePath.get(p.entry.framePath.size() - 1);
                     actions.add(MultiPageCodegen.SessionAction.frameSwitch(
                             t, inner, String.join(" :: ", p.entry.framePath)));
                 }
-                frameByPage.put(p.page, p.entry.framePath);
+                frameByTarget.put(t, p.entry.framePath);
             }
 
-            CodegenFieldSpec spec = fieldSpecFor(plans.get(p.page), p.entry);
+            CodegenFieldSpec spec = fieldSpecFor(planByTarget.get(t), p.entry);
             if (spec == null) continue;
 
             if (triggerIds.contains(p.id)) {
                 usedSig.add(p.entry.sigKey);
                 actions.add(MultiPageCodegen.SessionAction.pageSwitch(
-                        t, spec.fieldName, spec.action, targets.get(triggerToPage.get(p.id))));
+                        t, spec.fieldName, spec.action, triggerToPage.get(p.id)));
                 continue;
             }
             // 同元素去重（保留首次）：连点同一元素不再产生重复动作
@@ -1597,23 +1639,20 @@ public final class CodegenLauncher {
             actions.add(MultiPageCodegen.SessionAction.element(t, spec.fieldName, spec.action, todo));
         }
 
-        // 断言：本会话每页的元素（保持会话内操作顺序、按 sigKey 去重）
+        // 断言：本会话每页类的元素（保持会话内操作顺序、按 sigKey 去重）
         List<MultiPageCodegen.PageEntries> asserts = new ArrayList<>();
-        for (Page pg : pages) {
+        for (CodegenTarget tgt : pageTargets) {
             List<CodegenEntry> es = new ArrayList<>();
             Set<String> seen = new LinkedHashSet<>();
             for (Pick p : timeline) {
-                if (p.page == pg && p.entry != null && seen.add(p.entry.sigKey)) es.add(p.entry);
+                CodegenTarget t = targets.get(new PageUrl(p.page, p.url));
+                if (t != null && t.equals(tgt) && p.entry != null && seen.add(p.entry.sigKey)) es.add(p.entry);
             }
             if (!es.isEmpty()) {
-                asserts.add(new MultiPageCodegen.PageEntries(targets.get(pg), es, plans.get(pg)));
+                asserts.add(new MultiPageCodegen.PageEntries(tgt, es, planByTarget.get(tgt)));
             }
         }
 
-        List<CodegenTarget> pageTargets = new ArrayList<>();
-        for (Page pg : pages) {
-            if (targets.get(pg) != null) pageTargets.add(targets.get(pg));
-        }
         return new MultiPageCodegen.SessionUnit(index, pageTargets.isEmpty() ? null : pageTargets.get(0),
                 pageTargets, actions, asserts);
     }
@@ -1631,12 +1670,54 @@ public final class CodegenLauncher {
         }
     }
 
+    /**
+     * 分组键：<b>标签页 + 该次拾取的 URL</b>。
+     *
+     * <p>生成粒度从「标签页」改为「URL」后，同一标签页内发生导航（A→B）会产生两个不同的键，
+     * 从而派生出两个不同的 Page 类（{@code APage} / {@code BPage}），旧类不再被吞掉。
+     * 不同标签页若落在同一 URL，仍视为不同键（类名靠 {@link #resolveTargets} 的 _2 去重）。
+     */
+    private static final class PageUrl {
+        final Page page;
+        final String url;
+
+        PageUrl(Page page, String url) {
+            this.page = page;
+            this.url = url;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof PageUrl)) return false;
+            PageUrl that = (PageUrl) o;
+            return page == that.page && java.util.Objects.equals(url, that.url);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * System.identityHashCode(page) + java.util.Objects.hashCode(url);
+        }
+    }
+
+    /** 安全取页面 URL：页面已关闭 / 取不到时返回 null（走兜底类名），不抛异常。 */
+    private static String safeUrl(Page page) {
+        if (page == null) return null;
+        try {
+            return page.url();
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
     /** URL 派生目标，并对重名页面追加 _2 / _3 去重。 */
-    private static Map<Page, CodegenTarget> resolveTargets(java.util.Collection<Page> pages) {
-        Map<Page, CodegenTarget> out = new LinkedHashMap<>();
+    private static Map<PageUrl, CodegenTarget> resolveTargets(java.util.Collection<PageUrl> keys) {
+        Map<PageUrl, CodegenTarget> out = new LinkedHashMap<>();
         Set<String> used = new LinkedHashSet<>();
-        for (Page pg : pages) {
-            CodegenTarget base = CodegenTarget.ofPage(pg);
+        for (PageUrl key : keys) {
+            // 关键点：类名由【拾取时】的 URL 派生，而非 Stop 时的当前 URL——否则同标签页导航后
+            // 旧 URL 的元素会被并入最终 URL 的类，旧 Page 类名消失。
+            CodegenTarget base = CodegenTarget.of(CodegenTarget.DEFAULT_PACKAGE, key.url);
             String name = base.pageClassName;
             int n = 2;
             while (used.contains(name)) {
@@ -1644,7 +1725,7 @@ public final class CodegenLauncher {
                 n++;
             }
             used.add(name);
-            out.put(pg, name.equals(base.pageClassName) ? base : CodegenTarget.ofNamed(base.packageName, name));
+            out.put(key, name.equals(base.pageClassName) ? base : CodegenTarget.ofNamed(base.packageName, name));
         }
         return out;
     }

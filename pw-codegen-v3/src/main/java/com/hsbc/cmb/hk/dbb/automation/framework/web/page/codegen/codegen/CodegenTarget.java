@@ -29,8 +29,11 @@ import com.microsoft.playwright.Page;
  * <p>子包名与 v2 对齐（{@code .steps} / {@code .assertions}），Step/Assert 类名由 pageClassName
  * 去掉 {@code Page} 后缀后加角色后缀得到（v2 用固定 {@code SampleSteps}，此处随页面派生）。
  *
- * <p>URL 在拾取过程中可能变化（用户导航），因此 {@link #ofPage(Page, String)} <b>每次调用都重新读
- * 当前 URL</b>：会话开始取一次用于日志，Stop 时再取一次用于生成，保证产物名与实际拾取页面一致。
+ * <p>类名由<b>拾取发生时的 URL</b>派生（每次拾取都把当时页面的 URL 冻结在 {@code Pick} 上）。
+ * 因此同一标签页内发生导航（A→B）会产出两个不同的 Page 类（{@code APage} / {@code BPage}），
+ * 旧类不会被「Stop 时重读当前 URL」吞掉——这正是「按 URL 拆分页面类」的核心：
+ * 元素永远落在它<b>被拾取那一刻</b>所属 URL 对应的 Page 类，不受后续导航影响。
+ * {@link #ofPage(Page)} 仅读取当前 URL（用于日志 / 单页快速场景），生成路径统一走 {@link #of(String, String)}。
  */
 public final class CodegenTarget {
 
