@@ -404,10 +404,10 @@ public final class CodegenLauncher {
             }
         }
         final class Sessions {
-            /** 录制/拾取事件桥回调：context 级注册一次（见下方 ctx.exposeBinding）；followNewPage 持有同一实例，
-             *  理论上 context 级 exposeBinding 已覆盖所有页（含跨源弹窗），故按页再暴露通常是 no-op
-             *  （同名会抛 already-registered，被 catch 忽略）；仅在极少数 context 级未落到某新页时作为兜底。
-             *  真正的新页拾取正确性靠注入脚本监听 + 桥 + PICK 链路共同保证，由事件泵 WARN 诊断丢桥。 */
+            /** 录制/拾取事件桥回调：每页经 page.exposeBinding 暴露（主页在 startSession、新页在 followNewPage），
+             *  持有同一实例保证语义一致。不用 context 级 exposeBinding——它仅覆盖「注册之后才创建的页」，
+             *  主页早已存在故拿不到桥。真正的新页拾取正确性靠注入脚本监听 + 桥 + PICK 链路共同保证，
+             *  由事件泵 WARN 诊断丢桥（DOM +1 而 bridge +0）。 */
             com.microsoft.playwright.options.BindingCallback codegenEventBridge;
 
             final Map<Page, PageSession> map = new ConcurrentHashMap<>();
@@ -533,14 +533,13 @@ public final class CodegenLauncher {
                 // 注入（快，放 engine 单线程，不阻塞实时生成）
                 engine.submit(CodegenEngine.Kind.INJECT, np, () -> {
                     try {
-                        // 跨源弹窗兜底：context 级 exposeBinding 偶尔未可靠落到跨源新建页（点击处理器的
-                        // window.__codegenEvent 缺失 → 被注入脚本 catch(e){} 静默吞掉 → 弹窗点击完全无反应）。
-                        // 这里按页再暴露一次同名绑定（与 context 级回调是同一实例，语义一致）；若 context 级已覆盖，
-                        // Playwright 会抛 "already exists"，捕获忽略即可，无副作用。
+                        // 新页（弹窗/新标签页）按页暴露同名绑定：这是新页拿到 window.__codegenEvent 的唯一途径
+                        // （主页在 startSession 暴露，其余页在此暴露；context 级 exposeBinding 不可靠地跳过已存在/新建页）。
+                        // 若同页被重复暴露会抛 already-registered，捕获忽略（幂等）；若页面已关闭则 warn 不阻断注入。
                         try {
                             np.exposeBinding("__codegenEvent", codegenEventBridge);
                         } catch (Throwable ignore) {
-                            log.debug("[codegen][follow] page-level __codegenEvent already covered by context on {}", np.url());
+                            log.debug("[codegen][follow] __codegenEvent already exposed on {}", np.url());
                         }
                         CodegenScriptInjector.inject(np);
                         pushPickStatus(np, pickStatusArg(pickOn.get(), started.get(), stopped.get()));
@@ -810,7 +809,16 @@ public final class CodegenLauncher {
             return null;
         };
         sessions.codegenEventBridge = bridge;
-        ctx.exposeBinding("__codegenEvent", bridge);
+        // 关键修复（P0-1 根因）：不用 context 级 exposeBinding。
+        // 实测 context.exposeBinding 仅作用于「绑定注册之后才创建的页面」，而会话启动时主页早已存在
+        // → 主页永远拿不到 window.__codegenEvent → 点击被注入脚本 catch(e){} 静默吞掉（事件泵 DOM +1 / bridge +0）。
+        // 改用 page 级 exposeBinding 对每页显式暴露：既覆盖已存在的当前主页，又随导航经 Playwright 内置
+        // init script 重挂，且作用到该页所有 frame（含跨源 iframe）。新页由 followNewPage 同法暴露。
+        try {
+            real.exposeBinding("__codegenEvent", bridge);
+        } catch (Throwable t) {
+            log.warn("[codegen][bridge] exposeBinding on main page failed: {}", t.getMessage());
+        }
 
         // 注入 role 算法 + recorder：page 级对「当前已加载文档」立即生效（addInitScript 只覆盖后续导航，
         // 登录页早已加载完成，只注册 init script 会让 __CODEGEN__ 根本不存在 → 录制器永不工作）；
