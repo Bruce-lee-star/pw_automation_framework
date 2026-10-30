@@ -295,10 +295,7 @@ public final class CodegenLauncher {
             void submitPick(String fingerprint, Runnable task) {
                 try {
                     if (!engine.submit(CodegenEngine.Kind.PICK, page, () -> {
-                        if (nlsLang != null) {
-                            com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState
-                                    .setLanguage(nlsLang);
-                        }
+                        // 语言已由 CodegenEngine.submit 在运行任务前统一 setLanguage(nlsLang)，此处无需重复。
                         // 建会话 / 开通道可能抛（新页目标未就绪、页面已关等）：必须在 lambda 内捕获，
                         // 否则异常在守护线程里逃逸，guard 占位永不释放 → 该元素永久卡在「拾取中」且面板无显示。
                         try {
@@ -1214,18 +1211,32 @@ public final class CodegenLauncher {
         if (!REGEN_INFLIGHT.compareAndSet(false, true)) {
             return;                                        // 已有合并任务在跑/排队，本次由它兜底
         }
-        engine.submit(CodegenEngine.Kind.REGEN, null, () -> {
+        if (!engine.submit(CodegenEngine.Kind.REGEN, null, () -> {
             try {
+                long t0 = System.nanoTime();
                 long started = REGEN_SEQ.get();
                 generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
                 // 生成期间若又有新拾取（序号变化），补一次覆盖最新；否则结束。
                 if (REGEN_SEQ.get() != started) {
                     generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
                 }
+                // R1 计时探针：REGEN 与 PUMP 同线程，生成耗时直接决定派发窗口是否被推迟。
+                // DEBUG 全量记录用于收集 P95；超过 200ms 阈值（用户拍板的「迁出」线）打 WARN 提醒。
+                long ms = (System.nanoTime() - t0) / 1_000_000;
+                if (ms > 200) {
+                    log.warn("[codegen][regen] live regeneration took {} ms (>200ms) — on engine thread, "
+                            + "pump dispatch window delayed; consider moving REGEN off engine", ms);
+                } else {
+                    log.debug("[codegen][regen] live regeneration took {} ms", ms);
+                }
             } finally {
                 REGEN_INFLIGHT.set(false);
             }
-        });
+        })) {
+            // 入队被拒绝（stopped / 已 shutdown 竞态）：任务体不执行，finally 不触发，必须在此释放占位，
+            // 否则 REGEN_INFLIGHT 永久为 true（引擎若复用则后续实时生成全部被吞）。
+            REGEN_INFLIGHT.set(false);
+        }
     }
 
     /** 当前拾取状态（用于被测页控制条）：stopped ⇒ hidden，pickOn ⇒ picking，已开启过 ⇒ paused，否则 ready。 */
