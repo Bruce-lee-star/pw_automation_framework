@@ -404,9 +404,10 @@ public final class CodegenLauncher {
             }
         }
         final class Sessions {
-            /** 录制/拾取事件桥回调：context 级注册一次（见下方 ctx.exposeBinding）；新页 followNewPage 会按页再暴露一次，
-             *  兜底「跨源弹窗上 context 级绑定未可靠覆盖」导致点击处理器里 window.__codegenEvent 缺失、
-             *  被注入脚本的 catch(e){} 静默吞掉 → 弹窗点击完全无反应。 */
+            /** 录制/拾取事件桥回调：context 级注册一次（见下方 ctx.exposeBinding）；followNewPage 持有同一实例，
+             *  理论上 context 级 exposeBinding 已覆盖所有页（含跨源弹窗），故按页再暴露通常是 no-op
+             *  （同名会抛 already-registered，被 catch 忽略）；仅在极少数 context 级未落到某新页时作为兜底。
+             *  真正的新页拾取正确性靠注入脚本监听 + 桥 + PICK 链路共同保证，由事件泵 WARN 诊断丢桥。 */
             com.microsoft.playwright.options.BindingCallback codegenEventBridge;
 
             final Map<Page, PageSession> map = new ConcurrentHashMap<>();
@@ -850,11 +851,14 @@ public final class CodegenLauncher {
                     long deltaDom = clicks - pumpClicks[0];
                     long deltaBridge = bc - pumpClicks[1];
                     // 本拍的 evaluate 顺带驱动 binding 派发：活动页本拍新增的 DOM 点击应已转为 binding 回调
-                    // （误差 >1 容忍 1 拍异步派发延迟）。若 DOM 点击涨了却没对应到 binding 回调，说明点击被
-                    // 静默丢弃（注入未就绪 / 监听未挂 / 跨源弹窗未覆盖）→ 点名 URL 报警，避免「新页拾取不到」无声发生。
-                    if (deltaDom - deltaBridge > 1) {
-                        log.warn("[codegen][pump] active page DOM clicks +{} but only +{} bridge callbacks — "
-                                + "clicks may be silently dropped on {} (instrumentation not ready?)",
+                    // （evaluate 与 binding 派发同批，无异步延迟，故阈值取 0：任一次 DOM 点击无对应 bridge 回调即报警）。
+                    // 若 DOM 点击涨了却没对应到 binding 回调，说明点击被静默丢弃（注入未就绪 / 监听未挂 / 跨源弹窗绑定缺失）
+                    // → 点名 URL 报警，避免「新页拾取不到」无声发生。
+                    if (deltaDom - deltaBridge > 0) {
+                        log.warn("[codegen][pump] active page DOM click dropped: DOM +{} but bridge +{} on {} "
+                                + "— instrumentation not firing (listener not attached / binding missing?). "
+                                + "Note: context.exposeBinding covers cross-origin popups, so a drop here means the "
+                                + "injected click listener or its window.__codegenEvent call failed on this page.",
                                 deltaDom, deltaBridge, p.url());
                     }
                     domClicks.set(clicks);
