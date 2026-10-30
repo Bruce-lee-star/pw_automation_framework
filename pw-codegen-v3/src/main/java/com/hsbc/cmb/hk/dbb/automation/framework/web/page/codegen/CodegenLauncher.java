@@ -404,6 +404,11 @@ public final class CodegenLauncher {
             }
         }
         final class Sessions {
+            /** 录制/拾取事件桥回调：context 级注册一次（见下方 ctx.exposeBinding）；新页 followNewPage 会按页再暴露一次，
+             *  兜底「跨源弹窗上 context 级绑定未可靠覆盖」导致点击处理器里 window.__codegenEvent 缺失、
+             *  被注入脚本的 catch(e){} 静默吞掉 → 弹窗点击完全无反应。 */
+            com.microsoft.playwright.options.BindingCallback codegenEventBridge;
+
             final Map<Page, PageSession> map = new ConcurrentHashMap<>();
             final AtomicReference<Page> active = new AtomicReference<>(real);
             /** 活动页 MRU：队首 = 最近活动页。关闭某页时据此回落到「上一个仍在打开的活动页」，
@@ -527,11 +532,20 @@ public final class CodegenLauncher {
                 // 注入（快，放 engine 单线程，不阻塞实时生成）
                 engine.submit(CodegenEngine.Kind.INJECT, np, () -> {
                     try {
+                        // 跨源弹窗兜底：context 级 exposeBinding 偶尔未可靠落到跨源新建页（点击处理器的
+                        // window.__codegenEvent 缺失 → 被注入脚本 catch(e){} 静默吞掉 → 弹窗点击完全无反应）。
+                        // 这里按页再暴露一次同名绑定（与 context 级回调是同一实例，语义一致）；若 context 级已覆盖，
+                        // Playwright 会抛 "already exists"，捕获忽略即可，无副作用。
+                        try {
+                            np.exposeBinding("__codegenEvent", codegenEventBridge);
+                        } catch (Throwable ignore) {
+                            log.debug("[codegen][follow] page-level __codegenEvent already covered by context on {}", np.url());
+                        }
                         CodegenScriptInjector.inject(np);
                         pushPickStatus(np, pickStatusArg(pickOn.get(), started.get(), stopped.get()));
-                        log.debug("[codegen][follow] injected recorder into new page {}", np.url());
+                        log.debug("[codegen][follow] injected recorder + bridge into new page {}", np.url());
                     } catch (Exception e) {
-                        log.warn("[codegen][follow] inject recorder into new page failed: {} — {}",
+                        log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} — {}",
                                 np.url(), e.getMessage());
                     }
                 });
@@ -725,7 +739,7 @@ public final class CodegenLauncher {
         // 录制/拾取事件桥：注入脚本在 DOM 捕获阶段上报真实操作（click/fill）与点击坐标。
         // context 级 ⇒ 所有页面（含弹窗）可用；必须先于注入建立，否则首个事件会被丢弃。
         // 页面交互全程不受影响（不再用 Overlay inspect 拦截鼠标）。
-        ctx.exposeBinding("__codegenEvent", (source, args) -> {
+        com.microsoft.playwright.options.BindingCallback bridge = (source, args) -> {
             bridgeCalls.incrementAndGet();
             if (args == null || args.length == 0 || !(args[0] instanceof Map)) return null;
             @SuppressWarnings("unchecked")
@@ -793,7 +807,9 @@ public final class CodegenLauncher {
                 }
             });
             return null;
-        });
+        };
+        sessions.codegenEventBridge = bridge;
+        ctx.exposeBinding("__codegenEvent", bridge);
 
         // 注入 role 算法 + recorder：page 级对「当前已加载文档」立即生效（addInitScript 只覆盖后续导航，
         // 登录页早已加载完成，只注册 init script 会让 __CODEGEN__ 根本不存在 → 录制器永不工作）；
