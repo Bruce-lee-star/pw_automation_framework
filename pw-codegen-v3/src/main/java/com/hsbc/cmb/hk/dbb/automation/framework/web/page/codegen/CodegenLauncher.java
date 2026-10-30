@@ -41,6 +41,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -220,6 +222,13 @@ public final class CodegenLauncher {
         final CodegenRecorder recorder = new CodegenRecorder();
         // 全局单线程串行引擎（必须在 Sessions 之前声明，拾取/生成/注入/关页回调才能捕获）
         CodegenEngine engine = new CodegenEngine(lang);
+        // 实时代码生成专用单线程（与拾取引擎分离）：REGEN 实测 300–370ms，若与拾取同线程会推迟下一次拾取解析；
+        // 独立后拾取解析永不被生成阻塞。共享态 picked/dialogOps/recorder 均为 CopyOnWriteArrayList，并发安全。
+        ExecutorService regenExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "codegen-regen");
+            t.setDaemon(true);
+            return t;
+        });
         // binding 回调计数（事件泵日志里与页面侧点击计数对照，用于区分「DOM 事件没进来」与「binding 未派发」）
         final AtomicLong bridgeCalls = new AtomicLong(0);
         // 页面侧（顶层文档）累计 click 计数，事件泵据此判断注入的监听器是否真的在工作
@@ -593,7 +602,7 @@ public final class CodegenLauncher {
                         "value", "fill".equals(type) ? value : ""));
             }
             if (firstSeen) {
-                requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+                requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
             }
         };
 
@@ -611,7 +620,7 @@ public final class CodegenLauncher {
             }
             panelRef[0].onPicked(pk.id, entry);
             // 实时增量生成：每次拾取后立即刷新 Page/Step/Assert，无需等到按 Stop 才看到代码。
-            requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+            requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
             log.debug("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
                     pk.id, entry.name, entry.role, entry.selector);
         };
@@ -666,7 +675,7 @@ public final class CodegenLauncher {
                     break;
                 case "group":
                     handleGroup(picked, cmd, panelRef[0]);
-                    requestLiveRegeneration(engine, panelRef, picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+                    requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
                     break;
                 case "stop": {
                     sessions.pickOn.set(false);
@@ -793,13 +802,15 @@ public final class CodegenLauncher {
             sessions.installDialogAutoDismiss(p);
         }
 
-        // ---- 事件泵：驱动 Playwright 的消息派发（折叠进引擎单线程，与拾取/生成共用，不再额外起线程）----
+        // ---- 事件泵：驱动 Playwright 的消息派发（独立 daemon 线程，与引擎拾取/生成线程分离）----
         // Playwright Java 的 driver 消息是「有线程阻塞等响应」时顺带派发的；codegen 会话把主线程阻塞在
         // closeLatch 上，期间若没有别的 API 调用，页面发来的 bindingCalled（click/fill）会一直缓冲不被派发，
         // 表现就是「点击页面毫无反应，日志里连 [bridge] 都没有」。旧版 CDP inspect 也是靠同样的泵活着的。
         // 泵同时读取页面侧 click 计数，用于区分「DOM 事件没进来」与「事件进来了但没派发」。
-        // 折叠后泵与拾取/生成串行于同一条引擎线程：长拾取（~170ms）会短暂推迟下一拍，属可接受的次级影响。
-        engine.startPump(0, 120, () -> {
+        // 关键：泵必须独立于引擎线程——实测 REGEN 300–370ms、慢拾取 800ms+，若折叠进引擎，这些长任务会饿死泵，
+        // 导致弹窗/新标签页上的点击回调不被派发（R1 回归）。独立泵确保点击派发窗口永不被引擎任务阻塞。
+        final ScheduledExecutorService eventPump = createEventPump();
+        eventPump.scheduleWithFixedDelay(() -> {
             Page p = sessions.active.get();
             if (p == null) return;
             try {
@@ -818,8 +829,8 @@ public final class CodegenLauncher {
             } catch (Throwable ignore) {
                 // 页面正在导航 / 执行上下文已销毁：本拍失败不影响下一拍
             }
-        });
-        log.info("[codegen][pump] event pump folded into engine (120ms) — drives Playwright message dispatch");
+        }, 0, 120, java.util.concurrent.TimeUnit.MILLISECONDS);
+        log.info("[codegen][pump] event pump started (120ms, separate thread) — drives Playwright message dispatch");
 
         Path panelHtml = PanelResource.resolvePanelHtml();
 
@@ -828,7 +839,9 @@ public final class CodegenLauncher {
         try {
             panel = CodegenPanel.open(panelHtml, commandHandler, lang);
         } catch (RuntimeException e) {
-            // 面板没能打开（例如浏览器启动失败）：收掉引擎（含事件泵），避免线程泄漏。
+            // 面板没能打开（例如浏览器启动失败）：收掉事件泵、生成线程与引擎，避免线程泄漏。
+            if (eventPump != null) eventPump.shutdownNow();
+            regenExecutor.shutdownNow();
             engine.shutdownGracefully();
             throw e;
         }
@@ -886,7 +899,9 @@ public final class CodegenLauncher {
             com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.HangWatchdog.resume();
             if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception ignore) { } }
             sessions.closeAll();
-            engine.shutdownGracefully();   // 面板即将关闭：停掉引擎（含事件泵与实时生成），避免关窗后仍在推送
+            if (eventPump != null) eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
+            regenExecutor.shutdownNow();                       // 停掉实时代码生成线程
+            engine.shutdownGracefully();   // 面板即将关闭：停掉拾取引擎，避免关窗后仍在推送
             // 面板窗口可能已随 X 关闭而连带销毁其浏览器上下文：panel.close() 在已关闭的上下文上可能阻塞。
             // 放到带 5s 超时join的守护线程里执行，确保"关掉窗口后主线程一定返回"，绝不卡死。
             final Thread closer = new Thread(() -> {
@@ -1190,6 +1205,23 @@ public final class CodegenLauncher {
 
 
     /**
+     * 事件泵线程：daemon 单线程调度器（<b>独立于引擎线程</b>）。
+     *
+     * <p>Playwright Java 的 driver 消息在「有线程阻塞等响应」时被顺带派发；codegen 会话把主线程阻塞在
+     * {@code closeLatch} 上，若期间没有 API 调用，页面侧的 {@code bindingCalled}（点击/输入）会一直缓冲，
+     * 表现为「点击完全没反应、日志里连 bridge 回调都没有」。泵用极轻量的 {@code evaluate} 持续驱动派发。
+     * 必须独立于引擎线程：长拾取（~170ms，慢拾取 800ms+）与实时代码生成（实测 300–370ms）占住引擎时，
+     * 折叠进引擎的泵会被饿死 → 点击回调不被派发（R1 回归）。独立泵保住点击派发窗口。
+     */
+    private static ScheduledExecutorService createEventPump() {
+        return java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "codegen-event-pump");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /**
      * 请求一次实时刷新（异步，合并执行）。停止后不再提交，避免覆盖定稿代码。
      *
      * <p><b>合并而非排队</b>：连续快速拾取（一次点击/输入即一次请求）若逐个提交全量代码重生，会在
@@ -1200,41 +1232,48 @@ public final class CodegenLauncher {
      */
     private static final AtomicLong REGEN_SEQ = new AtomicLong();
     private static final AtomicBoolean REGEN_INFLIGHT = new AtomicBoolean(false);
-    private static void requestLiveRegeneration(CodegenEngine engine, CodegenPanel[] panelRef,
+    private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanel[] panelRef,
                                                 List<Pick> picks, CodegenRecorder recorder,
                                                 List<DialogOp> dialogOps, String[] nlsFiles,
-                                                AtomicBoolean stopped) {
-        if (engine == null || stopped.get()) {
+                                                String nlsLang, AtomicBoolean stopped) {
+        if (regenExecutor == null || stopped.get()) {
             return;
         }
         REGEN_SEQ.incrementAndGet();                       // 标记“有新请求”
         if (!REGEN_INFLIGHT.compareAndSet(false, true)) {
             return;                                        // 已有合并任务在跑/排队，本次由它兜底
         }
-        if (!engine.submit(CodegenEngine.Kind.REGEN, null, () -> {
-            try {
-                long t0 = System.nanoTime();
-                long started = REGEN_SEQ.get();
-                generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
-                // 生成期间若又有新拾取（序号变化），补一次覆盖最新；否则结束。
-                if (REGEN_SEQ.get() != started) {
+        try {
+            regenExecutor.execute(() -> {
+                try {
+                    if (nlsLang != null) {
+                        com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState
+                                .setLanguage(nlsLang);
+                    }
+                    long t0 = System.nanoTime();
+                    long started = REGEN_SEQ.get();
                     generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
+                    // 生成期间若又有新拾取（序号变化），补一次覆盖最新；否则结束。
+                    if (REGEN_SEQ.get() != started) {
+                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
+                    }
+                    // R1 计时探针：REGEN 已迁出引擎、泵也独立，故既不影响派发窗口也不推迟拾取解析。
+                    // 仍记录耗时用于观测；超过 200ms 仅作提示（已按数据迁出，无需再迁）。
+                    long ms = (System.nanoTime() - t0) / 1_000_000;
+                    if (ms > 200) {
+                        log.warn("[codegen][regen] live regeneration took {} ms (>200ms) — on dedicated regen thread, "
+                                + "no longer delays dispatch window or pick resolution", ms);
+                    } else {
+                        log.debug("[codegen][regen] live regeneration took {} ms", ms);
+                    }
+                } catch (Throwable t) {
+                    log.warn("[codegen][regen] regeneration failed: {}", t.toString());
+                } finally {
+                    REGEN_INFLIGHT.set(false);
                 }
-                // R1 计时探针：REGEN 与 PUMP 同线程，生成耗时直接决定派发窗口是否被推迟。
-                // DEBUG 全量记录用于收集 P95；超过 200ms 阈值（用户拍板的「迁出」线）打 WARN 提醒。
-                long ms = (System.nanoTime() - t0) / 1_000_000;
-                if (ms > 200) {
-                    log.warn("[codegen][regen] live regeneration took {} ms (>200ms) — on engine thread, "
-                            + "pump dispatch window delayed; consider moving REGEN off engine", ms);
-                } else {
-                    log.debug("[codegen][regen] live regeneration took {} ms", ms);
-                }
-            } finally {
-                REGEN_INFLIGHT.set(false);
-            }
-        })) {
-            // 入队被拒绝（stopped / 已 shutdown 竞态）：任务体不执行，finally 不触发，必须在此释放占位，
-            // 否则 REGEN_INFLIGHT 永久为 true（引擎若复用则后续实时生成全部被吞）。
+            });
+        } catch (RuntimeException re) {   // shutdown 竞态下的 RejectedExecutionException
+            // 入队被拒绝：任务体不执行，finally 不触发，必须在此释放占位，否则 REGEN_INFLIGHT 永久为 true。
             REGEN_INFLIGHT.set(false);
         }
     }

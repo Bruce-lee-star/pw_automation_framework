@@ -10,16 +10,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * {@link CodegenEngine} 不变式：单线程串行、提交顺序 = 执行顺序（seq 单调）、shutdown 后静默拒绝、
- * 事件泵折叠进同一条引擎线程。
+ * {@link CodegenEngine} 不变式：单线程串行、提交顺序 = 执行顺序（seq 单调）、shutdown 后静默拒绝。
+ *
+ * <p>事件泵不归引擎管（它由 {@code CodegenLauncher} 的独立 daemon 线程承担），故此处不测泵。
  */
 public class CodegenEngineTest {
 
@@ -49,7 +49,7 @@ public class CodegenEngineTest {
             });
         }
 
-        assertTrue("所有任务应在 5s 内执行完", done.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue("所有任务应在 5s 内执行完", done.await(5, TimeUnit.SECONDS));
 
         // 单调顺序：提交顺序严格等于执行顺序（单线程串行 ⇒ seq 单调）
         for (int i = 0; i < n; i++) {
@@ -67,40 +67,6 @@ public class CodegenEngineTest {
 
         boolean accepted = engine.submit(CodegenEngine.Kind.REGEN, page(), () -> { });
         assertFalse("shutdown 后提交必须被静默拒绝", accepted);
-    }
-
-    @Test
-    public void pumpRunsOnEngineThread() throws InterruptedException {
-        engine = new CodegenEngine(null);
-        final AtomicInteger pumpTicks = new AtomicInteger(0);
-        final Set<String> pumpThreads = Collections.synchronizedSet(new HashSet<>());
-
-        engine.startPump(0, 10, () -> {
-            pumpThreads.add(Thread.currentThread().getName());
-            pumpTicks.incrementAndGet();
-        });
-
-        Thread.sleep(200L);   // 10ms 周期，足够跑多拍
-
-        assertTrue("折叠后的泵应在引擎线程上执行多拍", pumpTicks.get() > 0);
-        assertEquals("泵与任务共用同一条引擎线程", 1, pumpThreads.size());
-        assertTrue("泵线程名应为 codegen-engine",
-                pumpThreads.iterator().next().contains("codegen-engine"));
-    }
-
-    @Test
-    public void pumpStopsAfterShutdown() throws InterruptedException {
-        engine = new CodegenEngine(null);
-        final AtomicLong lastTick = new AtomicLong(System.nanoTime());
-
-        engine.startPump(0, 10, () -> lastTick.set(System.nanoTime()));
-        Thread.sleep(100L);
-        engine.shutdownGracefully();
-        long afterShutdown = System.nanoTime();
-        Thread.sleep(100L);
-
-        // shutdown 后泵不再触发：最后一拍的时间应早于 shutdown 时刻
-        assertTrue("shutdown 后泵必须停止调度", lastTick.get() < afterShutdown);
     }
 
     private static Page page() {
