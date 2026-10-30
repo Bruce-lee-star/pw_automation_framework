@@ -1,0 +1,91 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; font-size: 13px; }
+body { display: flex; flex-direction: column; background: #1e1e1e; color: #ddd; overflow: hidden; }
+
+/* ---------- 顶栏：标题 + 连接状态 + 实时提示 + 操作按钮 ---------- */
+.toolbar { display: flex; align-items: center; gap: 12px; padding: 7px 12px; background: #252526; border-bottom: 1px solid #333; flex: none; }
+.title { font-weight: 700; font-size: 13px; color: #e8e8e8; white-space: nowrap; }
+
+/* 连接/拾取状态：彩色圆点 + 文字（随状态变色），替代原来的大色块徽标 */
+.status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #9cdcfe; white-space: nowrap; }
+.status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #4ec9b0; flex: none; }
+.status.inspecting { color: #e0a83a; }
+.status.inspecting::before { background: #e0a83a; }
+.status.paused { color: #4ec9b0; }
+.status.paused::before { background: #4ec9b0; }
+.status.stopped { color: #999; }
+.status.stopped::before { background: #777; }
+.status.error { color: #f14c4c; }
+.status.error::before { background: #f14c4c; }
+
+/* 顶栏内联的实时说明：占满剩余空间，过长省略 */
+.state-hint { flex: 1; min-width: 0; font-size: 12px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state-hint.inspecting { color: #e0a83a; }
+.state-hint.paused { color: #7fd6bd; }
+.spacer { flex: none; }
+
+/* 按钮：主操作（开始拾取）高亮蓝、Stop 红、成组为描边 */
+.btn { background: #3a3d41; color: #e5e5e5; border: 1px solid #4a4d51; padding: 5px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.btn:hover { background: #45484d; }
+.btn.primary { background: #0e639c; border-color: #1177bb; color: #fff; }
+.btn.primary:hover { background: #1177bb; }
+.btn.danger { background: #a1260d; border-color: #c42b1c; color: #fff; }
+.btn.danger:hover { background: #c42b1c; }
+.btn.ghost { background: transparent; border-color: #555; color: #ccc; }
+.btn.ghost:hover { background: #333; }
+
+/* ---------- 主体：左列（Elements 上 / Recorded Steps 下） + 右列代码区 ---------- */
+.content { flex: 1; display: flex; min-height: 0; }
+.left-col { flex: 0 0 42%; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid #333; }
+
+/* 面板：标题栏固定 + 内容区独立滚动 */
+.panel { display: flex; flex-direction: column; min-height: 0; }
+.elements { flex: 1 1 0; border-bottom: 1px solid #333; }
+.steps { flex: 1 1 0; }
+.panel-head { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #252526; border-bottom: 1px solid #333; flex: none; }
+.panel-title { font-size: 12px; font-weight: 700; letter-spacing: .3px; color: #ddd; text-transform: uppercase; }
+.panel-meta { font-size: 11px; color: #888; }
+.steps .panel-meta { margin-left: auto; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; padding: 2px 8px 6px; }
+
+/* 表格（Elements） */
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th { position: sticky; top: 0; z-index: 1; background: #1e1e1e; color: #aaa; font-weight: 600; text-align: left; padding: 4px 6px; border-bottom: 1px solid #333; }
+th.col-check { width: 22px; }
+th.col-idx { width: 26px; }
+th.col-score { width: 42px; }
+td { padding: 4px 6px; border-bottom: 1px solid #2a2a2a; vertical-align: top; word-break: break-word; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #2a2d2e; }
+tbody tr.selected { background: #094771; }
+tbody tr.grouped { background: #14483a; box-shadow: inset 3px 0 0 #2ea36b; }
+tbody tr.grouped:hover { background: #1a5a49; }
+/* 已按引擎复核就地修订（role → CSS）：琥珀色左边框 + Locator 列角标 */
+tbody tr.revised { border-left: 3px solid #d7a13b; }
+tbody tr.revised td:nth-child(5)::after { content: ' ⟵ 复核后'; color: #d7a13b; font-size: 11px; }
+
+/* 步骤列表（Recorded Steps）：自动滚动到底部显示最新 */
+#steps-list { margin: 0; padding-left: 18px; font-size: 12px; }
+#steps-list li { margin: 2px 0; line-height: 1.45; word-break: break-word; }
+.step-click { color: #9cdcfe; }
+.step-fill { color: #ce9178; }
+.steps-hint { font-size: 11px; font-weight: 400; color: #888; }
+.steps-hint.recording { color: #4ec9b0; }
+
+/* ---------- 右列：代码区（单块 + Page/Step/Assert 页签） ---------- */
+.code { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.code-tabs { display: flex; gap: 2px; padding: 4px 8px; background: #252526; border-bottom: 1px solid #333; flex: none; }
+.code-tab { background: transparent; color: #bbb; border: none; border-bottom: 2px solid transparent; padding: 5px 14px; cursor: pointer; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+.code-tab:hover { color: #fff; }
+.code-tab.active { color: #fff; border-bottom-color: #0e639c; }
+.code-pane { flex: 1; min-height: 0; display: none; flex-direction: column; }
+.code-pane.active { display: flex; }
+/* 页签内多页面切换器（仅块数 > 1 显示） */
+.subswitcher { display: none; flex-wrap: wrap; gap: 4px; padding: 4px 8px; background: #1b1b1b; border-bottom: 1px solid #333; flex: none; }
+.subtab { background: #333; color: #ccc; border: 1px solid #444; padding: 2px 10px; cursor: pointer; border-radius: 10px; font-size: 11px; }
+.subtab:hover { background: #3d3d3d; }
+.subtab.active { background: #0e639c; color: #fff; border-color: #1177bb; }
+.editor { flex: 1; min-height: 0; }
+.editor-fallback { flex: 1; min-height: 0; margin: 0; padding: 8px 10px; overflow: auto; white-space: pre-wrap; background: #1e1e1e; color: #d4d4d4; font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+
+.resize-hint { position: fixed; right: 6px; bottom: 4px; font-size: 10px; color: #777; pointer-events: none; }

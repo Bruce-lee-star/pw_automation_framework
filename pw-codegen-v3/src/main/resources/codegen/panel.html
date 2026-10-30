@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="utf-8">
+    <title>Codegen Inspector V3</title>
+    <link rel="stylesheet" href="panel.css">
+    <!-- 注意：Monaco 不在 <head> 里同步加载。<head> 内的外部 <script> 会阻塞 load 事件，
+         在公司网（CDN 不可达）下能让面板"看得见但几十秒内点不动"。改由 panel.js 在 DOM 就绪后
+         动态注入，加载失败自动降级为 <pre> 代码区，拾取/录制功能完全不受影响。 -->
+</head>
+<body>
+<!-- 顶栏：标题 + 连接状态 + 实时提示 + 操作按钮（开始拾取 / Stop / 标记为一组） -->
+<header class="toolbar">
+    <span class="title">Codegen Inspector V3</span>
+    <span id="status" class="status">就绪</span>
+    <span id="state-hint" class="state-hint">就绪：点「开始拾取」后，页面照常操作，点到的元素会自动加入 Elements 并录制动作。</span>
+    <span class="spacer"></span>
+    <button id="btn-start" class="btn primary">开始拾取</button>
+    <button id="btn-stop" class="btn danger">Stop</button>
+    <button id="btn-group" class="btn ghost" title="勾选 ≥2 个元素合成一个 PageElementList">标记为一组</button>
+</header>
+
+<main class="content">
+    <!-- 左列：Elements 在上、Recorded Steps 在下（纵向堆叠，各自独立滚动） -->
+    <div class="left-col">
+        <section class="panel elements">
+            <div class="panel-head">
+                <span class="panel-title">Elements</span>
+                <span id="elements-count" class="panel-meta">0 项</span>
+            </div>
+            <div class="panel-body">
+                <table id="elements-table">
+                    <thead>
+                    <tr><th class="col-check"></th><th class="col-idx">#</th><th>Name</th><th>Role</th><th>Locator</th><th class="col-score">Score</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel steps">
+            <div class="panel-head">
+                <span class="panel-title">Recorded Steps</span>
+                <span id="steps-count" class="panel-meta">自动跟随</span>
+                <span id="steps-hint" class="steps-hint" hidden></span>
+            </div>
+            <div id="steps-body" class="panel-body">
+                <ol id="steps-list"></ol>
+            </div>
+        </section>
+    </div>
+
+    <!-- 右列：代码区为一个整体块：Page / Step / Assert 用页签切换，同一时刻只显示一份代码。
+         每个页签自带页内切换器（多页面时出现），互不影响。 -->
+    <section class="code">
+        <div class="code-tabs">
+            <button class="code-tab active" data-tab="page">Page</button>
+            <button class="code-tab" data-tab="step">Step</button>
+            <button class="code-tab" data-tab="assert">Assert</button>
+        </div>
+        <div id="pane-page" class="code-pane active">
+            <div id="subswitcher-page" class="subswitcher" style="display:none"></div>
+            <div id="editor-page" class="editor"></div>
+            <pre id="editor-fallback-page" class="editor-fallback" style="display:none"></pre>
+        </div>
+        <div id="pane-step" class="code-pane">
+            <div id="subswitcher-step" class="subswitcher" style="display:none"></div>
+            <div id="editor-step" class="editor"></div>
+            <pre id="editor-fallback-step" class="editor-fallback" style="display:none"></pre>
+        </div>
+        <div id="pane-assert" class="code-pane">
+            <div id="subswitcher-assert" class="subswitcher" style="display:none"></div>
+            <div id="editor-assert" class="editor"></div>
+            <pre id="editor-fallback-assert" class="editor-fallback" style="display:none"></pre>
+        </div>
+    </section>
+</main>
+
+<!-- 视觉提示：Chrome --app= 窗口本身可由 OS 拖拽边缘缩放，面板内部 flex 响应式填满 -->
+<div class="resize-hint">⇔ 可拖拽窗口边缘缩放</div>
+
+<script src="panel.js"></script>
+</body>
+</html>

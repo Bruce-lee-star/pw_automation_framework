@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+        <artifactId>pw-framework-bom</artifactId>
+        <version>1.0.1</version>
+        <relativePath>../pw-framework-bom/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>pw-codegen-v3</artifactId>
+    <name>Automation Framework - Codegen V3</name>
+
+    <properties>
+        <!-- codegen 模块内大量 best-effort UI/通信空 catch，暂不纳入 checkstyle 门禁（同 v2）。 -->
+        <checkstyle.skip>true</checkstyle.skip>
+    </properties>
+
+    <description>V3 code-generator / Inspector：Chrome --app= 独立窗口面板 + CDP 拾取 + 移植 Playwright
+        roleUtils/selectorGenerator 算法。纯 Java/Maven，不引入 Electron/Node.js（与 Playwright Inspector
+        自身的实现方式一致）。彻底摒弃 v2 的 setContent 注入面板 + evaluate 通信方案。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+            <artifactId>pw-web-ui</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.cucumber</groupId>
+                    <artifactId>cucumber-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.cucumber</groupId>
+                    <artifactId>cucumber-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.cucumber</groupId>
+                    <artifactId>datatable</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+        </dependency>
+
+        <!-- 模板统一：与框架报告侧（pw-reports-v2）共用 FreeMarker 引擎生成产物 -->
+        <dependency>
+            <groupId>org.freemarker</groupId>
+            <artifactId>freemarker</artifactId>
+            <version>${freemarker.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
