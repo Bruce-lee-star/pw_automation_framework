@@ -83,8 +83,6 @@ public final class CodegenLauncher {
      * 与 {@link #PICK_SEQ} 分离，语义是「操作发生顺序」而非「拾取序号」。
      */
     private static final AtomicLong EVENT_SEQ = new AtomicLong();
-    /** 拾取执行器线程命名序号（每页一个，仅用于日志可辨识）。 */
-    private static final AtomicLong PICK_THREAD_SEQ = new AtomicLong();
 
     private CodegenLauncher() {}
 
@@ -236,13 +234,8 @@ public final class CodegenLauncher {
             private volatile CodegenCdpSession session;
             private volatile CdpLocatorCounter counter;
             private volatile CodegenCdpNodeExtractor extractor;
-            /** 拾取执行器：每页一个，eager 创建（只起线程，不碰 CDP）；CDP 会话在任务内懒加载。 */
-            private final ExecutorService pickExecutor = java.util.concurrent.Executors
-                    .newSingleThreadExecutor(r -> {
-                        Thread t = new Thread(r, "codegen-cdp-pick-" + PICK_THREAD_SEQ.incrementAndGet());
-                        t.setDaemon(true);
-                        return t;
-                    });
+            // 拾取不再有 per-page 线程：所有页的拾取 / 解析任务统一提交到 startSession 作用域的共享单线程引擎
+            // genExecutor（见 submitPick）；此处仅保留 per-page 的 CDP 会话 / 抽取器数据结构。
             /** CDP 拾取通道是否已开启（幂等标记）。 */
             volatile boolean pickChannelOn = false;
 
@@ -256,8 +249,8 @@ public final class CodegenLauncher {
              * 懒加载 CDP 会话 + 抽取器（double-checked locking，线程安全）。
              *
              * <p><b>调用方必须不在 onPage 回调 / 派发线程上</b>：{@code newCDPSession} 是一次真实协议往返，
-             * 会阻塞调用线程；故只在拾取执行器线程（{@link #submitPick} 包装内）或显式 Start 命令线程调用，
-             * 实现「onPage 回调只登记、会话创建推迟到 pickExecutor」。
+             * 会阻塞调用线程；故只在共享拾取引擎线程（{@link #submitPick} 包装内，即 genExecutor）或显式 Start 命令线程调用，
+             * 实现「onPage 回调只登记、会话创建推迟到共享引擎」。
              */
             private CodegenCdpSession cdpSession() {
                 if (session == null) {
@@ -295,13 +288,13 @@ public final class CodegenLauncher {
             private final PickGuard guard = new PickGuard();
 
             /**
-             * 把解析任务交给本页拾取执行器。任务前先懒加载 CDP 会话 + 开启通道（均在拾取执行器线程），
-             * 实现「onPage 回调只登记、会话创建推迟到 pickExecutor」—— onPage 回调（派发线程）永不在此同步建会话；
-             * 同时把 NLS 语言带到拾取线程（抽取器依赖 ThreadLocal 语言）。
+             * 把解析任务交给共享拾取引擎（genExecutor 单线程）。任务前先懒加载 CDP 会话 + 开启通道（均在引擎线程），
+             * 实现「onPage 回调只登记、会话创建推迟到共享引擎」—— onPage 回调（派发线程）永不在此同步建会话；
+             * 同时把 NLS 语言带到引擎线程（抽取器依赖 ThreadLocal 语言）。
              */
             void submitPick(String fingerprint, Runnable task) {
                 try {
-                    pickExecutor.submit(() -> {
+                    genExecutor.submit(() -> {
                         if (nlsLang != null) {
                             com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState
                                     .setLanguage(nlsLang);
@@ -340,7 +333,7 @@ public final class CodegenLauncher {
              * <p>坐标法只在根 frame 坐标下 hit-test，<b>跨源 iframe 内必然打空</b>（OOPIF 只暴露宿主 iframe），
              * 故仅作选择器不可用/未命中时的兜底。
              *
-             * <p>仅限拾取执行器线程调用（会话与通道已由 {@link #submitPick} 包装内建好）。
+             * <p>仅限共享引擎线程调用（会话与通道已由 {@link #submitPick} 包装内建好）。
              */
             CodegenEntry pickAt(String type, Object x, Object y, Object cssSelector, List<String> shadowHosts,
                                 List<Integer> framePath) {
@@ -391,19 +384,10 @@ public final class CodegenLauncher {
                 return (px != null && py != null) ? session.elementAt(px, py) : null;
             }
 
-            /** 关闭本页：先排空拾取队列，再 detach CDP 会话（懒加载可能为 null，即该页从未被拾取）。 */
+            /** 关闭本页：detach CDP 会话（懒加载可能为 null，即该页从未被拾取）；残留拾取由共享引擎按序排空。 */
             void close() {
-                try {
-                    pickExecutor.shutdown();
-                    if (!pickExecutor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)) {
-                        pickExecutor.shutdownNow();
-                    }
-                } catch (InterruptedException ie) {
-                    pickExecutor.shutdownNow();
-                    Thread.currentThread().interrupt();
-                } catch (Exception ignore) {
-                    log.debug("[codegen][cdp] PageSession pickExecutor shutdown failed: {}", ignore.toString());
-                }
+                // 无 per-page 线程池可关：拾取任务统一在共享引擎（genExecutor）上，页面关闭只需 detach CDP 会话；
+                // 队列中该页的残留拾取会在本 close 任务之前按序执行（close 也经引擎入队），失败由任务内 try 捕获。
                 CodegenCdpSession s = session;
                 if (s != null) {
                     s.disable();
@@ -614,7 +598,7 @@ public final class CodegenLauncher {
             }
         };
 
-        // 拾取到元素 → Elements 表 + 增量生成（仅在拾取执行器线程调用）。
+        // 拾取到元素 → Elements 表 + 增量生成（仅在共享引擎线程调用）。
         final java.util.function.BiConsumer<Page, CodegenEntry> addPick = (pg, entry) -> {
             if (entry == null) return;
             PageSession ps = sessions.of(pg);
