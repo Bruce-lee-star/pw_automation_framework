@@ -482,6 +482,21 @@ public abstract class BasePage {
         return PageNavigation.getCurrentUrl(this);
     }
 
+    /**
+     * 等待当前页 URL 包含指定子串（默认 {@code navigationTimeout}）。
+     * 适用于「点击/重定向后等待地址变为目标子串」；超时抛 {@link com.microsoft.playwright.TimeoutError}。
+     */
+    public void waitForUrl(String urlPart) {
+        PageNavigation.waitForUrl(this, urlPart);
+    }
+
+    /**
+     * 等待当前页 URL 包含指定子串（显式超时秒）。
+     */
+    public void waitForUrl(String urlPart, int timeoutSec) {
+        PageNavigation.waitForUrl(this, urlPart, timeoutSec);
+    }
+
     public String getTitle() {
         return PageNavigation.getTitle(this);
     }

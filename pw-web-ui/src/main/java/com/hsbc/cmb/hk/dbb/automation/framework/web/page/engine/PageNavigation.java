@@ -218,6 +218,62 @@ public final class PageNavigation {
         return bp.getPage().url();
     }
 
+    /** waitForUrl 轮询间隔（毫秒）：100ms 粒度足够即时感知 URL 变化，避免高频率协议往返。 */
+    private static final long WAIT_URL_POLL_MS = 100;
+
+    /**
+     * 等待当前页 URL 包含指定子串（默认 {@code navigationTimeout}）。
+     *
+     * <p>业务侧 waitForUrl（2026-10-29 用户需求）：语义 = 在超时内轮询当前页 URL，
+     * 一旦包含 {@code urlPart} 即返回。适用「点击/重定向后等待地址变为目标子串」的场景；
+     * 与 {@link #navigateTo} 的"主动导航 + 加载态"互补——本方法只等，不触发导航。</p>
+     *
+     * <p>实现说明：不直接用 {@code page.waitForURL(String glob)}——glob 按整体匹配语义且
+     * {@code *} 不跨 {@code /}，表达"包含子串"需拼通配符并对 urlPart 的 glob 特殊字符转义；
+     * 轮询 {@code page.url().contains(urlPart)} 语义零歧义、无转义坑。默认超时与
+     * {@code PlaywrightContextManager} 的导航类等待口径一致（navigationTimeout），
+     * 超时抛 {@link TimeoutError}（与原生 waitForURL 同异常类型），消息带当前 URL 便于排查。</p>
+     *
+     * @param bp      页面（内部触发 ensurePageValid）
+     * @param urlPart 期望 URL 包含的子串（非空）
+     */
+    public static void waitForUrl(BasePage bp, String urlPart) {
+        long timeoutMs = resolvedTimeout(bp.getConfig());
+        waitForUrlInternal(bp, urlPart, timeoutMs,
+                "waitForUrl '" + urlPart + "' not matched within " + (timeoutMs / 1000) + "s (navigationTimeout)");
+    }
+
+    /**
+     * 等待当前页 URL 包含指定子串（显式超时，秒）。
+     *
+     * @param bp         页面
+     * @param urlPart    期望 URL 包含的子串（非空）
+     * @param timeoutSec 显式超时秒数（&gt; 0；否则按配置 navigationTimeout 兜底，见内部实现）
+     */
+    public static void waitForUrl(BasePage bp, String urlPart, int timeoutSec) {
+        long timeoutMs = timeoutSec > 0 ? (long) timeoutSec * 1000 : resolvedTimeout(bp.getConfig());
+        waitForUrlInternal(bp, urlPart, timeoutMs,
+                "waitForUrl '" + urlPart + "' not matched within " + (timeoutMs / 1000) + "s");
+    }
+
+    private static void waitForUrlInternal(BasePage bp, String urlPart, long timeoutMs, String failureMsg) {
+        java.util.Objects.requireNonNull(urlPart, "urlPart cannot be null");
+        if (urlPart.isBlank()) {
+            throw new IllegalArgumentException("urlPart must not be blank");
+        }
+        long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
+        while (true) {
+            String current = bp.getPage().url();
+            if (current.contains(urlPart)) {
+                return;
+            }
+            if (System.nanoTime() - deadline >= 0) {
+                throw new TimeoutError(failureMsg + "; current url: " + current);
+            }
+            PageInteractions.waitForTimeout(bp, (int) WAIT_URL_POLL_MS);
+        }
+    }
+
     public static String getTitle(BasePage bp) {
         return bp.getPage().title();
     }

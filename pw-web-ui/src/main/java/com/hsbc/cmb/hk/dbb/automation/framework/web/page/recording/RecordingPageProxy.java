@@ -182,11 +182,18 @@ public final class RecordingPageProxy {
             if (method.getName().startsWith("on")) {
                 return method.invoke(target, args);
             }
+            // D8: 方法参数若为本代理包装的可录制接口（Page/Locator/Frame/...），解包为真实对象再转发。
+            // Playwright 内部 API 需要真实的 ChannelOwner 实现：如 LocatorFactory.byTestId 的
+            // primary.or(compatLoc)（compatLoc 经 page.locator() 返回后被递归包装为动态代理），
+            // 或 Locator.filter(has)/frameLocator().locator(loc) 等「把 Locator/Frame 作为参数传回
+            // Playwright」的场景——若不解包，Playwright 内部对参数做 ChannelOwner 转型时会抛
+            // ClassCastException（用户反馈的"代理报错"：Cannot cast ... Proxy ... to LocatorImpl）。
+            Object[] unwrapped = unwrapArgs(args);
             // Layer A 录制：刷新待报告 API 数据 + 录制动作，再委托真实对象（flush 在 op 前，与 Recorder.record 一致）
-            Recorder.recordNative(method.getName(), summarize(args), null);
+            Recorder.recordNative(method.getName(), summarize(unwrapped), null);
             Object result;
             try {
-                result = method.invoke(target, args);
+                result = method.invoke(target, unwrapped);
             } catch (InvocationTargetException e) {
                 throw e.getCause();
             } catch (IllegalAccessException e) {
@@ -194,6 +201,57 @@ public final class RecordingPageProxy {
             }
             // 递归包装可录制的返回值
             return wrapIfRecordable(result, method.getReturnType());
+        }
+
+        /**
+         * 解包「本代理包装」的动态代理参数（D8）。非代理 / 非本代理 / 非可录制接口的参数原样保留。
+         * 惰性复制：仅在确实命中要替换的参数时克隆数组，避免每次调用的无谓分配。
+         */
+        private static Object[] unwrapArgs(Object[] args) {
+            if (args == null || args.length == 0) {
+                return args;
+            }
+            Object[] out = args;
+            for (int i = 0; i < args.length; i++) {
+                Object a = args[i];
+                if (a == null) {
+                    continue;
+                }
+                Object real = unwrapRecordable(a);
+                if (real != null) {
+                    if (out == args) {
+                        out = args.clone();
+                    }
+                    out[i] = real;
+                }
+            }
+            return out;
+        }
+
+        /**
+         * 若入参是本代理包装的可录制接口（Page/Locator/Frame/...）动态代理，返回其底层真实对象；
+         * 否则返回 {@code null}（原样保留）。对非 JDK 动态代理（如 CGLIB）防御性返回 null。
+         */
+        private static Object unwrapRecordable(Object a) {
+            if (!Proxy.isProxyClass(a.getClass())) {
+                return null;
+            }
+            for (Class<?> iface : RECORDABLE_INTERFACES) {
+                if (iface.isInstance(a)) {
+                    try {
+                        InvocationHandler h = Proxy.getInvocationHandler(a);
+                        if (h instanceof RecordingHandler) {
+                            return ((RecordingHandler) h).target();
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // 防御路径（理论上被 isProxyClass 前置守卫排除）：非本代理则原样保留。
+                        LOGGER.warn("[RecordingPageProxy] Argument is a JDK proxy but not wrapped by RecordingHandler; "
+                                + "kept as-is for forwarding: {}", e.toString());
+                    }
+                    break;
+                }
+            }
+            return null;
         }
 
         private static Object summarize(Object[] args) {

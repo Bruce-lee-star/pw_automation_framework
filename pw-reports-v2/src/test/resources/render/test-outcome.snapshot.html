@@ -307,8 +307,19 @@
 </ul>
       </div>
 
-      <div class="card">
-        <h3><span class="icon"></span>API Request (2)</h3>
+      <div class="card bottom-tabs case-tabs">
+        <div class="tab-bar" role="tablist">
+          <button type="button" class="tab-btn is-active" role="tab" data-tab="case-tab-register"
+                  aria-selected="true">Route Register (1)</button>
+          <button type="button" class="tab-btn" role="tab" data-tab="case-tab-rest"
+                  aria-selected="false">API Request (2)</button>
+        </div>
+        <div class="tab-pane is-active" id="case-tab-register" role="tabpanel">
+          <ul class="con-lines" style="border-top:0;background:transparent;padding:4px 0 0">
+    <li class="con-raw">[Route] register GET route for &#39;/api/health&#39; (monitor: timeout=30s)</li>
+          </ul>
+        </div>
+        <div class="tab-pane" id="case-tab-rest" role="tabpanel">
   <div class="api-card">
     <div class="api-card-head">
       
@@ -323,14 +334,7 @@
       <span class="api-url">POST /api/session 401</span>
     </div>
   </div>
-      </div>
-
-
-      <div class="card con-register">
-        <h3><span class="icon"></span>Route Register (1)</h3>
-        <ul class="con-lines" style="border-top:0;background:transparent;padding:4px 0 0">
-    <li class="con-raw">[Route] register GET route for &#39;/api/health&#39; (monitor: timeout=30s)</li>
-        </ul>
+        </div>
       </div>
 
 

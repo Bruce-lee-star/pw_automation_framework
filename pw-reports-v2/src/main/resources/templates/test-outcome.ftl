@@ -501,30 +501,54 @@
         <ul class="steps" id="steps"><@stepTree outcome.testSteps![]/></ul>
       </div>
 
-      <#-- 用例级兜底：调用发生在步骤上下文之外（如 @Before 钩子）才落到这里；
-           步骤内的一律归位到对应步骤（见步骤树）。同样按来源拆 API Request / Route Captured。 -->
-      <#if caseRestApi?has_content>
-      <div class="card">
-        <h3><span class="icon"></span>API Request (${caseRestApi?size})</h3>
-        <#list caseRestApi as block><@apiCard block/></#list>
-      </div>
-      </#if>
-
-      <#if caseCapturedApi?has_content>
-      <div class="card con-captured">
-        <h3><span class="icon"></span>Route Captured (${caseCapturedApi?size})</h3>
-        <div class="con-cards">
-          <#list caseCapturedApi as block><@apiCard call=block seq=(block_index + 1)/></#list>
+      <#-- 用例级兜底（2026-10-29 用户要求：Route Register / Route Captured / API Request
+           改用左右 Tab 切换、不再上下堆叠）：调用发生在步骤上下文之外（如 @Before 钩子）才落到这里；
+           步骤内的一律归位到对应步骤（见步骤树）。三类来源各占一个 Tab：
+           Route Register（注册日志原文行）→ Route Captured（实际抓取，卡片）→ API Request（业务请求，卡片），
+           第一个有内容的 Tab 默认激活；整卡复用底部 bottom-tabs 的 tab-bar/tab-btn/tab-pane 样式与 JS
+           （JS 选择器 .bottom-tabs .tab-btn 自动绑定，无需新增脚本）。 -->
+      <#assign hasCaseRegister = outcome.routeRegistrations?has_content>
+      <#assign hasCaseCaptured = caseCapturedApi?has_content>
+      <#assign hasCaseRest = caseRestApi?has_content>
+      <#assign caseTabFirst = "none">
+      <#if hasCaseRegister><#assign caseTabFirst = "register"></#if>
+      <#if hasCaseCaptured && caseTabFirst == "none"><#assign caseTabFirst = "captured"></#if>
+      <#if hasCaseRest && caseTabFirst == "none"><#assign caseTabFirst = "rest"></#if>
+      <#if hasCaseRegister || hasCaseCaptured || hasCaseRest>
+      <div class="card bottom-tabs case-tabs">
+        <div class="tab-bar" role="tablist">
+          <#if hasCaseRegister>
+          <button type="button" class="tab-btn<#if caseTabFirst == "register"> is-active</#if>" role="tab" data-tab="case-tab-register"
+                  aria-selected="<#if caseTabFirst == "register">true<#else>false</#if>">Route Register (${outcome.routeRegistrations?size})</button>
+          </#if>
+          <#if hasCaseCaptured>
+          <button type="button" class="tab-btn<#if caseTabFirst == "captured"> is-active</#if>" role="tab" data-tab="case-tab-captured"
+                  aria-selected="<#if caseTabFirst == "captured">true<#else>false</#if>">Route Captured (${caseCapturedApi?size})</button>
+          </#if>
+          <#if hasCaseRest>
+          <button type="button" class="tab-btn<#if caseTabFirst == "rest"> is-active</#if>" role="tab" data-tab="case-tab-rest"
+                  aria-selected="<#if caseTabFirst == "rest">true<#else>false</#if>">API Request (${caseRestApi?size})</button>
+          </#if>
         </div>
-      </div>
-      </#if>
-
-      <#if outcome.routeRegistrations?has_content>
-      <div class="card con-register">
-        <h3><span class="icon"></span>Route Register (${outcome.routeRegistrations?size})</h3>
-        <ul class="con-lines" style="border-top:0;background:transparent;padding:4px 0 0">
-          <#list outcome.routeRegistrations as line><@consoleLine line/></#list>
-        </ul>
+        <#if hasCaseRegister>
+        <div class="tab-pane<#if caseTabFirst == "register"> is-active</#if>" id="case-tab-register" role="tabpanel">
+          <ul class="con-lines" style="border-top:0;background:transparent;padding:4px 0 0">
+            <#list outcome.routeRegistrations as line><@consoleLine line/></#list>
+          </ul>
+        </div>
+        </#if>
+        <#if hasCaseCaptured>
+        <div class="tab-pane<#if caseTabFirst == "captured"> is-active</#if>" id="case-tab-captured" role="tabpanel">
+          <div class="con-cards">
+            <#list caseCapturedApi as block><@apiCard call=block seq=(block_index + 1)/></#list>
+          </div>
+        </div>
+        </#if>
+        <#if hasCaseRest>
+        <div class="tab-pane<#if caseTabFirst == "rest"> is-active</#if>" id="case-tab-rest" role="tabpanel">
+          <#list caseRestApi as block><@apiCard block/></#list>
+        </div>
+        </#if>
       </div>
       </#if>
 

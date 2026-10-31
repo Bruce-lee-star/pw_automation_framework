@@ -60,8 +60,16 @@ public final class RoleLocatorFactory {
         }
         RoleFile classFile = pageClass.getAnnotation(RoleFile.class);
         if (classFile == null || classFile.value().length == 0) {
-            throw new ElementException(what + " needs either file() or a class-level @RoleFile on "
-                    + pageClass.getSimpleName());
+            // 2026-10-29 用户反馈「页面类有 RoleElement 字段但没有 @RoleFile 时，报错信息要明确」：
+            // 旧文案只说"needs either file() or @RoleFile"，没告诉用户怎么修。升级为三类修复指引：
+            //  ① 页面类加 @RoleFile（推荐，跨字段共享）；② 字段/调用级 file() 覆盖；③ 换掉 key()（含 role/text/
+            //     altText/title/placeholder/label 的 key 绑定都走 nls 解析），改用字面量 name()/text()/testId() 等。
+            throw new ElementException(what + " requires nls file resolution, but class "
+                    + pageClass.getSimpleName() + " has NO @RoleFile and the field/call provides no file() either. "
+                    + "Fix options: (1) declare @RoleFile(\"nls/your.nls.json\") on the page class (recommended, shared by all fields); "
+                    + "(2) set file(\"nls/your.nls.json\") on the RoleElement field or in the call; "
+                    + "(3) avoid key()-based binding (role/text/altText/title/placeholder/label with a key) and use a literal "
+                    + "name()/text()/testId() instead.");
         }
         List<String> ordered = new ArrayList<>(Arrays.asList(classFile.value()));
         String primary = classFile.primary();

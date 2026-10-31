@@ -362,10 +362,20 @@ public class PageElement {
 
     /**
      * 在指定超时内等待元素变为可见。超时仍未可见则返回 {@code false}。
+     *
+     * <p>性能（2026-10-29 用户反馈：元素已出现但 isVisible 仍慢）：先做<b>一次无等待探测</b>
+     * {@code locator.isVisible()}（Playwright 的轻量单次评估命令），已可见立即返回——已出现场景
+     * 从「waitFor 的全量协议轮询」降到「单次 RPC」；未命中再回落 {@code waitFor(VISIBLE, timeout)}，
+     * 保持"页面加载中稍后出现"的等待语义不变。行为与旧实现完全兼容（已可见：立即 true；
+     * 未可见：等待至超时）。</p>
      */
     public boolean isVisible(int timeoutSec) {
         try {
-            locatorInternal().waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout((long) timeoutSec * 1000));
+            Locator loc = locatorInternal();
+            if (loc.isVisible()) {
+                return true; // 已出现：毫秒级返回，不再走 waitFor 全量等待
+            }
+            loc.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE).setTimeout((long) timeoutSec * 1000));
             return true;
         } catch (PlaywrightException e) {
             return false;
@@ -379,7 +389,11 @@ public class PageElement {
 
     public boolean isNotVisible(int timeoutSec) {
         try {
-            locatorInternal().waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.HIDDEN).setTimeout((long) timeoutSec * 1000));
+            Locator loc = locatorInternal();
+            if (!loc.isVisible()) {
+                return true; // 已不可见：毫秒级返回（性能同 isVisible 的快速探测）
+            }
+            loc.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.HIDDEN).setTimeout((long) timeoutSec * 1000));
             return true;
         } catch (PlaywrightException e) {
             return false;
@@ -398,10 +412,17 @@ public class PageElement {
 
     /**
      * 在指定超时内等待元素挂载到 DOM。超时仍未挂载则返回 {@code false}。
+     *
+     * <p>性能同 {@link #isVisible(int)}：先做一次无等待 {@code count() > 0} 探测，
+     * 已挂载立即返回；未命中再回落 {@code waitFor(ATTACHED, timeout)}。</p>
      */
     public boolean exists(int timeoutSec) {
         try {
-            locatorInternal().waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout((long) timeoutSec * 1000));
+            Locator loc = locatorInternal();
+            if (loc.count() > 0) {
+                return true; // 已挂载：毫秒级返回
+            }
+            loc.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.ATTACHED).setTimeout((long) timeoutSec * 1000));
             return true;
         } catch (PlaywrightException e) {
             return false;
