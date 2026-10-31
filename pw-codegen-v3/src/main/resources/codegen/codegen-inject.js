@@ -388,7 +388,12 @@
                 }
                 // 注意：这里绝不 preventDefault / stopPropagation —— 拾取必须与页面交互共存
                 // （早先版本用 CDP Overlay.setInspectMode 拦截鼠标，导致「一进拾取页面就点不动」）。
-                document.addEventListener('click', function (ev) {
+                // 注册在 window 捕获层而非 document：跨域官网弹窗（如 business.hsbc.com.hk 的
+                // privacy-and-security / terms-of-use）带 consent/analytics 全局脚本，会在更早阶段
+                // stopPropagation 吞掉点击，document 捕获层监听收不到（症状：新页面 enable 后
+                // 点击零日志、拾取无显示）。本脚本经 context.addInitScript 注入，先于页面任何脚本执行，
+                // 故 window 捕获监听总是最早注册 —— 页面脚本的 stopImmediatePropagation 拦不到我们。
+                window.addEventListener('click', function (ev) {
                     try {
                         // 诊断计数：Java 侧事件泵据此区分「DOM 事件没进来」与「事件进来了但 binding 没派发」。
                         window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
@@ -401,7 +406,7 @@
                             info: infoOf(ev.target) });
                     } catch (e) {}
                 }, true);
-                document.addEventListener('input', function (ev) {
+                window.addEventListener('input', function (ev) {
                     try {
                         var off2 = topFrameOffset();
                         var pt2 = off2 ? centerOf(ev.target, off2) : null;
