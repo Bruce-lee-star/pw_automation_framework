@@ -1,1 +1,1 @@
-cmd /c "cd /d D:\IdeaProject\pw_automation_framework && mvn -o clean install -Dcheckstyle.skip=true -Dspotbugs.skip=true -Dcve.gate.skip=true"
+mvn -o -pl pw-codegen-v3 -am clean install -DskipTests "-Dcve.gate.skip=true" "-Dcheckstyle.skip=true" "-Dspotbugs.skip=true"
