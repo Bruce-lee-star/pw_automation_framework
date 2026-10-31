@@ -346,6 +346,17 @@ public final class CodegenLauncher {
                 }
             }
 
+            /** 面板内容跟随：拾取/切到本页时，通知面板把三栏代码区切到本页对应块（对齐键 = URL 派生的页面类名）。 */
+            void focusPanel() {
+                try {
+                    CodegenPanelHandle h = panelRef[0];
+                    if (h == null) return;
+                    h.focusPage(CodegenTarget.of(null, page.url()).pageClassName);
+                } catch (Throwable t) {
+                    log.debug("[codegen][focus] panel content follow failed on {}: {}", page.url(), t.toString());
+                }
+            }
+
             /** 同元素并发去重 + 失败冷却（避免重复条目与「每个输入事件重跑一次 CDP」）。 */
             private final PickGuard guard = new PickGuard();
 
@@ -364,8 +375,10 @@ public final class CodegenLauncher {
                             cdpSession();
                             openPickChannel();
                             // 拾取哪个页面的元素，就聚焦哪个页面：每次点击解析前把本页带到前台
-                            // （多标签/多窗口下用户点击始终落在被拾取页面；fail-soft，失败不阻断）。
+                            // （多标签/多窗口下用户点击始终落在被拾取页面；fail-soft，失败不阻断），
+                            // 并让面板三栏代码区跟随到本页（内容跟随，不移动面板窗口）。
                             focusPick();
+                            focusPanel();
                         } catch (Throwable t) {
                             log.warn("[codegen][cdp] pick session/channel init failed on {}: {}",
                                     page.url(), t.getMessage());
@@ -568,7 +581,7 @@ public final class CodegenLauncher {
                             final Page fb = fallback;
                             if (pickOn.get()) {
                                 engine.submit(CodegenEngine.Kind.ENABLE, fb, () -> {
-                                    try { enablePick(fb); of(fb).focusPick(); }
+                                    try { enablePick(fb); of(fb).focusPick(); of(fb).focusPanel(); }
                                     catch (Exception e) { log.warn("[codegen][follow] re-enable pick on fallback {} failed: {}", fb.url(), e.toString()); }
                                 });
                             }
@@ -622,6 +635,7 @@ public final class CodegenLauncher {
                         CodegenScriptInjector.inject(np);
                         pushPickStatus(np, pickStatusArg(pickOn.get(), started.get(), stopped.get()));
                         of(np).focusPick();
+                        of(np).focusPanel();
                         log.debug("[codegen][follow] injected recorder + bridge into new page {}", np.url());
                     } catch (Exception e) {
                         log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} — {}",
@@ -650,6 +664,7 @@ public final class CodegenLauncher {
                             if (ready) {
                                 enablePick(np);
                                 of(np).focusPick();
+                                of(np).focusPanel();
                                 log.debug("[codegen][follow] enabled pick channel on ready new page {}", np.url());
                             } else {
                                 // 1.5s 内没 ready：不硬等 —— 交给 submitPick 懒加载兜底（每条点击重试开通道）
@@ -808,9 +823,12 @@ public final class CodegenLauncher {
                         if (!anyEnabled) {
                             throw new IllegalStateException("pick channel could not be enabled on any page (see logs)");
                         }
-                        // 拾取哪个页面的元素，就聚焦哪个页面：Start 即把当前活动页带到前台。
+                        // 拾取哪个页面的元素，就聚焦哪个页面：Start 即把当前活动页带到前台，面板内容同步跟随。
                         Page act = sessions.active.get();
-                        if (act != null && !act.isClosed()) sessions.of(act).focusPick();
+                        if (act != null && !act.isClosed()) {
+                            sessions.of(act).focusPick();
+                            sessions.of(act).focusPanel();
+                        }
                         if (panelRef[0] != null) panelRef[0].setStatus("inspecting");
                         broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
                     } catch (Exception e) {

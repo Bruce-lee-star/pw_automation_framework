@@ -344,6 +344,35 @@
         renderCodeArea(p.tab);
     };
 
+    /**
+     * 面板内容跟随：Java 端在拾取/切页时调用，把三栏代码区切到对应页面块。
+     *
+     * <p>对齐键 = 页面类名（与产物分块 label 同源）：Page 栏块 label 即页面类名；
+     * Step / Assert 栏为页面类名去掉 {@code Page} 后缀后加 {@code Steps} / {@code Assertions}
+     * —— 两端同构于 {@code CodegenTarget} 派生规则。找不到目标块（该页产物尚未生成，
+     * 或碰撞去重后类名不同）时静默忽略：保持当前选中页不变，下一次 {@code __onCode}
+     * 仍按用户选中页保持。
+     */
+    window.__codegenFocusPage = function (pageClassName) {
+        if (!pageClassName) return;
+        var base = (pageClassName.length > 4 && pageClassName.slice(-4) === 'Page')
+                ? pageClassName.slice(0, -4) : pageClassName;
+        EDITED_TABS.forEach(function (tab) {
+            var data = codeByTab[tab];
+            if (!data || !data.blocks || !data.blocks.length) return;
+            var want = pageClassName;
+            if (tab === 'step') want = base + 'Steps';
+            else if (tab === 'assert') want = base + 'Assertions';
+            for (var i = 0; i < data.blocks.length; i++) {
+                if (data.blocks[i].label === want) {
+                    data.current = i;
+                    renderCodeArea(tab);
+                    return;
+                }
+            }
+        });
+    };
+
     // ---- 交互：点击列表项 → 通知 Java 高亮被测页元素（类 page.pause） ----
     function selectRow(tr, pickId) {
         var rows = document.querySelectorAll('#elements-table tbody tr');

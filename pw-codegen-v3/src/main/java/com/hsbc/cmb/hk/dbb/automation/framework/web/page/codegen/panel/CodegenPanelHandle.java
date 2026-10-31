@@ -106,6 +106,16 @@ public final class CodegenPanelHandle {
     }
 
     /**
+     * 面板内容跟随：把三栏代码区切到指定页面类名对应的块（拾取哪个页面，面板显示哪个页面的代码）。
+     *
+     * <p>对齐键 = 页面类名（与产物分块 label 同源，两端同构于 {@code CodegenTarget} 派生规则）；
+     * 目标块尚未生成 / 碰撞去重改名时面板静默保持当前选中页（见 panel.js {@code __codegenFocusPage}）。
+     */
+    public void focusPage(String pageClassName) {
+        owner.pushSafely(this, "p => window.__codegenFocusPage(p)", pageClassName);
+    }
+
+    /**
      * 面板窗口被用户关闭（OS 标题栏 ×）时回调。
      *
      * <p>B 轨道下关窗意味着<b>面板进程被终止</b>（常驻失效），是异常结束路径；会话仍会释放闩锁让主线程
