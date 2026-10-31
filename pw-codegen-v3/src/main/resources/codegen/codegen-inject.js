@@ -176,9 +176,34 @@
         return out;
     }
 
+    /** 稳定属性候选：过滤 id/class/style/src（各有专档）与随机/超长/纯数字长串值，按文档顺序保留。 */
+    function stableAttrs(e) {
+        var out = [], seen = {};
+        var attrs = e.attributes;
+        if (!attrs) return out;
+        for (var i = 0; i < attrs.length; i++) {
+            var a = attrs[i];
+            var n = a.name;
+            if (n === 'id' || n === 'class' || n === 'style' || n === 'src') continue;
+            var v = a.value;
+            if (!v) continue;
+            v = String(v).trim();
+            if (!v || v.length > 40) continue;
+            if (/^[\d.,-]+$/.test(v) && v.length > 6) continue;
+            if (/_R_[A-Za-z0-9]{4,}_/.test(v)) continue;
+            if (/:r\d+:/.test(v)) continue;
+            if (/^\d{4,}-/.test(v)) continue;
+            if (seen[n]) continue;
+            seen[n] = true;
+            out.push(n);
+        }
+        if (out.length > 6) out.length = 6;
+        return out;
+    }
+
     /**
      * 目标元素属性兜底（在结构链之前）：无 id / 动态 id 无法唯一时，先试
-     * {@code img[src$="文件名"]}、稳定 class token（{@code tag[class*="tok"]}），
+     * {@code img[src$="文件名"]}、稳定 class token / class 双 token AND、稳定属性单→双→三组合 AND，
      * 每个候选都做唯一性校验——唯一才采用，否则返回空串交给 tag:nth-of-type 结构链。
      */
     function attrFallbackSel(e) {
@@ -196,6 +221,33 @@
         for (var i = 0; i < toks.length; i++) {
             var byCls = t + '[class*="' + attrEsc(toks[i]) + '"]';
             if (uniqueSel(byCls)) return byCls;
+        }
+        // class 双 token AND：单 token 不唯一时，两个稳定 token 组合常能收敛。
+        for (var i = 0; i < toks.length && i < 4; i++) {
+            for (var j = i + 1; j < toks.length && j < 4; j++) {
+                var byCls2 = t + '[class*="' + attrEsc(toks[i]) + '"][class*="' + attrEsc(toks[j]) + '"]';
+                if (uniqueSel(byCls2)) return byCls2;
+            }
+        }
+        // 跨属性 AND：稳定属性单→双→三组合（唯一才用），命中「class 随机 + 多属性唯一」场景。
+        var names = stableAttrs(e);
+        for (var i = 0; i < names.length; i++) {
+            var by1 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"]';
+            if (uniqueSel(by1)) return by1;
+        }
+        for (var i = 0; i < names.length; i++) {
+            for (var j = i + 1; j < names.length; j++) {
+                var by2 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"][' + names[j] + '="' + attrEsc(e.getAttribute(names[j])) + '"]';
+                if (uniqueSel(by2)) return by2;
+            }
+        }
+        for (var i = 0; i < names.length; i++) {
+            for (var j = i + 1; j < names.length; j++) {
+                for (var k = j + 1; k < names.length; k++) {
+                    var by3 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"][' + names[j] + '="' + attrEsc(e.getAttribute(names[j])) + '"][' + names[k] + '="' + attrEsc(e.getAttribute(names[k])) + '"]';
+                    if (uniqueSel(by3)) return by3;
+                }
+            }
         }
         return '';
     }
