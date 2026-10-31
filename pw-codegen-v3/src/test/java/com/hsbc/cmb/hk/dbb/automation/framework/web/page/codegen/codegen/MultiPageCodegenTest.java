@@ -104,6 +104,9 @@ public class MultiPageCodegenTest {
         // 切页用 waitForNewPage 包住触发器（触发器不重复点击）
         assertTrue("step1 应以 waitForNewPage 编排切页",
                 step1.contains("logonPage.waitForNewPage(() -> logonPage." + open.fieldName + "." + open.action + ");"));
+        // 切页后必须显式把新页绑定到目标页对象（waitForNewPage 只绑定触发者，目标页字段否则仍解析旧页）
+        assertTrue("切页后应把新页绑定到目标页对象（switchToCurrentPage）",
+                step1.contains("popupPage.switchToCurrentPage();"));
         assertTrue("切换后应继续操作新页元素",
                 step1.contains("popupPage." + next.fieldName + "." + next.action + ";"));
 

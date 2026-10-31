@@ -28,6 +28,7 @@ import java.util.Set;
  *         PopupPage popupPage = PageObjectFactory.getPage(PopupPage.class);
  *
  *         logonPage.waitForNewPage(() -> logonPage.openProfile.click());
+ *         popupPage.switchToCurrentPage();
  *         popupPage.ok.click();
  *     }
  * }
@@ -39,8 +40,9 @@ import java.util.Set;
  *   <li>方法体内<b>按需实例化本会话涉及的所有页面类</b>——同一步操作了多个页面时，
  *       这一步就实例化多个页面对象（而不是把不同页面塞进同一个 Page 类）；</li>
  *   <li>字段名/动作表达式由 {@link CodegenFieldPlanner} 统一规划，与 Page 类严格同源；</li>
- *   <li>页面切换处生成 {@code from.waitForNewPage(() -> from.trigger.click())}，触发元素不会在
- *       来源页被重复点击。</li>
+ *   <li>页面切换处生成 {@code from.waitForNewPage(() -> from.trigger.click())}，随后
+ *       {@code to.switchToCurrentPage()} 把新页显式绑定到目标页对象（waitForNewPage 只绑定
+ *       触发者，目标页对象的 {@code @Element} 字段否则仍解析到旧页）。</li>
  * </ul>
  *
  * <p>模板：{@code codegen/templates/step-class-sessions.ftl}。
@@ -118,9 +120,14 @@ public final class StepClassGenerator {
                         + (a.accept ? "acceptAlert()" : "dismissAlert()") + ";");
                 break;
             case PAGE_SWITCH:
-                // 触发元素在来源页触发新页，新页由框架接管（页面对象懒跟随当前页）。
+                // 触发元素在来源页触发新页：waitForNewPage 把新页绑定到「触发者」页面对象，
+                // 而目标页对象自身的 owner.page 仍停在旧页（@Element 字段会解析到旧页），
+                // 因此必须显式把当前活动页（即新页）绑定到目标页对象，后续目标页动作才会落到新页。
                 out.add("        " + pageVar(a.target) + ".waitForNewPage(() -> " + pageVar(a.target) + "."
                         + a.fieldName + "." + a.action + ");");
+                if (a.toTarget != null && !a.toTarget.equals(a.target)) {
+                    out.add("        " + pageVar(a.toTarget) + ".switchToCurrentPage();");
+                }
                 break;
             case NAVIGATION:
                 // 同标签页内 URL 跳转：不切页、不等待，仅提示（该页对象已在方法顶部实例化）。
