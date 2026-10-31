@@ -511,29 +511,32 @@ public final class CodegenCdpNodeExtractor {
                         attrs: semanticAttrsOf(x, 10)
                     };
                 }
-                // 单层选择器段：稳定 id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。
+                // 单层选择器段：稳定 id 优先，动态 id 试稳定前缀（唯一才用），否则稳定属性段（含组内索引）；
+                // 一律不产出裸 tag:nth-of-type(n) 段——纯 tag 段既无锚点也无属性，不作 CSS 候选（交 Java 侧 XPath/role 兜底）。
                 function segOf(n) {
                     if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
                     if (n.id) {
                         var fb = dynamicIdFallbackSel(n.id);
                         if (fb) return fb;
                     }
-                    var t = n.tagName.toLowerCase(), i = 1, sib = n.previousElementSibling;
-                    while (sib) {
-                        if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
-                        sib = sib.previousElementSibling;
-                    }
-                    return t + ':nth-of-type(' + i + ')';
+                    return attrFallbackSel(n);
                 }
                 // 父级嵌套降级候选：每项是「从该祖先到目标的完整路径」（段链 > 连接、层级严格连续）。
                 // 必须整条替换 base，绝不能当 base 的前缀拼接——cssSel 是"上溯最多 6 层"的窗口，
                 // 两个窗口相拼会重叠，产出 div:nth-of-type(7) > body:nth-of-type(1) 这类不可能的层级，
-                // 生成的 CSS 永远匹配不到元素。最后一条为绝对路径兜底（逐级 nth-of-type 精确 ⇒ 必然唯一）。
-                function ancestorChain(x, maxDepth) {
-                    var chain = [segOf(x)], out = [], last = '';
-                    var p = x.parentElement, d = 0;
+                // 生成的 CSS 永远匹配不到元素。
+                // v2.12 收紧：每一层都必须有稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引）——
+                // 目标层或任一中间层是裸 tag:nth-of-type(n) 段时整条链作废（返回空数组），不再作为 CSS 候选，
+                // 交给 Java 侧 XPath / role 兜底；「锚点 + 中间裸 tag 段」的链同样不产出。
+                function ancestorChain(el, maxDepth) {
+                    var first = segOf(el);
+                    if (!first) return [];
+                    var chain = [first], out = [], last = '';
+                    var p = el.parentElement, d = 0;
                     while (p && p.nodeType === 1) {
-                        chain.unshift(segOf(p));
+                        var seg = segOf(p);
+                        if (!seg) return [];
+                        chain.unshift(seg);
                         last = chain.join(' > ');
                         if (d < maxDepth) out.push({ cssSelector: last, id: p.id || '' });
                         p = p.parentElement;

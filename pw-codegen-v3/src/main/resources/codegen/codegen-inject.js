@@ -542,19 +542,15 @@
         };
     }
 
-    /** 单层选择器段：稳定 id 优先，动态 id 试稳定前缀（唯一才用），否则 tag:nth-of-type(k)。 */
+    /** 单层选择器段：稳定 id 优先，动态 id 试稳定前缀（唯一才用），否则稳定属性段（含组内索引）；
+     * 一律不产出裸 tag:nth-of-type(n) 段——纯 tag 段既无锚点也无属性，不作 CSS 候选（交 Java 侧 XPath/role 兜底）。 */
     function segOf(n) {
         if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
         if (n.id) {
             var fb = dynamicIdFallbackSel(n.id);
             if (fb) return fb;
         }
-        var t = n.tagName.toLowerCase(), i = 1, sib = n.previousElementSibling;
-        while (sib) {
-            if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
-            sib = sib.previousElementSibling;
-        }
-        return t + ':nth-of-type(' + i + ')';
+        return attrFallbackSel(n);
     }
 
     /**
@@ -562,16 +558,24 @@
      *
      * <p><b>必须整条替换 base，不能当 base 的前缀拼接</b>：{@link cssSel} 是"上溯最多 6 层"的<b>窗口</b>，
      * 两个窗口相拼会重叠，产出 {@code div:nth-of-type(7) > body:nth-of-type(1)} 这类不可能的层级，
-     * 生成的 CSS 永远匹配不到元素（历史 bug）。最后一条为绝对路径兜底（逐级 nth-of-type 精确 ⇒ 必然唯一）。
+     * 生成的 CSS 永远匹配不到元素（历史 bug）。
+     *
+     * <p>v2.12 收紧：<b>每一层</b>都必须有稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引）——
+     * 目标层或任一中间层是裸 tag:nth-of-type(n) 段时整条链作废（返回空数组），不再作为 CSS 候选，
+     * 交给 Java 侧 XPath / role 兜底；「锚点 + 中间裸 tag 段」的链同样不产出。
      *
      * <p>只回传 {@code cssSelector}：祖先不需要 role/name/xpath/shadowHosts —— 为每层重复算全量事实
      * 是白付多轮 DOM 遍历。
      */
     function ancestorChain(el, maxDepth) {
-        var chain = [segOf(el)], out = [], last = '';
+        var first = segOf(el);
+        if (!first) return [];
+        var chain = [first], out = [], last = '';
         var p = el.parentElement, d = 0;
         while (p && p.nodeType === 1) {
-            chain.unshift(segOf(p));
+            var seg = segOf(p);
+            if (!seg) return [];
+            chain.unshift(seg);
             last = chain.join(' > ');
             if (d < maxDepth) out.push({ cssSelector: last, id: p.id || '' });
             p = p.parentElement;
