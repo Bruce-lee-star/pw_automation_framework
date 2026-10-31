@@ -546,28 +546,6 @@ public abstract class BasePage {
     }
 
     /**
-     * 把<b>当前活动页</b>（{@code PlaywrightManager} 全局当前页，{@link #waitForNewPage} 后即新打开的页）
-     * 绑定为本页面对象的操作目标页，使后续 {@code @Element} 字段解析到该页。
-     *
-     * <p><b>为什么需要：</b>{@code waitForNewPage(...)} 只把新页绑定到<b>触发者</b>页面对象
-     * （{@code from.waitForNewPage(...)} 的 {@code from}），同会话里其它页面对象（如新页对应的
-     * {@code toPage}）的 {@code owner.page} 引用仍停在旧页 —— 它们的 {@code @Element} 字段随后会解析到
-     * 旧页并在其上查找元素，造成"切了页但没切过去"。拾取生成代码在 {@code waitForNewPage} 之后、
-     * 新页动作之前调用本方法，显式把新页绑定到目标页面对象。</p>
-     *
-     * @return 绑定后的 Page
-     * @see PageLifecycleCoordinator#switchToPage(BasePage, Page)
-     */
-    public Page switchToCurrentPage() {
-        Page target = PlaywrightManager.getPage();
-        if (target == null) {
-            throw new IllegalStateException(
-                    "switchToCurrentPage: no current page is available (PlaywrightManager has no active page)");
-        }
-        return PageLifecycleCoordinator.switchToPage(this, target);
-    }
-
-    /**
      * 触发操作并等待新页面打开（基于 Playwright {@code context.waitForPage(action)} 事件级捕获新 Tab）。
      * @param trigger     触发新页面打开的操作（如点击链接）
      * @param timeoutSecs 等待超时秒数

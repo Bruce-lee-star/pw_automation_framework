@@ -101,12 +101,13 @@ public class MultiPageCodegenTest {
                 step1.contains("LogonPage logonPage = PageObjectFactory.getPage(LogonPage.class);"));
         assertTrue("step1 应实例化 PopupPage",
                 step1.contains("PopupPage popupPage = PageObjectFactory.getPage(PopupPage.class);"));
-        // 切页用 waitForNewPage 包住触发器（触发器不重复点击）
-        assertTrue("step1 应以 waitForNewPage 编排切页",
-                step1.contains("logonPage.waitForNewPage(() -> logonPage." + open.fieldName + "." + open.action + ");"));
-        // 切页后必须显式把新页绑定到目标页对象（waitForNewPage 只绑定触发者，目标页字段否则仍解析旧页）
-        assertTrue("切页后应把新页绑定到目标页对象（switchToCurrentPage）",
-                step1.contains("popupPage.switchToCurrentPage();"));
+        // 切页用 waitForNewPage 包住触发器（触发器不重复点击），并接住返回的新页 Page
+        assertTrue("step1 应以 waitForNewPage 编排切页并接收返回值",
+                step1.contains("Page newPage1 = logonPage.waitForNewPage(() -> logonPage."
+                        + open.fieldName + "." + open.action + ");"));
+        // 切页后必须把 waitForNewPage 返回的新页显式绑定到目标页对象（不依赖全局当前页）
+        assertTrue("切页后应把新页绑定到目标页对象（switchToPage(newPage1)）",
+                step1.contains("popupPage.switchToPage(newPage1);"));
         assertTrue("切换后应继续操作新页元素",
                 step1.contains("popupPage." + next.fieldName + "." + next.action + ";"));
 
