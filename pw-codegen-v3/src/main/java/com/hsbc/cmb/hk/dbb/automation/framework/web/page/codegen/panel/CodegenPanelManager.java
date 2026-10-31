@@ -384,6 +384,13 @@ public final class CodegenPanelManager {
             }
             p.attachCommand(null);
         }
+        // v2.18 修复（手动关窗泄漏）：窗口被 OS 关掉 ⇒ 浏览器进程已死，但该 PanelProcess 的
+        // pw(独占 Playwright driver/node)、server(非 daemon HttpServer 派发线程)、cmdScheduler
+        // 仍存活，若无人回收会泄漏 driver 进程且 JVM 无法干净退出。shutdownProcess() 在
+        // process 已为 null 时是 no-op，此处是唯一回收点。offload 到 LAUNCH_EXECUTOR，
+        // 避免在本 Playwright 事件派发线程上同步发 close 协议引发潜在死锁（closeNow 各段已吞异常）。
+        log.info("[codegen][panel] panel window closed by OS — reclaiming driver/server resources");
+        LAUNCH_EXECUTOR.submit(p::closeNow);
         if (cb != null) {
             try {
                 cb.run();   // 回调内（CodegenLauncher）负责释放闩锁与收尾清理
