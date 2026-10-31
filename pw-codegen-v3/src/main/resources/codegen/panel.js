@@ -400,6 +400,7 @@
         send(inspectActive ? 'pause' : 'start');
     };
     document.getElementById('btn-stop').onclick = function () { send('stop'); };
+    document.getElementById('btn-end-session').onclick = function () { send('endSession'); };
     document.getElementById('btn-group').onclick = function () {
         var ids = checkedIds();
         if (ids.length < 2) { window.alert('请至少勾选 2 个元素，再「标记为一组」。'); return; }
