@@ -130,6 +130,12 @@ public final class CodegenCdpNodeExtractor {
                     if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
                     return false;
                 }
+                /**
+                 * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用），
+                 * 否则锚点收束链：上溯到稳定 id / 可用前缀即收束；整条路径无任何稳定锚点
+                 * （id、动态 id 前缀、稳定属性候选均失败）时返回空串——纯 tag:nth-of-type(n)
+                 * 链不再产出，交给 Java 侧 XPath 兜底。
+                 */
                 function cssSel(e) {
                     if (!e || e.nodeType !== 1) return '';
                     if (e.id && !isDynamicId(e.id)) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
@@ -139,19 +145,25 @@ public final class CodegenCdpNodeExtractor {
                     }
                     var ab = attrFallbackSel(e);
                     if (ab) return ab;
-                    var parts = []; var n = e;
+                    var parts = [];
+                    var n = e;
+                    var anchored = false;
                     while (n && n.nodeType === 1 && parts.length < 6) {
-                        if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
+                        if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); anchored = true; break; }
                         if (n.id) {
                             var pf = dynamicIdFallbackSel(n.id);
-                            if (pf) { parts.unshift(pf); break; }
+                            if (pf) { parts.unshift(pf); anchored = true; break; }
                         }
                         var t = n.tagName.toLowerCase();
                         var i = 1, sib = n.previousElementSibling;
-                        while (sib) { if (sib.tagName && sib.tagName.toLowerCase() === t) i++; sib = sib.previousElementSibling; }
+                        while (sib) {
+                            if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
+                            sib = sib.previousElementSibling;
+                        }
                         parts.unshift(t + ':nth-of-type(' + i + ')');
                         n = n.parentElement;
                     }
+                    if (!anchored) return '';   // 纯 tag:nth-of-type 链不再产出（整条路径无稳定锚点收束），交 XPath 兜底
                     return parts.join(' > ');
                 }
                 // 动态 id 稳定前缀/包含选择器兜底（唯一才用）；无前缀/不唯一返回空串交给结构链
