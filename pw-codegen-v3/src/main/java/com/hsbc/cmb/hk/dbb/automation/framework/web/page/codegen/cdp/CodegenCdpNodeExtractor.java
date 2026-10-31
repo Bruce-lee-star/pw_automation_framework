@@ -250,11 +250,30 @@ public final class CodegenCdpNodeExtractor {
                     }
                     return out;
                 }
-                /** 稳定属性候选：过滤 id/class/style/src（各有专档）与随机/超长/纯数字长串值，按文档顺序保留。 */
+                /** 属性值稳定段：值无随机段 → 精确(=)；含随机段（Radix 夹心 / :rN: / 数字段）→ 稳定前缀 ^=、核心 *=、稳定后缀 $=（段自身无随机段、长度 2~40，避免随机值；^= → *= → $= 顺序）。 */
+                function attrValueSegments(v) {
+                    if (!v) return [];
+                    v = String(v).trim();
+                    if (!v || v.length > 40) return [];
+                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}/;
+                    if (!rand.test(v)) return [{ op: '=', seg: v }];
+                    var parts = v.split(rand);
+                    var head = (parts[0] || '').replace(/^[-_ :]+|[-_ :]+$/g, '');
+                    var tail = (parts[parts.length - 1] || '').replace(/^[-_ :]+|[-_ :]+$/g, '');
+                    var core = parts.join(' ').replace(/\\s+/g, ' ').trim();
+                    var out = [];
+                    if (head.length >= 2 && !rand.test(head)) out.push({ op: '^=', seg: head });
+                    if (core.length >= 2 && core !== head && !rand.test(core)) out.push({ op: '*=', seg: core });
+                    if (tail.length >= 2 && tail !== head && tail !== core && !rand.test(tail)) out.push({ op: '$=', seg: tail });
+                    return out;
+                }
+
+                /** 稳定属性候选（id/class/style/src 各走专档）：值非空且 ≤40 字符、非纯数字长串；含随机段的属性不再丢弃，标 rand=1（值用 ^=/*=$= 变体）；稳定（rand=0）排前、按文档顺序，上限 6。 */
                 function stableAttrs(e) {
                     var out = [], seen = {};
                     var attrs = e.attributes;
                     if (!attrs) return out;
+                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}/;
                     for (var i = 0; i < attrs.length; i++) {
                         var a = attrs[i];
                         var n = a.name;
@@ -264,16 +283,15 @@ public final class CodegenCdpNodeExtractor {
                         v = String(v).trim();
                         if (!v || v.length > 40) continue;
                         if (/^[\\d.,-]+$/.test(v) && v.length > 6) continue;
-                        if (/_R_[A-Za-z0-9]{4,}_/.test(v)) continue;
-                        if (/:r\\d+:/.test(v)) continue;
-                        if (/^\\d{4,}-/.test(v)) continue;
                         if (seen[n]) continue;
                         seen[n] = true;
-                        out.push(n);
+                        out.push({ name: n, value: v, rand: rand.test(v) ? 1 : 0 });
                     }
+                    out.sort(function (a, b) { return a.rand - b.rand; });
                     if (out.length > 6) out.length = 6;
                     return out;
                 }
+
                 /** 可见匹配计数（唯一性之外，用于识别"一组元素"场景）。 */
                 function visibleCount(sel) {
                     try {
@@ -310,13 +328,12 @@ public final class CodegenCdpNodeExtractor {
                     }
                     return '';
                 }
-
                 /**
                  * 目标元素属性兜底（在结构链之前）：无 id / 动态 id 无法唯一时，先试
-                 * {@code img[src$="文件名"]}、稳定 class token / class 双 token AND、稳定属性单→双→三组合 AND，
-                 * 每个候选先做可见唯一性校验——唯一即采用；候选可见但不唯一（一组元素）时，
-                 * 退而取组内索引 {@code sel:nth-of-type(k)}（同 tag 兄弟序，仍做可见唯一校验），
-                 * 全部失败返回空串交给 tag:nth-of-type 结构链。
+                 * {@code img[src$="文件名"]}、稳定 class token / class 双 token AND，然后按「最稳定优先」用属性：
+                 * ① 稳定属性（值无随机段）精确 {@code [name="value"]}；② 稳定属性双→三精确 AND；③ 含随机值属性
+                 * 用开头 {@code ^=}、包含 {@code *=}、结尾 {@code $=} 变体（段自身无随机值）。每个候选先做可见唯一性
+                 * 校验——唯一即采用；可见不唯一（一组元素）时取组内索引；全部失败返回空串交给结构链/XPath。
                  */
                 function attrFallbackSel(e) {
                     if (!e || e.nodeType !== 1) return '';
@@ -344,27 +361,36 @@ public final class CodegenCdpNodeExtractor {
                             if (s2) return s2;
                         }
                     }
-                    // 跨属性 AND：稳定属性单→双→三组合（唯一/组内索引才用），命中「class 随机 + 多属性唯一」场景。
+                                        // 跨属性：按「最稳定优先」用属性——稳定属性（值无随机段）单精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体。
                     var names = stableAttrs(e);
-                    for (var i = 0; i < names.length; i++) {
-                        var by1 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"]';
+                    for (var i = 0; i < names.length && !names[i].rand; i++) {
+                        var by1 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"]';
                         var s3 = uniqueOrGroup(by1, e);
                         if (s3) return s3;
                     }
-                    for (var i = 0; i < names.length; i++) {
-                        for (var j = i + 1; j < names.length; j++) {
-                            var by2 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"][' + names[j] + '="' + attrEsc(e.getAttribute(names[j])) + '"]';
+                    for (var i = 0; i < names.length && !names[i].rand; i++) {
+                        for (var j = i + 1; j < names.length && !names[j].rand; j++) {
+                            var by2 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"][' + names[j].name + '="' + attrEsc(names[j].value) + '"]';
                             var s4 = uniqueOrGroup(by2, e);
                             if (s4) return s4;
                         }
                     }
-                    for (var i = 0; i < names.length; i++) {
-                        for (var j = i + 1; j < names.length; j++) {
-                            for (var k = j + 1; k < names.length; k++) {
-                                var by3 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"][' + names[j] + '="' + attrEsc(e.getAttribute(names[j])) + '"][' + names[k] + '="' + attrEsc(e.getAttribute(names[k])) + '"]';
-                                var s5 = uniqueOrGroup(by3, e);
-                                if (s5) return s5;
+                    for (var i = 0; i < names.length && !names[i].rand; i++) {
+                        for (var j = i + 1; j < names.length && !names[j].rand; j++) {
+                            for (var k = j + 1; k < names.length && !names[k].rand; k++) {
+                                var by3 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"][' + names[j].name + '="' + attrEsc(names[j].value) + '"][' + names[k].name + '="' + attrEsc(names[k].value) + '"]';
+                                var s6 = uniqueOrGroup(by3, e);
+                                if (s6) return s6;
                             }
+                        }
+                    }
+                    for (var i = 0; i < names.length; i++) {
+                        if (!names[i].rand) continue;
+                        var segs = attrValueSegments(names[i].value);
+                        for (var m = 0; m < segs.length; m++) {
+                            var byV = t + '[' + names[i].name + segs[m].op + '"' + attrEsc(segs[m].seg) + '"]';
+                            var s5 = uniqueOrGroup(byV, e);
+                            if (s5) return s5;
                         }
                     }
                     return '';
