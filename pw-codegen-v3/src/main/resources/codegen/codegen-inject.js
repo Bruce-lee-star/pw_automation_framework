@@ -298,8 +298,9 @@
      * 目标元素属性兜底（在结构链之前）：无 id / 动态 id 无法唯一时，先试
      * {@code img[src$="文件名"]}、稳定 class token / class 双 token AND，然后按「最稳定优先」用属性：
      * ① 稳定属性（值无随机段）精确 {@code [name="value"]}；② 稳定属性双→三精确 AND；③ 含随机值属性
-     * 用开头 {@code ^=}、包含 {@code *=}、结尾 {@code $=} 变体（段自身无随机值）。每个候选先做可见唯一性
-     * 校验——唯一即采用；可见不唯一（一组元素）时取组内索引；全部失败返回空串交给结构链/XPath。
+     * 用开头 {@code ^=}、包含 {@code *=}、结尾 {@code $=} 变体（段自身无随机值）；④ 组合层：单属性仍
+     * 不唯一时多个属性共同定位——稳定属性精确 AND 随机变体（最稳定优先）、随机变体 × 随机变体 AND。
+     * 每个候选先做可见唯一性校验——唯一即采用；可见不唯一（一组元素）时取组内索引；全部失败返回空串交给结构链/XPath。
      */
     function attrFallbackSel(e) {
         if (!e || e.nodeType !== 1) return '';
@@ -357,6 +358,35 @@
                 var byV = t + '[' + names[i].name + segs[m].op + '"' + attrEsc(segs[m].seg) + '"]';
                 var s5 = uniqueOrGroup(byV, e);
                 if (s5) return s5;
+            }
+        }
+        // 组合层：单属性仍不唯一时多个属性共同定位——① 稳定属性精确 AND 随机属性变体
+        // （稳定取前 2、随机取前 2，随机变体按 ^= → *= → $=）；② 随机变体 × 随机变体 AND。
+        // 全部经可见唯一校验（含组内索引）；命中即返回。
+        var randNames = [], stabNames = [];
+        for (var i = 0; i < names.length; i++) if (names[i].rand) randNames.push(names[i]);
+        for (var i = 0; i < names.length && !names[i].rand && i < 2; i++) stabNames.push(names[i]);
+        for (var a = 0; a < stabNames.length; a++) {
+            for (var b = 0; b < randNames.length && b < 2; b++) {
+                var rbSegs = attrValueSegments(randNames[b].value);
+                for (var m = 0; m < rbSegs.length; m++) {
+                    var byMix = t + '[' + stabNames[a].name + '="' + attrEsc(stabNames[a].value) + '"][' + randNames[b].name + rbSegs[m].op + '"' + attrEsc(rbSegs[m].seg) + '"]';
+                    var s7 = uniqueOrGroup(byMix, e);
+                    if (s7) return s7;
+                }
+            }
+        }
+        for (var b = 0; b < randNames.length && b < 2; b++) {
+            for (var c = b + 1; c < randNames.length && c < 2; c++) {
+                var rb2Segs = attrValueSegments(randNames[b].value);
+                var rcSegs = attrValueSegments(randNames[c].value);
+                for (var m = 0; m < rb2Segs.length; m++) {
+                    for (var m2 = 0; m2 < rcSegs.length; m2++) {
+                        var byRand = t + '[' + randNames[b].name + rb2Segs[m].op + '"' + attrEsc(rb2Segs[m].seg) + '"][' + randNames[c].name + rcSegs[m2].op + '"' + attrEsc(rcSegs[m2].seg) + '"]';
+                        var s8 = uniqueOrGroup(byRand, e);
+                        if (s8) return s8;
+                    }
+                }
             }
         }
         return '';
