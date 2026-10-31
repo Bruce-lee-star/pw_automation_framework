@@ -28,11 +28,20 @@ final class RolePickerConstants {
     static final String CMD_STOP = "stop";
     static final String CMD_ABORT = "abort";
     static final String CMD_DONE = "done";
+
     /**
      * 面板「列表」开关的 JSON 对象命令 type（经 {@code __rolePickerCmd} 投递的对象命令，
      * 形如 {@code {type:'markList', list:<bool>, pick:{...}}}）。对象命令在 runPickerCommand 顶部拦截。
      */
     static final String CMD_TYPE_MARK_LIST = "markList";
+    /**
+     * 面板「删除选中元素」的 JSON 对象命令 type（经 {@code __rolePickerCmd} 投递，形如
+     * {@code {type:'delete', keys:[...精简 pick...]}}）。V2 把删除从独立的 {@code __roleOnDelete}
+     * 绑定/控制台兜底桥收敛为统一的 {@code __rolePickerCmd} 对象命令，与 markList 同口径，删除逻辑
+     * 由 Java 权威内存态（javaPickBySig）按值级匹配执行（见 {@code RolePickerCommandEngine#cmdDelete}），
+     * 不再依赖浏览器侧回传落地后再"复活"的竞态窗口。
+     */
+    static final String CMD_TYPE_DELETE = "delete";
 
     // ───────────────────────── MODE_* : PickMode → 浏览器侧字符串 ─────────────────────────
     //  取值必须与面板 JS 的比对字面量严格一致（同一 Java↔JS 契约）。
@@ -46,8 +55,6 @@ final class RolePickerConstants {
     //       （exec-maven-plugin → tools/validate_picker_js.js，含就地组合校验）；
     //    ② Java↔JS 字符串一致性：本包 RolePickerContractTest 逐键比对 JS 资源。
     //  注：历史上被引用的 RolePickerModeContractTest 并不存在（A-03 幻影守卫），已不再引用。
-    static final String MODE_IDLE = "idle";
-    static final String MODE_MANUAL = "manual";
 
     // ───────────────────────── STATE_* : Java↔JS 通信实参键（对应脚本 a.xxx） ─────────────────────────
     static final String STATE_KEY_MODE = "mode";

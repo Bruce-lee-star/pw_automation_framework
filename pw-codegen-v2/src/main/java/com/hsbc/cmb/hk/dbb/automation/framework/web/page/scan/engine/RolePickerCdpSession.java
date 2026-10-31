@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine;
 
 import com.google.gson.JsonObject;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.PageRefs;
 import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
@@ -27,8 +28,14 @@ final class RolePickerCdpSession {
     private final CDPSession cdp;
 
     RolePickerCdpSession(Page page) {
-        this.page = page;
-        this.cdp = page.context().newCDPSession(page);
+        // V2 修复：框架在录制开启时会把 Page 包成 JDK 动态代理（web 的 RecordingPageProxy /
+        // RecordingHandler），而 Playwright 的 BrowserContext.newCDPSession(page) 内部会把 page 强转为
+        // PageImpl 以取底层渲染进程连接，代理上强转会抛 ClassCastException（"$ProxyN cannot be cast to
+        // PageImpl"），导致 CDP 抓取静默失效、元素拾取不可用。
+        // 用核心层 PageRefs 剥去代理、取真实 PageImpl 建立 CDP 通道；剥不开时原样回退（零行为变更）。
+        Page real = (Page) PageRefs.unwrap(page);
+        this.page = real;
+        this.cdp = real.context().newCDPSession(real);
     }
 
     /** 启用各域并进入 inspect 模式；{@code onPick} 接收每次点选上报的 {@code Overlay.inspectNodeRequested} 参数。 */
@@ -36,6 +43,7 @@ final class RolePickerCdpSession {
         try {
             cdp.send("DOM.enable");
             cdp.send("Accessibility.enable");
+            cdp.send("Runtime.enable");
             cdp.send("Overlay.enable");
             cdp.on("Overlay.inspectNodeRequested", ev -> {
                 try {
@@ -46,6 +54,9 @@ final class RolePickerCdpSession {
             });
             JsonObject inspect = new JsonObject();
             inspect.addProperty("mode", "searchForNode");
+            // Chromium 在 mode != "none" 时强制要求 highlightConfig，缺失即报
+            // "highlight configuration parameter is missing"，故必须随命令附带（与 Chrome DevTools 一致配色）。
+            inspect.add("highlightConfig", highlightConfig());
             cdp.send("Overlay.setInspectMode", inspect);
             log.info("[picker][cdp] inspect mode enabled on page: {}", page.url());
         } catch (Exception e) {
@@ -100,6 +111,37 @@ final class RolePickerCdpSession {
 
     Page page() {
         return page;
+    }
+
+    /**
+     * 构造 CDP {@code Overlay.setInspectMode} 在 {@code searchForNode} 模式下必需的 {@code highlightConfig}。
+     * Chromium 在 {@code mode != "none"} 时强制要求该参数，缺失即报
+     * "highlight configuration parameter is missing"。配色与 Chrome DevTools 的元素高亮一致。
+     */
+    static JsonObject highlightConfig() {
+        JsonObject c = new JsonObject();
+        c.addProperty("showInfo", true);
+        c.addProperty("showRulers", false);
+        c.addProperty("showExtensionLines", true);
+        c.add("contentColor", rgba(111, 168, 220, 0.6));
+        c.add("paddingColor", rgba(147, 196, 253, 0.6));
+        c.add("borderColor", rgba(255, 229, 153, 0.6));
+        c.add("marginColor", rgba(246, 178, 107, 0.6));
+        c.add("eventTargetColor", rgba(255, 196, 196, 0.6));
+        c.add("shapeColor", rgba(96, 82, 177, 0.6));
+        c.add("shapeMarginColor", rgba(96, 82, 127, 0.6));
+        c.add("cssGridColor", rgba(75, 0, 130, 0.6));
+        return c;
+    }
+
+    /** RGBA 颜色对象（CDP {@code HighlightConfig} 要求的子结构）。 */
+    private static JsonObject rgba(int r, int g, int b, double a) {
+        JsonObject o = new JsonObject();
+        o.addProperty("r", r);
+        o.addProperty("g", g);
+        o.addProperty("b", b);
+        o.addProperty("a", a);
+        return o;
     }
 
     /** 将简单 Map 参数转为 Gson JsonObject（CDPSession.send 第二参要求 JsonObject）。 */

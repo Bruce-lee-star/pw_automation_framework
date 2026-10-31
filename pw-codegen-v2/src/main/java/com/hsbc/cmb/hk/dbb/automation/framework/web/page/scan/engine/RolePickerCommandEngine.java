@@ -12,7 +12,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickMode;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickerResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickerAction;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickSnapshot;
@@ -24,7 +23,6 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.Role
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.asString;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.syncPanelToBrowser;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.anyLivePage;
-import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.setPickMode;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.mergeFramePicksToMain;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.readPickStateJson;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.safeOrigin;
@@ -79,7 +77,7 @@ public final class RolePickerCommandEngine {
             }
         } catch (Exception ignoreResync) { RolePickerQuiet.ignore("RolePickerCommandEngine#cmdStartResync", ignoreResync); }
         // 进入手动拾取模式（当前唯一模式：点击页面只拾取被点元素）。
-        setPickMode(anyLivePage(pageNames), PickMode.MANUAL, pageNames);
+        // 注：V2 不再向面板推送 JS 拾取模式字符串（PickMode 已退役），面板按钮态改由 active 经 syncPanelToBrowser 驱动。
         // 反向查表只构建一次（避免对每个被跟踪页面重复读 nls 文件），减少点击"开始"的延迟。
         String startNls = RolePickerNlsCache.buildNlsReverseJson(Arrays.asList(nlsFiles));
         // 【优化-去重】pageNames 可能因"导航后旧页残留 / 重复登记"而含同一 URL 的多个 Page 对象，
@@ -88,6 +86,8 @@ public final class RolePickerCommandEngine {
         Set<String> startedUrls = new java.util.LinkedHashSet<>();
         for (Page p : pageNames.keySet()) {
             if (p.isClosed()) continue;
+            // 面板是独立窗口（RolePickerPanelHost），绝不开启其 inspect / 拾取；否则点面板会把面板自身拾进去。
+            if (RolePickerPanelHost.isAlive() && RolePickerPanelHost.page() == p) continue;
             String u;
             try { u = p.url(); } catch (Exception ignore) { u = null; }
             if (u != null && !startedUrls.add(u)) {
@@ -122,6 +122,8 @@ public final class RolePickerCommandEngine {
         // 绝不能再 stop + 返回 DONE，否则会误关面板。未知命令一律忽略、继续会话。
         return new PickerResult(PickerAction.CONTINUE, null, null, null);
     }
+
+
 
 
     private static PickerResult cmdRefreshCode(RolePickerContext ctx, Page page) {
@@ -229,6 +231,10 @@ public final class RolePickerCommandEngine {
                 try { p.evaluate(RolePickerScripts.SET_PICK_STOPPED_JS); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
             }
         }
+        // 【面板独立窗口】面板 UI 的拾取态（⏹/▶ 按钮）位于面板窗口，去激活需同步一次，
+        // 否则面板仍显示"停止中"。被测页那一次仍必须执行（它置的 __rolePickActive 是 ESC 热键的闸）。
+        try { RolePickerPanelHost.eval(RolePickerScripts.SET_PICK_STOPPED_JS); }
+        catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
         if (snap == null) snap = readPickSnapshot(page);   // 兜底：命令页不在跟踪集合时
         // 跨域页停止时，主框架 page.evaluate 可能因导航竞态返回空/抛异常（snap.entries 为空）；
         // 此处再从各 frame 的 window.__rolePicks 逐帧兜底读取（与 stop() 的跨 frame 聚合同口径），
@@ -392,9 +398,7 @@ public final class RolePickerCommandEngine {
             try { browserPicks = ((List<?>) pickerEval(page, RolePickerScripts.READ_PICK_COUNT_JS)).size(); } catch (Exception ignoreB) { RolePickerQuiet.ignore("RolePickerCommandEngine#readPickCount", ignoreB); }
             log.warn("[picker][stop] no elements picked @ {} : in-memory javaPickBySig={}, browser __rolePicks={}, current page origin={}",
                     page.url(), jsMem, browserPicks, safeOrigin(page.url()));
-            // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"。
-            // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"。
-            setPickMode(anyLivePage(pageNames), PickMode.IDLE, pageNames);
+            // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"（active=false 经 syncPanelToBrowser 驱动面板按钮态）。
             return new PickerResult(PickerAction.CONTINUE, null, null, "未拾取到元素");
         }
         // 按 pageClass 分别生成页面类（含"仅 step/ops 无元素 pick"的页，也产出空字段类，保证步骤视图引用不悬空）
@@ -446,6 +450,9 @@ public final class RolePickerCommandEngine {
             // 修复：stop 时彻底清空浏览器侧全部拾取注册状态（与"下一轮从 1 重新连续"语义一致），
             // 停止拾取：保留元素列表（__rolePicks），但清空本轮动作序号与选择集，
             // 使下一轮「开始拾取」的序号从 1 重新连续（面板序号体系已移除，此处只剩序号基线语义）。
+            // 【面板独立窗口】__rolePicks 现由面板窗口持有并渲染（sync-panel-to-browser 写的是面板），
+            // 故清空目标为面板窗口；被测页那一次保留仅用于清理已退役 JS 库的残留态，无副作用。
+            RolePickerPanelHost.eval(RolePickerScripts.CLEAR_PICKS_JS);
             pickerEval(page, RolePickerScripts.CLEAR_PICKS_JS);
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
         int matched = 0;
@@ -455,9 +462,8 @@ public final class RolePickerCommandEngine {
         String nlsInfo = (nlsFiles != null && nlsFiles.length > 0)
                 ? "（nls=" + (nlsFiles.length == 1 ? nlsFiles[0] : nlsFiles.length + " 个文件")
                     + "，已反查 " + matched + " 个 key）" : "";
-        // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"，页面点击不再拾取。
-        setPickMode(anyLivePage(pageNames), PickMode.IDLE, pageNames);
         String assertInfo = codeAssert.isEmpty() ? "" : "，断言类 " + codeAssert.size() + " 个（按页）";
+        // 停止即回 IDLE，面板按钮复位为"▶ 开始拾取"（active=false 经 syncPanelToBrowser 驱动面板按钮态）。
         return new PickerResult(PickerAction.CONTINUE, codePage, codeStep, codeAssert,
                 "已生成 " + entriesByPage.size() + " 个页面类 / " + allEntries.size()
                         + " 个页面字段 / " + totalSteps + " 个 step" + assertInfo + nlsInfo);
@@ -487,6 +493,7 @@ public final class RolePickerCommandEngine {
             case RolePickerConstants.CMD_STOP: return cmdStop(ctx, page);
             case RolePickerConstants.CMD_ABORT: return cmdAbort(ctx, page);
             case RolePickerConstants.CMD_DONE: return cmdDone(ctx, page);
+
             default: return cmdUnknown(ctx, page);
         }
     }
@@ -502,6 +509,9 @@ public final class RolePickerCommandEngine {
             if (m == null) return null;
             if (RolePickerConstants.CMD_TYPE_MARK_LIST.equals(String.valueOf(m.get("type")))) {
                 return cmdMarkList(ctx, page, m);
+            }
+            if (RolePickerConstants.CMD_TYPE_DELETE.equals(String.valueOf(m.get("type")))) {
+                return cmdDelete(ctx, page, m);
             }
             return null;
         } catch (Exception ex) {
@@ -556,4 +566,69 @@ public final class RolePickerCommandEngine {
             log.warn("[picker] markList failed: {}", ex.getMessage());
             return new PickerResult(PickerAction.CONTINUE, null, null, null, "列表标记失败：" + ex.getMessage());
         }
-    }}
+    }
+
+    /**
+     * 面板「删除选中元素」：把待删 pick（{@code keys}）经 {@link RolePickerPickParser#collectDeleteKeys}
+     * 生成死亡键集，再按与历史删除桥完全一致的【值级匹配】从 Java 权威内存态（javaPickBySig）精确移除，
+     * 随后回灌面板使已删元素不再被"复活"。
+     *
+     * <p>V2：删除从浏览器侧 {@code __roleOnDelete} 绑定 / 控制台兜底桥收敛为统一的 {@code __rolePickerCmd}
+     * 对象命令（type='delete'），逻辑在 Java 侧执行（权威态唯一来源），与 {@code cmdMarkList} 同口径，
+     * 不再依赖浏览器侧回传落地后主循环 syncPanelToBrowser 才覆盖的竞态窗口。
+     */
+    private static PickerResult cmdDelete(RolePickerContext ctx, Page page, Map<String, Object> m) {
+        try {
+            Object keysRaw = m.get("keys");
+            if (!(keysRaw instanceof List)) {
+                return new PickerResult(PickerAction.CONTINUE, null, null, null, "删除命令缺少 keys");
+            }
+            @SuppressWarnings("unchecked")
+            List<?> keys = (List<?>) keysRaw;
+            java.util.Set<String> dead = RolePickerPickParser.collectDeleteKeys(keys);
+            if (dead.isEmpty()) {
+                return new PickerResult(PickerAction.CONTINUE, null, null, null, "没有可删除的元素");
+            }
+            LinkedHashMap<String, RoleEntry> map = ctx.javaPickBySig;
+            int removed = 0;
+            synchronized (map) {
+                // 【方案 B：页面级隔离】值级兜底必须绑定 pageClass，与 collectDeleteKeys 的 "pc|裸键" 口径一致，
+                // 杜绝跨页同名元素误删（如 LoginPage / SetupSecondPwdPage 同名页脚）。
+                int before = map.size();
+                map.entrySet().removeIf(en -> {
+                    RoleEntry re = en.getValue();
+                    if (re == null) return false;
+                    String rpc = (re.getPageClass() != null) ? re.getPageClass() : "";
+                    if (dead.contains(en.getKey())) return true;
+                    String sigKey = re.getSigKey();
+                    if (sigKey != null && dead.contains(sigKey)) return true;
+                    String lk;
+                    try { lk = RoleElementPageGenerator.locatorKey(re); } catch (Exception ignore) { lk = null; }
+                    if (lk != null && !lk.isEmpty() && dead.contains(rpc + "|" + lk)) return true;
+                    String strategy = re.getStrategy() == null ? "role" : re.getStrategy();
+                    if ("role".equals(strategy)) {
+                        String rk = "role:" + (re.getRole() == null ? "" : re.getRole()).toLowerCase(java.util.Locale.ROOT)
+                                + ":" + (re.getName() == null ? "" : re.getName());
+                        if (dead.contains(rpc + "|" + rk)) return true;
+                    } else if ("id".equals(strategy) || "css".equals(strategy)) {
+                        if (re.getSelector() != null && dead.contains(rpc + "|" + strategy + ":" + re.getSelector())) return true;
+                    } else {
+                        if (re.getName() != null && dead.contains(rpc + "|" + strategy + ":" + re.getName())) return true;
+                    }
+                    return false;
+                });
+                removed = before - map.size();
+            }
+            log.info("[picker] delete applied: removed {} element(s) from {} candidates", removed, dead.size());
+            // 回灌面板：作废 ETag 后按 Java 权威态重写，使已删元素即时从面板消失、且不再被主循环"复活"。
+            try { RolePickerPanelSync.invalidateSync(page); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
+            try { syncPanelToBrowser(page, null, ctx.javaPickBySig); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerCommandEngine", ignore); }
+            // 面板侧删除本地元素后还会发 refreshCode 重新生成代码；此处不再重复，避免双重开销。
+            return new PickerResult(PickerAction.CONTINUE, null, null, null,
+                    removed > 0 ? "已删除 " + removed + " 个元素" : "未找到匹配的元素（可能已被删除）");
+        } catch (Exception ex) {
+            log.warn("[picker] delete failed: {}", ex.getMessage());
+            return new PickerResult(PickerAction.CONTINUE, null, null, null, "删除失败：" + ex.getMessage());
+        }
+    }
+}

@@ -67,22 +67,46 @@ final class RolePickerCdpNodeExtractor {
             JsonObject ax = session.send("Accessibility.getPartialAXTree", Map.of("backendNodeId", backendNodeId));
             if (ax != null && ax.has("nodes")) {
                 JsonArray nodes = ax.getAsJsonArray("nodes");
+                // 【修复 name/role 恒为 null】CDP Accessibility.AXNode 的字段是 backendDOMNodeId，
+                // 不是 backendNodeId（后者只是 getPartialAXTree 的【请求参数】）。原实现按 backendNodeId
+                // 匹配 AX 节点，永远匹配不到 ⇒ role 退化为 tag 兜底、可访问名恒为 null（name 丢失，
+                // 生成 @RoleElement 只剩 role 裸值）。先按 backendDOMNodeId 精确匹配目标节点；个别 AX
+                // 节点缺该字段时回退取首节点（以 backendNodeId 查询时首节点即目标节点）。
+                JsonObject target = null;
                 for (int i = 0; i < nodes.size(); i++) {
                     JsonObject n = nodes.get(i).getAsJsonObject();
-                    if (!n.has("backendNodeId") || n.get("backendNodeId").getAsLong() != backendNodeId) continue;
-                    if (n.has("role") && !n.get("role").isJsonNull()) {
-                        JsonObject r = n.getAsJsonObject("role");
+                    if (n.has("backendDOMNodeId") && !n.get("backendDOMNodeId").isJsonNull()
+                            && n.get("backendDOMNodeId").getAsLong() == backendNodeId) {
+                        target = n;
+                        break;
+                    }
+                }
+                if (target == null && nodes.size() > 0) {
+                    target = nodes.get(0).getAsJsonObject();
+                }
+                if (target != null) {
+                    if (target.has("role") && !target.get("role").isJsonNull()) {
+                        JsonObject r = target.getAsJsonObject("role");
                         if (r.has("value") && !r.get("value").isJsonNull()) role = r.get("value").getAsString();
                     }
-                    if (n.has("name") && !n.get("name").isJsonNull()) {
-                        JsonObject nm = n.getAsJsonObject("name");
+                    if (target.has("name") && !target.get("name").isJsonNull()) {
+                        JsonObject nm = target.getAsJsonObject("name");
                         if (nm.has("value") && !nm.get("value").isJsonNull()) axName = nm.get("value").getAsString();
                     }
-                    break;
                 }
             }
             if (role == null) role = (tag != null ? tag : "generic");
-            String name = (axName != null && !axName.isEmpty()) ? axName : attrs.get("innerText");
+            // 【修复 name 恒为 null】旧的兜底 attrs.get("innerText") 永远为 null：innerText 是 DOM 运行时属性，
+            // 而非 HTML 属性，DOM.describeNode 的 attributes 扁平数组里根本没有它。当可访问名（axName）缺失时，
+            // 回退到节点的真实文本内容（textContent），使 LabelText / StaticText / generic 等"文本型"角色也能拿到
+            // name；只取单行、长度受限的文本，避免把 div/section 整段内容误当 name。
+            String name = axName;
+            if (name == null || name.isEmpty()) {
+                String text = fetchTextContent(session, backendNodeId);
+                if (text != null && !text.isEmpty() && text.length() <= 120 && !text.contains("\n")) {
+                    name = text;
+                }
+            }
 
             // 3) 策略解析（打分序取最优）
             String strategy = null;
@@ -172,5 +196,31 @@ final class RolePickerCdpNodeExtractor {
             return "role|" + (role == null ? "" : role) + "|" + (name == null ? "" : name);
         }
         return strategy + "|" + (selector != null ? selector : (role + "|" + name));
+    }
+
+    /**
+     * 经 CDP 取节点文本（{@code textContent}），作为可访问名缺失时的回退。
+     * 走 {@code DOM.resolveNode} → {@code Runtime.callFunctionOn}（与 DevTools 取节点文本同源），
+     * 任一环节失败返回 null（调用方跳过，绝不抛异常）。
+     */
+    private String fetchTextContent(RolePickerCdpSession session, long backendNodeId) {
+        try {
+            JsonObject resolved = session.send("DOM.resolveNode", Map.of("backendNodeId", backendNodeId));
+            if (resolved == null || !resolved.has("object") || !resolved.getAsJsonObject("object").has("objectId")) {
+                return null;
+            }
+            String objectId = resolved.getAsJsonObject("object").get("objectId").getAsString();
+            JsonObject r = session.send("Runtime.callFunctionOn", Map.of(
+                    "objectId", objectId,
+                    "functionDeclaration", "function(){ var t = this.textContent; return (t == null ? '' : String(t)).trim(); }",
+                    "returnByValue", true));
+            if (r != null && r.has("result") && r.getAsJsonObject("result").has("value")
+                    && !r.getAsJsonObject("result").get("value").isJsonNull()) {
+                return r.getAsJsonObject("result").get("value").getAsString();
+            }
+        } catch (Exception ignore) {
+            RolePickerQuiet.ignore("RolePickerCdpNodeExtractor#fetchTextContent", ignore);
+        }
+        return null;
     }
 }

@@ -17,7 +17,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RolePickerBridgeRegistry.CmdEvent;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickerResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickerAction;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickMode;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.PickerAbortedException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickSnapshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.StepRec;
@@ -32,14 +31,12 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.PageDebugControl
 // 行为保持零回归的桥接：openPanel / registerPopupFollow 原样搬自 RoleElementPicker，
 // 其依赖的私有静态助手已放宽到包内可见，此处显式静态导入以保留原调用形态。
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.anyLivePage;
-import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.setPickMode;
+import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.syncPanelToBrowser;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RolePickerBridgeRegistry.registerContextBridges;
-import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.registerContextInitScripts;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RolePickerBridgeRegistry.drainPanelCmds;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.isCiRun;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.runPickerCommand;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.mergeFramePicksToMain;
-import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.syncPanelToBrowser;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker.pickerEvalSoft;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RolePickerPageTracker.reconcileTrackedPages;
 import static com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RolePickerPageTracker.reconcileMissedPages;
@@ -134,8 +131,10 @@ public final class RolePickerPanelController {
             log.info("[picker] CI runtime detected, skipping picker panel (openPanel).");
             return;
         }
-        // ③联动：codegen 面板会话开启即发布「调试/录制暂停态」共享信号（对齐 page.pause 调试态），finally 清除。
+        // ③联动：codegen 面板会话开启即发布「调试/录制暂停态」共享信号（对齐 page.pause 调试态），finally 清除；
+        // 同时标记 codegen 会话活跃，使原生 BasePage.pause() 在面板打开时跳过 page.pause()（避免与 Inspector 双监听 Overlay）。
         PageDebugControl.markPaused(true);
+        PageDebugControl.markCodegenActive(true);
         // 上下文级解耦（对齐 page.pause 的 DebugController/Recorder 架构）：
         // 面板重建脚本 + 门控拾取脚本 + 命令/拾取/控制台桥全部一次性注册到 BrowserContext，
         // context 下所有当前与未来页面（导航/弹窗/新标签页）自动生效，由浏览器原生保证存活。
@@ -148,19 +147,13 @@ public final class RolePickerPanelController {
         // 因此若本行日志显示这里有文件，key 必然来自该调用点；若为空，则产物与面板都不应再出现任何 key。
         log.info("[picker] openPanel nlsFiles={} nlsReverseJsonEmpty={}",
                 Arrays.asList(nlsFiles), (nlsReverseJson == null || nlsReverseJson.isEmpty() || "{}".equals(nlsReverseJson)));
-        // 开启面板开关：刷新/导航后 context 级 addInitScript 会自动重建面板，避免"刷新后面板消失"。
-        pickerEval(page, RolePickerScripts.ENABLE_PANEL_JS);
-        // 清掉上一次会话可能残留的拾取落盘态与拾取开关（浏览器上下文虽每次重建，仍防御性清理），
-        // 避免 onFrameNavigated 合并时把旧数据误并入本次会话、或门控注入脚本因残留开关误自启拾取。
+        // 【面板独立窗口】面板不再注入被测页。CDP 探针实测：inspect 期间被测页 frame 树内的指针事件
+        // 一律不可达（mousemove 收不到 / click 触发不了元素自身 onclick / 连子 iframe 内部按钮都会被
+        // 穿透抓取上报），所以面板 DOM 只要长在被测页里就必然「被抓成拾取元素 + 停止按钮点不动」。
+        // 面板改由 RolePickerPanelHost 开在独立 BrowserContext（独立窗口 + 独立 Renderer 主线程）。
+        // 被测页只保留与面板 UI 无关的拾取会话态清理。
         pickerEval(page, RolePickerScripts.CLEAR_PICKER_STATE_JS + RolePickerScripts.STOP_SESSION_ON_JS);
-        // 把关联的 nls 文件路径暴露给面板（标题展示 files=...），并在导航重建后依然可用。
-        pickerEval(page, RolePickerScripts.SET_NLS_FILES_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_FILES, nlsFiles));
-        // context 级初始化脚本：①面板引导 + 面板重建（任意页面/导航自动执行）；
-        // ②门控拾取脚本（会话开关打开时每个新文档自动注入 nls + 重挂拾取监听——
-        //   "页面怎么变都能拾取"从此由浏览器原生保证，替代手动重挂/自愈兜底的主路径）。
-        registerContextInitScripts(ctx, nlsReverseJson);
-        // addInitScript 只对注册后的【新文档】生效：当前已加载文档立即补执行一次面板脚本。
-        pickerEval(page, RolePickerScripts.PANEL_SCRIPT);
+        // 注：ENABLE_PANEL_JS / PANEL_SCRIPT / SET_NLS_FILES_JS 不再注入被测页（面板已搬走，见 RolePickerPanelHost）。
         final AtomicReference<Page> current = new AtomicReference<>(page);
         // 会话级"是否处于拾取中"状态：跨页面跟随 / 导航 / 关闭回退都以此为权威依据，
         // 驱动面板切换控件显示 ⏹ 停止（而不是每次都重置成 ▶ 开始）。
@@ -212,9 +205,14 @@ public final class RolePickerPanelController {
         // （__roleOnUrlChanged::，gate-init.js 的 pushState/popstate 自愈钩子）时反查本会话并即时刷新页类，
         // 补齐 History API 导航不触发 onFrameNavigated 的空档。
         RolePickerPageTracker.bindContext(ctx, pc);
-        // 把根页类名暴露给面板标题展示（新页面在 followPage 里设置），并持久化以便整页重建后恢复。
-        pickerEval(page, RolePickerScripts.SET_PAGE_NAME_AND_RESET_INSTANCE_JS,
-                RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, pageClassName));
+        // 开启面板独立窗口（内部已把页面类名与 nls 文件名写进面板 UI）。
+        // 面板窗口不可用时直接终止会话：没有 UI 的假会话会让用户无从开始/停止，比直接报错更糟。
+        if (RolePickerPanelHost.open(page, pageClassName, nlsFiles, cmdQueue, javaPickBySig) == null) {
+            log.error("[picker] panel window unavailable; aborting picker session (no panel UI to operate).");
+            PageDebugControl.markPaused(false);
+            PageDebugControl.markCodegenActive(false);
+            return;
+        }
         // 命令桥+拾取桥+控制台桥：context 一次注册，所有当前与未来页面共享（替代逐页 exposeFunction）。
         registerContextBridges(ctx, cmdQueue, javaPickBySig);
         registerPopupFollow(pc, page, null);
@@ -293,17 +291,28 @@ public final class RolePickerPanelController {
                     continue;
                 }
                 if (ev.page != null && ev.page.isClosed()) continue;   // 页面已关闭：丢弃其命令
-                current.set(ev.page);
+                // 【面板独立窗口】面板 context 挂的是同一条 cmdQueue，故面板按钮的命令也会到这里，
+                // 但面板页绝不能被当成"当前被测页"——否则 start/stop/生成 会执行到面板页上。
+                // 故：面板页发来的命令只取命令内容，current 仍指向真实被测页。
+                if (ev.page == null || ev.page != RolePickerPanelHost.page()) {
+                    current.set(ev.page);
+                }
                 String cmd = ev.cmd;
                 // 每次开始拾取前，把浏览器真实打开的页面（context.pages()）与内存跟踪表对齐：
                 // 任何在 stop→再 start 之间、或 onPage/onPopup/followPage 因异常漏登记的打开页面都会被补登，
                 // 确保"停止后再点开始"不会遗漏某页（表现为点了开始却拾取不了）。
                 if (RolePickerConstants.CMD_START.equals(cmd)) {
-                    reconcileTrackedPages(pc, ev.page);
-                    // 【修复"开始拾取后（尤其新页面/导航后）没有面板"】reconcile 只对【漏登记】页面注入面板；
-                    // 已登记页面若其 origin 上曾关闭过面板（localStorage 墓碑 __rolePanelEnabled='0'），
-                    // 新文档的 bootstrap 会早退、面板不再重建（见 panel-bootstrap-script.js 的门控修复）。
-                    // 开始拾取意味着用户要用面板，故对当前页显式强制使能并重建（幂等）。
+                    // 【加固】开始拾取的前置对齐在下方命令 try-catch（307 行）之外；reconcileTrackedPages
+                    // 内唯一未自护的调用是 trigger.context().pages()，一旦 context 瞬态抖动抛异常，
+                    // 会撕裂主循环 → finally 关面板（用户表现："点开始拾取，面板立即关闭、无元素"）。
+                    // 此处单独兜底：reconcile 失败仅降级继续会话，绝不关面板。
+                    try {
+                        reconcileTrackedPages(pc, ev.page);
+                    } catch (Exception reconcileEx) {
+                        log.warn("[picker] start pre-processing reconcile failed, degraded to keep session alive: {}", reconcileEx.getMessage());
+                    }
+                    // ensurePanelVisible 内部已有 try-catch（导航瞬态失败仅记 debug），不会抛；
+                    // 即便上面的 reconcile 失败，也要确保当前页面板被强制使能/重建（幂等），使"点开始拾取"稳健生效。
                     ensurePanelVisible(ev.page);
                 }
                 PickerResult r;
@@ -315,7 +324,9 @@ public final class RolePickerPanelController {
                     // 此处捕获后降级为 CONTINUE：若该命令是 stop 则 active 已被复位（runPickerCommand 在 evaluate 前先置 active.get()=false），
                     // 会话继续但不会再拾取；其余命令异常仅告警不中断。
                     log.warn("[picker] failed to handle command '{}' (degraded to keep the session alive): {}", cmd, cmdEx.getMessage());
-                    if (RolePickerConstants.CMD_STOP.equals(cmd)) setPickMode(anyLivePage(pageNames), PickMode.IDLE, pageNames);
+                    if (RolePickerConstants.CMD_STOP.equals(cmd)) {
+                        // V2：不再向面板推送 JS 拾取模式字符串（PickMode 已退役）；active=false 经 syncPanelToBrowser 驱动面板按钮态。
+                    }
                     r = new PickerResult(PickerAction.CONTINUE, null, null, "命令 " + cmd + " 执行异常：" + cmdEx.getMessage());
                 }
                 if (r.action == PickerAction.ABORT) {
@@ -329,42 +340,34 @@ public final class RolePickerPanelController {
                 }
                 if ((r.pageClassByPage != null && !r.pageClassByPage.isEmpty())
                         || (r.stepByPage != null && !r.stepByPage.isEmpty())) {
-                    // 多实例：把"合并后的全部页面代码"填充到每一个被跟踪页面的面板，
-                    // 避免只在当前页（如新页）显示、而默认页面板留空（之前"默认页没生成代码"的根因）。
-                    for (Page p : pageNames.keySet()) {
-                        if (p != null && !p.isClosed()) {
-                            // 【逐页容错】任一页处于跳转 / 跨域瞬态失败时不得影响其它页回填（与即时生成同处理）。
-                            try {
-                                fillCode(p, r.pageClassByPage, r.stepByPage, r.assertByPage, r.statusMsg);
-                            } catch (Exception pEx) {
-                                log.debug("[picker] result fill skipped on a transient page: {}", pEx.getMessage());
-                                RolePickerQuiet.ignore("RolePickerPanelController#resultFill", pEx);
-                            }
-                            // 封装为步骤后：在当前命令页精准跳转到目标 step（切步骤 Tab + 激活子 Tab + 选中高亮）；
-                            // 仅命令页执行，避免多页都跳；window.__pendingJump 未设置时 __afterFillJump 直接返回。
-                            if (p.equals(page)) {
-                                try {
-                                    pickerEval(p, RolePickerScripts.INVOKE_AFTER_FILL_JUMP_JS);
-                                } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
-                            }
-                        }
+                    // 【面板独立窗口】面板全局只有一份（独立窗口），不再"逐页各填一份"——
+                    // 原先的多实例逐页填充是为注入式面板服务的（每个被测页各有一份面板 DOM，
+                    // 不逐页填就会出现"默认页面板留空"）。面板搬走后只需回填一次。
+                    try {
+                        fillCode(page, r.pageClassByPage, r.stepByPage, r.assertByPage, r.statusMsg);
+                    } catch (Exception pEx) {
+                        log.debug("[picker] result fill skipped: {}", pEx.getMessage());
+                        RolePickerQuiet.ignore("RolePickerPanelController#resultFill", pEx);
                     }
+                    // 封装为步骤后精准跳转到目标 step（切步骤 Tab + 激活子 Tab + 选中高亮）；
+                    // window.__pendingJump 未设置时 __afterFillJump 直接返回。
+                    try {
+                        RolePickerPanelHost.eval(RolePickerScripts.INVOKE_AFTER_FILL_JUMP_JS);
+                    } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
                 } else {
                     setStatus(current.get(), r.statusMsg);
                 }
             }
         } finally {
             PageDebugControl.markPaused(false); // ③联动：面板会话结束，清除共享暂停态信号
-            // 关闭开关并移除面板（撤销 docked 预留的右侧空间）：写墓碑 '0'（而非 remove），
-            // 使 context 级引导注入脚本（无法撤销）在之后的导航中自行退出、不再重建面板。
-            try { pickerEval(page, RolePickerScripts.DISABLE_PANEL_JS); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
+            PageDebugControl.markCodegenActive(false); // 同步清除 codegen 活跃信号（恢复原生 pause 能力）
+            // 清掉被测页的拾取落盘态（与面板 UI 无关，属会话态收尾）。
             try { pickerEval(page, RolePickerScripts.REMOVE_PICK_STATE_JS); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
-            // 多实例：可能有多个页面各自带面板（默认页 + 若干弹窗），逐一关闭，避免残留。
-            closePanel(page);
-            for (Page p : openedPages) {
-                try { if (p != null && !p.isClosed()) closePanel(p); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
-            }
-            if (current.get() != page) closePanel(current.get());
+            // 【面板独立窗口】面板不再是"每个被测页各一份 DOM"，而是唯一的独立窗口。
+            // 原来的 DISABLE_PANEL_JS 墓碑（供无法撤销的 context 级引导脚本退出）与逐页 closePanel
+            // （撤销 docked 右侧预留空间）均已无意义，改为由 RolePickerPanelHost 统一关闭面板页
+            // 及其 BrowserContext，避免遗留一个独立窗口。
+            RolePickerPanelHost.close();
             // 关闭面板时一并关闭会话期间新开出的页面（弹窗/新标签页），仅保留最初的根页面。
             for (Page p : openedPages) {
                 try { if (p != null && !p.isClosed()) p.close(); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelController", ignore); }
@@ -391,11 +394,21 @@ public final class RolePickerPanelController {
      */
     private static void ensurePanelVisible(Page page) {
         if (page == null || page.isClosed()) return;
+        // 面板现住在独立窗口（RolePickerPanelHost），与被测页无关；这里只保留
+        // "面板 DOM 意外丢失则重建"的自愈，被测页不再承担任何面板注入。
+        if (!RolePickerPanelHost.isAlive()) return;
         try {
-            pickerEval(page, RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
-            pickerEval(page, RolePickerScripts.PANEL_SCRIPT);
+            // 走面板自带的幂等自愈入口（__roleEnsurePanel：缺 DOM 才 build()，随后重渲染已拾元素），
+            // 而不是重跑整套 PANEL_SCRIPT —— 后者会重复执行自举逻辑；且面板页不再有"导航后重建"的语义。
+            Object ensured = RolePickerPanelHost.evalSoft(
+                    "() => { try { if (window.__roleEnsurePanel) { window.__roleEnsurePanel(); } "
+                            + "if (window.__renderPicks) { window.__renderPicks(); } } catch (e) {} "
+                            + "return !!document.getElementById('__rolePanel'); }");
+            if (!Boolean.TRUE.equals(ensured)) {
+                RolePickerPanelHost.eval(RolePickerScripts.PANEL_SCRIPT);
+            }
         } catch (Exception e) {
-            log.debug("[picker] panel re-enable skipped (page may still be navigating): {}", e.getMessage());
+            log.debug("[picker] panel re-enable skipped: {}", e.getMessage());
         }
     }
 
@@ -948,6 +961,9 @@ public final class RolePickerPanelController {
                     // 重灌后再次作废 ETag，确保文档真正就绪后 idle 主循环仍会确定性重写一次，
                     // 避免"提前写旧文档、新文档收不到"的竞态（修复回灌慢/偶发丢元素）。
                     RolePickerPanelSync.syncPanelToBrowser(page, null, javaPickBySig);
+                    // V2：导航回灌也经 CDP-push 下发 Java 权威 steps + nls 反向表（取代 applyPickState 的浏览器态读回），
+                    // 保证新文档的步骤清单展示与弹窗页 i18n key 反查不丢。
+                    RolePickerPanelSync.syncPanelSteps(page, ctx.sealedSteps, ctx.nlsReverseJson, ctx.nlsFiles);
                     RolePickerPanelSync.invalidateSync(page);
                     // 导航后重渲染面板列表并滚动到底部，确保已恢复元素可见（修复"URL 变化后元素看不见"）。
                     // 【必须用短超时】这是"每轮/每次导航都会重做、丢掉无害"的显示层动作；弹窗/跨域页在导航后常
@@ -1070,14 +1086,12 @@ public final class RolePickerPanelController {
                                     log.warn("[picker][nav] cross-origin re-injection retry still failed (ignorable during navigation): {}", startEx2.getMessage());
                                 }
                             }
-                            // 跨域同页跳转：面板脚本(panel-core)经 context 级 addInitScript 已无条件注入，但其显示门禁
-                            // localStorage.__rolePanelEnabled 因 origin 隔离读不到、window.__rolePanelForce 随旧文档销毁丢失
-                            // → 面板不显示（有蓝框能拾取却看不到已拾列表）。此处显式置位兜底开关确保面板显示。
-                            // 【必须 soft】本方法跑在 Playwright 事件派发线程上，且 pickerEval 是"持页锁等待"：
-                            // 用 10s 默认超时会让新文档/慢页把事件派发与面板回灌一起排队（现场：跨域新页连出两个
-                            // 10s 空档，用户表现为"已拾元素回灌很慢"）。幂等且失败可重做，故一律走 2s 软超时。
+                            // 【面板独立窗口】面板显示门禁现在只存在于面板窗口：面板文档是独立源，
+                            // localStorage.__rolePanelEnabled 读不到，故 RolePickerPanelHost#open 已用
+                            // window.__rolePanelForce 兜底置位。此处的兜底随之改为作用于面板窗口；
+                            // 面板页只有面板 UI，evaluate 为毫秒级，不再有"新文档把面板回灌排队"的问题。
                             try {
-                                pickerEvalSoft(page, RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
+                                RolePickerPanelHost.evalSoft(RolePickerScripts.PANEL_FORCE_AND_ENABLE_JS);
                             } catch (Exception ignorePanel) { RolePickerQuiet.ignore("RolePickerPanelController#removePanel", ignorePanel); }
                         }
                     }

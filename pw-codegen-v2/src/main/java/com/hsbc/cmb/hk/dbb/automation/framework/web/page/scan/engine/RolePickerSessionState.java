@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickMode;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.RoleEntry;
 
 /**
@@ -32,7 +31,6 @@ final class RolePickerSessionState {
     static final Map<BrowserContext, LinkedHashMap<String, RoleEntry>> CTX_PICK_STATES =
             new ConcurrentHashMap<>();
     static final Set<BrowserContext> CTX_BRIDGED = Collections.newSetFromMap(new ConcurrentHashMap<>());
-    static final Map<BrowserContext, PickMode> CTX_PICK_MODES = new ConcurrentHashMap<>();
     static final Map<BrowserContext, java.util.Set<Page>> CTX_FRAMEWORK_CLOSED = new ConcurrentHashMap<>();
     static final Set<BrowserContext> CTX_PANEL_SCRIPTED = Collections.newSetFromMap(new ConcurrentHashMap<>());
     static final Map<BrowserContext, String> CTX_PICKER_NLS = new ConcurrentHashMap<>();
@@ -86,7 +84,6 @@ final class RolePickerSessionState {
         CTX_CMD_QUEUES.remove(ctx);
         CTX_PICK_STATES.remove(ctx);
         CTX_BRIDGED.remove(ctx);
-        CTX_PICK_MODES.remove(ctx);
         CTX_FRAMEWORK_CLOSED.remove(ctx);
         // CT2-09：此前遗漏的两张「按 context」Map
         CTX_PANEL_SCRIPTED.remove(ctx);
@@ -137,7 +134,6 @@ final class RolePickerSessionState {
         CTX_CMD_QUEUES.clear();
         CTX_PICK_STATES.clear();
         CTX_BRIDGED.clear();
-        CTX_PICK_MODES.clear();
         CTX_FRAMEWORK_CLOSED.clear();
         LAST_PICK_ORIGIN.clear();
         // CT2-09：补齐此前遗漏的三张静态 Map（面板已注入标记 / picker 语言 / 强制启动时间戳）。

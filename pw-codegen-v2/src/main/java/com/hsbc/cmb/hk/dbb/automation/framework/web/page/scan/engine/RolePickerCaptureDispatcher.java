@@ -21,6 +21,13 @@ final class RolePickerCaptureDispatcher {
 
     void onInspect(RolePickerCdpSession session, JsonObject inspectParams) {
         Page page = session.page();
+        // 【面板隔离·架构铁律】面板是独立 BrowserContext/Page（RolePickerPanelHost），不在被 inspect 的
+        // frame 树中，绝不应成为拾取元素。任何来源页是面板页的 inspect 事件一律丢弃，
+        // 对齐"独立窗口"架构（Electron 承载 React UI 的等价隔离原则）。
+        if (RolePickerPanelHost.isAlive() && RolePickerPanelHost.page() == page) {
+            log.debug("[picker][cdp] dropping inspect event from the panel window (never a pick target).");
+            return;
+        }
         RolePickerContext ctx = RolePickerPageTracker.contextFor(page.context());
         if (ctx == null) {
             log.warn("[picker][cdp] no active picker context for page {}; dropping inspect event.", page.url());

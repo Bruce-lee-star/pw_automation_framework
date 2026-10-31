@@ -259,9 +259,16 @@ final class RolePickerPanelSync {
                 }
             }
         }
+        // 【面板独立窗口】回灌目标改为面板窗口：面板是唯一的 UI 宿主，且跑在<b>独立 Renderer 主线程</b>上，
+        // 不再与被测页（HSBC 这类重页面）争抢 —— 这正是日志里满屏 pickerEval timed out after 2000ms 的根因。
+        // ETag 也随之改以面板页为键（面板全局唯一，聚合所有被测页的拾取）。
+        // 面板窗口优先；未开启时（如直接调 start(Page, …) 而未开面板）回退到传入页面，
+        // 行为与改造前一致，保证该独立入口的既有契约不受影响。
+        Page target = RolePickerPanelHost.page();
+        if (target == null) target = page;
         try {
             String newSig = sig.toString();
-            String prev = LAST_SYNC_SIG.get(page);
+            String prev = LAST_SYNC_SIG.get(target);
             if (newSig.equals(prev)) return;
             // 只在"确实变了、要写回"时输出一条 INFO（空闲轮次在上一行就 return 了，不再刷屏）。
             if (log.isInfoEnabled()) {
@@ -279,13 +286,43 @@ final class RolePickerPanelSync {
                     .encodeToString(delJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             // 【必须用短超时】面板回灌是"每轮都会重做、丢掉无害"的幂等动作；若沿用 30s 默认超时，页面在
             // 导航瞬间抖动会把同一轮的关键动作（页类刷新、计数器垫高、监听重挂）一起卡住（实测 30s 停摆）。
-            RoleElementPicker.pickerEvalSoft(page, RolePickerScripts.SYNC_PANEL_TO_BROWSER_JS,
+            RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.SYNC_PANEL_TO_BROWSER_JS,
                     java.util.Arrays.asList(syncJsonB64, syncDelB64));
             // 【修复 ETag 毒化】必须在浏览器侧写回成功后才记签名：否则写回失败时签名已被标为"已同步"，
             // 后续相同状态永不重投，面板便再也不更新（表现为"点了元素、面板列表不刷新"）。
-            LAST_SYNC_SIG.put(page, newSig);
+            LAST_SYNC_SIG.put(target, newSig);
         } catch (Exception syncE) {
             try { log.warn("[picker] failed to sync the panel to the browser: {}", syncE.getMessage()); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
+        }
+    }
+
+    /**
+     * 【V2·面板态 CDP-push】把 Java 权威「步骤清单（sealedSteps，含 closeCurrentPage 等页面级 op）+ nls 反向表」
+     * 经 CDP 合并进目标文档的 window.__steps / window.__nls*，取代原 applyPickState 的浏览器态读回式恢复。
+     * steps 采用「本地非空优先」合并（脚本内），避免覆盖本页进行中当轮；nls 反向表保证弹窗页 i18n 元素的 key 反查不丢。
+     * active 激活态由调用方的 {@link RolePickerScripts#SET_PICK_ACTIVE_AND_RENDER_JS} 单独推送（本方法不触碰）。
+     * 失败/超时无损（下一轮与面板自举都会兜底），故用软超时，绝不占住事件线程。
+     */
+    static void syncPanelSteps(Page page, List<?> sealedSteps, String nlsReverseJson, String[] nlsFiles) {
+        if (page == null || page.isClosed()) return;
+        // 【面板独立窗口】steps / nls 反向表均为面板 UI 侧数据，回灌目标为面板窗口；
+        // 未开启面板窗口时回退到传入页面（保持该入口的既有行为）。
+        Page target = RolePickerPanelHost.page();
+        if (target == null) target = page;
+        try {
+            String stepsB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(GSON.toJson(sealedSteps == null ? java.util.Collections.emptyList() : sealedSteps)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String nlsB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString((nlsReverseJson == null ? "{}" : nlsReverseJson)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String filesB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(GSON.toJson(nlsFiles == null ? new String[0] : nlsFiles)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            RoleElementPicker.pickerEvalSoft(target, RolePickerScripts.SYNC_STEPS_TO_BROWSER_JS,
+                    java.util.Arrays.asList(stepsB64, nlsB64, filesB64));
+        } catch (Exception syncE) {
+            try { log.warn("[picker] failed to sync steps to the browser: {}", syncE.getMessage()); } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPanelSync", ignore); }
         }
     }
 

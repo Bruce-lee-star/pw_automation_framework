@@ -288,14 +288,13 @@ final class RolePickerPageTracker {
             pageNames.put(p, cls);
             if (!openedPages.contains(p)) openedPages.add(p);
             // 暴露页面类名 + 开启面板开关（与 openPanel/followPage 一致）
+            // 【面板独立窗口】面板已搬到独立窗口（RolePickerPanelHost），被测页不再注入任何面板脚本：
+            // CDP 探针实测 inspect 期间被测页 frame 树内指针事件一律不可达，注入式面板必然
+            // 「被抓成拾取元素 + 停止按钮点不动」。此处只保留与面板 UI 无关的页面类名登记。
             if (soft) {
                 pickerEvalSoft(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
-                pickerEvalSoft(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
-                pickerEvalSoft(p, RolePickerScripts.PANEL_SCRIPT);   // 软超时重建当前已加载文档的面板
             } else {
                 pickerEval(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
-                pickerEval(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
-                pickerEval(p, RolePickerScripts.PANEL_SCRIPT);   // 立即重建当前已加载文档的面板
             }
             snapshots.put(p, RoleElementPicker.readPickStateJson(p));
             log.info("[picker][reconcile] back-registered a missed page, now pickable: {} -> {}", p.url(), cls);
@@ -317,6 +316,8 @@ final class RolePickerPageTracker {
         if (trigger == null || trigger.isClosed()) return;
         for (Page p : trigger.context().pages()) {
             if (p == null || p.isClosed()) continue;
+            // 面板是独立窗口（RolePickerPanelHost），绝不登记为可拾取页（否则会被 cmdStart 开 inspect、点面板拾自身）。
+            if (RolePickerPanelHost.isAlive() && RolePickerPanelHost.page() == p) continue;
             if (!ctx.pageNames.containsKey(p)) {
                 ensurePageTracked(ctx, p, true);
             }
@@ -403,7 +404,7 @@ final class RolePickerPageTracker {
                 if (openerState != null && !openerState.isEmpty()) {
                     // 【必须用软超时】本方法跑在 Playwright 事件线程上，而状态搬运已由【文档起始自举】承担；
                     // 这里只补 nls 与整态兜底，超时即放弃（下一轮与自举都会兜底），绝不占住事件线程 10s。
-                    RoleElementPicker.applyPickStateSoft(newPage, openerState, nlsReverseJson, nlsFiles);
+                    RolePickerPanelSync.syncPanelSteps(newPage, ctx.sealedSteps, nlsReverseJson, nlsFiles);
                 }
             } catch (Exception applyEx) {
                 log.warn("[picker] applyPickState into the followed page failed (continuing with library/panel injection): {}", applyEx.getMessage());
@@ -438,6 +439,9 @@ final class RolePickerPageTracker {
             if (sessionActive) {
                 try { pickerEvalSoft(newPage, RolePickerScripts.SET_PICK_ACTIVE_AND_RENDER_JS); }
                 catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#reactivate", ignore); }
+                // 新页同样要装 ESC 停止热键：它是 inspect 期间唯一可达的控制通道（指针事件被浮层吞掉）。
+                try { pickerEvalSoft(newPage, RolePickerScripts.INSTALL_STOP_HOTKEY_JS); }
+                catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#stopHotkey", ignore); }
             }
             // 注：面板使能 + PANEL_SCRIPT + 拾取库注入（含"跨源 localStorage 隔离"的开关/__rolePanelForce 兜底）
             // 已上移并收敛到 injectPanelAndLib（幂等软超时 + 一次性 load 兜底），此处不再重复，避免双份逻辑与
@@ -470,9 +474,8 @@ final class RolePickerPageTracker {
         if (p == null || p.isClosed()) return false;
         boolean ok = false;
         try {
+            // 【面板独立窗口】不再向被测页注入面板脚本（面板已搬至独立窗口），仅登记页面类名。
             pickerEvalSoft(p, RolePickerScripts.SET_PAGE_NAME_JS, RolePickerScripts.args(RolePickerConstants.STATE_KEY_PAGE_NAME, cls));
-            pickerEvalSoft(p, RolePickerScripts.ENABLE_PANEL_JS + RolePickerScripts.SET_PANEL_FORCE_JS);
-            pickerEvalSoft(p, RolePickerScripts.PANEL_SCRIPT);
             ok = true;
         } catch (Exception ignore) { RolePickerQuiet.ignore("RolePickerPageTracker#injectPanel", ignore); }
         if (sessionActive) {

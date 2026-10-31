@@ -39,7 +39,9 @@ public final class RolePickerScripts {
     // A. 面板门控 + 合并去重键（最基础，被后续合并脚本广泛引用，必须前置）
     // =====================================================================
 
-    public static final String PANEL_BOOTSTRAP_SCRIPT = loadScript("panel-bootstrap-script.js");
+    // 【已移除】PANEL_BOOTSTRAP_SCRIPT（panel-bootstrap-script.js）：它是把面板注入【被测页】的
+    // context 级自举脚本（门控 localStorage.__rolePanelEnabled + __rolePickSessionOn）。
+    // 面板已搬到独立窗口（RolePickerPanelHost），保留会误导后人以为面板仍注入被测页。
     public static final String MERGE_KEY_SHIM = loadScript("merge-key-shim.js");
 
     // =====================================================================
@@ -69,17 +71,12 @@ public final class RolePickerScripts {
     //    SET_PANEL_FORCE_JS→PANEL_FORCE_AND_ENABLE；SET_NLS_AND_SESSION 引用 START_SCRIPT 已在 B）
     // =====================================================================
 
-    /** 开启面板（墓碑门控未置位时强制置 1）。 */
-    public static final String ENABLE_PANEL_JS = loadScript("enable-panel-js.js");
-
-    /** 关闭面板（墓碑门控复位为 0）。 */
-    public static final String DISABLE_PANEL_JS = loadScript("disable-panel-js.js");
+    // 【已移除】ENABLE_PANEL_JS / DISABLE_PANEL_JS：这两个开关是为"注入到被测页的面板"服务的
+    // （用 localStorage 墓碑控制 context 级引导脚本是否重建面板）。面板搬到独立窗口后，
+    // 面板的显隐由窗口生命周期决定，这套墓碑门控随之失效且不再有调用点。
 
     /** 停止时清除会话开关（阻断门控脚本在后续新文档自启拾取）。 */
     public static final String STOP_SESSION_ON_JS = loadScript("stop-session-on-js.js");
-
-    /** 停止时清除会话开关 + 复位面板控件状态机（wanted/stopped），随后拼接 STOP_SCRIPT。 */
-    public static final String STOP_SESSION_CLEANUP_JS = loadScript("stop-session-cleanup-js.js");
 
     /** 清除持久化拾取态（__rolePickState）。 */
     public static final String REMOVE_PICK_STATE_JS = loadScript("remove-pick-state-js.js");
@@ -112,24 +109,14 @@ public final class RolePickerScripts {
     /** 写入 NLS 文件清单（nlsFiles 经 Playwright 序列化后赋值给 window.__nlsFiles）。 */
     public static final String SET_NLS_FILES_JS = loadScript("set-nls-files-js.js");
 
-    // =====================================================================
-    // D. 生命周期注入（START_INJECT_JS 引用 START_SCRIPT，已在 B；其余独立）
-    // =====================================================================
-
-    /** start() 拾取注入脚本：会话置位 + nls 反查表 + 重挂监听（START_SCRIPT / __roleGatedStart）+ 录制根容器。 */
-    public static final String START_INJECT_JS = concat(loadScript("start-inject-js-head.js"), START_SCRIPT, loadScript("start-inject-js-tail.js"));
-
     /**
-     * 把拾取会话状态注入目标页面（不依赖 window.opener，兼容 rel="noopener" / 跨域弹窗）。
-     * 实参 a: {nlsFiles, nlsReverseJson, stateJson}；后两者为 JSON 字符串，脚本内 JSON.parse 复原。
+     * 【V2·面板态 CDP-push】把 Java 权威「步骤清单 + nls 反向表」合并进目标文档的 window.__steps / window.__nls*，
+     * 取代原 applyPickState（浏览器态读回式恢复）。实参 a: [sealedStepsB64, nlsReverseJsonB64, nlsFilesB64]；
+     * steps 取自 Java 权威态 ctx.sealedSteps（"停止"时缓存的浏览器 __steps，含 closeCurrentPage 等页面级 op），
+     * 不再依赖 readPickStateJson 读回浏览器易变快照；nls 反向表仍由原 ctx.nlsReverseJson / ctx.nlsFiles 经 CDP 下发，
+     * 保证弹窗页 i18n 元素的 key 反查能力不丢。__steps 采用「本地非空优先」合并（见脚本），避免覆盖本页已拾步骤。
      */
-    public static final String APPLY_PICK_STATE_JS = loadScript("apply-pick-state-js.js");
-
-    /** 【文档起始自举】把 Java 权威拾取态**只合并**进目标文档（不置 active、不搬 nls），供新文档自拉取使用。 */
-    public static final String MERGE_PICK_STATE_JS = loadScript("merge-pick-state-js.js");
-
-    /** 【文档起始自举】context 级 init 脚本：每个新顶层文档在文档起始调用一次 __rolePullPickState 拉取权威态。 */
-    public static final String PULL_STATE_ON_DOC_START_JS = loadScript("pull-state-on-doc-start.js");
+    public static final String SYNC_STEPS_TO_BROWSER_JS = loadScript("sync-steps-to-browser-js.js");
 
     /** 移除常驻面板：摘除点击/悬停/按键/焦点/滚动监听，复位 active，清会话开关并写面板墓碑（阻断门控自启）。 */
     public static final String CLOSE_PANEL_JS = loadScript("close-panel-js.js");
@@ -147,6 +134,17 @@ public final class RolePickerScripts {
 
     /** 置拾取激活态并立即重渲染面板。 */
     public static final String SET_PICK_ACTIVE_AND_RENDER_JS = loadScript("set-pick-active-and-render-js.js");
+
+    /**
+     * 安装 ESC 停止热键（幂等）。
+     *
+     * <p>CDP 探针实测结论：{@code Overlay.setInspectMode(searchForNode)} 期间，被测页 frame 树内的
+     * <b>指针事件一律不可达</b>——主文档 mousemove 收不到、click 触发不了元素自身的 onclick、
+     * 且父 frame 的 inspect 会穿透子 iframe（连 iframe 内部的按钮都会被上报）。因此面板上的
+     * 「停止拾取」按钮在此期间的 click 必然被浮层吞掉 ⇒ 停止不了。
+     * 唯独<b>键盘事件</b>仍正常抵达文档（探针实测），故 ESC 是唯一确定可用的停止控制点。
+     */
+    public static final String INSTALL_STOP_HOTKEY_JS = loadScript("install-stop-hotkey-js.js");
 
     /** 触发面板重渲染（若存在）。 */
     public static final String RENDER_PICKS_JS = loadScript("render-picks-js.js");
@@ -219,14 +217,8 @@ public final class RolePickerScripts {
     /** 读取某 iframe 的 window.__rolePicks 原始 JSON 字符串（跨源 frame 经 Playwright 协议读取，不受 file:// 跨源限制）。 */
     public static final String READ_FRAME_PICKS_RAW_JS = loadScript("read-frame-picks-raw-js.js");
 
-    /** getPageOpsWithPage：读取浏览器侧 __steps 中带 op 的项并映射为 {pageClass, op}。 */
-    public static final String READ_OPS_JS = loadScript("read-ops-js.js");
-
     /** 读取「页面级操作」step（含 op 字段，如关闭页面），供生成 closeCurrentPage() 等步骤。 */
     public static final String READ_PAGE_OPS_JS = loadScript("read-page-ops-js.js");
-
-    /** 读取元素 step 序列并归一为 {pageClass, picks}（过滤掉含 op 的页面级操作 step）。 */
-    public static final String READ_STEPS_WITH_PAGE_JS = loadScript("read-steps-with-page-js.js");
 
     /** 导航恢复/激活后的运行时诊断快照（会话开关、激活态、三大监听是否注入）。 */
     public static final String NAV_DIAG_JS = loadScript("nav-diag-js.js");
@@ -286,9 +278,6 @@ public final class RolePickerScripts {
     // =====================================================================
     // I. waitForFunction 条件
     // =====================================================================
-
-    /** waitForFunction 条件：用户点击结束拾取（__pickDone 置位）。 */
-    public static final String WAIT_PICK_DONE_JS = loadScript("wait-pick-done-js.js");
 
     /** waitForFunction 条件：代码面板已关闭（__codePanelClosed 置位）。 */
     public static final String WAIT_CODE_PANEL_CLOSED_JS = loadScript("wait-code-panel-closed-js.js");

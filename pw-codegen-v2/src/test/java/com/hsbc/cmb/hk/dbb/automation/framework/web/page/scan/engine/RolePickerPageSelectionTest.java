@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.model.PickMode;
 import com.microsoft.playwright.Page;
 import org.junit.Test;
 
@@ -21,8 +20,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElement
  * 在"没有存活页面"的合法时刻（stop 命令、命令异常降级路径）会抛
  * {@link java.util.NoSuchElementException} —— 而该异常位于面板主循环内，
  * 会把异常升级成"点了停止却卡住/没反应"（主循环撕裂 → finally 静默关面板）。
- * 现统一改为 {@link RoleElementPicker#anyLivePage(Map)} + {@link RoleElementPicker#setPickMode}
- * 的 null 容忍契约。</p>
+ * 现统一改为 {@link RoleElementPicker#anyLivePage(Map)} 的 null 容忍契约。</p>
  *
  * <p>本模块测试类路径<b>没有 Mockito</b>（只有 JUnit），故用 {@link Proxy} 动态实现 {@link Page} 接口
  * 来伪造"存活/已关闭"两种页面。</p>
@@ -54,13 +52,6 @@ public class RolePickerPageSelectionTest {
         withLive.put(closed, "ClosedPage");
         withLive.put(live, "LivePage");
         assertSame("应返回那个仍存活的页面", live, RoleElementPicker.anyLivePage(withLive));
-    }
-
-    /** {@code setPickMode} 的 null 容忍契约：无存活页面时必须安全返回，不触碰 context / 静态表。 */
-    @Test
-    public void setPickMode_toleratesNullPage() {
-        RoleElementPicker.setPickMode(null, PickMode.IDLE, new ConcurrentHashMap<Page, String>());
-        RoleElementPicker.setPickMode(null, PickMode.MANUAL, null);
     }
 
     /** 用动态代理伪造 Page：只实现本测试用到的 isClosed/equals/hashCode/toString。 */
