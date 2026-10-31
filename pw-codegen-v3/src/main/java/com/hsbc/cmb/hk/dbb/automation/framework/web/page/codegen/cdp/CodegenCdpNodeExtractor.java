@@ -167,12 +167,7 @@ public final class CodegenCdpNodeExtractor {
                 function attrEsc(v) {
                     return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
                 }
-                /**
-                 * 可见性判定：hidden 属性、aria-hidden="true"、内联/计算样式 display:none / visibility:hidden 视为隐藏。
-                 * uniqueSel 只统计可见元素，避免隐藏副本（桌面/移动菜单并存等）破坏稳定属性候选的唯一性。                /**
-                 * 可见性判定：hidden 属性、aria-hidden="true"、内联/计算样式 display:none / visibility:hidden 视为隐藏。
-                 * uniqueSel 只统计可见元素，避免隐藏副本（桌面/移动菜单并存等）破坏稳定属性候选的唯一性。
-                 */
+                /** 可见性判定：hidden 属性、aria-hidden="true"、内联/计算样式 display:none / visibility:hidden 视为隐藏。 */
                 function isVisible(e) {
                     if (!e || e.nodeType !== 1) return false;
                     if (e.hidden) return false;
@@ -186,7 +181,9 @@ public final class CodegenCdpNodeExtractor {
                     }
                     return true;
                 }
-                                function uniqueSel(sel) {
+
+                /** 当前文档中唯一性校验：只统计可见元素（供 id 前缀/包含/组内索引兜底使用）。 */
+                function uniqueSel(sel) {
                     try {
                         if (!sel) return false;
                         var nodes = document.querySelectorAll(sel), n = 0;
@@ -194,6 +191,7 @@ public final class CodegenCdpNodeExtractor {
                         return n === 1;
                     } catch (e) { return false; }
                 }
+
                 function dynamicIdFallbackSel(id) {
                     var prefix = stableIdPrefix(id);
                     if (prefix) {
@@ -264,10 +262,49 @@ public final class CodegenCdpNodeExtractor {
                     if (out.length > 6) out.length = 6;
                     return out;
                 }
+                /** 可见匹配计数（唯一性之外，用于识别"一组元素"场景）。 */
+                function visibleCount(sel) {
+                    try {
+                        if (!sel) return 0;
+                        var nodes = document.querySelectorAll(sel), n = 0;
+                        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
+                        return n;
+                    } catch (e) { return 0; }
+                }
+
+                /** 组内索引：候选在父下同 tag 兄弟中的第 k 个（1 起），产出 {@code sel:nth-of-type(k)}；无父/无 tag 返回空串。 */
+                function groupIndexSel(sel, el) {
+                    var parent = el && el.parentElement;
+                    if (!parent || !el.tagName) return '';
+                    var tag = el.tagName.toLowerCase();
+                    var k = 0, sibs = parent.children || [];
+                    for (var i = 0; i < sibs.length; i++) {
+                        var c = sibs[i];
+                        if (c && c.nodeType === 1 && c.tagName && c.tagName.toLowerCase() === tag) {
+                            k++;
+                            if (c === el) return sel + ':nth-of-type(' + k + ')';
+                        }
+                    }
+                    return '';
+                }
+
+                /** 唯一或组内索引：候选可见唯一即用；可见不唯一（一组元素）时取组内索引并校验可见唯一，失败返回空串。 */
+                function uniqueOrGroup(sel, e) {
+                    if (uniqueSel(sel)) return sel;
+                    var cnt = visibleCount(sel);
+                    if (cnt > 1 && cnt <= 10) {
+                        var g = groupIndexSel(sel, e);
+                        if (g && uniqueSel(g)) return g;
+                    }
+                    return '';
+                }
+
                 /**
                  * 目标元素属性兜底（在结构链之前）：无 id / 动态 id 无法唯一时，先试
                  * {@code img[src$="文件名"]}、稳定 class token / class 双 token AND、稳定属性单→双→三组合 AND，
-                 * 每个候选都做唯一性校验——唯一才采用，否则返回空串交给 tag:nth-of-type 结构链。
+                 * 每个候选先做可见唯一性校验——唯一即采用；候选可见但不唯一（一组元素）时，
+                 * 退而取组内索引 {@code sel:nth-of-type(k)}（同 tag 兄弟序，仍做可见唯一校验），
+                 * 全部失败返回空串交给 tag:nth-of-type 结构链。
                  */
                 function attrFallbackSel(e) {
                     if (!e || e.nodeType !== 1) return '';
@@ -276,44 +313,51 @@ public final class CodegenCdpNodeExtractor {
                         var tail = srcTail(e.getAttribute && e.getAttribute('src'));
                         if (tail) {
                             var byTail = 'img[src$="' + attrEsc(tail) + '"]';
-                            if (uniqueSel(byTail)) return byTail;
+                            var s0 = uniqueOrGroup(byTail, e);
+                            if (s0) return s0;
                         }
                     }
                     var cls = (typeof e.className === 'string') ? e.className : '';
                     var toks = stableClassTokens(cls);
                     for (var i = 0; i < toks.length; i++) {
                         var byCls = t + '[class*="' + attrEsc(toks[i]) + '"]';
-                        if (uniqueSel(byCls)) return byCls;
+                        var s1 = uniqueOrGroup(byCls, e);
+                        if (s1) return s1;
                     }
                     // class 双 token AND：单 token 不唯一时，两个稳定 token 组合常能收敛。
                     for (var i = 0; i < toks.length && i < 4; i++) {
                         for (var j = i + 1; j < toks.length && j < 4; j++) {
                             var byCls2 = t + '[class*="' + attrEsc(toks[i]) + '"][class*="' + attrEsc(toks[j]) + '"]';
-                            if (uniqueSel(byCls2)) return byCls2;
+                            var s2 = uniqueOrGroup(byCls2, e);
+                            if (s2) return s2;
                         }
                     }
-                    // 跨属性 AND：稳定属性单→双→三组合（唯一才用），命中「class 随机 + 多属性唯一」场景。
+                    // 跨属性 AND：稳定属性单→双→三组合（唯一/组内索引才用），命中「class 随机 + 多属性唯一」场景。
                     var names = stableAttrs(e);
                     for (var i = 0; i < names.length; i++) {
                         var by1 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"]';
-                        if (uniqueSel(by1)) return by1;
+                        var s3 = uniqueOrGroup(by1, e);
+                        if (s3) return s3;
                     }
                     for (var i = 0; i < names.length; i++) {
                         for (var j = i + 1; j < names.length; j++) {
                             var by2 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"][' + names[j] + '="' + attrEsc(e.getAttribute(names[j])) + '"]';
-                            if (uniqueSel(by2)) return by2;
+                            var s4 = uniqueOrGroup(by2, e);
+                            if (s4) return s4;
                         }
                     }
                     for (var i = 0; i < names.length; i++) {
                         for (var j = i + 1; j < names.length; j++) {
                             for (var k = j + 1; k < names.length; k++) {
                                 var by3 = t + '[' + names[i] + '="' + attrEsc(e.getAttribute(names[i])) + '"][' + names[j] + '="' + attrEsc(e.getAttribute(names[j])) + '"][' + names[k] + '="' + attrEsc(e.getAttribute(names[k])) + '"]';
-                                if (uniqueSel(by3)) return by3;
+                                var s5 = uniqueOrGroup(by3, e);
+                                if (s5) return s5;
                             }
                         }
                     }
                     return '';
                 }
+
                 function siblingIndex(e) { var i = 0, s = e.previousElementSibling; while (s) { i++; s = s.previousElementSibling; } return i; }
                 // 绝对 XPath（结构 CSS 无法唯一时的兜底定位器）。shadow root 内返回空串：XPath 表达不了
                 // "穿透 shadow 边界"的路径，那种情况由 shadowHosts + CSS 负责。
