@@ -118,16 +118,28 @@ public final class CodegenCdpNodeExtractor {
                     if (p && p.tagName && p.tagName.toLowerCase() === 'label' && p.textContent.trim()) return p.textContent.trim();
                     return '';
                 }
+                // 动态/随机 id 识别（Radix、Headless UI、react-select、MUI、antd 等每次渲染随机），
+                // 命中即视为无稳定 id，降级 tag:nth-of-type 结构链或 role/name。保守前缀黑名单，不误伤稳定 id。
+                function isDynamicId(id) {
+                    if (!id || !id.length) return false;
+                    if (/^_R_/.test(id) || /_R_[A-Za-z0-9]{4,}_/.test(id)) return true;
+                    if (/:r\\d+:/.test(id)) return true;
+                    if (/^headlessui-/.test(id)) return true;
+                    if (/^react-select-/.test(id)) return true;
+                    if (/^mui-\\d+$/.test(id)) return true;
+                    if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
+                    return false;
+                }
                 function cssSel(e) {
                     if (!e || e.nodeType !== 1) return '';
-                    if (e.id) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
+                    if (e.id && !isDynamicId(e.id)) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
                     var parts = []; var n = e;
                     while (n && n.nodeType === 1 && parts.length < 6) {
                         var t = n.tagName.toLowerCase();
                         var i = 1, sib = n.previousElementSibling;
                         while (sib) { if (sib.tagName && sib.tagName.toLowerCase() === t) i++; sib = sib.previousElementSibling; }
                         parts.unshift(t + ':nth-of-type(' + i + ')');
-                        if (n.id) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
+                        if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
                         n = n.parentElement;
                     }
                     return parts.join(' > ');
@@ -229,9 +241,9 @@ public final class CodegenCdpNodeExtractor {
                         attrs: semanticAttrsOf(x, 10)
                     };
                 }
-                // 单层选择器段：id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。
+                // 单层选择器段：稳定 id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。
                 function segOf(n) {
-                    if (n.id) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+                    if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
                     var t = n.tagName.toLowerCase(), i = 1, sib = n.previousElementSibling;
                     while (sib) {
                         if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
@@ -282,6 +294,17 @@ public final class CodegenCdpNodeExtractor {
                 var el = this;
                 function esc(v) { return window.CSS ? CSS.escape(v) : String(v); }
                 function attrVal(v) { return String(v).replace(/"/g, '\\\\"'); }
+                // 动态/随机 id（Radix/Headless UI/react-select/MUI/antd 等）：不参与选择器，降级结构链
+                function isDynamicId(id) {
+                    if (!id || !id.length) return false;
+                    if (/^_R_/.test(id) || /_R_[A-Za-z0-9]{4,}_/.test(id)) return true;
+                    if (/:r\\d+:/.test(id)) return true;
+                    if (/^headlessui-/.test(id)) return true;
+                    if (/^react-select-/.test(id)) return true;
+                    if (/^mui-\\d+$/.test(id)) return true;
+                    if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
+                    return false;
+                }
                 function unique(sel) {
                     try { return sel && document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
                 }
@@ -294,7 +317,7 @@ public final class CodegenCdpNodeExtractor {
                         var i = 1, sib = n.previousElementSibling;
                         while (sib) { if (sib.tagName && sib.tagName.toLowerCase() === t) i++; sib = sib.previousElementSibling; }
                         parts.unshift(t + ':nth-of-type(' + i + ')');
-                        if (n.id) {
+                        if (n.id && !isDynamicId(n.id)) {
                             var withId = '#' + esc(n.id) + (parts.length > 1 ? ' > ' + parts.slice(1).join(' > ') : '');
                             if (unique(withId)) return withId;
                         }
@@ -306,7 +329,7 @@ public final class CodegenCdpNodeExtractor {
                 }
                 var t = (el.tagName ? el.tagName.toLowerCase() : '');
                 if (t !== 'iframe' && t !== 'frame') return cssStruct(el);
-                if (el.id) {
+                if (el.id && !isDynamicId(el.id)) {
                     var byId = '#' + esc(el.id);
                     if (unique(byId)) return byId;
                 }

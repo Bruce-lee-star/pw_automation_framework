@@ -80,10 +80,27 @@
         return '';
     }
 
-    /** 稳定 CSS 选择器（id 优先，否则 tag:nth-of-type 链，遇到 id 截断）。 */
+    /**
+     * 动态/随机 id 识别：此类 id 每次渲染都会变（Radix、Headless UI、react-select、MUI、antd 等），
+     * 直接落进 CSS 选择器会产出「录制时唯一、回放必挂」的定位器。命中即视为无稳定 id，
+     * 由调用方降级为 tag:nth-of-type 结构链或 role/name 定位。规则取保守前缀黑名单，避免误伤
+     * password / username 这类稳定 id。
+     */
+    function isDynamicId(id) {
+        if (!id || !id.length) return false;
+        if (/^_R_/.test(id) || /_R_[A-Za-z0-9]{4,}_/.test(id)) return true; // Radix: _R_kmub7m_ / dropdown-list-_R_kmub7m_
+        if (/:r\d+:/.test(id)) return true;                                // Radix v1/v2: :r1:
+        if (/^headlessui-/.test(id)) return true;    // Headless UI
+        if (/^react-select-/.test(id)) return true;  // react-select
+        if (/^mui-\d+$/.test(id)) return true;       // MUI: mui-12345
+        if (/^[a-z]+(-[a-z]+)*-\d{4,}$/.test(id)) return true; // 通用: 任意段前缀 + ≥4 位数字（antd 类）
+        return false;
+    }
+
+    /** 稳定 CSS 选择器（id 优先，否则 tag:nth-of-type 链，遇到稳定 id 截断）。 */
     function cssSel(e) {
         if (!e || e.nodeType !== 1) return '';
-        if (e.id) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
+        if (e.id && !isDynamicId(e.id)) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
         var parts = [];
         var n = e;
         while (n && n.nodeType === 1 && parts.length < 6) {
@@ -94,7 +111,7 @@
                 sib = sib.previousElementSibling;
             }
             parts.unshift(t + ':nth-of-type(' + i + ')');
-            if (n.id) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
+            if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
             n = n.parentElement;
         }
         return parts.join(' > ');
@@ -247,9 +264,9 @@
         };
     }
 
-    /** 单层选择器段：id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。 */
+    /** 单层选择器段：稳定 id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。 */
     function segOf(n) {
-        if (n.id) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+        if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
         var t = n.tagName.toLowerCase(), i = 1, sib = n.previousElementSibling;
         while (sib) {
             if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
