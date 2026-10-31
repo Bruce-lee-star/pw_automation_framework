@@ -133,16 +133,47 @@ public final class CodegenCdpNodeExtractor {
                 function cssSel(e) {
                     if (!e || e.nodeType !== 1) return '';
                     if (e.id && !isDynamicId(e.id)) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
+                    if (e.id) {
+                        var fb = dynamicIdFallbackSel(e.id);
+                        if (fb) return fb;
+                    }
                     var parts = []; var n = e;
                     while (n && n.nodeType === 1 && parts.length < 6) {
+                        if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
+                        if (n.id) {
+                            var pf = dynamicIdFallbackSel(n.id);
+                            if (pf) { parts.unshift(pf); break; }
+                        }
                         var t = n.tagName.toLowerCase();
                         var i = 1, sib = n.previousElementSibling;
                         while (sib) { if (sib.tagName && sib.tagName.toLowerCase() === t) i++; sib = sib.previousElementSibling; }
                         parts.unshift(t + ':nth-of-type(' + i + ')');
-                        if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
                         n = n.parentElement;
                     }
                     return parts.join(' > ');
+                }
+                // 动态 id 稳定前缀/包含选择器兜底（唯一才用）；无前缀/不唯一返回空串交给结构链
+                function stableIdPrefix(id) {
+                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,})/);
+                    return m ? m[1] : '';
+                }
+                function attrEsc(v) {
+                    return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
+                }
+                function uniqueSel(sel) {
+                    try { return sel && document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
+                }
+                function dynamicIdFallbackSel(id) {
+                    var prefix = stableIdPrefix(id);
+                    if (!prefix) return '';
+                    var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
+                    if (uniqueSel(byPrefix)) return byPrefix;
+                    var core = prefix.replace(/[-_]+$/, '');
+                    if (core) {
+                        var byCore = '[id*="' + attrEsc(core) + '"]';
+                        if (uniqueSel(byCore)) return byCore;
+                    }
+                    return '';
                 }
                 function siblingIndex(e) { var i = 0, s = e.previousElementSibling; while (s) { i++; s = s.previousElementSibling; } return i; }
                 // 绝对 XPath（结构 CSS 无法唯一时的兜底定位器）。shadow root 内返回空串：XPath 表达不了
@@ -244,6 +275,10 @@ public final class CodegenCdpNodeExtractor {
                 // 单层选择器段：稳定 id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。
                 function segOf(n) {
                     if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+                    if (n.id) {
+                        var fb = dynamicIdFallbackSel(n.id);
+                        if (fb) return fb;
+                    }
                     var t = n.tagName.toLowerCase(), i = 1, sib = n.previousElementSibling;
                     while (sib) {
                         if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
@@ -308,6 +343,26 @@ public final class CodegenCdpNodeExtractor {
                 function unique(sel) {
                     try { return sel && document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
                 }
+                function stableIdPrefix(id) {
+                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,})/);
+                    return m ? m[1] : '';
+                }
+                function attrEsc(v) {
+                    return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
+                }
+                // 动态 id 的稳定前缀/包含选择器兜底（唯一才用）：dropdown-list-_R_x_ → [id^="dropdown-list-"]
+                function dynamicIdFallbackSel(id) {
+                    var prefix = stableIdPrefix(id);
+                    if (!prefix) return '';
+                    var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
+                    if (unique(byPrefix)) return byPrefix;
+                    var core = prefix.replace(/[-_]+$/, '');
+                    if (core) {
+                        var byCore = '[id*="' + attrEsc(core) + '"]';
+                        if (unique(byCore)) return byCore;
+                    }
+                    return '';
+                }
                 function cssStruct(e) {
                     if (!e || e.nodeType !== 1) return '';
                     var parts = []; var n = e; var depth = 0;
@@ -321,6 +376,11 @@ public final class CodegenCdpNodeExtractor {
                             var withId = '#' + esc(n.id) + (parts.length > 1 ? ' > ' + parts.slice(1).join(' > ') : '');
                             if (unique(withId)) return withId;
                         }
+                        if (n.id) {
+                            var pf = dynamicIdFallbackSel(n.id);
+                            if (pf && parts.length === 1) return pf;
+                            if (pf) { var withPf = pf + (parts.length > 1 ? ' > ' + parts.slice(1).join(' > ') : ''); if (unique(withPf)) return withPf; }
+                        }
                         var chain = parts.join(' > ');
                         if (unique(chain)) return chain;
                         n = n.parentElement;
@@ -332,6 +392,10 @@ public final class CodegenCdpNodeExtractor {
                 if (el.id && !isDynamicId(el.id)) {
                     var byId = '#' + esc(el.id);
                     if (unique(byId)) return byId;
+                }
+                if (el.id) {
+                    var byPf = dynamicIdFallbackSel(el.id);
+                    if (byPf) return byPf;
                 }
                 var nm = el.getAttribute && el.getAttribute('name');
                 if (nm && nm.trim()) {

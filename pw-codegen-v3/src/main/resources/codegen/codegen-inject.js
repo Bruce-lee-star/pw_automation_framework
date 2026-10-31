@@ -97,13 +97,62 @@
         return false;
     }
 
-    /** 稳定 CSS 选择器（id 优先，否则 tag:nth-of-type 链，遇到稳定 id 截断）。 */
+    /**
+     * 动态 id 的稳定前缀：截掉随机夹心（Radix {@code _R_xxxx_}/ {@code :rN:}、数字后缀）后，
+     * 剩余部分在组件语义上稳定（如 {@code dropdown-list-_R_kmub7m_} → {@code dropdown-list-}）。
+     * 无稳定前缀时返回空串。
+     */
+    function stableIdPrefix(id) {
+        var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\d+:|-\d{4,})/);
+        return m ? m[1] : '';
+    }
+
+    function attrEsc(v) {
+        return String(v).replace(/["\\]/g, function (c) { return '\\' + c; });
+    }
+
+    /** 当前文档中唯一性校验（供 id 前缀/包含选择器兜底使用）。 */
+    function uniqueSel(sel) {
+        try { return sel && document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
+    }
+
+    /**
+     * 动态 id 的 CSS 兜底：优先稳定前缀 {@code [id^="…"]}（组件语义前缀，如 {@code dropdown-list-}），
+     * 前缀不唯一时再试包含 {@code [id*="…"]}（去尾部分隔符的核心词）。每个候选都做文档唯一性校验，
+     * 唯一才采用 —— 保证生成的选择器回放时命中且不歧义；全部不唯一则返回空串交给结构链兜底。
+     */
+    function dynamicIdFallbackSel(id) {
+        var prefix = stableIdPrefix(id);
+        if (!prefix) return '';
+        var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
+        if (uniqueSel(byPrefix)) return byPrefix;
+        var core = prefix.replace(/[-_]+$/, '');
+        if (core) {
+            var byCore = '[id*="' + attrEsc(core) + '"]';
+            if (uniqueSel(byCore)) return byCore;
+        }
+        return '';
+    }
+
+    /**
+     * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用），
+     * 否则 tag:nth-of-type 链（遇到稳定 id 或可用前缀收束）。
+     */
     function cssSel(e) {
         if (!e || e.nodeType !== 1) return '';
         if (e.id && !isDynamicId(e.id)) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
+        if (e.id) {
+            var fb = dynamicIdFallbackSel(e.id);
+            if (fb) return fb;
+        }
         var parts = [];
         var n = e;
         while (n && n.nodeType === 1 && parts.length < 6) {
+            if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
+            if (n.id) {
+                var pf = dynamicIdFallbackSel(n.id);
+                if (pf) { parts.unshift(pf); break; }
+            }
             var t = n.tagName.toLowerCase();
             var i = 1, sib = n.previousElementSibling;
             while (sib) {
@@ -111,7 +160,6 @@
                 sib = sib.previousElementSibling;
             }
             parts.unshift(t + ':nth-of-type(' + i + ')');
-            if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
             n = n.parentElement;
         }
         return parts.join(' > ');
@@ -264,9 +312,13 @@
         };
     }
 
-    /** 单层选择器段：稳定 id 优先，否则 tag:nth-of-type(k)（同级同 tag 中的序号）。 */
+    /** 单层选择器段：稳定 id 优先，动态 id 试稳定前缀（唯一才用），否则 tag:nth-of-type(k)。 */
     function segOf(n) {
         if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+        if (n.id) {
+            var fb = dynamicIdFallbackSel(n.id);
+            if (fb) return fb;
+        }
         var t = n.tagName.toLowerCase(), i = 1, sib = n.previousElementSibling;
         while (sib) {
             if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
