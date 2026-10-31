@@ -426,11 +426,12 @@
     }
 
     // 拾取开关：页面交互始终可用（拾取不再拦截鼠标事件），按钮只控制「是否把点到的元素加入 Elements」。
-    // 拾取态点它 = 停止拾取（动作仍录制）；非拾取态点它 = 开始拾取（每次开始 = 产物里的一步）。
+    // 拾取态点它 = 暂停拾取（动作仍录制）；非拾取态点它 = 开始拾取（每次开始 = 产物里的一步）。
     document.getElementById('btn-start').onclick = function () {
         send(inspectActive ? 'pause' : 'start');
     };
-    document.getElementById('btn-stop').onclick = function () { send('stop'); };
+    // v2.20：面板移除「停止」按钮 —— 定稿语义由「结束会话」承载（未定稿会先定稿），
+    // 避免两个按钮功能重叠；Java "stop" 命令保留（被测页控制条仍使用），此处不再绑定面板按钮。
     document.getElementById('btn-end-session').onclick = function () { send('endSession'); };
     document.getElementById('btn-group').onclick = function () {
         var ids = checkedIds();
