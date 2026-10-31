@@ -26,6 +26,20 @@
   </#switch>
 </#function>
 
+<#-- 失败分类徽章底色：按展示名反查（ErrorClassifier 内置分类；配置自定义类型走 default） -->
+<#function typeBg label>
+  <#switch label>
+    <#case "Timeout"><#return "#b45309">
+    <#case "Navigation loss"><#return "#2563eb">
+    <#case "Context closed"><#return "#7c3aed">
+    <#case "Frame detached"><#return "#0891b2">
+    <#case "Element not found"><#return "#db2777">
+    <#case "Assertion failure"><#return "#b91c1c">
+    <#case "Driver / infra"><#return "#64748b">
+    <#default><#return "#6b7a90">
+  </#switch>
+</#function>
+
 <#-- 卡片头：与 v2 的 .card h3（圆点 + 标题）一致 -->
 <#macro secHead title>
 <div style="padding:14px 18px;border-bottom:1px solid #e4e9f0;">
@@ -299,6 +313,9 @@
                         </td>
                         <td class="td" style="padding-right:0;">
                             <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#ffffff;background:${badgeBg(s.resultLabel)};">${s.resultLabel?html}</span>
+                            <#if s.failureTypeLabel?? && s.failureTypeLabel?trim?has_content>
+                            <span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;color:#ffffff;background:${typeBg(s.failureTypeLabel)};margin-left:6px;">${s.failureTypeLabel?html}</span>
+                            </#if>
                             <div class="msg">${s.message?html}</div>
                         </td>
                     </tr>

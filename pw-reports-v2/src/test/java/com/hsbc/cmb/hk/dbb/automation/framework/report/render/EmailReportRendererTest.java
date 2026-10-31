@@ -203,4 +203,15 @@ class EmailReportRendererTest {
             }
         }
     }
+
+    @Test
+    @DisplayName("Full Failure List 每条失败用例带分类徽章（与聚合榜同源：AssertionError → Assertion failure）")
+    void failureRowsCarryTypeBadge() throws Exception {
+        String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
+
+        assertThat(html)
+                .contains("Full Failure List")
+                .contains("background:#b91c1c")            // Assertion failure 分类徽章底色（typeBg）
+                .contains(">Assertion failure</span>");     // 分类徽章文本（failureTypeLabel）
+    }
 }

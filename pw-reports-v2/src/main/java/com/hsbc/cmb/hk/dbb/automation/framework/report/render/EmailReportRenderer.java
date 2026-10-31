@@ -122,14 +122,25 @@ public final class EmailReportRenderer {
         return model;
     }
 
-    /** 失败明细（邮件最关心的可执行信息）：用例名 / feature / 结果徽章 / 首行失败原因。 */
+    /** 失败明细（邮件最关心的可执行信息）：用例名 / feature / 结果徽章 / 失败分类 / 首行失败原因。 */
     private static List<Map<String, Object>> failureRows(List<TestOutcome> outcomes) {
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> r : SummaryHtmlRenderer.failureRows(outcomes)) {
-            Map<String, Object> row = new LinkedHashMap<>(r);
-            String key = String.valueOf(r.get("result"));
+        //  基行复用 SummaryHtmlRenderer.failureRows（同一失败过滤与字段口径）；
+        //  分类需真实 TestOutcome，故按相同过滤顺序 zip 配对（行序一一对应）。
+        List<Map<String, Object>> base = SummaryHtmlRenderer.failureRows(outcomes);
+        int idx = 0;
+        for (TestOutcome o : outcomes) {
+            if (o.getResult() == null || !o.getResult().isFailure()) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>(base.get(idx++));
+            String key = String.valueOf(row.get("result"));
             row.put("resultKey", key);
             row.put("resultLabel", ReportView.label(key));
+            //  失败分类（与「Most Frequent Failure Types」聚合榜同源：failureTypeOf）
+            String type = failureTypeOf(o);
+            row.put("failureType", type);
+            row.put("failureTypeLabel", ErrorClassifier.displayLabel(type));
             rows.add(row);
         }
         return rows;
@@ -235,7 +246,14 @@ public final class EmailReportRenderer {
         return List.copyOf(rules);
     }
 
-    /** 把一条失败用例归到可聚合的「类型」标签（配置规则优先，其次语义类别，最后异常类简名）。 */
+    /**
+     * 把一条失败用例归到可聚合的「类型」标签。
+     *
+     * <p>判定链：{@code report.error.types} 配置规则（用户自定义类型，最高优先级）
+     * → {@link ErrorClassifier} 内置分类（异常类名 / 消息精确短语 / 语义类别，见分类器 javadoc）。
+     * 聚合榜 {@link #frequentFailures} 与失败明细行 {@link #failureRows} 共用本方法——同一用例
+     * 在「Most Frequent Failure Types」与「Full Failure List」看到的分组一致。
+     */
     private static String failureTypeOf(TestOutcome o) {
         String message = failureMessage(o);
         String classname = o.getTestFailureClassname() == null ? "" : o.getTestFailureClassname();
@@ -247,20 +265,7 @@ public final class EmailReportRenderer {
                 }
             }
         }
-        String errorType = o.getTestFailureCause() == null ? null : o.getTestFailureCause().getErrorType();
-        if (errorType != null && !errorType.isBlank()) {
-            return switch (errorType.toUpperCase(Locale.ROOT)) {
-                case "FAILURE" -> "Assertion failure";
-                case "ERROR" -> "Unexpected error";
-                case "COMPROMISED" -> "Environment / infra";
-                default -> errorType;
-            };
-        }
-        if (!classname.isBlank()) {
-            int dot = classname.lastIndexOf('.');
-            return dot >= 0 && dot < classname.length() - 1 ? classname.substring(dot + 1) : classname;
-        }
-        return "Unknown";
+        return ErrorClassifier.classify(o).name();
     }
 
     /** 最不稳定 Feature（对齐 Serenity 2.0.84 home.ftl 的 Most Unstable Features）：按 feature 聚合失败数、降序、前 5，并附失败百分比。 */
