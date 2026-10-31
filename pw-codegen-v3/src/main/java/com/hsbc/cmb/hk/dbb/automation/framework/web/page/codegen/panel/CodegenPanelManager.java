@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState;
+import com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.quiet.CodegenQuiet;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
@@ -77,6 +78,9 @@ public final class CodegenPanelManager {
      */
     private static final Object PUSH_LOCK = new Object();
 
+    /** 收尾期推送失败抑制窗口（2.5）：连续失败达到该值后降级为 DEBUG，不再逐条 WARN 刷屏。 */
+    private static final int PUSH_FAIL_LIMIT = 5;
+
     private final Object lifecycleLock = new Object();
     private volatile State state = State.IDLE;
     private volatile CompletableFuture<PanelProcess> launchFuture;
@@ -88,6 +92,7 @@ public final class CodegenPanelManager {
     /** 最后一次会话活跃时间（watchdog idle 判据；{@code System.nanoTime()}）。 */
     private volatile long lastActiveNanos = System.nanoTime();
     private volatile CodegenPanelConfig config = CodegenPanelConfig.fromSystem();
+    private final AtomicInteger pushConsecutiveFailures = new AtomicInteger();
 
     /** launch 专用单线程（daemon）：保证一次只跑一个 launch，且不占用调用方线程。 */
     private static final ExecutorService LAUNCH_EXECUTOR = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
@@ -95,6 +100,18 @@ public final class CodegenPanelManager {
         t.setDaemon(true);
         return t;
     });
+
+    /** watchdog（2.5）：idle 超时回收；0 = 常驻时不启动。惰性创建（首次 open 时）。 */
+    private volatile ScheduledExecutorService watchdog;
+
+    static {
+        // B 轨道 2.5：接入框架统一关闭编排（参照现有 page-close cleanup step 的注册方式），
+        // 不裸加 Runtime hook —— 避免与框架 shutdown 竞态/超时刷屏（日志曾有
+        // "Cleanup step 'page-close exceeded 1000ms and was abandoned"）。
+        ShutdownCoordinator.register(
+                ShutdownCoordinator.ORDER_DIAGNOSTICS, "codegen-panel",
+                () -> INSTANCE.shutdownProcess());
+    }
 
     private CodegenPanelManager() {
     }
@@ -122,7 +139,7 @@ public final class CodegenPanelManager {
                 cfg.launchTimeoutMs(), cfg.navigateTimeoutMs(), cfg.readyTimeoutMs(),
                 cfg.commandPollIntervalMs(), nlsLang);
         this.config = cfg;
-        // 活跃标记：进程复用/重建期间的计时基准（2.5 watchdog idle 判据基于此）。
+        // 活跃标记提前（watchdog 竞态防护）：ensureProcess 在途期间不回收新进程。
         lastActiveNanos = System.nanoTime();
 
         PanelProcess p = ensureProcess();
@@ -130,6 +147,7 @@ public final class CodegenPanelManager {
         CodegenPanelHandle handle = new CodegenPanelHandle(this, p.page);
         activeHandle = handle;
         lastActiveNanos = System.nanoTime();
+        ensureWatchdog();
         log.info("[codegen][panel] session bound to resident panel process (serveDir={}, profile={})",
                 cfg.panelResourceDir(), cfg.profileDir());
         return handle;
@@ -309,6 +327,41 @@ public final class CodegenPanelManager {
         }
     }
 
+    /** watchdog 单拍（每 1s）：READY 且无活跃会话且 idle 超时 → 回收。 */
+    private void idleCheck() {
+        long idleMillis = config.idleTimeoutMillis();
+        if (idleMillis <= 0 || state != State.READY || activeHandle != null) {
+            return;
+        }
+        long elapsedNanos = System.nanoTime() - lastActiveNanos;
+        if (elapsedNanos >= TimeUnit.MILLISECONDS.toNanos(idleMillis)) {
+            log.info("[codegen][panel] no active session for {}ms — idle timeout reached, reclaiming panel process",
+                    idleMillis);
+            shutdownProcess();
+        }
+    }
+
+    private void ensureWatchdog() {
+        long idleMillis = config.idleTimeoutMillis();
+        if (idleMillis <= 0) {
+            return;   // 0 = 常驻：watchdog 不启动。
+        }
+        ScheduledExecutorService wd = watchdog;
+        if (wd == null) {
+            synchronized (this) {
+                if (watchdog == null) {
+                    wd = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                        Thread t = new Thread(r, "codegen-panel-watchdog");
+                        t.setDaemon(true);
+                        return t;
+                    });
+                    watchdog = wd;
+                    wd.scheduleWithFixedDelay(this::idleCheck, 1_000, 1_000, TimeUnit.MILLISECONDS);
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // 窗口关闭派发（进程级注册一次，会话级回调）
     // ------------------------------------------------------------------
@@ -345,10 +398,11 @@ public final class CodegenPanelManager {
     // ------------------------------------------------------------------
 
     /**
-     * 统一的「Java → 面板」推送出口：串行化（PUSH_LOCK）+ 参数 Long 收敛（sanitize）。
+     * 统一的「Java → 面板」推送出口：串行化（PUSH_LOCK）+ 参数 Long 收敛（sanitize）+ 收尾抑制。
      *
-     * <p>收尾期（会话结束、浏览器正在关）会出现推送失败（{@code push failed ... Playwright connection closed}），
-     * 属预期现象（2.5 增加连续失败抑制窗口）。
+     * <p>收尾期（会话结束、浏览器正在关）会出现连续 {@code push failed ... Playwright connection closed}；
+     * 连续失败 ≥ {@value #PUSH_FAIL_LIMIT} 后降级为 DEBUG（抑制窗口），不再逐条 WARN 刷屏 —— 这是
+     * 既定行为（收尾期预期失败），<b>不</b>作为 DEGRADED 判据（避免每次收尾都误报并触发重建）。
      */
     void pushSafely(CodegenPanelHandle h, String expr, Object arg) {
         if (h.isReleased()) {
@@ -358,8 +412,14 @@ public final class CodegenPanelManager {
             synchronized (PUSH_LOCK) {
                 h.page().evaluate(expr, sanitize(arg));
             }
+            pushConsecutiveFailures.set(0);
         } catch (Exception e) {
-            log.warn("[codegen][panel] push to panel failed ({}): {}", expr, e.getMessage());
+            int n = pushConsecutiveFailures.incrementAndGet();
+            if (n >= PUSH_FAIL_LIMIT) {
+                log.debug("[codegen][panel] push suppressed after {} consecutive failures (session ending): {}", n, e.getMessage());
+            } else {
+                log.warn("[codegen][panel] push to panel failed ({}): {}", expr, e.getMessage());
+            }
         }
     }
 
