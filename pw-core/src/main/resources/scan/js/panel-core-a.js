@@ -17,7 +17,18 @@
       // 无条件注册该监听，确保嵌套 iframe 的 pick 能逐层转发到顶层进入 __currentStep。面板 UI 门禁
       // 保持不变（见下方 __rolePanelUI 分支）。
       var __rolePanelUI = false;
-      try { __rolePanelUI = (localStorage.getItem('__rolePanelEnabled') === '1' || !!window.__rolePanelForce); } catch (e) { __rolePanelUI = false; }
+      // 门禁：正常访问不打面板。openPanel/followPage 会显式置位 localStorage.__rolePanelEnabled='1'（真实源可读）；
+      // 独立面板窗口是 opaque origin（about:blank），localStorage 的【getter 本身】会抛 SecurityError，
+      // 故必须先取 window.__rolePanelForce 兜底（它不触碰 localStorage），仅当未强制时才读 localStorage。
+      // 切勿写成 "localStorage.getItem(...) || window.__rolePanelForce" —— localStorage 在 opaque origin
+      // 会先抛异常、整段表达式被下方 catch 兜底成 false，__rolePanelForce 永不到达，面板永远不显示。
+      try {
+        if (window.__rolePanelForce === true) {
+          __rolePanelUI = true;
+        } else {
+          try { __rolePanelUI = (localStorage.getItem('__rolePanelEnabled') === '1'); } catch (e) {}
+        }
+      } catch (e) {}
       // 顶层面板接收来自 iframe（含跨源）的拾取：iframe 内点击 push 进的是 iframe 自己的 window.__rolePicks，
       // 主框架可见面板读不到 → 表现为"Java 内存态增长、面板空白"。iframe 经 postMessage 把 pick 发给父窗口，
       // 此处接收并聚合进主框架 window.__rolePicks + 渲染。纯前端同步，无需 Java 主循环轮询。
@@ -156,6 +167,9 @@
 
               var panel = document.createElement('div');
               panel.id = '__rolePanel';
+              // 注：此处曾加过"鼠标移入面板即暂停 inspect 浮层"的钩子，已删除——CDP 探针实测证实
+              // inspect 期间 mousemove 根本进不了文档（计数 0），该钩子永远收不到事件，属机制性失效。
+              // 面板上的「停止拾取」按钮因此在拾取中确实点不动；替代方案是 ESC 热键（见 install-stop-hotkey-js.js）。
               panel.style.cssText = 'position:fixed;top:0;right:0;width:420px;height:100vh;' +
                 'display:flex;flex-direction:column;pointer-events:auto;background:#1e1e1e;color:#e0e0e0;' +
                 'border-left:1px solid #000;box-shadow:-8px 0 24px rgba(0,0,0,.35);' +
@@ -201,7 +215,9 @@
               // 修复：显式 color:#fff（白色）确保任何继承/上下文下都清晰显示在蓝色 header 上。
               status.style.cssText = 'font-weight:normal;font-size:12px;color:#fff;opacity:.95;' +
                 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;flex-shrink:0;';
-              status.textContent = '就绪：点 ▶ 开始拾取并在页面点击元素';
+              // 拾取进行中路每指事件都被 inspect 浮层吞掉 ⇒ 面板上的「停止拾取」点不动，ESC 是唯一可用通道，
+              // 必须在状态条显式告知（否则用户无从知晓）。
+              status.textContent = '就绪：点 ▶ 开始拾取，再点页面元素（拾取中按 ESC 停止）';
               // 关闭面板：标题栏右侧 X 图标（对齐 page.pause() 的 inspector 关闭按钮）
               var closeBtn = mkIconBtn(ICON.close, 'transparent', '关闭面板', function() {
                 if (window.__roleToggleTimer) { clearInterval(window.__roleToggleTimer); window.__roleToggleTimer = null; }

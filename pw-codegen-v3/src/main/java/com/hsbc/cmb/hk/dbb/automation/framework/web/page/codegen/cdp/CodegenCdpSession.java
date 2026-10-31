@@ -117,6 +117,23 @@ public final class CodegenCdpSession {
     }
 
     /**
+     * 把本页带到前台（浏览器窗口/标签聚焦），实现「拾取哪个页面的元素，就聚焦哪个页面」。
+     *
+     * <p>每次拾取动作前（及拾取中切换到活动页 / 新页就绪 / 业务弹窗）由拾取引擎线程调用：
+     * Playwright {@code Page#bringToFront} 等价于 CDP {@code Page.bringToFront}，把目标页对应的
+     * 标签（及所属浏览器窗口）激活到最前——多标签、多窗口下用户点击始终落在被拾取页面。
+     *
+     * <p><b>fail-soft</b>：页面已关闭 / 目标未 attach 等失败只记 debug，绝不阻断拾取链路。
+     */
+    public void bringToFront() {
+        try {
+            page.bringToFront();
+        } catch (Exception e) {
+            log.debug("[codegen][cdp] bringToFront failed on {}: {}", page.url(), e.getMessage());
+        }
+    }
+
+    /**
      * 用 CSS 选择器在<b>所有 frame（含跨域 iframe）</b>里反查元素，并带回其所属 frameId。
      *
      * <p>页面侧上报的 {@code cssSelector} 是相对元素<b>自身文档</b>算出来的，所以在该 frame 的执行上下文里求值

@@ -9,6 +9,10 @@
               document.removeEventListener('focusin', window.__rolePickFocus, true);
               document.removeEventListener('scroll', window.__rolePickScroll, true);
               window.__rolePickActive = false;
+              // 与 set-pick-active-and-render-js.js（置 'manual'）对称：停止即回 IDLE，
+              // 使切换按钮经下方 __roleRefreshToggle() 权威复位为"▶ 开始拾取"。
+              //（refreshToggle 读 __roleMode；不置 idle 则停止后按钮仍停在"⏹ 停止拾取"。）
+              try { window.__roleMode = 'idle'; } catch (e) {}
               // 复位面板切换控件的"乐观意图"位：避免上一轮残留的 __rolePickWanted 让下一轮按钮的 willStart
               // 计算误判、发出错误命令（关键修复"停止后再点开始却拾取不了 / 二轮停止不了"的边界）。
               try { window.__rolePickWanted = false; } catch (e) {}

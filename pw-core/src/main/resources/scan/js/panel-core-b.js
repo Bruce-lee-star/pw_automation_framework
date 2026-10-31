@@ -340,8 +340,11 @@
                   }];
                   try {
                     var payload = JSON.stringify(delPicks);
+                    // 双通道兼容：__roleOnDelete（旧 codegen 模块删除桥/控制台兜底）+ __rolePickerCmd(type='delete')（V2 cmdDelete）。
+                    // 各模块只处理自己识别的那一条，另一条为 no-op，不会重复删除。
                     if (typeof window.__roleOnDelete === 'function') window.__roleOnDelete(payload);
                     try { console.log('__roleOnDelete::' + payload); } catch (e4) {}
+                    if (typeof window.__rolePickerCmd === 'function') window.__rolePickerCmd(JSON.stringify({ type: 'delete', keys: delPicks }));
                   } catch (e3) {}
                   // 7) 注：原「删除后其余有号元素全局紧凑重编号 + 逐个 repickNos 回传 Java」已整体移除——
                   //    面板序号体系不再存在（序号不展示、不编辑），_pickNos 只由真实点击拾取驱动，
@@ -657,8 +660,11 @@
                       // 上报完整 pick 对象（delPicks）而非仅 key 数组，供 Java 侧用 pickDedupKey 精确命中删除；
                       // 旧通道的 deadKeys 仅保留用于下方本地 __rolePicks / __rolePickSigs 的过滤。
                       var payload = JSON.stringify(delPicks);
+                      // 双通道兼容：__roleOnDelete（旧 codegen 模块删除桥/控制台兜底）+ __rolePickerCmd(type='delete')（V2 cmdDelete）。
+                      // 各模块只处理自己识别的那一条，另一条为 no-op，不会重复删除。
                       if (typeof window.__roleOnDelete === 'function') window.__roleOnDelete(payload);
                       try { console.log('__roleOnDelete::' + payload); } catch (e4) {}
+                      if (typeof window.__rolePickerCmd === 'function') window.__rolePickerCmd(JSON.stringify({ type: 'delete', keys: delPicks }));
                     } catch (e3) {}
                     // 清空选择集并重新渲染（含子 Tab 计数同步）
                     window.__currentStep = [];
