@@ -143,6 +143,7 @@
         'inspecting': '拾取中',
         'paused': '已暂停',
         'stopped': '已停止',
+        'ended': '已结束',
         'waiting for bridge': '等待通道',
         'bridge not ready (queued)': '通道未就绪（已排队）'
     };
@@ -152,7 +153,8 @@
         'ready': '就绪：点「开始拾取」后，页面照常操作，点到的元素会自动加入 Elements 并录制动作。',
         'inspecting': '拾取中：页面可正常操作。每次点击/输入都会录制，且点到的元素自动加入 Elements。',
         'paused': '已暂停拾取：页面可正常操作，动作仍会录制；点「开始拾取」可继续收集元素。',
-        'stopped': '已停止：本轮录制结束，可在右侧查看生成的代码。'
+        'stopped': '已停止：本轮录制定稿，右侧为最终代码；可再点「开始拾取」继续补充，或点「结束会话」收尾。',
+        'ended': '已结束：本轮会话收尾完成，面板窗口保留，下次拾取会话可立即复用。'
     };
 
     var lastStatus = '';       // 最近一次「生命周期状态」原值（用于判断是否进入新一轮拾取）
@@ -208,7 +210,7 @@
         }
         inspectActive = (s === 'inspecting');
         var btn = document.getElementById('btn-start');
-        if (btn) btn.textContent = inspectActive ? '停止拾取' : '开始拾取';
+        if (btn) btn.textContent = inspectActive ? '暂停拾取' : '开始拾取';
         renderStepsHint(s);
         // 只在「进入新一轮拾取」时清空步骤：从 paused 恢复拾取属于同一轮，不能清掉已录动作。
         if (s === 'inspecting' && lastStatus !== 'paused') {
