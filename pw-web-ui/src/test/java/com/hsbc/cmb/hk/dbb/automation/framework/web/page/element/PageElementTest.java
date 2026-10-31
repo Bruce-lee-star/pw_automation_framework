@@ -222,6 +222,140 @@ public class PageElementTest {
         assertTrue(found.getSelector().contains("role=" + AriaRole.BUTTON));
     }
 
+    // ---------- 相对定位族：text/label/placeholder/testId/title/altText（2026-10-31 新增） ----------
+
+    @Test
+    public void text_returnsNewElement_andResolvesViaGetByText() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#dialog", bp);
+        Locator child = mock(Locator.class);
+        when(base.getByText("确定")).thenReturn(child);
+
+        PageElement found = el.text("确定");
+
+        assertNotSame("text 应返回新元素，不原地修改", el, found);
+        assertTrue("描述须含文本：" + found.getSelector(), found.getSelector().contains("text=确定"));
+        assertSame("底层定位器应动态解析到 getByText 结果", child, found.locatorInternal());
+        verify(base).getByText("确定");
+    }
+
+    @Test
+    public void text_withExact_setsExactFlag() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#nav", bp);
+        when(base.getByText(any(String.class), any(Locator.GetByTextOptions.class))).thenReturn(mock(Locator.class));
+
+        PageElement found = el.text("提交订单", true);
+        found.locatorInternal();
+
+        var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByTextOptions.class);
+        verify(base).getByText(org.mockito.ArgumentMatchers.eq("提交订单"), captor.capture());
+        assertEquals("exact 应透传", Boolean.TRUE, captor.getValue().exact);
+        assertTrue("描述须带 exact 标记：" + found.getSelector(), found.getSelector().contains("exact"));
+    }
+
+    @Test
+    public void text_withPattern_usesRegex() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#list", bp);
+        when(base.getByText(any(Pattern.class))).thenReturn(mock(Locator.class));
+
+        el.text(Pattern.compile("保存.*")).locatorInternal();
+
+        // Pattern 无 equals 语义，用 captor 取真实 pattern 字符串断言
+        var captor = org.mockito.ArgumentCaptor.forClass(Pattern.class);
+        verify(base).getByText(captor.capture());
+        assertEquals("正则应透传", "保存.*", captor.getValue().pattern());
+    }
+
+    @Test
+    public void label_returnsNewElement_viaGetByLabel() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#form", bp);
+        Locator child = mock(Locator.class);
+        when(base.getByLabel("用户名")).thenReturn(child);
+
+        PageElement found = el.label("用户名");
+
+        assertSame(child, found.locatorInternal());
+        verify(base).getByLabel("用户名");
+    }
+
+    @Test
+    public void placeholder_returnsNewElement_viaGetByPlaceholder() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#search-box", bp);
+        when(base.getByPlaceholder("请输入关键字")).thenReturn(mock(Locator.class));
+
+        PageElement found = el.placeholder("请输入关键字");
+
+        assertTrue("描述须含 placeholder：" + found.getSelector(), found.getSelector().contains("placeholder=请输入关键字"));
+        found.locatorInternal();
+        verify(base).getByPlaceholder("请输入关键字");
+    }
+
+    @Test
+    public void testId_returnsNewElement_viaGetByTestId() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#card", bp);
+        when(base.getByTestId("submit-btn")).thenReturn(mock(Locator.class));
+
+        PageElement found = el.testId("submit-btn");
+
+        assertTrue("描述须含 testId：" + found.getSelector(), found.getSelector().contains("testId=submit-btn"));
+        found.locatorInternal();
+        verify(base).getByTestId("submit-btn");
+    }
+
+    @Test
+    public void title_returnsNewElement_viaGetByTitle() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#tip", bp);
+        when(base.getByTitle("帮助")).thenReturn(mock(Locator.class));
+
+        PageElement found = el.title("帮助");
+
+        assertTrue("描述须含 title：" + found.getSelector(), found.getSelector().contains("title=帮助"));
+        found.locatorInternal();
+        verify(base).getByTitle("帮助");
+    }
+
+    @Test
+    public void altText_returnsNewElement_viaGetByAltText() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#banner", bp);
+        when(base.getByAltText("宣传图")).thenReturn(mock(Locator.class));
+
+        PageElement found = el.altText("宣传图");
+
+        assertTrue("描述须含 altText：" + found.getSelector(), found.getSelector().contains("altText=宣传图"));
+        found.locatorInternal();
+        verify(base).getByAltText("宣传图");
+    }
+
+    @Test
+    public void relativeLocators_rejectNullArgs() {
+        BasePage bp = bpWith(mock(Page.class));
+        PageElement el = new PageElement(() -> mock(Locator.class), "#x", bp);
+
+        assertThrows(NullPointerException.class, () -> el.text((String) null));
+        assertThrows(NullPointerException.class, () -> el.text((Pattern) null));
+        assertThrows(NullPointerException.class, () -> el.label(null));
+        assertThrows(NullPointerException.class, () -> el.placeholder((String) null));
+        assertThrows(NullPointerException.class, () -> el.placeholder((Pattern) null));
+        assertThrows(NullPointerException.class, () -> el.testId(null));
+        assertThrows(NullPointerException.class, () -> el.title(null));
+        assertThrows(NullPointerException.class, () -> el.altText(null));
+    }
+
     // ---------- isClickable（2026-10-31 新增：可见且可用 = 可点击，快速探测 + 等待兜底） ----------
 
     @Test

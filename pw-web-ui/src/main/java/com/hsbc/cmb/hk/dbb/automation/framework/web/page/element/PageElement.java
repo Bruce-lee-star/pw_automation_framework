@@ -276,6 +276,164 @@ public class PageElement {
                 selector + " >> role=" + role + " (options)", page);
     }
 
+    // ==================== 相对定位族：在已定位元素内按文本/标签/占位符/test-id/title/alt 向下定位（对齐 Playwright Locator.getBy*） ====================
+    /**
+     * 按可见文本定位本元素上下文内的子元素（对齐 Playwright {@code locator.getByText(text)}）。
+     *
+     * <p>与 {@link #role(AriaRole, String)} 互补：role 按语义角色找目标，text 按<b>可见文本</b>
+     * 找目标——elementByRole 定位容器后，容器内按文本相对定位是该族的典型用法。</p>
+     *
+     * @param text 期望子元素包含的文本（子串匹配；精确匹配用 {@link #text(String, boolean)}）
+     * @return 定位结果
+     */
+    public PageElement text(String text) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByText(text),
+                selector + " >> text=" + text, page);
+    }
+
+    /**
+     * 按可见文本定位子元素（可指定精确匹配）。
+     *
+     * @param text  期望文本
+     * @param exact {@code true} 精确匹配（区分大小写、不做子串）
+     * @return 定位结果
+     */
+    public PageElement text(String text, boolean exact) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByText(text,
+                        new Locator.GetByTextOptions().setExact(exact)),
+                selector + " >> text=" + text + (exact ? " exact" : ""), page);
+    }
+
+    /**
+     * 按可见文本正则定位子元素。
+     *
+     * @param textPattern 文本正则（Java {@link Pattern}）
+     * @return 定位结果
+     */
+    public PageElement text(Pattern textPattern) {
+        Objects.requireNonNull(textPattern, "textPattern cannot be null");
+        return new PageElement(() -> locatorInternal().getByText(textPattern),
+                selector + " >> text~" + textPattern.pattern(), page);
+    }
+
+    /**
+     * 按关联 label 定位子元素（对齐 Playwright {@code locator.getByLabel(label)}，可命中输入框/
+     * 下拉等表单控件）。
+     *
+     * @param label label 文本（子串匹配）
+     * @return 定位结果
+     */
+    public PageElement label(String label) {
+        Objects.requireNonNull(label, "label cannot be null");
+        return new PageElement(() -> locatorInternal().getByLabel(label),
+                selector + " >> label=" + label, page);
+    }
+
+    /**
+     * 按关联 label 定位子元素（可指定精确匹配）。
+     *
+     * @param label label 文本
+     * @param exact {@code true} 精确匹配
+     * @return 定位结果
+     */
+    public PageElement label(String label, boolean exact) {
+        Objects.requireNonNull(label, "label cannot be null");
+        return new PageElement(() -> locatorInternal().getByLabel(label,
+                        new Locator.GetByLabelOptions().setExact(exact)),
+                selector + " >> label=" + label + (exact ? " exact" : ""), page);
+    }
+
+    /**
+     * 按 placeholder 占位符定位子元素（对齐 Playwright {@code locator.getByPlaceholder(text)}）。
+     *
+     * @param text placeholder 文本（子串匹配）
+     * @return 定位结果
+     */
+    public PageElement placeholder(String text) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByPlaceholder(text),
+                selector + " >> placeholder=" + text, page);
+    }
+
+    /**
+     * 按 placeholder 占位符正则定位子元素。
+     *
+     * @param textPattern placeholder 正则
+     * @return 定位结果
+     */
+    public PageElement placeholder(Pattern textPattern) {
+        Objects.requireNonNull(textPattern, "textPattern cannot be null");
+        return new PageElement(() -> locatorInternal().getByPlaceholder(textPattern),
+                selector + " >> placeholder~" + textPattern.pattern(), page);
+    }
+
+    /**
+     * 按 test-id 属性定位子元素（对齐 Playwright {@code locator.getByTestId(testId)}，
+     * 命中 {@code data-testid/data-test-id/data-test} 等）。
+     *
+     * @param testId test-id 值
+     * @return 定位结果
+     */
+    public PageElement testId(String testId) {
+        Objects.requireNonNull(testId, "testId cannot be null");
+        return new PageElement(() -> locatorInternal().getByTestId(testId),
+                selector + " >> testId=" + testId, page);
+    }
+
+    /**
+     * 按 title 属性定位子元素（对齐 Playwright {@code locator.getByTitle(text)}）。
+     *
+     * @param text title 属性文本（子串匹配）
+     * @return 定位结果
+     */
+    public PageElement title(String text) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByTitle(text),
+                selector + " >> title=" + text, page);
+    }
+
+    /**
+     * 按 title 属性定位子元素（可指定精确匹配）。
+     *
+     * @param text  title 属性文本
+     * @param exact {@code true} 精确匹配
+     * @return 定位结果
+     */
+    public PageElement title(String text, boolean exact) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByTitle(text,
+                        new Locator.GetByTitleOptions().setExact(exact)),
+                selector + " >> title=" + text + (exact ? " exact" : ""), page);
+    }
+
+    /**
+     * 按 alt 属性定位子元素（对齐 Playwright {@code locator.getByAltText(text)}，常用于图片）。
+     *
+     * @param text alt 属性文本（子串匹配）
+     * @return 定位结果
+     */
+    public PageElement altText(String text) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByAltText(text),
+                selector + " >> altText=" + text, page);
+    }
+
+    /**
+     * 按 alt 属性定位子元素（可指定精确匹配）。
+     *
+     * @param text  alt 属性文本
+     * @param exact {@code true} 精确匹配
+     * @return 定位结果
+     */
+    public PageElement altText(String text, boolean exact) {
+        Objects.requireNonNull(text, "text cannot be null");
+        return new PageElement(() -> locatorInternal().getByAltText(text,
+                        new Locator.GetByAltTextOptions().setExact(exact)),
+                selector + " >> altText=" + text + (exact ? " exact" : ""), page);
+    }
+
     // ==================== Safe Execution Template（委托 ElementOperationSupport） ====================
     /**
      * 安全的 Locator 操作执行模板——统一异常翻译 + 自动诊断收集。
