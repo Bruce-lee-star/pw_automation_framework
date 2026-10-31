@@ -167,8 +167,32 @@ public final class CodegenCdpNodeExtractor {
                 function attrEsc(v) {
                     return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
                 }
-                function uniqueSel(sel) {
-                    try { return sel && document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
+                /**
+                 * 可见性判定：hidden 属性、aria-hidden="true"、内联/计算样式 display:none / visibility:hidden 视为隐藏。
+                 * uniqueSel 只统计可见元素，避免隐藏副本（桌面/移动菜单并存等）破坏稳定属性候选的唯一性。                /**
+                 * 可见性判定：hidden 属性、aria-hidden="true"、内联/计算样式 display:none / visibility:hidden 视为隐藏。
+                 * uniqueSel 只统计可见元素，避免隐藏副本（桌面/移动菜单并存等）破坏稳定属性候选的唯一性。
+                 */
+                function isVisible(e) {
+                    if (!e || e.nodeType !== 1) return false;
+                    if (e.hidden) return false;
+                    if (e.getAttribute && e.getAttribute('aria-hidden') === 'true') return false;
+                    if (e.style && (e.style.display === 'none' || e.style.visibility === 'hidden')) return false;
+                    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+                        try {
+                            var cs = window.getComputedStyle(e);
+                            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                        } catch (err) { }
+                    }
+                    return true;
+                }
+                                function uniqueSel(sel) {
+                    try {
+                        if (!sel) return false;
+                        var nodes = document.querySelectorAll(sel), n = 0;
+                        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
+                        return n === 1;
+                    } catch (e) { return false; }
                 }
                 function dynamicIdFallbackSel(id) {
                     var prefix = stableIdPrefix(id);
