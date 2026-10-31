@@ -151,6 +151,21 @@ public final class NLSUtils {
                     + "' in any of files " + files + " -> " + errors);
         }
 
+        /**
+         * 取 key 对应的「可见文本」：内部先 {@link #get(String)} 取当前语言原始值，再经
+         * {@link NLSUtils#visibleText(String)} 剥 HTML 标签 / 解码实体 / 归一化空白——正好对应
+         * 浏览器渲染后的可见文本。适合与页面 {@code getText()}/{@code getValue()} 做断言比对，
+         * 避免原始值里内嵌 {@code <a>/<strong>/&nbsp;} 等导致和可见文本比对不上。
+         *
+         * <p>等价手写 {@code NLSUtils.visibleText(bind(files).get(key))}，但少一层嵌套、语义更直白。
+         *
+         * @param key 功能内 key
+         * @return 当前语言下、已剥 HTML 的可见文本（缺失 key 时由 {@link #get(String)} 抛异常）
+         */
+        public String visibleText(String key) {
+            return NLSUtils.visibleText(get(key));
+        }
+
         /** 返回绑定的主要文件路径（多文件时为首个） */
         public String path() {
             return files.get(0);

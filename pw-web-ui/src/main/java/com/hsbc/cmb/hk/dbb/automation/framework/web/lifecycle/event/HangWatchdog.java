@@ -66,6 +66,13 @@ public final class HangWatchdog {
     private static volatile int frozenStreak;
     /** 当前冻结剧集是否已上报（避免每个采样间隔重复刷屏）。 */
     private static volatile boolean frozenReported;
+    /**
+     * 交互式阻塞挂起标记（如 codegen inspector 在等待用户点 Start/Close 期间）。
+     *
+     * <p>这类会话<b>本就</b>让场景线程停在 {@code CountDownLatch.await()} 等用户操作，栈长期不变属正常，
+     * 若照常采样会被误判为「真卡死」并刷屏（甚至误触硬超时打断）。挂起后采样直接跳过，不产生误报。
+     */
+    private static volatile boolean suspended;
 
     /** 概览中刻意跳过的 JVM 内务线程（对定位卡住无价值，只增加噪音）。 */
     private static final String[] NOISE_THREAD_PREFIXES = {
@@ -123,6 +130,28 @@ public final class HangWatchdog {
         return sampler != null && scenarioThread != null;
     }
 
+    /**
+     * 暂停卡住判定（交互式阻塞开始时调用，如 codegen inspector 等用户操作）。
+     *
+     * <p>暂停期间采样直接跳过：既不打印「疑似卡死」现场，也不会触发硬超时打断，
+     * 因为这类会话本就正常地阻塞在 {@code CountDownLatch.await()} 上等用户操作。
+     */
+    public static void suspend() {
+        suspended = true;
+    }
+
+    /**
+     * 恢复卡住判定（交互式阻塞结束时调用）。
+     *
+     * <p>同时重置冻结判定，避免暂停期间累积的相同栈在恢复瞬间立刻触发一次误报。
+     */
+    public static void resume() {
+        suspended = false;
+        lastStack = null;
+        frozenStreak = 0;
+        frozenReported = false;
+    }
+
     private static void cancelSampler() {
         ScheduledFuture<?> f = sampler;
         sampler = null;
@@ -150,6 +179,9 @@ public final class HangWatchdog {
         try {
             if (token != ARM_TOKEN.get()) {
                 return; // 已换用例 / 已收尾：本次采样作废
+            }
+            if (suspended) {
+                return; // 交互式阻塞（如 codegen 等用户操作）：跳过采样，避免把正常等待误判为卡死
             }
             Thread owner = scenarioThread;
             if (owner == null || !owner.isAlive()) {

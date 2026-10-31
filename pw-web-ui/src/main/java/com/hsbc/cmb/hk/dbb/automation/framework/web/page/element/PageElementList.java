@@ -199,7 +199,7 @@ public final class PageElementList extends AbstractList<PageElement> {
     public PageElement get(int index) {
         int currentSize = size();
         Objects.checkIndex(index, currentSize);
-        return new PageElementWithIndex(selector, page, index, frameSegs);
+        return new PageElementWithIndex(selector, page, index, frameSegs, locatorSupplier);
     }
 
     // ========================== 迭代器 ==========================
@@ -293,24 +293,30 @@ public final class PageElementList extends AbstractList<PageElement> {
     // ========================== 索引定位器内部类 ==========================
     private static final class PageElementWithIndex extends PageElement {
         private final int index;
+        /** 与父列表同源的动态定位器供应商；非空时优先于 selector 解析（同父列表语义）。 */
+        private final Supplier<Locator> locatorSupplier;
 
-        private PageElementWithIndex(String selector, BasePage page, int index) {
-            super(selector, page, null);
-            this.index = index;
-        }
-
-        private PageElementWithIndex(String selector, BasePage page, int index, List<String> frameSegs) {
+        private PageElementWithIndex(String selector, BasePage page, int index, List<String> frameSegs,
+                                    Supplier<Locator> locatorSupplier) {
             super(selector, page, frameSegs);
             this.index = index;
+            this.locatorSupplier = locatorSupplier;
         }
 
         /**
-         * 通过父类 locatorInternal().nth(index) 获取定位器。
-         * Locator 不再缓存——父类的 locator() 每次动态绑定新 Page 实例，
-         * 页面切换后自动使用新的 Page 重新创建 Locator。
+         * 复用父列表的定位策略获取第 index 个元素的定位器：
+         * <ul>
+         *   <li>父列表为角色/NLS 动态定位（{@code locatorSupplier != null}）⇒
+         *       {@code supplier.get().nth(index)}，<b>绝不</b>回退到把描述串当 CSS 选择器解析；</li>
+         *   <li>父列表为选择器定位 ⇒ {@code super.locatorInternal().nth(index)}（selector + frame 下钻）。</li>
+         * </ul>
+         * Locator 不缓存——父类的 locator() 每次动态绑定新 Page 实例，页面切换后自动使用新的 Page 重新创建。
          */
         @Override
         protected Locator locatorInternal() {
+            if (locatorSupplier != null) {
+                return locatorSupplier.get().nth(index);
+            }
             return super.locatorInternal().nth(index);
         }
     }

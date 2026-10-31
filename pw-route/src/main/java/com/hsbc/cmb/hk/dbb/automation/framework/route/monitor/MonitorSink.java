@@ -225,8 +225,11 @@ public final class MonitorSink {
      *
      * <p><b>只记录「有响应侧期望」的 MONITOR 规则</b>（有 expectStatus 或 body 断言）。其余一律不记录：
      * MOCK / MODIFY / DELAY 能力（以及无任何断言的 MONITOR 规则）既无断言可做，也不该进入观测队列 ——
-     * 它们永远等不到响应配对（{@link #onResponseForSpec} 对非 MONITOR 能力直接返回），却会被
-     * {@link #drainSettledFailures()} 的超时扫描判成「监控超时」并<b>归因到场景失败</b>。
+     * 它们永远等不到响应配对（{@link #onResponseForSpec} 对非 MONITOR 能力直接返回），曾被
+     * {@link #drainSettledFailures()} 的超时扫描误判成「监控超时」并<b>归因场景失败</b>（2026-09-28 误报，
+     * 见下方实测）。现在观测队列只承载真正可断言的 MONITOR 请求，且<b>监控超时（窗口内未捕获到响应）仅停止
+     * 观测、不再判失败</b>（需求：monitor 在配置时间内没监控到 API 即停止监控、不报错；规则退役由
+     * {@code RouteRuntimeImpl.schedulePurposeDeadline} 负责）。
      *
      * <p>实测误报（2026-09-28）：MOCK 规则 {@code profile/list} 命中后，只要步骤继续存活超过
      * {@code monitorTimeoutMs}（默认 30s），就稳定产出
@@ -678,7 +681,14 @@ public final class MonitorSink {
                 long timeoutMs = exchange.monitorTimeoutMs();
                 if (timeoutMs != 0 && now - requestTimeNanos(exchange) > timeoutMs * 1_000_000L) {
                     exchange.markTimedOut();
-                    settleFailure(exchange);
+                    // 监控窗口到期仍未捕获到响应 ⇒ 仅停止对该请求的观测，不归因场景失败：
+                    // 需求为「monitor 在配置时间内没监控到 API 即停止监控、不报错」。规则生命周期上限
+                    // 由 RouteRuntimeImpl.schedulePurposeDeadline 到点退役（retireByPurpose），此处只清观测。
+                    if (LOGGER.isDebugEnabled()) {
+                        LOGGER.debug("[Route] monitor timed out (no response captured within {}ms) — "
+                                + "stopping observation, not reported as failure: pattern='{}' url='{}'",
+                                timeoutMs, exchange.pattern(), exchange.url());
+                    }
                     removeFromPending(exchange);
                 }
             }
@@ -798,7 +808,12 @@ public final class MonitorSink {
                 long timeoutMs = exchange.monitorTimeoutMs();
                 if (timeoutMs != 0 && now - exchange.recordedAtNanos() > timeoutMs * 1_000_000L) {
                     exchange.markTimedOut();
-                    settleFailure(exchange);
+                    // 同 drain()：监控超时仅停止观测，不进失败队列、不报错（规则退役由调度器负责）。
+                    if (LOGGER.isDebugEnabled()) {
+                        LOGGER.debug("[Route] monitor timed out (no response captured within {}ms) — "
+                                + "stopping observation, not reported as failure: pattern='{}' url='{}'",
+                                timeoutMs, exchange.pattern(), exchange.url());
+                    }
                     removeFromPending(exchange);
                 }
             }

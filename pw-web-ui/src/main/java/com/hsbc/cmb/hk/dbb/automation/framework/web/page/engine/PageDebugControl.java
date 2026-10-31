@@ -29,6 +29,14 @@ public final class PageDebugControl {
      */
     private static final ThreadLocal<Boolean> PAUSED = new ThreadLocal<>();
 
+    /**
+     * 共享「codegen 面板会话活跃」信号：自研 codegen 面板（pw-codegen 的 RolePickerPanelController）
+     * 经 {@code context.newCDPSession(page)} 独占 {@code Overlay.inspectNodeRequested}。若同时调原生
+     * {@code page.pause()}（会拉起 Inspector 的第二条 CDP 连接也监听同一 Overlay 事件）将双触发同一点选 ⇒ 冲突。
+     * 该信号让原生 {@link #pause(BasePage)} 在 codegen 活跃时跳过原生 pause，避免冲突（同模块，无反向依赖）。
+     */
+    private static final ThreadLocal<Boolean> CODEGEN_ACTIVE = new ThreadLocal<>();
+
     private PageDebugControl() {
         // 纯静态工具单元，禁止实例化
     }
@@ -53,16 +61,27 @@ public final class PageDebugControl {
     /**
      * 安全暂停方法：本地 IDE 正常 pause 调试；Jenkins / BrowserStack 自动跳过，杜绝流程阻塞。
      * <p>当且仅当为可调试本地环境时才访问页面 {@code pause()}，避免在非调试环境触发页面初始化副作用。
+     * 若自研 codegen 面板会话正处于活跃（其 CDP 会话已独占 {@code Overlay.inspectNodeRequested}），
+     * 跳过原生 {@code page.pause()}（不再拉起 Inspector 的第二条 CDP 连接），仅保持共享暂停态，
+     * 避免两条 CDP 连接双监听同一 Overlay 事件造成点选被重复处理。
      *
      * @param bp 当前页面对象（用于获取 Playwright Page）
      */
     static void pause(BasePage bp) {
         if (isDebugEnvironment()) {
-            try {
-                bp.getPage().pause();
-                markPaused(true); // 发布共享「调试/录制暂停态」信号（③联动：对齐 page.pause 调试态）
-            } catch (Exception e) {
-                logger.warn("Page pause failed, skip debug pause", e);
+            if (isCodegenActive()) {
+                // codegen 面板已用 newCDPSession 独占 Overlay 监听；再开原生 page.pause() 会拉起 Inspector
+                // 的第二条 CDP 连接 → 双监听冲突。故跳过原生 pause（不打开 Inspector），共享暂停态已由面板
+                // markPaused(true)，此处仅幂等保活。
+                logger.warn("[PageDebugControl] codegen panel session active; skip native page.pause() to avoid duplicate Overlay listeners (Inspector + codegen CDP conflict)");
+                markPaused(true);
+            } else {
+                try {
+                    bp.getPage().pause();
+                    markPaused(true); // 发布共享「调试/录制暂停态」信号（③联动：对齐 page.pause 调试态）
+                } catch (Exception e) {
+                    logger.warn("Page pause failed, skip debug pause", e);
+                }
             }
         } else {
             logger.warn("[Security Control] Jenkins/BrowserStack environment, auto skip pause() to avoid block");
@@ -83,6 +102,23 @@ public final class PageDebugControl {
             PAUSED.set(true);
         } else {
             PAUSED.remove();
+        }
+    }
+
+    /**
+     * 读取当前线程是否处于 codegen 面板会话（其 CDP 会话已独占 Overlay 监听）。
+     * 供 {@link #pause(BasePage)} 判定是否跳过原生 page.pause()，避免与 Inspector 双监听冲突。
+     */
+    public static boolean isCodegenActive() {
+        return Boolean.TRUE.equals(CODEGEN_ACTIVE.get());
+    }
+
+    /** 发布/清除「codegen 面板会话活跃」信号（由 RolePickerPanelController 在 openPanel 起止调用）。 */
+    public static void markCodegenActive(boolean v) {
+        if (v) {
+            CODEGEN_ACTIVE.set(true);
+        } else {
+            CODEGEN_ACTIVE.remove();
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 
 import com.microsoft.playwright.Frame;
+import com.microsoft.playwright.FrameLocator;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
@@ -15,6 +16,7 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,6 +31,7 @@ public class LocatorFactoryTest {
         BasePage bp = mock(BasePage.class);
         when(bp.getCurrentFrame()).thenReturn(frame);
         when(bp.getPage()).thenReturn(page);
+        when(bp.shadowPrefix()).thenReturn("");
         return bp;
     }
 
@@ -137,5 +140,74 @@ public class LocatorFactoryTest {
 
         assertEquals(loc, LocatorFactory.byTitle(bp, "t"));
         verify(page).getByTitle("t");
+    }
+
+    // ---- 跨 frame 穿透（codegen 生成的 frame= 前缀） ----
+
+    @Test
+    public void bySelector_framePierce_singleFrame_piercesFromPage() {
+        Page page = mock(Page.class);
+        FrameLocator fl = mock(FrameLocator.class);
+        Locator loc = mock(Locator.class);
+        when(page.frameLocator(eq("iframe#a"))).thenReturn(fl);
+        when(fl.locator(eq("#btn"))).thenReturn(loc);
+        BasePage bp = bpWith(mock(Frame.class), page); // 当前 frame 非空也应被忽略
+
+        assertEquals(loc, LocatorFactory.bySelector(bp, "frame=iframe#a :: #btn"));
+        verify(page).frameLocator("iframe#a");
+        verify(fl).locator("#btn");
+    }
+
+    @Test
+    public void bySelector_framePierce_nestedFrames_chainsFrameLocator() {
+        Page page = mock(Page.class);
+        FrameLocator flA = mock(FrameLocator.class);
+        FrameLocator flB = mock(FrameLocator.class);
+        Locator loc = mock(Locator.class);
+        when(page.frameLocator(eq("iframe#a"))).thenReturn(flA);
+        when(flA.frameLocator(eq("iframe#b"))).thenReturn(flB);
+        when(flB.locator(eq(".deep"))).thenReturn(loc);
+        BasePage bp = bpWith(null, page);
+
+        assertEquals(loc, LocatorFactory.bySelector(bp, "frame=iframe#a :: iframe#b :: .deep"));
+        verify(page).frameLocator("iframe#a");
+        verify(flA).frameLocator("iframe#b");
+        verify(flB).locator(".deep");
+    }
+
+    @Test
+    public void bySelector_framePierce_ignoresCurrentFrameRoot() {
+        Frame frame = mock(Frame.class);
+        Page page = mock(Page.class);
+        FrameLocator fl = mock(FrameLocator.class);
+        Locator loc = mock(Locator.class);
+        when(page.frameLocator(anyString())).thenReturn(fl);
+        when(fl.locator(anyString())).thenReturn(loc);
+        BasePage bp = bpWith(frame, page);
+
+        LocatorFactory.bySelector(bp, "frame=iframe#x :: #y");
+        // 必须走 page.frameLocator，绝不可落到当前 frame.locator
+        verify(page).frameLocator("iframe#x");
+        verify(frame, org.mockito.Mockito.never()).locator(anyString());
+    }
+
+    @Test
+    public void bySelector_framePierce_malformed_noInnerSelector_throws() {
+        Page page = mock(Page.class);
+        BasePage bp = bpWith(null, page);
+        assertThrows(IllegalArgumentException.class,
+                () -> LocatorFactory.bySelector(bp, "frame=iframe#a"));
+    }
+
+    @Test
+    public void bySelector_nonFrameSelector_unaffected() {
+        Page page = mock(Page.class);
+        Locator loc = mock(Locator.class);
+        when(page.locator(eq("#plain"))).thenReturn(loc);
+        BasePage bp = bpWith(null, page);
+
+        assertEquals(loc, LocatorFactory.bySelector(bp, "#plain"));
+        verify(page).locator("#plain");
+        org.mockito.Mockito.verify(page, org.mockito.Mockito.never()).frameLocator(anyString());
     }
 }

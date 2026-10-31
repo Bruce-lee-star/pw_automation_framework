@@ -3,6 +3,9 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.utils;
 import org.junit.After;
 import org.junit.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -42,5 +45,22 @@ public class NLSUtilsTest {
         String src = NLSUtils.templateRegexSource("Hi {{name}}");
         assertTrue("模板占位符应编译为正则捕获组", src.contains("(.*?)"));
         assertFalse("模板占位符不应残留 {{name}}", src.contains("{{name}}"));
+    }
+
+    /** {@code NlsBundle.visibleText(key)} 应等于手写 {@code NLSUtils.visibleText(bind(file).get(key))}，且剥离 HTML。 */
+    @Test
+    public void bundleVisibleText_stripsHtmlAndMatchesManualForm() throws Exception {
+        Path dir = Files.createTempDirectory("nls-bundle");
+        Path f = dir.resolve("b.nls.json");
+        Files.writeString(f, "{\"en\":{\"greet\":\"Hello <b>World</b> &copy;\"}}");
+        NLSUtils.setLanguage("en");
+
+        String viaBundle = NLSUtils.bind(f.toString()).visibleText("greet");
+        String manual = NLSUtils.visibleText(NLSUtils.bind(f.toString()).get("greet"));
+        assertEquals("visibleText(key) 应等价于手写 visibleText(get(key))", manual, viaBundle);
+        assertFalse("应剥离 HTML 标签", viaBundle.contains("<"));
+        assertTrue("应解码实体 &copy; → ©", viaBundle.contains("©"));
+        assertTrue(viaBundle.contains("Hello"));
+        assertTrue(viaBundle.contains("World"));
     }
 }

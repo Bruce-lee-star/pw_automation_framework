@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 
 import com.microsoft.playwright.options.AriaRole;
 import com.microsoft.playwright.Frame;
+import com.microsoft.playwright.FrameLocator;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.RoleElement;
@@ -38,6 +39,14 @@ public final class LocatorFactory {
     }
 
     /**
+     * 跨 frame 穿透定位器前缀：{@code frame=SELa :: SELb :: <内层 css>}。
+     * 由 codegen 工具生成（元素位于跨源 iframe 内时），此处解析为
+     * {@code page.frameLocator(SELa).frameLocator(SELb).locator(<内层 css>)}。
+     */
+    static final String FRAME_PIERCE_PREFIX = "frame=";
+    private static final String FRAME_PIERCE_SEP = " :: ";
+
+    /**
      * 按 <b>CSS / XPath 选择器</b>定位，返回原生 Playwright {@code Locator}。
      *
      * <p>补齐工厂的"选择器入口"：本类其余 {@code by*} 均为语义定位（{@code getByRole} /
@@ -45,15 +54,17 @@ public final class LocatorFactory {
      * 绕过工厂直取 {@code BasePage.locatorInternal}（跨层调用内部 seam）。补本方法后，
      * <b>全部定位入口（语义 + 选择器）统一收敛于 {@code LocatorFactory}</b>。
      *
-     * <p>实现委托 {@code bp.locatorInternal(selector)}，以保留其内部已处理的上下文适配：
+     * <p>支持两类上下文穿透前缀：
      * <ul>
-     *   <li><b>iframe</b>：当前 frame 非空时以 frame 为根定位；</li>
-     *   <li><b>shadow DOM</b>：把宿主栈以 {@code >>>} 穿透组合器拼到选择器前缀。</li>
+     *   <li><b>跨 frame</b>：选择器以 {@code frame=} 开头时，按 {@code :: } 切分为若干 frame 选择器
+     *       与最后一个内层元素选择器，解析为 {@code page.frameLocator(SELa).…locator(<内层>)}，
+     *       可定位跨源 iframe 内的元素（此时忽略当前 frame 根，始终从主页面下钻）；</li>
+     *   <li><b>shadow DOM</b>：非 frame 前缀时，把宿主栈以 {@code >>>} 穿透组合器拼到选择器前缀。</li>
      * </ul>
      * 这两点是 {@code page.locator(selector)} 直连无法提供的，故不可简化为直接取 page。
      *
      * @param bp       页面对象（不得为 null）
-     * @param selector CSS 或 XPath 选择器（不得为 null / 空白）
+     * @param selector CSS / XPath 选择器，或跨 frame 穿透前缀（不得为 null / 空白）
      */
     public static Locator bySelector(BasePage bp, String selector) {
         requireNonNullPage(bp);
@@ -61,6 +72,10 @@ public final class LocatorFactory {
             throw new IllegalArgumentException("selector must not be null or blank when building locators");
         }
         bp.ensurePageValid();
+        // 跨 frame 穿透：frame=SELa :: SELb :: <内层 css>
+        if (selector.startsWith(FRAME_PIERCE_PREFIX)) {
+            return buildFramePiercingLocator(bp, selector);
+        }
         // shadow 上下文高于 iframe/DOM 层：用 >>> 穿透组合器把宿主前缀拼到选择器前。
         String shadowPrefix = bp.shadowPrefix();
         String resolved = shadowPrefix.isEmpty() ? selector : shadowPrefix + selector;
@@ -69,6 +84,30 @@ public final class LocatorFactory {
             return frame.locator(resolved);
         }
         return bp.getPage().locator(resolved);
+    }
+
+    /**
+     * 解析跨 frame 穿透选择器：{@code frame=SELa :: SELb :: <内层 css>} →
+     * {@code page.frameLocator(SELa).frameLocator(SELb).locator(<内层 css>)}。
+     * 内层选择器仍应用 shadow 前缀（若当前处于 shadow 宿主内）。
+     */
+    private static Locator buildFramePiercingLocator(BasePage bp, String selector) {
+        String body = selector.substring(FRAME_PIERCE_PREFIX.length());
+        String[] parts = body.split(FRAME_PIERCE_SEP, -1);
+        // 至少需要一个 frame 选择器 + 一个内层元素选择器
+        if (parts.length < 2 || parts[parts.length - 1].trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "frame-piercing selector must be 'frame=<frameSel> :: <innerSel>' with at least one frame segment");
+        }
+        String inner = parts[parts.length - 1];
+        String shadowPrefix = bp.shadowPrefix();
+        String resolvedInner = shadowPrefix.isEmpty() ? inner : shadowPrefix + inner;
+        Page page = bp.getPage();
+        FrameLocator chain = page.frameLocator(parts[0].trim());
+        for (int i = 1; i < parts.length - 1; i++) {
+            chain = chain.frameLocator(parts[i].trim());
+        }
+        return chain.locator(resolvedInner);
     }
 
     public static Locator byRole(BasePage bp, AriaRole role) {

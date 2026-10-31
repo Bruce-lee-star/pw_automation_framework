@@ -131,7 +131,7 @@ public class MonitorSinkAssertionSettlementTest {
     }
 
     @Test
-    public void timedOutRequestSettlesAsFailure() throws Exception {
+    public void timedOutRequestStopsWithoutFailure() throws Exception {
         ApiSpec spec = ApiSpec.builder("/api/slow", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .monitorTimeoutMs(50)
@@ -141,10 +141,12 @@ public class MonitorSinkAssertionSettlementTest {
         sink.recordRequest(mockRequest("https://host/api/slow"), spec);
         Thread.sleep(120); // 超过 monitorTimeoutMs
 
-        List<CapturedExchange> failures = sink.drainSettledFailures();
-        assertEquals("超时未响应必须结算为失败", (long) 1, (long) failures.size());
-        assertTrue(failures.get(0).responseTimedOut());
-        assertFalse(failures.get(0).assertionPassed());
+        // 需求（2026-10-26）：监控超时（窗口内未捕获到响应）仅停止观测，不结算为失败
+        assertTrue("超时未响应不得结算为失败", sink.drainSettledFailures().isEmpty());
+        assertEquals((long) 0, (long) sink.settledFailureCount());
+        CapturedExchange exchange = sink.drain().get(0);
+        assertTrue(exchange.responseTimedOut());
+        assertFalse(exchange.assertionPassed());
     }
 
     @Test

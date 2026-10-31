@@ -257,9 +257,11 @@ public class MonitorSinkTest {
         assertTrue( "MOCK 请求不得产出 [timeout] 误报失败", sink.drainSettledFailures().isEmpty());
     }
 
-    /** 正对照（防本次修复把真问题一起吞掉）：有响应期望的规则超时未响应时，仍必须如实上报。 */
+    /** 需求（2026-10-26）：monitor 在配置时间内没监控到 API ⇒ 停止监控、不报错。
+     *  正对照：有响应期望的 MONITOR 规则超时未响应时，<b>不得</b>产出失败（旧逻辑会判 [timeout] 失败），
+     *  但仍应在 drain 快照中被标记 timedOut（观测已停止），且不污染失败队列。 */
     @Test
-    public void expectedButNeverArrivingResponseStillReportsTimeout() throws Exception {
+    public void monitorTimeoutWithoutResponseStopsWithoutFailure() throws Exception {
         ApiSpec spec = ApiSpec.builder("/api/slow", RouteCapability.MONITOR)
                 .expectStatus(200)
                 .monitorTimeoutMs(30)
@@ -270,10 +272,14 @@ public class MonitorSinkTest {
                 sink.recordRequest(mockRequest("https://host/api/slow"), spec));
         Thread.sleep(80);
 
-        List<CapturedExchange> failures = sink.drainSettledFailures();
-        assertEquals("有期望未响应必须上报", (long) 1, (long) failures.size());
-        assertTrue(failures.get(0).responseTimedOut());
-        assertEquals((Object) "/api/slow", (Object) failures.get(0).pattern());
+        // 超时未响应 ⇒ 不进失败队列（不报错）
+        assertTrue("监控超时不得产出失败", sink.drainSettledFailures().isEmpty());
+        assertEquals((long) 0, (long) sink.settledFailureCount());
+        // 观测仍被标记 timedOut（便于排查），并从 pending 移除（停止监控）
+        CapturedExchange exchange = sink.drain().get(0);
+        assertTrue("超时未响应必须标记", exchange.responseTimedOut());
+        assertFalse(exchange.assertionPassed());
+        assertEquals((Object) "/api/slow", (Object) exchange.pattern());
     }
 
     /**
