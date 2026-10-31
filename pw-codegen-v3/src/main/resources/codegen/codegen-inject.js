@@ -116,7 +116,9 @@
     function attrEsc(v) {
         return String(v).replace(/["\\]/g, function (c) { return '\\' + c; });
     }
-    /** 可见性判定：hidden 属性、aria-hidden="true"、内联/计算样式 display:none / visibility:hidden 视为隐藏。 */
+    /** 可见性判定：hidden、aria-hidden="true"、display:none / visibility:hidden（含祖先，经计算样式）、
+     * visibility:collapse、opacity:0（含祖先链，不继承需逐级查，限 5 层）、clip 裁零 / clip-path 裁零、
+     * 零尺寸或整体移出视口（响应式/移动端隐藏副本常见）均视为隐藏。 */
     function isVisible(e) {
         if (!e || e.nodeType !== 1) return false;
         if (e.hidden) return false;
@@ -125,11 +127,30 @@
         if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
             try {
                 var cs = window.getComputedStyle(e);
-                if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+                if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+                if (cs.opacity === '0' || cs.opacity === '0.0' || cs.opacity === '0.00') return false;
+                if (cs.clip && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clip.indexOf('rect(0') === 0)) return false;
+                if (cs.clipPath && (/inset\(0%\)/.test(cs.clipPath) || /inset\(50%\)/.test(cs.clipPath) || /circle\(0/.test(cs.clipPath))) return false;
+                var p = e.parentElement, d = 0;
+                while (p && p.nodeType === 1 && d < 5) {
+                    var pcs = window.getComputedStyle(p);
+                    if (pcs.opacity === '0' || pcs.opacity === '0.0' || pcs.opacity === '0.00') return false;
+                    p = p.parentElement; d++;
+                }
+            } catch (err) { }
+        }
+        if (typeof e.getBoundingClientRect === 'function') {
+            try {
+                var r = e.getBoundingClientRect();
+                if (!r || (r.width === 0 && r.height === 0)) return false;
+                var vw = (typeof window !== 'undefined' && window.innerWidth) || 0;
+                var vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
+                if (vw > 0 && vh > 0 && (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh)) return false;
             } catch (err) { }
         }
         return true;
     }
+
 
     /** 当前文档中唯一性校验：只统计可见元素（供 id 前缀/包含/组内索引兜底使用）。 */
     function uniqueSel(sel) {
@@ -341,10 +362,10 @@
         return '';
     }
     /**
-     * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用），
-     * 否则锚点收束链：上溯到稳定 id / 可用前缀即收束；整条路径无任何稳定锚点
-     * （id、动态 id 前缀、稳定属性候选均失败）时返回空串——纯 tag:nth-of-type(n)
-     * 链不再产出，交给 Java 侧 XPath 兜底。
+     * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用）；
+     * 否则结构链逐层上溯——每层只接受稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引），
+     * 任何一层既无锚点也无可用属性段（裸 tag:nth-of-type(n)）时整条链不产出，返回空串
+     * 交给 Java 侧 XPath 兜底（属性优先：稳定属性精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体）。
      */
     function cssSel(e) {
         if (!e || e.nodeType !== 1) return '';
@@ -364,16 +385,12 @@
                 var pf = dynamicIdFallbackSel(n.id);
                 if (pf) { parts.unshift(pf); anchored = true; break; }
             }
-            var t = n.tagName.toLowerCase();
-            var i = 1, sib = n.previousElementSibling;
-            while (sib) {
-                if (sib.tagName && sib.tagName.toLowerCase() === t) i++;
-                sib = sib.previousElementSibling;
-            }
-            parts.unshift(t + ':nth-of-type(' + i + ')');
-            n = n.parentElement;
+            var seg = attrFallbackSel(n);
+            if (seg) { parts.unshift(seg); n = n.parentElement; continue; }
+            // 该层既无稳定锚点也无可用属性段：裸 tag:nth-of-type(n) 段不再产出，整条链作废交 XPath。
+            return '';
         }
-        if (!anchored) return '';   // 纯 tag:nth-of-type 链不再产出（整条路径无稳定锚点收束），交 XPath 兜底
+        if (!anchored) return '';
         return parts.join(' > ');
     }
 
