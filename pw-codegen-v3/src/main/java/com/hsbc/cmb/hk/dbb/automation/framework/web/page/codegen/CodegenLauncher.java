@@ -14,7 +14,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.inject.CodegenS
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.LocatorStrategy;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.nls.NlsReverseLookup;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPanel;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPanelHandle;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPanelManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.PanelResource;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.recorder.CodegenRecorder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.utils.NLSUtils;
@@ -44,6 +45,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -216,7 +218,7 @@ public final class CodegenLauncher {
         // 原生对话框事件容器（与 picked 同生命周期；供生成步骤里的 acceptAlert/dismissAlert）
         List<DialogOp> dialogOps = new CopyOnWriteArrayList<>();
         // 用数组持有者避免 lambda 捕获"正在被赋值的局部变量"导致的明确赋值错误
-        final CodegenPanel[] panelRef = { null };
+        final CodegenPanelHandle[] panelRef = { null };
         // 会话结束闩锁：用户关面板窗口（标题栏 ×）或点「停止」即释放，主线程从阻塞中返回。
         // 提前声明，使下方 commandHandler（面板与测试页控制条共用）能引用。
         final CountDownLatch closeLatch = new CountDownLatch(1);
@@ -526,6 +528,8 @@ public final class CodegenLauncher {
                 // 注入已由 context.addInitScript 覆盖；此处<b>只登记页面 + 挂载关闭钩子</b>，
                 // CDP 会话创建推迟到首次拾取（submitPick 内的拾取执行器线程）—— 避免在 onPage 回调
                 // （派发线程）上同步建会话阻塞派发节奏。拾取进行中则切换活动页，通道在首次 pick 时开启。
+                // 所有新页（含手动标签）都先登记 + 挂关闭钩子（防 map/CDP session 泄漏）+ 对话框自动关闭，
+                // 再按 opener 决定是否跟随（见补丁 A）。
                 of(newPage);
                 newPage.onClose(p -> {
                     removeDialogAutoDismiss(newPage);
@@ -559,24 +563,44 @@ public final class CodegenLauncher {
                         }
                     }
                 });
-                // 拾取进行中打开的新页：立即设为活动页（并在 MRU 置顶），后续拾取/录制落到该页；
-                // 嵌套弹窗（在弹窗上再开弹窗）同样被 ctx.onPage 触发，故一并被正确跟随。
-                if (pickOn.get()) {
-                    setActive(newPage);
-                }
                 // 原生对话框自动关闭：覆盖本新页（P0 缺口修复，详见 installDialogAutoDismiss）。
                 installDialogAutoDismiss(newPage);
+                final Page np = newPage;
+                // —— 补丁 A：opener 判定（对齐官方 popup vs openPage 语义）——
+                // opener 非 null 且未关闭 ⇒ 业务弹窗（window.open / target=_blank 等），应跟随并开启拾取；
+                // opener 为 null ⇒ 用户手动 Ctrl+T 开的独立标签，只登记防泄漏、不抢拾取焦点、不注入/不 enable。
+                // opener() 属探针性质，失败按「手动标签」安全降级（不崩 followNewPage，避免整条跟随链路断掉）。
+                Page opener = null;
+                try {
+                    opener = np.opener();
+                } catch (Throwable ignore) {
+                    log.debug("[codegen][follow] opener() failed on {} (treat as manual tab)", np.url());
+                }
+                boolean businessPopup = (opener != null && !opener.isClosed());
+                if (!businessPopup) {
+                    log.debug("[codegen][follow] new page {} opened without opener (manual tab) — register + dialog only, no follow/enable",
+                            np.url());
+                    return;
+                }
+                // 业务弹窗：拾取进行中打开立即设为活动页（并在 MRU 置顶）；嵌套弹窗同样正确跟随。
+                if (pickOn.get()) {
+                    setActive(np);
+                }
                 // 新标签页/弹窗的「拾取不了元素」根因：新页只靠 context.addInitScript 自动重挂录制脚本，
                 // 而 context 级注入在部分打开方式 / Playwright 版本下不一定落到新页，且原实现从未对新页做自检，
                 // 一旦失败就是「点了没反应、且无声无息」。这里在后台线程显式补注一次（含 recorder + bridge 自检，
                 // 任一缺失会打 WARN），把静默失效变成可见诊断；context 已覆盖则本次幂等补强。
                 // 绝不在 onPage 派发线程上调用 page.evaluate（会与该连接的读线程互等死锁），故交给 engine。
-                final Page np = newPage;
                 // 注入（快，放 engine 单线程，不阻塞实时生成）
+                // 探针同步闩：INJECT（内含 exposeBinding）在 engine 上异步执行，探针必须等它跑完再发 probe；
+                // 否则探针会在绑定建立「之前」打出唯一一次 evaluate → 必然判 UNREACHABLE（实测假阳性：
+                // 探针 32.25 开火、exposeBinding 32.895 才执行，导致同源 / 跨域新页一律误报）。
+                final CountDownLatch injected = new CountDownLatch(1);
                 engine.submit(CodegenEngine.Kind.INJECT, np, () -> {
                     try {
                         // 新页（弹窗/新标签页）按页暴露同名绑定：这是新页拿到 window.__codegenEvent 的唯一途径
-                        // （主页在 startSession 暴露，其余页在此暴露；context 级 exposeBinding 不可靠地跳过已存在/新建页）。
+                        // （主页在 startSession 暴露，其余页在此暴露；context 级 exposeBinding 与 page 级同名互斥、
+                        //  且不覆盖会话启动时已存在的主页，故全局统一只用 page 级）。
                         // 若同页被重复暴露会抛 already-registered，捕获忽略（幂等）；若页面已关闭则 warn 不阻断注入。
                         try {
                             np.exposeBinding("__codegenEvent", codegenEventBridge);
@@ -589,23 +613,82 @@ public final class CodegenLauncher {
                     } catch (Exception e) {
                         log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} — {}",
                                 np.url(), e.getMessage());
+                    } finally {
+                        injected.countDown();   // 成败都放行探针，避免探针永久挂死
                     }
                 });
                 // 新页 CDP 目标常在 onPage 触发时尚未 attach，此刻 newCDPSession 会瞬时抛错；故此处<b>不</b>自己开裸线程去
                 // waitForLoadState + 轮询（既与现有异步模式不一致，又难管理生命周期）。改为与 onClose 回落页完全一致的写法：
                 // 在 engine 上「单次」尝试 enablePick —— 页面通常此时已 attach，多数情况能直接开通道；
                 // 若仍撞 attach 竞态失败，则交给每帧点击的 submitPick 懒加载兜底（本就每条点击重试）。拾取进行中（pickOn）才开。
+                // —— 补丁 B：ready 门（轻量探测，最多 3×500ms，绝不长占引擎）——
+                // 避免「通道开了但页面 DOM 未就绪，点击落到空 DOM 上」的静默；未就绪则交给 submitPick 懒加载兜底。
                 if (pickOn.get()) {
                     engine.submit(CodegenEngine.Kind.ENABLE, np, () -> {
                         try {
-                            enablePick(np);
-                            log.debug("[codegen][follow] enabled pick channel on new page {}", np.url());
+                            boolean ready = false;
+                            for (int i = 0; i < 3 && !np.isClosed(); i++) {
+                                try {
+                                    Object rs = np.evaluate("() => document.readyState");
+                                    if ("complete".equals(rs) || "interactive".equals(rs)) { ready = true; break; }
+                                } catch (Exception ignore) { /* 页面未就绪，evaluate 抛属正常 */ }
+                                try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                            }
+                            if (ready) {
+                                enablePick(np);
+                                log.debug("[codegen][follow] enabled pick channel on ready new page {}", np.url());
+                            } else {
+                                // 1.5s 内没 ready：不硬等 —— 交给 submitPick 懒加载兜底（每条点击重试开通道）
+                                log.warn("[codegen][follow] new page {} not DOM-ready within 1.5s — pick enabled lazily on first click",
+                                        np.url());
+                            }
                         } catch (Exception e) {
                             log.warn("[codegen][follow] enable pick on new page {} deferred (lazy retry on next click): {}",
                                     np.url(), e.getMessage());
                         }
                     });
                 }
+            // #1 新页拾取绑定可达性探针：inject/enable 后真正调一次 window.__codegenEvent，
+            // 看 Java 侧 bridgeCalls 是否自增（bridge 回调无条件自增，probe 类型同样计数）；
+            // 不涨则说明该页 binding 未真正接上 Java 回调（静默失效），打点名 URL 的 WARN。
+            // 绑定回调跑在 Playwright 派发线程（与引擎无关），故探针用独立 daemon 线程触发 + 轮询：
+            // 既不阻塞引擎/派发线程，也不因触发调用可能挂起而卡住主流程（挂起则中断子线程）。
+            // ⚠ 必须先等 INJECT 完成（injected 闩）：旧版在提交 INJECT 后立刻开火，与 engine 上的
+            //   exposeBinding 竞态 —— evaluate 只发一次且发生在绑定建立之前，导致「同源 / 跨域新页
+            //   一律 UNREACHABLE」的假阳性（已实测：探针 32.25 开火、exposeBinding 32.895 才执行）。
+            final long probeBaseline = bridgeCalls.get();
+            final String probeUrl = np.url();
+            Thread probeThread = new Thread(() -> {
+                try {
+                    if (!injected.await(5, TimeUnit.SECONDS)) {
+                        log.debug("[codegen][follow] probe on {} started before INJECT completed (timed out waiting)", probeUrl);
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+                Thread trigger = new Thread(() -> {
+                    try {
+                        np.evaluate("try { window.__codegenEvent({type:'probe'}); } catch (e) {}");
+                    } catch (Throwable ignore) {
+                        // 页面可能已关闭或正在卸载
+                    }
+                }, "codegen-probe-trigger");
+                trigger.setDaemon(true);
+                trigger.start();
+                boolean reached = false;
+                for (int i = 0; i < 12; i++) {
+                    if (bridgeCalls.get() > probeBaseline) { reached = true; break; }
+                    try { Thread.sleep(50); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
+                if (!reached) {
+                    trigger.interrupt();
+                    log.warn("[codegen][follow] PICK BINDING UNREACHABLE on page {} — this page's "
+                            + "window.__codegenEvent did not deliver to Java; clicks here will be silently dropped "
+                            + "(see codegen-inject.js note about unestablished binding).", probeUrl);
+                }
+            }, "codegen-probe");
+            probeThread.setDaemon(true);
+            probeThread.start();
             }
             void closeAll() {
                 // 先注销所有对话框自动关闭监听器（恢复 Playwright 内置自动关闭），再拆 CDP 会话。
@@ -749,14 +832,40 @@ public final class CodegenLauncher {
                     // 否则 Stop 后点 Start 会因 map 为空而抛 "pick channel could not be enabled on any page"，
                     // 且被关掉的线程池/会话也无法复活。拆毁只在 close / 面板关闭时发生。
                     broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
-                    verifyPendingRoles(panelRef[0], picked);
                     if (panelRef[0] != null) {
-                        generateMultiPage(panelRef[0], picked, recorder, dialogOps, nlsFiles, sessions.stopped);
+                        // 定稿必须准确：skipVerify=false ⇒ 内部先 verifyPendingRoles 再生成（此处不再重复复核）。
+                        generateMultiPage(panelRef[0], picked, recorder, dialogOps, nlsFiles, sessions.stopped, /*skipVerify=*/false);
                         panelRef[0].setStatus("stopped");
                     }
                     log.info("[codegen] generated multi-page artifacts ({} picked, {} recorded actions, {} pages)",
                             picked.size(), recorder.snapshot().size(),
                             picked.stream().map(p -> p.page).distinct().count());
+                    break;
+                }
+                case "endSession": {
+                    // 2.0：面板「结束会话」按钮 —— 结束会话但<b>面板进程常驻</b>（B 轨道核心语义）。
+                    // 未定稿时先定稿（与 stop 一致：verifyPendingRoles + 生成多页产物），再解绑句柄并释放闩锁。
+                    // 与旧「关窗=结束会话」的区别：窗口保留、进程保留，下一次 inspect 直接复用（<500ms 级）。
+                    sessions.pickOn.set(false);
+                    if (!sessions.stopped.get()) {
+                        sessions.stopped.set(true);
+                        broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
+                        if (panelRef[0] != null) {
+                            generateMultiPage(panelRef[0], picked, recorder, dialogOps, nlsFiles, sessions.stopped, /*skipVerify=*/false);
+                            panelRef[0].setStatus("ended");
+                        }
+                        log.info("[codegen] finalized on endSession ({} picked, {} recorded actions)",
+                                picked.size(), recorder.snapshot().size());
+                    } else {
+                        if (panelRef[0] != null) panelRef[0].setStatus("ended");
+                    }
+                    // 解绑会话（进程常驻，不关窗口/浏览器）→ 释放闩锁让主线程返回。
+                    if (panelRef[0] != null) {
+                        CodegenPanelManager.instance().release(panelRef[0]);
+                    }
+                    sessions.closeAll();
+                    closeLatch.countDown();
+                    log.info("[codegen] session ended by panel '结束会话'; panel process stays resident for next inspect");
                     break;
                 }
                 case "highlight":
@@ -769,8 +878,12 @@ public final class CodegenLauncher {
                     }
                     break;
                 case "close":
+                    // 2.0：结束会话（被测页控制条 close / 兼容路径）：解绑句柄（进程常驻）+ 释放闩锁。
                     sessions.pickOn.set(false);
                     sessions.closeAll();
+                    if (panelRef[0] != null) {
+                        CodegenPanelManager.instance().release(panelRef[0]);
+                    }
                     closeLatch.countDown();
                     break;
                 default:
@@ -791,6 +904,11 @@ public final class CodegenLauncher {
                 java.util.List<Object> c = new java.util.ArrayList<>();
                 c.add(payload.get("action"));
                 commandHandler.accept(c);
+                return null;
+            }
+            // 绑定可达性探针（#1）：跨域弹窗拾取静默失效诊断。只确认 bridge 回调能到达 Java，
+            // 不触发任何拾取（不进入下面的 guard / pickAt）。bridgeCalls 已在 785 行自增，探针借此判定。
+            if ("probe".equals(String.valueOf(payload.get("type")))) {
                 return null;
             }
             Page src = source != null ? source.page() : null;
@@ -851,11 +969,15 @@ public final class CodegenLauncher {
             return null;
         };
         sessions.codegenEventBridge = bridge;
-        // 关键修复（P0-1 根因）：不用 context 级 exposeBinding。
-        // 实测 context.exposeBinding 仅作用于「绑定注册之后才创建的页面」，而会话启动时主页早已存在
-        // → 主页永远拿不到 window.__codegenEvent → 点击被注入脚本 catch(e){} 静默吞掉（事件泵 DOM +1 / bridge +0）。
-        // 改用 page 级 exposeBinding 对每页显式暴露：既覆盖已存在的当前主页，又随导航经 Playwright 内置
-        // init script 重挂，且作用到该页所有 frame（含跨源 iframe）。新页由 followNewPage 同法暴露。
+        // 关键修复（P0-1 根因）：只能用 <b>page 级</b> exposeBinding，不能用 context 级。
+        // ① 为什么不能用 context 级：实测 context.exposeBinding 仅作用于「绑定注册之后才创建的页面」，
+        //    而会话启动时主页早已存在且已加载 → 仅靠 context 级，主页当前文档永远拿不到 window.__codegenEvent，
+        //    点击被注入脚本 catch(e){} 静默吞掉（事件泵 DOM +1 / bridge +0）——即 P0-1 已修掉的老 bug。
+        // ② 为什么不能「page 级 + context 级互补」：本 Playwright 版本下两者同名<b>互斥</b>——
+        //    page 级先注册后，再调 context.exposeBinding 会抛
+        //    "Function \"__codegenEvent\" has been already registered in one of the pages"（已实测）。
+        //    故 context 级在此架构下永远不可能生效，不再尝试。
+        // ③ 新页（弹窗 / 新标签页）由 followNewPage 对每页调 page 级 exposeBinding 暴露，同源与跨域均覆盖。
         try {
             real.exposeBinding("__codegenEvent", bridge);
         } catch (Throwable t) {
@@ -939,10 +1061,12 @@ public final class CodegenLauncher {
 
         Path panelHtml = PanelResource.resolvePanelHtml();
 
-        CodegenPanel panel;
+        CodegenPanelHandle panel;
         ScheduledExecutorService closeWatchdog = null;
         try {
-            panel = CodegenPanel.open(panelHtml, commandHandler, lang);
+            // 2.1：面板进程常驻 —— open 交给 Manager（ensureProcess 复用 READY 进程 / 按 09.6 重建），
+            // 返回本会话句柄；浏览器进程、driver、server、命令轮询的生命周期全归 Manager。
+            panel = CodegenPanelManager.instance().open(panelHtml, commandHandler, lang);
         } catch (RuntimeException e) {
             // 面板没能打开（例如浏览器启动失败）：收掉事件泵、生成线程与引擎，避免线程泄漏。
             if (eventPump != null) eventPump.shutdownNow();
@@ -952,12 +1076,13 @@ public final class CodegenLauncher {
         }
         panelRef[0] = panel;
 
-        // 面板已去掉 Close 按钮：用户直接关窗口（标题栏 ×）即结束会话。
-        // 监听面板页关闭并释放 closeLatch，避免关窗后主线程仍永久阻塞。
+        // 2.0：会话结束语义改造 —— 面板「结束会话」按钮是正常结束路径（进程常驻，见 commandHandler
+        // case "endSession"）；关窗（标题栏 ×）仍是结束路径，但语义变为「面板进程被终止、常驻失效」：
+        // Manager 已把进程置 DEGRADED（下次 open 自动重建），这里只需解绑句柄并释放闩锁。
         // 注意：countDown() 必须放进 finally —— 若 closeAll()/broadcast() 抛异常（页面已随窗口关闭），
         // 不能让"释放主线程"这一步被跳过，否则表现为"关掉窗口程序还卡着"。
         panel.onClose(() -> {
-            log.info("[codegen] panel window closed by user — ending codegen session");
+            log.info("[codegen] panel window closed by user — ending codegen session (panel process terminated, resident service degraded)");
             try {
                 sessions.pickOn.set(false);
                 sessions.stopped.set(true);   // 关窗即结束：被测页上的状态指示条随之隐藏
@@ -966,6 +1091,8 @@ public final class CodegenLauncher {
             } catch (Throwable t) {
                 log.warn("[codegen] error during panel close cleanup (ignored): {}", t.getMessage());
             } finally {
+                // 进程已死：Manager 已统一置 DEGRADED 并派发本回调；这里只解绑句柄（幂等），不再 close 进程。
+                CodegenPanelManager.instance().release(panel);
                 closeLatch.countDown();
             }
         });
@@ -982,6 +1109,8 @@ public final class CodegenLauncher {
         wd.scheduleWithFixedDelay(() -> {
             try {
                 if (panel.isClosed()) {
+                    // 兜底路径：onClose 未被派发 ⇒ Manager 未感知进程死亡；主动解绑（幂等）+ 释放闩锁。
+                    CodegenPanelManager.instance().release(panel);
                     closeLatch.countDown();
                     wd.shutdownNow();
                 }
@@ -1006,18 +1135,12 @@ public final class CodegenLauncher {
             sessions.closeAll();
             if (eventPump != null) eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
             regenExecutor.shutdownNow();                       // 停掉实时代码生成线程
-            engine.shutdownGracefully();   // 面板即将关闭：停掉拾取引擎，避免关窗后仍在推送
-            // 面板窗口可能已随 X 关闭而连带销毁其浏览器上下文：panel.close() 在已关闭的上下文上可能阻塞。
-            // 放到带 5s 超时join的守护线程里执行，确保"关掉窗口后主线程一定返回"，绝不卡死。
-            final Thread closer = new Thread(() -> {
-                try { panel.close(); } catch (Exception ignore) { }
-            }, "codegen-panel-closer");
-            closer.setDaemon(true);
-            closer.start();
-            try { closer.join(5_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-            if (closer.isAlive()) {
-                log.warn("[codegen] panel.close() did not finish in 5s; leaving it to daemon thread");
-            }
+            engine.shutdownGracefully();   // 会话结束：停掉拾取引擎，避免结束后仍在推送
+            // 2.0：进程<b>不再</b>随会话结束被关闭（常驻，见方案文档 B 轨道 / P0-2）。
+            // 关窗路径：进程已死，Manager 已置 DEGRADED；endSession 路径：进程存活待复用。
+            // 两种路径都无需在此主动 close —— 进程清理归 Manager（watchdog idle / ShutdownCoordinator）。
+            // 兜底：异常路径可能残留句柄，release 幂等清扫（不关进程）。
+            CodegenPanelManager.instance().release(panel);
         }
         log.info("[codegen] session ended; picked {} elements", picked.size());
     }
@@ -1047,7 +1170,7 @@ public final class CodegenLauncher {
     // 「标记为一组」：多次拾取 → 一个 PageElementList
     // ------------------------------------------------------------------
 
-    private static void handleGroup(List<Pick> picked, List<Object> cmd, CodegenPanel panel) {
+    private static void handleGroup(List<Pick> picked, List<Object> cmd, CodegenPanelHandle panel) {
         List<Pick> members = new ArrayList<>();
         for (int i = 1; i < cmd.size(); i++) {
             Long id = parseId(String.valueOf(cmd.get(i)));
@@ -1359,7 +1482,7 @@ public final class CodegenLauncher {
 
     private static final AtomicLong REGEN_SEQ = new AtomicLong();
     private static final AtomicBoolean REGEN_INFLIGHT = new AtomicBoolean(false);
-    private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanel[] panelRef,
+    private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanelHandle[] panelRef,
                                                 List<Pick> picks, CodegenRecorder recorder,
                                                 List<DialogOp> dialogOps, String[] nlsFiles,
                                                 String nlsLang, AtomicBoolean stopped) {
@@ -1377,21 +1500,31 @@ public final class CodegenLauncher {
                         com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState
                                 .setLanguage(nlsLang);
                     }
-                    long t0 = System.nanoTime();
                     long started = REGEN_SEQ.get();
-                    generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
-                    // 生成期间若又有新拾取（序号变化），补一次覆盖最新；否则结束。
-                    if (REGEN_SEQ.get() != started) {
-                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped);
-                    }
-                    // R1 计时探针：REGEN 已迁出引擎、泵也独立，故既不影响派发窗口也不推迟拾取解析。
-                    // 仍记录耗时用于观测；超过 200ms 仅作提示（已按数据迁出，无需再迁）。
-                    long ms = (System.nanoTime() - t0) / 1_000_000;
-                    if (ms > 200) {
-                        log.warn("[codegen][regen] live regeneration took {} ms (>200ms) — on dedicated regen thread, "
-                                + "no longer delays dispatch window or pick resolution", ms);
+                    boolean anyPending = picks.stream().anyMatch(p -> p.rolePending);
+                    // 首推：跳过全量复核（verify 是 CDP 往返、首推瓶颈），先把代码推上面板（快，目标 <500ms）。
+                    long tFirst = System.nanoTime();
+                    generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
+                    long firstMs = (System.nanoTime() - tFirst) / 1_000_000;
+                    if (firstMs > 500) {
+                        log.warn("[codegen][regen] first push (skipVerify) took {} ms (>500ms) — "
+                                + "push/assemble bottleneck, not verify", firstMs);
                     } else {
-                        log.debug("[codegen][regen] live regeneration took {} ms", ms);
+                        log.debug("[codegen][regen] first push (skipVerify) took {} ms", firstMs);
+                    }
+                    // 生成期间若又有新拾取（序号变化），合并覆盖最新（仍走快首推）。
+                    if (REGEN_SEQ.get() != started) {
+                        long tMerge = System.nanoTime();
+                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
+                        log.debug("[codegen][regen] merged re-push took {} ms", (System.nanoTime() - tMerge) / 1_000_000);
+                    }
+                    // 首推完成后，若有未复核 role，后台补复核 + 重推修订（不阻塞首推；verify 是 CDP 往返，
+                    // 落在首推路径之外，用户先把代码看到、再被修订覆盖）。Stop 定稿走 skipVerify=false 已含复核。
+                    if (anyPending && !stopped.get()) {
+                        long tBack = System.nanoTime();
+                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/false);
+                        log.info("[codegen][regen] background verify+repush took {} ms (off the first-push path)",
+                                (System.nanoTime() - tBack) / 1_000_000);
                     }
                 } catch (Throwable t) {
                     log.warn("[codegen][regen] regeneration failed: {}", t.toString());
@@ -1436,24 +1569,45 @@ public final class CodegenLauncher {
      * 页面切换的「场景流程」Step 类，三份产物分别推到 page/step/assert 三个 Tab（同类产物跨页拼接）。
      * 三个 Tab 各自独立兜错：某个生成器出问题不能再连累其它 Tab。
      */
-    private static void generateMultiPage(CodegenPanel panel, List<Pick> picks, CodegenRecorder recorder,
-                                         List<DialogOp> dialogOps, String[] nlsFiles, AtomicBoolean stopped) {
+    /**
+     * 多页面 / frame / dialog 生成入口：按页面分组各自成 Page/Step/Assert 三件套，外加一个串联各页与
+     * 页面切换的「场景流程」Step 类，三份产物分别推到 page/step/assert 三个 Tab（同类产物跨页拼接）。
+     * 三个 Tab 各自独立兜错：某个生成器出问题不能再连累其它 Tab。
+     *
+     * @param skipVerify 跳过「生成前全量复核」（{@code verifyPendingRoles} 是 CDP 往返，首推瓶颈）。
+     *                   {@code true} 用于实时增量生成的<b>首推</b>：先把代码推上面板（快，首推 &lt;500ms），
+     *                   未复核 role 条目暂以拾取时策略产出；随后由 {@code requestLiveRegeneration} 的后台补推
+     *                   （{@code skipVerify=false}）复核并修订。{@code false} 用于 Stop 定稿（必须准确）。
+     */
+    private static void generateMultiPage(CodegenPanelHandle panel, List<Pick> picks, CodegenRecorder recorder,
+                                         List<DialogOp> dialogOps, String[] nlsFiles, AtomicBoolean stopped,
+                                         boolean skipVerify) {
         if (panel == null || stopped.get() || picks.isEmpty()) {
             return;
         }
-        // 生成前必须把未复核的 role 条目复核掉，产物才能与"拾取时同步复核"逐字一致。
-        verifyPendingRoles(panel, picks);
-
+        long tVerify = 0L, tRender = 0L, tPush = 0L;
+        if (!skipVerify) {
+            // 生成前必须把未复核的 role 条目复核掉，产物才能与"拾取时同步复核"逐字一致。
+            long tv = System.nanoTime();
+            verifyPendingRoles(panel, picks);
+            tVerify = (System.nanoTime() - tv) / 1_000_000;
+        }
         MultiPageCodegen.MultiPageResult result;
+        long tr = System.nanoTime();
         try {
             result = assembleMultiPage(picks, recorder, dialogOps, nlsFiles);
         } catch (Exception e) {
             log.warn("[codegen] live regeneration skipped (generation failed): {}", e.toString());
             return;
         }
+        tRender = (System.nanoTime() - tr) / 1_000_000;
+        long tp = System.nanoTime();
         pushBlocks(panel, "page", result.pageBlocks);
         pushBlocks(panel, "step", result.stepBlocks);
         pushBlocks(panel, "assert", result.assertBlocks);
+        tPush = (System.nanoTime() - tp) / 1_000_000;
+        log.info("[codegen][regen] generated (skipVerify={}): verify={}ms render={}ms push={}ms total={}ms",
+                skipVerify, tVerify, tRender, tPush, tVerify + tRender + tPush);
     }
 
     /**
@@ -1763,7 +1917,7 @@ public final class CodegenLauncher {
      * 复核不可判定（{@code -1}，CDP/页面异常）按"放行"处理，只告警不阻断——环境抖动不该把可靠产物
      * 退化成结构 CSS。
      */
-    private static void verifyPendingRoles(CodegenPanel panel, List<Pick> picks) {
+    private static void verifyPendingRoles(CodegenPanelHandle panel, List<Pick> picks) {
         if (picks == null || picks.isEmpty()) return;
 
         // 组判定与字段规划同口径（同一 base-sig + 序号互异 ≥2 ⇒ 将合成一个 PageElementList）。
@@ -1834,7 +1988,7 @@ public final class CodegenLauncher {
     }
 
     /** 单元素：严格模式要求恰好 1 个命中。 */
-    private static void verifySingle(CodegenPanel panel, Pick pk) {
+    private static void verifySingle(CodegenPanelHandle panel, Pick pk) {
         CodegenEntry entry = pk.entry;
         int hits = pk.extractor.countRoleMatches(entry);
         if (hits < 0) {
@@ -1856,7 +2010,7 @@ public final class CodegenLauncher {
      * <p>不相等 ⇒ 组被污染（含不可见元素被 role 引擎排除 / 页面还有未拾取的同类元素），
      * {@code get(i)} 索引不可信：整组一起回退 CSS，避免同组策略不一致。
      */
-    private static void verifyGroup(CodegenPanel panel, String base, List<Pick> group, int members) {
+    private static void verifyGroup(CodegenPanelHandle panel, String base, List<Pick> group, int members) {
         Pick head = group.get(0);
         CodegenEntry entry = head.entry;
         int hits = head.extractor.countRoleMatches(entry);
@@ -1880,7 +2034,7 @@ public final class CodegenLauncher {
     }
 
     /** 回退 CSS 并推面板就地修订该行（不新增行）。 */
-    private static void reviseToCss(CodegenPanel panel, Pick pk, int hits, String because) {
+    private static void reviseToCss(CodegenPanelHandle panel, Pick pk, int hits, String because) {
         CodegenEntry entry = pk.entry;
         CodegenEntry revised = RoleRevision.toCss(entry);
         pk.entry = revised;
@@ -1892,7 +2046,7 @@ public final class CodegenLauncher {
                 pk.id, hits, entry.role, entry.name, because, revised.selector);
     }
 
-    private static void pushTab(CodegenPanel panel, String tab, java.util.function.Supplier<String> generator) {
+    private static void pushTab(CodegenPanelHandle panel, String tab, java.util.function.Supplier<String> generator) {
         try {
             panel.onCode(tab, generator.get());
         } catch (Exception e) {
@@ -1901,7 +2055,7 @@ public final class CodegenLauncher {
     }
 
     /** 推送按页拆分的代码块（供面板在 Tab 内做「页内分页面切换器」）。 */
-    private static void pushBlocks(CodegenPanel panel, String tab,
+    private static void pushBlocks(CodegenPanelHandle panel, String tab,
                                    List<com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.MultiPageCodegen.CodeBlock> blocks) {
         try {
             panel.onCodeBlocks(tab, blocks);
