@@ -6,6 +6,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.api.security.SecurityAudit;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.EnvironmentUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.domain.enums.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ApiOperationKind;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.typesafe.config.Config;
@@ -489,12 +490,12 @@ public abstract class AbstractRestJob {
         int httpSocketTimeout;
 
         // Priority: System Property > ApiFrameworkConfig > Default value
-        Optional<String> opt = Optional.ofNullable(System.getProperty(ConfigKeys.HTTP_CONNECTION_TIMEOUT.toString()));
+        Optional<String> opt = Optional.ofNullable(ConfigReader.getProperty(ConfigKeys.HTTP_CONNECTION_TIMEOUT.toString()));
         httpConnectTimeout = opt
             .map(Integer::parseInt)
             .orElse(ApiFrameworkConfig.getConnectionTimeout());
 
-        opt = Optional.ofNullable(System.getProperty(ConfigKeys.HTTP_SOCKET_TIMEOUT.toString()));
+        opt = Optional.ofNullable(ConfigReader.getProperty(ConfigKeys.HTTP_SOCKET_TIMEOUT.toString()));
         httpSocketTimeout = opt
             .map(Integer::parseInt)
             .orElse(ApiFrameworkConfig.getSocketTimeout());

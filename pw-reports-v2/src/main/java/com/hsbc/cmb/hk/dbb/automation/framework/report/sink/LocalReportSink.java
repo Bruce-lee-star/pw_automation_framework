@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.sink;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.CaseFinishedEvent;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.CaseStartedEvent;
@@ -207,7 +208,7 @@ public final class LocalReportSink implements ReportSink {
 
     /** 渲染整体有界超时（秒）：默认 300s，可经系统属性 {@code pw.report.render.timeout.seconds} 覆盖。 */
     private static long renderTimeoutSeconds() {
-        String v = System.getProperty("pw.report.render.timeout.seconds");
+        String v = ConfigReader.getProperty("pw.report.render.timeout.seconds");
         if (v != null) {
             try {
                 long parsed = Long.parseLong(v.trim());

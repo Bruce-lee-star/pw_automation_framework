@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.assembler.headersImpl.HeadersAssemblers;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.config.ConfigProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.config.ApiFrameworkConfig;
@@ -100,16 +101,15 @@ public class Entity {
     }
 
     public String getEntityName() {
-        // 优先级：手动设置的entityName > 系统属性 > 环境变量
+        // 优先级：手动设置的entityName > 框架统一配置（系统属性 → 环境变量）
         if (this.entityName != null && !this.entityName.isEmpty()) {
             return this.entityName.toLowerCase(Locale.ENGLISH);
         }
-        String sysEntity = System.getProperty(Constants.ENTITY);
-        if (sysEntity != null && !sysEntity.isEmpty()) {
-            return sysEntity.toLowerCase(Locale.ENGLISH);
+        String entity = ConfigReader.getProperty(Constants.ENTITY);
+        if (entity != null && !entity.isEmpty()) {
+            return entity.toLowerCase(Locale.ENGLISH);
         }
-        String envEntity = System.getenv(Constants.ENTITY);
-        return envEntity != null ? envEntity.toLowerCase(Locale.ENGLISH) : "";
+        return "";
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
@@ -418,7 +419,7 @@ public final class MonitorSink {
      * 关闭方式：{@code -Droute.evidence.readResponseBody=false}（大量请求 + 大体积响应时可显著省开销）。
      */
     private static final boolean READ_BODY_FOR_EVIDENCE =
-            !"false".equalsIgnoreCase(System.getProperty("route.evidence.readResponseBody", "true"));
+            !"false".equalsIgnoreCase(ConfigReader.getProperty("route.evidence.readResponseBody", "true"));
 
     /** 证据展示的响应体前缀上限（字符；脱敏与最终截断仍由 {@code CapturedExchange} 完成）。 */
     private static final int PREVIEW_MAX_CHARS = 8192;

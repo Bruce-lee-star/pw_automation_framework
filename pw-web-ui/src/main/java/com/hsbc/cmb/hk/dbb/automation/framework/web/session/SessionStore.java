@@ -10,6 +10,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
@@ -87,7 +88,7 @@ final class SessionStore {
     private static final String SESSION_DIR = resolveSessionDir();
 
     private static String resolveSessionDir() {
-        String override = System.getProperty("framework.playwright.session.dir");
+        String override = ConfigReader.getProperty("framework.playwright.session.dir");
         if (override != null && !override.trim().isEmpty()) {
             return Paths.get(override).toAbsolutePath().normalize().toString();
         }

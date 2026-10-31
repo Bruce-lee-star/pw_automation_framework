@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -246,13 +245,9 @@ public final class PwReportsConfig {
     // ---------------------------------------------------------------- helpers
 
     private static String str(String key, String def) {
-        String sys = System.getProperty(PREFIX + key);
-        if (sys != null && !sys.isBlank()) {
-            return sys.trim();
-        }
-        String env = System.getenv("PW_REPORT_" + key.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_'));
-        if (env != null && !env.isBlank()) {
-            return env.trim();
+        String v = ConfigReader.getProperty(PREFIX + key);
+        if (v != null && !v.isBlank()) {
+            return v.trim();
         }
         return def;
     }

@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.LoggerFactory;
 
 /**
@@ -17,8 +18,8 @@ import org.slf4j.LoggerFactory;
  * <ul>
  *   <li>默认（未设 {@code pw.codegen.log}，或值为 OFF 之外的未知值）→ {@code WARN}：
  *       刷屏级 INFO/DEBUG 不输出，WARN/ERROR 异常保留可见（不做黑盒）；</li>
- *   <li>{@code -Dpw.codegen.log=INFO|DEBUG} → 显式打开详细日志；</li>
- *   <li>{@code -Dpw.codegen.log=OFF} → 完全静默（异常也不输出，不建议）。</li>
+ *   <li>{@code -Dpw.codegen.log=INFO|DEBUG}（环境变量 {@code PW_CODEGEN_LOG} 同效）→ 显式打开详细日志；</li>
+ *   <li>{@code -Dpw.codegen.log=OFF}（环境变量同效）→ 完全静默（异常也不输出，不建议）。</li>
  * </ul>
  *
  * <p>机制：包级 {@code setLevel}（后续尚未加载的子 logger 继承）＋ LoggerContext
@@ -68,7 +69,7 @@ public final class CodegenLogGate {
 
     /** 属性 → 目标级别：INFO/DEBUG 打开、OFF 全静默、其余（含未设）默认 WARN。 */
     static Level resolveTarget() {
-        String value = System.getProperty(PROPERTY, "");
+        String value = ConfigReader.getProperty(PROPERTY, "");
         if ("INFO".equalsIgnoreCase(value) || "DEBUG".equalsIgnoreCase(value)) {
             return Level.valueOf(value.toUpperCase());
         }

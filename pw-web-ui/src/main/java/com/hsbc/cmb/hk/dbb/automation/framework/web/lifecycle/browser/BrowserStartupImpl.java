@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.Locale;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.cloud.BrowserStackManager;
@@ -270,7 +271,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
             String rawName = (channel != null && !channel.trim().isEmpty()) ? channel : browserType;
             String displayName = rawName.substring(0, 1).toUpperCase(Locale.ROOT) + rawName.substring(1);
             String version = browser.version();
-            String merged = mergeBrowserEntry(System.getProperty("pw.report.browsers", ""), displayName, version);
+            String merged = mergeBrowserEntry(ConfigReader.getProperty("pw.report.browsers", ""), displayName, version);
             System.setProperty("pw.report.browsers", merged);
         } catch (Throwable ignored) {
             // 报告环境信息为可观测性增强，缺失不影响执行

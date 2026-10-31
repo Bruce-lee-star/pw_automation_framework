@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.dispatch;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.claim.RouteClaim;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.microsoft.playwright.APIRequestContext;
@@ -55,7 +56,7 @@ public final class RouteAction {
      *
      * <p>关闭：{@code -Droute.fetch.probe=false} 或环境变量 {@code ROUTE_FETCH_PROBE=false}。
      */
-    private static final boolean FETCH_PROBE = flag("route.fetch.probe", "ROUTE_FETCH_PROBE", true);
+    private static final boolean FETCH_PROBE = flag("route.fetch.probe", true);
 
     /**
      * intercept 重发（{@link #fetch}）是否<b>忽略 HTTPS 证书校验</b>——默认 <b>true</b>。
@@ -74,7 +75,7 @@ public final class RouteAction {
      * 或环境变量 {@code ROUTE_FETCH_IGNORE_HTTPS_ERRORS=false}。</p>
      */
     private static final boolean FETCH_IGNORE_HTTPS =
-            flag("route.fetch.ignoreHttpsErrors", "ROUTE_FETCH_IGNORE_HTTPS_ERRORS", true);
+            flag("route.fetch.ignoreHttpsErrors", true);
 
     /** 全局在飞 intercept fetch 数（探针用；多 Context 并行时为其总和）。 */
     private static final AtomicInteger FETCH_INFLIGHT = new AtomicInteger();
@@ -89,12 +90,9 @@ public final class RouteAction {
     /** 最近一次 {@code APIResponse.dispose()} 的描述（{@code url@时刻}），供 fetch 失败时对照。 */
     private static final AtomicReference<String> LAST_DISPOSE = new AtomicReference<>("<none>");
 
-    /** 读开关：系统属性优先，其次环境变量，最后默认值（与 {@code MonitorSink} 同款口径）。 */
-    private static boolean flag(String prop, String env, boolean defaultValue) {
-        String v = System.getProperty(prop);
-        if (v == null || v.isEmpty()) {
-            v = System.getenv(env);
-        }
+    /** 读开关：优先框架统一配置（系统属性 → 环境变量 → 配置文件），最后默认值（与 {@code MonitorSink} 同款口径）。 */
+    private static boolean flag(String prop, boolean defaultValue) {
+        String v = ConfigReader.getProperty(prop);
         if (v == null || v.isEmpty()) {
             return defaultValue;
         }

@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.config.ConfigProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.ApiLogSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.Constants;
@@ -118,7 +119,7 @@ public class EntityBuilder {
      * @return configured Entity instance
      */
     public static Entity build() {
-        String entityName = System.getProperty(Constants.ENTITY);
+        String entityName = ConfigReader.getProperty(Constants.ENTITY);
         if (entityName == null || entityName.trim().isEmpty()) {
             // If no entity name in system properties, return a null entity for dynamic configuration
             LOGGER.info("No entity name found in system properties, building null entity for dynamic configuration");

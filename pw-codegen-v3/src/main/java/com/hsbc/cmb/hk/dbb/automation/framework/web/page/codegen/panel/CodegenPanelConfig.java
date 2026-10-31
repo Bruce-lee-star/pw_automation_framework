@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import java.nio.file.Path;
 
 /**
@@ -65,9 +66,10 @@ public record CodegenPanelConfig(
                 null);                                  // nlsLang 由 open 调用方注入（会话级）
     }
 
-    /** 面板浏览器 profile 目录：默认系统临时目录下固定目录；可用 {@code -Dcodegen.panel.profile.dir=<dir>} 指定。 */
+    /** 面板浏览器 profile 目录：默认系统临时目录下固定目录；可用 {@code -Dcodegen.panel.profile.dir} 或
+     * 环境变量 {@code CODEGEN_PANEL_PROFILE_DIR} 指定。 */
     private static Path panelProfileDir(String property) {
-        String configured = System.getProperty(property);
+        String configured = ConfigReader.getProperty(property);
         Path dir = (configured == null || configured.trim().isEmpty())
                 ? Path.of(System.getProperty("java.io.tmpdir"), "codegen-panel-profile")
                 : Path.of(configured.trim());

@@ -53,13 +53,9 @@ public final class FrameworkFlags {
      * @param defaultValue 未配置时的默认值
      */
     public static String resolve(String key, String defaultValue) {
-        String fromSys = System.getProperty(key);
-        if (fromSys != null && !fromSys.trim().isEmpty()) {
-            return fromSys.trim();
-        }
-        String fromEnv = System.getenv(toEnvKey(key));
-        if (fromEnv != null && !fromEnv.trim().isEmpty()) {
-            return fromEnv.trim();
+        String v = ConfigReader.getProperty(key);
+        if (v != null && !v.trim().isEmpty()) {
+            return v.trim();
         }
         return defaultValue;
     }

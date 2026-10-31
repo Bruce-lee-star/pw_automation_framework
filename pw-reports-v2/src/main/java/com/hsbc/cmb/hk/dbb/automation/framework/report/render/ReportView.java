@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 
@@ -166,11 +167,11 @@ public final class ReportView {
         List<Map<String, Object>> rows = new ArrayList<>();
         add(rows, "JDK", join(System.getProperty("java.version"), System.getProperty("java.vm.name")));
         add(rows, "Build tool", buildTool());
-        add(rows, "Test framework", System.getProperty("pw.report.test.framework", "Cucumber · JUnit"));
+        add(rows, "Test framework", ConfigReader.getProperty("pw.report.test.framework", "Cucumber · JUnit"));
         add(rows, "Browser driver", playwrightDriver());
         add(rows, "OS", join(System.getProperty("os.name"), System.getProperty("os.version")));
-        add(rows, "Target", firstNonBlank(System.getProperty("pw.report.target"),
-                System.getProperty("base.url"), System.getenv("BASE_URL")));
+        add(rows, "Target", firstNonBlank(ConfigReader.getProperty("pw.report.target"),
+                ConfigReader.getProperty("base.url")));
         rows.removeIf(row -> row.get("v") == null);
         return rows;
     }

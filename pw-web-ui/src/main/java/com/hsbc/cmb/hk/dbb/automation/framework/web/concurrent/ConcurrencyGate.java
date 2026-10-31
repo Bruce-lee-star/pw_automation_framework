@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ConcurrencyGateTimeoutException;
 import org.slf4j.Logger;
@@ -144,12 +145,13 @@ public final class ConcurrencyGate {
     }
 
     /**
-     * 实时解析启用开关：优先读 {@code System.getProperty}（命令行 {@code -D} 与单测即时切换均生效），
+     * 实时解析启用开关：优先读 {@code ConfigReader.getProperty}（系统属性 → 环境变量 → 配置文件；
+     * 命令行 {@code -D} 与单测即时切换仍即时生效），
      * 回退 {@link WebFrameworkConfig}（经 框架 配置体系，含 serenity.conf）。
      * 双重读取规避 框架 {@code SystemEnvironmentVariables} 单例缓存导致的运行期不可见问题。
      */
     private static boolean isEnabledLive() {
-        String override = System.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_ENABLED.getKey());
+        String override = ConfigReader.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_ENABLED.getKey());
         if (override != null && !override.trim().isEmpty()) {
             return parseTriState(override);
         }
@@ -185,10 +187,10 @@ public final class ConcurrencyGate {
     }
 
     /**
-     * 实时解析每 key 许可数：优先 {@code System.getProperty}，回退 {@link WebFrameworkConfig}（默认 1）。
+     * 实时解析每 key 许可数：优先 {@code ConfigReader.getProperty}，回退 {@link WebFrameworkConfig}（默认 1）。
      */
     private static int perKeyPermitsLive() {
-        String override = System.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_PER_KEY_PERMITS.getKey());
+        String override = ConfigReader.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_PER_KEY_PERMITS.getKey());
         if (override != null) {
             try {
                 return Math.max(1, Integer.parseInt(override.trim()));
@@ -203,14 +205,14 @@ public final class ConcurrencyGate {
     }
 
     /**
-     * 实时解析「闸门等待超时后是否失败快」：优先 {@code System.getProperty}，回退
+     * 实时解析「闸门等待超时后是否失败快」：优先 {@code ConfigReader.getProperty}，回退
      * {@link WebFrameworkConfig}（默认 {@code true}）。
      *
      * <p>默认 fail-closed：把「未能取得闸门」如实判为该场景失败；设
      * {@code framework.playwright.concurrent.partition.fail.closed=false} 可退回 fail-open 放行。</p>
      */
     private static boolean failClosedLive() {
-        String override = System.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_FAIL_CLOSED.getKey());
+        String override = ConfigReader.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_FAIL_CLOSED.getKey());
         if (override != null && !override.trim().isEmpty()) {
             return truthy(override);
         }
@@ -291,7 +293,7 @@ public final class ConcurrencyGate {
     /** 进入闸门的最大等待（毫秒）：优先系统属性，回退配置；{@code <=0} 表示无限等待。 */
     private static long maxWaitMs() {
         String key = WebFrameworkConfig.CONCURRENCY_PARTITION_MAX_WAIT_MS.getKey();
-        String override = System.getProperty(key);
+        String override = ConfigReader.getProperty(key);
         String raw = (override != null && !override.trim().isEmpty())
                 ? override
                 : WebFrameworkConfig.CONCURRENCY_PARTITION_MAX_WAIT_MS.getValue();
