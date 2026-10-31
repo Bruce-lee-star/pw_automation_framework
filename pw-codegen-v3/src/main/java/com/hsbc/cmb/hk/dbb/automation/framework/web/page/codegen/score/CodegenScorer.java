@@ -61,6 +61,11 @@ public final class CodegenScorer {
     public static final int PLACEHOLDER = 120;
     public static final int LABEL = 140;
     public static final int ALT = 160;
+    /**
+     * {@code img} 的 {@code src} 尾部文件名（{@code [src$="…"]}）：URL 末段稳定且通常唯一，
+     * 比 {@code alt}（文案属性，多语言环境会变）更可靠；排在 alt 与 text 之间。
+     */
+    public static final int SRC_TAIL = 170;
     public static final int TEXT = 180;
     public static final int TITLE = 200;
     public static final int TEXT_REGEX = 250;
@@ -312,6 +317,26 @@ public final class CodegenScorer {
             }
         }
 
+        // 4b) img 的 src 尾部文件名（[src$="…"]，tag 前缀限定为 img）：
+        //     URL 域名/路径可能随环境变化，文件名（末段，去 query/hash）稳定且通常唯一——
+        //     深层表格里 alt 全部相同的二维码/徽章图（如 QR 下载区），这是唯一可靠的属性锚点。
+        //     文件名稳定用精确 $=；文件名本身含随机段则退到稳定 token 的 *=
+        if (isImg(self)) {
+            String tail = srcTail(self.src);
+            if (tail != null) {
+                if (SelectorStability.isStable(tail)) {
+                    out.add(new Candidate(SRC_TAIL, "img" + attrSelector("src", "$=", tail)));
+                } else {
+                    int used = 0;
+                    for (String token : SelectorStability.stableTokens(tail)) {
+                        if (used >= MAX_PARTIAL_PER_ATTR) break;
+                        used++;
+                        out.add(new Candidate(SRC_TAIL, "img" + attrSelector("src", "*=", token)));
+                    }
+                }
+            }
+        }
+
         // 5) class 里的稳定类名（class 以空格分隔类名，类名内部可含 '-'，故按空格切分而非按分隔符切）
         for (String cls : SelectorStability.stableClassNames(self.className)) {
             out.add(new Candidate(CSS_CLASS, attrSelector("class", "*=", cls)));
@@ -376,6 +401,12 @@ public final class CodegenScorer {
         }
         if (textAttributesAllowed && SelectorStability.isStable(self.alt)) {
             exact.add(attrSelector("alt", "=", self.alt));
+        }
+        if (isImg(self)) {
+            String tail = srcTail(self.src);
+            if (tail != null && SelectorStability.isStable(tail)) {
+                exact.add(attrSelector("src", "$=", tail));
+            }
         }
 
         List<String> classes = new ArrayList<>();
@@ -476,6 +507,30 @@ public final class CodegenScorer {
         String r = f.role == null ? "" : f.role.toLowerCase();
         if ("textbox".equals(r) || "searchbox".equals(r) || "spinbutton".equals(r)) return true;
         return "input".equals(f.tag) || "textarea".equals(f.tag);
+    }
+
+    private static boolean isImg(CodegenFacts.Fact f) {
+        return f != null && "img".equals(f.tag);
+    }
+
+    /**
+     * 取 {@code src} 的尾部文件名：URL 末段，去掉 query 与 hash，且至少 3 个字符。
+     *
+     * <p>{@code /x/y/Search_HSBC_HK_Business_Express_EN.png?t=1} → {@code Search_HSBC_HK_Business_Express_EN.png}；
+     * data URI / 空值返回 {@code null}（无法用文件名定位）。
+     */
+    private static String srcTail(String src) {
+        if (src == null || src.isBlank()) return null;
+        String s = src.trim();
+        if (s.startsWith("data:")) return null;
+        int q = s.indexOf('?');
+        if (q >= 0) s = s.substring(0, q);
+        int h = s.indexOf('#');
+        if (h >= 0) s = s.substring(0, h);
+        int slash = s.lastIndexOf('/');
+        if (slash >= 0) s = s.substring(slash + 1);
+        if (s.length() < 3) return null;
+        return s;
     }
 
     /** 构造属性选择器 {@code [name op "value"]}，转义双引号与反斜杠。 */

@@ -137,6 +137,8 @@ public final class CodegenCdpNodeExtractor {
                         var fb = dynamicIdFallbackSel(e.id);
                         if (fb) return fb;
                     }
+                    var ab = attrFallbackSel(e);
+                    if (ab) return ab;
                     var parts = []; var n = e;
                     while (n && n.nodeType === 1 && parts.length < 6) {
                         if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); break; }
@@ -157,6 +159,11 @@ public final class CodegenCdpNodeExtractor {
                     var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,})/);
                     return m ? m[1] : '';
                 }
+                // 动态 id 的稳定后缀：截掉开头随机段（Radix 夹心/`:rN:`/数字段+连字符）后，剩余尾部在组件语义上稳定。
+                function stableIdSuffix(id) {
+                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-)(.*)$/);
+                    return m ? m[1] : '';
+                }
                 function attrEsc(v) {
                     return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
                 }
@@ -165,13 +172,67 @@ public final class CodegenCdpNodeExtractor {
                 }
                 function dynamicIdFallbackSel(id) {
                     var prefix = stableIdPrefix(id);
-                    if (!prefix) return '';
-                    var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
-                    if (uniqueSel(byPrefix)) return byPrefix;
-                    var core = prefix.replace(/[-_]+$/, '');
+                    if (prefix) {
+                        var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
+                        if (uniqueSel(byPrefix)) return byPrefix;
+                    }
+                    var suffix = stableIdSuffix(id);
+                    if (suffix) {
+                        var bySuffix = '[id$="' + attrEsc(suffix) + '"]';
+                        if (uniqueSel(bySuffix)) return bySuffix;
+                    }
+                    var core = (prefix || suffix).replace(/^[-_]+|[-_]+$/g, '');
                     if (core) {
                         var byCore = '[id*="' + attrEsc(core) + '"]';
                         if (uniqueSel(byCore)) return byCore;
+                    }
+                    return '';
+                }
+                // 取 src 尾部文件名（URL 末段，去 query/hash）；data URI / 空值返回空串。
+                function srcTail(s) {
+                    if (!s) return '';
+                    s = String(s).trim();
+                    if (s.indexOf('data:') === 0) return '';
+                    var q = s.indexOf('?'); if (q >= 0) s = s.substring(0, q);
+                    var h = s.indexOf('#'); if (h >= 0) s = s.substring(0, h);
+                    var sl = s.lastIndexOf('/'); if (sl >= 0) s = s.substring(sl + 1);
+                    return s.length >= 3 ? s : '';
+                }
+                // class 里的稳定类名（空格切分，滤掉框架随机 token 与过短碎片）。
+                function stableClassTokens(cls) {
+                    var out = [], seen = {};
+                    if (!cls) return out;
+                    var raw = String(cls).trim().split(/\\s+/);
+                    for (var i = 0; i < raw.length; i++) {
+                        var t = raw[i];
+                        if (t.length < 3) continue;
+                        if (/^(css|sc)-[a-z0-9]{5,}$/i.test(t)) continue;      // Emotion css-xxx
+                        if (/^[a-z0-9]{8,}$/i.test(t)) continue;                // 长 hash
+                        if (/_R_[A-Za-z0-9]{4,}_/.test(t)) continue;            // Radix 夹心
+                        if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(t)) continue;     // 数字后缀
+                        if (seen[t]) continue;
+                        seen[t] = true;
+                        out.push(t);
+                    }
+                    return out;
+                }
+                // 目标元素属性兜底（在结构链之前）：无 id / 动态 id 无法唯一时，先试
+                // img[src$="文件名"]、稳定 class token（tag[class*="tok"]），每个候选都做唯一性校验。
+                function attrFallbackSel(e) {
+                    if (!e || e.nodeType !== 1) return '';
+                    var t = e.tagName.toLowerCase();
+                    if (t === 'img') {
+                        var tail = srcTail(e.getAttribute && e.getAttribute('src'));
+                        if (tail) {
+                            var byTail = 'img[src$="' + attrEsc(tail) + '"]';
+                            if (uniqueSel(byTail)) return byTail;
+                        }
+                    }
+                    var cls = (typeof e.className === 'string') ? e.className : '';
+                    var toks = stableClassTokens(cls);
+                    for (var i = 0; i < toks.length; i++) {
+                        var byCls = t + '[class*="' + attrEsc(toks[i]) + '"]';
+                        if (uniqueSel(byCls)) return byCls;
                     }
                     return '';
                 }
@@ -246,7 +307,7 @@ public final class CodegenCdpNodeExtractor {
                         var name = a.name.toLowerCase();
                         if (name.indexOf('data-') !== 0 && name.indexOf('aria-') !== 0) continue;
                         if (name === 'data-testid') continue;
-                        var v = (a.value || '').replace(/\s+/g, ' ').trim();
+                        var v = (a.value || '').replace(/\\s+/g, ' ').trim();
                         if (!v || v.length > 120) continue;
                         out[name] = v;
                         used++;
@@ -269,6 +330,7 @@ public final class CodegenCdpNodeExtractor {
                         className: (typeof x.className === 'string') ? x.className : '',
                         xpath: absXPath(x),
                         nameAttr: (x.getAttribute && x.getAttribute('name')) || '',
+                        src: (x.getAttribute && x.getAttribute('src')) || '',
                         attrs: semanticAttrsOf(x, 10)
                     };
                 }
@@ -347,16 +409,28 @@ public final class CodegenCdpNodeExtractor {
                     var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,})/);
                     return m ? m[1] : '';
                 }
+                // 动态 id 的稳定后缀：截掉开头随机段后，剩余尾部在组件语义上稳定。
+                function stableIdSuffix(id) {
+                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-)(.*)$/);
+                    return m ? m[1] : '';
+                }
                 function attrEsc(v) {
                     return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
                 }
-                // 动态 id 的稳定前缀/包含选择器兜底（唯一才用）：dropdown-list-_R_x_ → [id^="dropdown-list-"]
+                // 动态 id 的稳定前缀/后缀/包含选择器兜底（唯一才用）：dropdown-list-_R_x_ → [id^="dropdown-list-"]；
+                // a3f9-input-name → [id$="input-name"]。
                 function dynamicIdFallbackSel(id) {
                     var prefix = stableIdPrefix(id);
-                    if (!prefix) return '';
-                    var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
-                    if (unique(byPrefix)) return byPrefix;
-                    var core = prefix.replace(/[-_]+$/, '');
+                    if (prefix) {
+                        var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
+                        if (unique(byPrefix)) return byPrefix;
+                    }
+                    var suffix = stableIdSuffix(id);
+                    if (suffix) {
+                        var bySuffix = '[id$="' + attrEsc(suffix) + '"]';
+                        if (unique(bySuffix)) return bySuffix;
+                    }
+                    var core = (prefix || suffix).replace(/^[-_]+|[-_]+$/g, '');
                     if (core) {
                         var byCore = '[id*="' + attrEsc(core) + '"]';
                         if (unique(byCore)) return byCore;
@@ -672,7 +746,7 @@ public final class CodegenCdpNodeExtractor {
         if (Objects.equals(role, js.role) && Objects.equals(name, js.name)) return js;
         return new CodegenFacts.Fact(role, name, js.tag, js.id, js.testid, js.type, js.placeholder,
                 js.alt, js.title, js.value, js.text, js.label, js.nth, js.cssSelector, js.shadowHosts,
-                js.className, js.xpath, js.nameAttr);
+                js.className, js.xpath, js.nameAttr, js.attrs, js.src);
     }
 
     /**

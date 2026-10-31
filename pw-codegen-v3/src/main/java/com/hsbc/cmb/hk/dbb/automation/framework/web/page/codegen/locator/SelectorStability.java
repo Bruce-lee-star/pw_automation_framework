@@ -33,6 +33,16 @@ public final class SelectorStability {
     /** React 19 useId：{@code :r1:}、{@code :R2m:}（也常被拼进 radix 的 id 前缀）。 */
     private static final Pattern REACT_USE_ID = Pattern.compile(":r[0-9a-z]{1,4}:", Pattern.CASE_INSENSITIVE);
 
+    /**
+     * Radix 夹心随机段（infix）：{@code dropdown-list-_R_kmub7m_}、{@code menu-_R_1a2b3c4d_-trigger}。
+     *
+     * <p>注意整串用 {@link Matcher#find()}：随机段出现在值中间而非首尾，matches() 会漏掉。
+     * 段级切分（{@link #parts}）还会把 {@code _R_kmub7m_} 拆成 {@code R}/{@code kmub7m}，
+     * 而 {@code kmub7m} 既非 hex 又不满足高熵阈值（<12 位），会被误判为"稳定段"拼进前缀——
+     * 因此 {@code parts()} 必须同时识别下划线包夹的 Radix 段。
+     */
+    private static final Pattern RADIX_INFIX = Pattern.compile("_R_[A-Za-z0-9]{4,}_");
+
     /** 纯十六进制（≥8 位且字母数字混合）——打包器 hash 的典型形态。 */
     private static final Pattern HEX_HASH = Pattern.compile("^[0-9a-f]{8,}$", Pattern.CASE_INSENSITIVE);
 
@@ -83,6 +93,7 @@ public final class SelectorStability {
         if (v.isEmpty()) return true;
         if (UUID.matcher(v).matches()) return true;
         if (REACT_USE_ID.matcher(v).find()) return true;
+        if (RADIX_INFIX.matcher(v).find()) return true;
         if (PURE_DIGITS.matcher(v).matches()) return true;
         if (TRAILING_TIMESTAMP.matcher(v).find()) return true;
         if (LONG_DIGIT_RUN.matcher(v).find()) return true;
@@ -216,7 +227,14 @@ public final class SelectorStability {
         Matcher m = Pattern.compile("[A-Za-z0-9]+").matcher(value);
         while (m.find()) {
             String text = m.group();
-            out.add(new Part(text, m.start(), m.end(), isVolatilePart(text)));
+            boolean radixInfix = m.start() >= 2
+                    && value.charAt(m.start() - 1) == '_'
+                    && value.charAt(m.start() - 2) == 'R'
+                    && m.end() < value.length()
+                    && value.charAt(m.end()) == '_'
+                    && text.length() >= 4;
+            out.add(new Part(text, m.start(), m.end(),
+                    isVolatilePart(text) || radixInfix));
         }
         return out;
     }

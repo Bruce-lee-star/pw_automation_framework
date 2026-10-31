@@ -55,6 +55,12 @@ public final class CodegenFacts {
         /** 表单 {@code name} 属性：与语言无关，是 input 类元素最稳定的定位依据之一。 */
         public final String nameAttr;
         /**
+         * 元素的 {@code src} 属性（img/script/iframe 等）。对图片类元素是天然定位依据：
+         * 文件名（URL 末段）稳定且通常唯一——{@code img[src$="Google_play_badge_EN.png"]} 远比
+         * 深层 {@code nth-of-type} 结构链健壮。值是否随机/带查询串由 {@code SelectorStability} 判定。
+         */
+        public final String src;
+        /**
          * 可定位的语义属性（{@code data-*} + {@code aria-label}，属性名 → 值）。
          *
          * <p>{@code data-i18n} / {@code data-qa} / {@code data-test} / {@code data-automation-id} 由业务书写，
@@ -89,6 +95,14 @@ public final class CodegenFacts {
                     String placeholder, String alt, String title, String value,
                     String text, String label, int nth, String cssSelector, List<String> shadowHosts,
                     String className, String xpath, String nameAttr, Map<String, String> attrs) {
+            this(role, name, tag, id, testid, type, placeholder, alt, title, value,
+                    text, label, nth, cssSelector, shadowHosts, className, xpath, nameAttr, attrs, "");
+        }
+
+        public Fact(String role, String name, String tag, String id, String testid, String type,
+                    String placeholder, String alt, String title, String value,
+                    String text, String label, int nth, String cssSelector, List<String> shadowHosts,
+                    String className, String xpath, String nameAttr, Map<String, String> attrs, String src) {
             this.role = role;
             this.name = name;
             this.tag = tag;
@@ -110,6 +124,7 @@ public final class CodegenFacts {
             this.className = className == null ? "" : className;
             this.xpath = xpath == null ? "" : xpath;
             this.nameAttr = nameAttr == null ? "" : nameAttr;
+            this.src = src == null ? "" : src;
             this.attrs = (attrs == null || attrs.isEmpty())
                     ? Map.of()
                     : Collections.unmodifiableMap(new LinkedHashMap<>(attrs));
@@ -170,7 +185,8 @@ public final class CodegenFacts {
                 str(o, "className", ""),
                 str(o, "xpath", ""),
                 str(o, "nameAttr", ""),
-                mapOf(o, "attrs"));
+                mapOf(o, "attrs"),
+                str(o, "src", ""));
     }
 
     /**
