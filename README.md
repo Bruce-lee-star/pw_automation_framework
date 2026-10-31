@@ -73,7 +73,7 @@ mvn -pl test-automation -am test
 
 > 例外：route 采集三键（`route.capture.all.type` / `route.capture.inline.max.bytes` / `route.capture.gzip.max.bytes`）
 > 为 **环境变量 > 系统属性 > 配置文件 > 默认值**，经 `ConfigRegistry` 的**声明式层序**
-> （`ConfigSource.ENV_FIRST_PRECEDENCE`）声明；其余键仍为系统属性优先，语义不变。
+> （`ConfigReader.ENV_FIRST_PRECEDENCE`）声明；其余键仍为系统属性优先，语义不变。
 
 配置键的**唯一事实来源**是 `core` 的
 `com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry`（当前 **216** 个键）：

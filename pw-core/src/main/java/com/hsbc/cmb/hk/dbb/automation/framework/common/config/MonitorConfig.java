@@ -7,7 +7,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
  * 现键名与默认值的<b>唯一事实来源</b>是 {@link ConfigRegistry}（{@code MONITOR_*} / {@code API_CAPTURE_*} 条目），
  * 本类仅保留 {@link Key} 形态与读取访问器，使既有调用方（route / persistence 域）零改动。
  *
- * <p>解析统一走 {@link ConfigSource#resolve(String, String)}（支持 serenity.properties / 系统属性 /
+ * <p>解析统一走 {@link ConfigReader#resolve(String, String)}（支持 serenity.properties / 系统属性 /
  * 环境变量 / {@code ENC()} 透明解密）；键名与默认值经 {@link ConfigRegistry} 集中登记，对既有配置零侵入
  * （配置仅按 key 字符串解析，与定义位置无关）。
  *
@@ -165,7 +165,7 @@ public final class MonitorConfig {
 
     /** 字符串值（缺失则返回默认值）。 */
     public static String getString(Key k) {
-        return ConfigSource.resolve(k.key(), k.defaultValue());
+        return ConfigReader.resolve(k.key(), k.defaultValue());
     }
 
     /** 布尔值：true/yes/1 视为真。 */

@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.junit.After;
 import org.junit.Test;
 
@@ -12,8 +12,8 @@ import static org.junit.Assert.assertTrue;
 /**
  * {@link RouteCapturePolicy} 的冻结快照 / 层序来源 / 数值兜底 / 防漂移契约。
  *
- * <p>route 三键声明层序为 {@link ConfigSource#ENV_FIRST_PRECEDENCE}：①环境变量层无法在进程内
- * 设置（与 {@code ConfigSource} 既有做法一致，不纳入单测），故本类覆盖 ②系统属性层、③配置文件层
+ * <p>route 三键声明层序为 {@link ConfigReader#ENV_FIRST_PRECEDENCE}：①环境变量层无法在进程内
+ * 设置（与 {@code ConfigReader} 既有做法一致，不纳入单测），故本类覆盖 ②系统属性层、③配置文件层
  * （pw-route 单测 classpath 上无 {@code ConfigResolver} 实现 ⇒ 恒为空）与 ④默认值层。
  *
  * <p><b>JVM 全局性</b>：System 属性为进程级共享，本类独占这三个键的读写
@@ -36,7 +36,7 @@ public class RouteCapturePolicyTest {
         assertFalse("空白系统属性视为未命中，应回落默认 false", policy.allTypes());
         assertEquals(RouteConfig.DEFAULT_CAPTURE_INLINE_MAX_BYTES, policy.inlineMaxBytes());
         assertEquals(RouteConfig.DEFAULT_CAPTURE_GZIP_MAX_BYTES, policy.gzipMaxBytes());
-        assertEquals(ConfigSource.Layer.DEFAULT, layerOf(policy, "route.capture.all.type"));
+        assertEquals(ConfigReader.Layer.DEFAULT, layerOf(policy, "route.capture.all.type"));
     }
 
     @Test
@@ -44,7 +44,7 @@ public class RouteCapturePolicyTest {
         System.setProperty("route.capture.all.type", "true");
         RouteCapturePolicy policy = RouteCapturePolicy.resolveNow();
         assertTrue("系统属性层应覆盖默认值", policy.allTypes());
-        assertEquals("来源层应为系统属性", ConfigSource.Layer.SYSTEM_PROPERTY,
+        assertEquals("来源层应为系统属性", ConfigReader.Layer.SYSTEM_PROPERTY,
                 layerOf(policy, "route.capture.all.type"));
     }
 
@@ -84,16 +84,16 @@ public class RouteCapturePolicyTest {
     @Test
     public void routeKeysDeclareEnvFirstPrecedence() {
         // 声明式层序：只有 route 三键为 ENV 优先，其余键保持框架默认（语义零变化）
-        assertEquals(ConfigSource.ENV_FIRST_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.key()));
-        assertEquals(ConfigSource.ENV_FIRST_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.key()));
-        assertEquals(ConfigSource.ENV_FIRST_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.key()));
-        assertEquals(ConfigSource.DEFAULT_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigRegistry.MONITOR_OBSERVE_THREADS.key()));
-        assertEquals("未登记键走框架默认层序", ConfigSource.DEFAULT_PRECEDENCE,
-                ConfigSource.precedenceFor("route.capture.not.registered"));
+        assertEquals(ConfigReader.ENV_FIRST_PRECEDENCE,
+                ConfigReader.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.key()));
+        assertEquals(ConfigReader.ENV_FIRST_PRECEDENCE,
+                ConfigReader.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.key()));
+        assertEquals(ConfigReader.ENV_FIRST_PRECEDENCE,
+                ConfigReader.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.key()));
+        assertEquals(ConfigReader.DEFAULT_PRECEDENCE,
+                ConfigReader.precedenceFor(ConfigRegistry.MONITOR_OBSERVE_THREADS.key()));
+        assertEquals("未登记键走框架默认层序", ConfigReader.DEFAULT_PRECEDENCE,
+                ConfigReader.precedenceFor("route.capture.not.registered"));
     }
 
     @Test
@@ -108,7 +108,7 @@ public class RouteCapturePolicyTest {
     }
 
     /** 取某项生效值的来源层（诊断用 provenance）。 */
-    private static ConfigSource.Layer layerOf(RouteCapturePolicy policy, String key) {
+    private static ConfigReader.Layer layerOf(RouteCapturePolicy policy, String key) {
         return policy.provenance().stream()
                 .filter(r -> key.equals(r.key()))
                 .findFirst()

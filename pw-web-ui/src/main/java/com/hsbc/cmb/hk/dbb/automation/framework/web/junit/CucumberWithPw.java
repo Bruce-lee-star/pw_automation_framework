@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.junit;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.PwReportPlugin;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwReportObjectFactory;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkCucumberEventListener;
@@ -85,7 +85,7 @@ public final class CucumberWithPw extends Runner implements Filterable {
         //  features 根目录：framework.features.root 决定 Cucumber 去哪里找 .feature 文件。
         //  通过 cucumber.options 注入 --features，业务无需在 @CucumberOptions 里硬编码路径；
         //  仅当业务未显式用 cucumber.options 指定 --features 时才注入，尊重其显式配置。
-        String featuresRoot = ConfigSource.resolve(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT.key(), null);
+        String featuresRoot = ConfigReader.resolve(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT.key(), null);
         if (featuresRoot != null && !featuresRoot.isBlank()) {
             String cucumberOpts = System.getProperty("cucumber.options");
             if (cucumberOpts == null || !cucumberOpts.contains("--features")) {

@@ -4,7 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.ApiLogSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.Constants;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.EnvironmentUtils;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.typesafe.config.Config;
@@ -399,7 +399,7 @@ public class ConfigProvider {
 
     /**
      * 对整份配置做透明解密：仅遍历<b>字符串</b>值，凡 {@code ENC(...)} 形式经
-     * {@link ConfigSource#decrypt(String)} 解密；数字 / 布尔 / 列表等非字符串值原样保留，
+     * {@link ConfigReader#decrypt(String)} 解密；数字 / 布尔 / 列表等非字符串值原样保留，
      * 配置结构不变。解密失败（主密钥缺失 / 密文损坏）时保留原串，绝不中断配置加载。
      */
     private static Config decryptSecrets(Config cfg) {
@@ -430,7 +430,7 @@ public class ConfigProvider {
             return l;
         }
         if (node instanceof String) {
-            return ConfigSource.decrypt((String) node);
+            return ConfigReader.decrypt((String) node);
         }
         return node;
     }

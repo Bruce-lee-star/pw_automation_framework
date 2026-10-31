@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,8 +11,8 @@ import java.util.List;
  * 路由采集策略（<b>不可变值对象</b>）—— 三项采集配置的<b>唯一解析点与冻结快照</b>。
  *
  * <p>层序不在本类硬编码：由 {@link ConfigRegistry} 对 {@code route.capture.*} 三键的**声明式层序**
- * （{@link ConfigSource#ENV_FIRST_PRECEDENCE}：环境变量 → 系统属性 → 配置文件属性 → 默认值）
- * 决定，逐层回退、透明解密、来源层上报全部复用 {@link ConfigSource} —— 框架内只有一套解析实现。
+ * （{@link ConfigReader#ENV_FIRST_PRECEDENCE}：环境变量 → 系统属性 → 配置文件属性 → 默认值）
+ * 决定，逐层回退、透明解密、来源层上报全部复用 {@link ConfigReader} —— 框架内只有一套解析实现。
  *
  * <p><b>生命周期</b>：由装配方（{@code RouteRuntimeImpl}）在构造 sink 时 {@link #resolveNow()}
  * 解析一次并<b>冻结</b>。请求侧与响应侧两个采集闸门共用同一快照，杜绝"同一次 exchange 两次判定
@@ -31,10 +31,10 @@ public final class RouteCapturePolicy {
     /** MONITOR 响应体断言上限（字节）：超限的 body 不再整体物化解析，降级为仅 status/headers 断言。 */
     private final int assertBodyMaxBytes;
     /** 四项生效值的来源层（可观测/诊断；不含敏感值语义，均为 boolean/int）。 */
-    private final List<ConfigSource.Resolved> provenance;
+    private final List<ConfigReader.Resolved> provenance;
 
     private RouteCapturePolicy(boolean allTypes, int inlineMaxBytes, int gzipMaxBytes,
-                               int assertBodyMaxBytes, List<ConfigSource.Resolved> provenance) {
+                               int assertBodyMaxBytes, List<ConfigReader.Resolved> provenance) {
         this.allTypes = allTypes;
         this.inlineMaxBytes = inlineMaxBytes;
         this.gzipMaxBytes = gzipMaxBytes;
@@ -63,7 +63,7 @@ public final class RouteCapturePolicy {
     }
 
     /** 四项生效值的来源层（键 + 生效值 + 层），供诊断/日志（返回不可变快照）。 */
-    public List<ConfigSource.Resolved> provenance() {
+    public List<ConfigReader.Resolved> provenance() {
         return List.copyOf(provenance);
     }
 
@@ -73,13 +73,13 @@ public final class RouteCapturePolicy {
      * @return 冻结后的采集策略
      */
     public static RouteCapturePolicy resolveNow() {
-        ConfigSource.Resolved allTypes = resolve(ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.key(),
+        ConfigReader.Resolved allTypes = resolve(ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.key(),
                 Boolean.toString(RouteConfig.DEFAULT_CAPTURE_ALL_TYPES));
-        ConfigSource.Resolved inline = resolve(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.key(),
+        ConfigReader.Resolved inline = resolve(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_CAPTURE_INLINE_MAX_BYTES));
-        ConfigSource.Resolved gzip = resolve(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.key(),
+        ConfigReader.Resolved gzip = resolve(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_CAPTURE_GZIP_MAX_BYTES));
-        ConfigSource.Resolved assertBody = resolve(ConfigRegistry.ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES.key(),
+        ConfigReader.Resolved assertBody = resolve(ConfigRegistry.ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_ASSERT_BODY_MAX_BYTES));
         RouteCapturePolicy policy = new RouteCapturePolicy(
                 Boolean.parseBoolean(allTypes.value()),
@@ -95,13 +95,13 @@ public final class RouteCapturePolicy {
     }
 
     /** 显式「空白视为未命中」的解析（不遮蔽配置文件层）。 */
-    private static ConfigSource.Resolved resolve(String key, String defaultValue) {
-        return ConfigSource.resolveWithLayer(key, defaultValue,
-                ConfigSource.precedenceFor(key), true);
+    private static ConfigReader.Resolved resolve(String key, String defaultValue) {
+        return ConfigReader.resolveWithLayer(key, defaultValue,
+                ConfigReader.precedenceFor(key), true);
     }
 
     /** 正整数：命中但 ≤0 / 非法 ⇒ WARN 并回落该键默认值（配置错误不让采集失败）。 */
-    private static int positiveInt(ConfigSource.Resolved resolved, int fallback) {
+    private static int positiveInt(ConfigReader.Resolved resolved, int fallback) {
         String raw = resolved.value();
         if (raw == null) {
             return fallback;

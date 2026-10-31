@@ -12,7 +12,7 @@ import java.util.Locale;
 import java.util.ServiceLoader;
 
 /**
- * 极薄配置源工具——统一"按 key 解析 + ENC(...) 透明解密"，供 Web(框架) 与 API(Typesafe) 两域复用，
+ * 统一配置读取服务——按 key 解析 + ENC(...) 透明解密，供 Web(框架) 与 API(Typesafe) 两域复用，
  * 避免各自重复实现解密 / 解析逻辑。
  *
  * <p>解析优先级（CORE-P0-1：core 不再耦合任何配置框架）：
@@ -44,9 +44,9 @@ import java.util.ServiceLoader;
  * 兜底 {@code defaultValue}（代码内字面量）仅显式 {@code ENC(...)} 才解密（C-9）。解密失败
  * （主密钥缺失 / 密文损坏）保留原串，绝不中断配置加载。</p>
  */
-public final class ConfigSource {
+public final class ConfigReader {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ConfigSource.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ConfigReader.class);
 
     /**
      * 配置来源层（解析顺序由<b>层序声明</b>决定，高 → 低）。
@@ -77,7 +77,7 @@ public final class ConfigSource {
     public record Resolved(String key, String value, Layer layer) {
     }
 
-    private ConfigSource() {
+    private ConfigReader() {
     }
 
     /** SPI 发现的配置解析器缓存（懒加载、线程安全；缺实现/异常时降级为空列表）。 */
@@ -85,7 +85,7 @@ public final class ConfigSource {
 
     private static List<ConfigResolver> resolvers() {
         if (resolvers == null) {
-            synchronized (ConfigSource.class) {
+            synchronized (ConfigReader.class) {
                 if (resolvers == null) {
                     List<ConfigResolver> list = new ArrayList<>();
                     try {
@@ -94,7 +94,7 @@ public final class ConfigSource {
                         }
                     } catch (Throwable e) {
                         // SPI 不可用不影响内置解析（系统属性 / 环境变量 / 默认值），但不得静默（D7-3）
-                        LOGGER.debug("[ConfigSource] ConfigResolver SPI unavailable, "
+                        LOGGER.debug("[ConfigReader] ConfigResolver SPI unavailable, "
                                 + "fallback to builtin sources: {}", e.toString());
                     }
                     resolvers = list;
@@ -117,6 +117,37 @@ public final class ConfigSource {
      */
     public static String resolve(String key, String defaultValue) {
         return resolveWithLayer(key, defaultValue).value();
+    }
+
+    /**
+     * Serenity 风格宽松读取（业务测试代码入口）：按 key 解析配置值，未命中返回 {@code null}。
+     *
+     * <p>解析层序：已登记键用其在 {@link ConfigRegistry} 的声明层序，未登记键用
+     * {@link #DEFAULT_PRECEDENCE}（系统属性 → 环境变量 → 配置文件 → 默认值）；透明解密、
+     * 空白值语义（空白算命中）与 {@link #resolve(String, String)} 完全一致。
+     *
+     * <p>典型业务用法（配置在环境变量里的值自动可读，键名点分与下划线大写互通）：
+     * <pre>{@code
+     * String uri = ConfigReader.getProperty("api.base.uri");              // 读不到返回 null
+     * String timeout = ConfigReader.getProperty("api.timeout", "30000");  // 带兜底默认值
+     * }</pre>
+     *
+     * @param key 配置键（如 {@code api.base.uri}，对应环境变量 {@code API_BASE_URI}）
+     * @return 解析并解密后的值；全部层未命中时返回 {@code null}
+     */
+    public static String getProperty(String key) {
+        return getProperty(key, null);
+    }
+
+    /**
+     * Serenity 风格宽松读取，带兜底默认值（见 {@link #getProperty(String)}）。
+     *
+     * @param key          配置键
+     * @param defaultValue 全部层未命中时的兜底值（可为 {@code null}）
+     * @return 解析并解密后的值；未命中返回 {@code defaultValue}
+     */
+    public static String getProperty(String key, String defaultValue) {
+        return resolveWithLayer(key, defaultValue, precedenceFor(key), false).value();
     }
 
     /**
@@ -188,7 +219,7 @@ public final class ConfigSource {
             }
             String value = SecretValue.decryptIfNeeded(raw);
             if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("[ConfigSource] resolved {} (layer={})", key, layer);
+                LOGGER.debug("[ConfigReader] resolved {} (layer={})", key, layer);
             }
             reportOnce(key, layer);
             return new Resolved(key, value, layer);
@@ -235,13 +266,13 @@ public final class ConfigSource {
         if (ConfigRegistry.of(key) == null || !REPORTED.add(key + '@' + layer)) {
             return;
         }
-        LOGGER.info("[ConfigSource] effective {} (layer={})", key, layer);
+        LOGGER.info("[ConfigReader] effective {} (layer={})", key, layer);
     }
 
     /**
      * 配置键 → 环境变量名：大写，并将 {@code .} 与 {@code -} 规范为 {@code _}
      * （与 框架 的 ENV 映射保持一致）。
-     * 例：{@code framework.playwright.headless} → {@code SERENITY_PLAYWRIGHT_HEADLESS}。
+     * 例：{@code framework.playwright.headless} → {@code FRAMEWORK_PLAYWRIGHT_HEADLESS}。
      */
     static String toEnvKey(String key) {
         return key.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');

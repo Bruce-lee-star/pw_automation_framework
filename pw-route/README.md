@@ -138,7 +138,7 @@ RouteDsl.resetAll();          // 关闭全部运行时
 | `route.capture.gzip.max.bytes` | `8388608` | 文本型 gzip 上限（8 MiB），超出落盘 |
 | `route.monitor.assert.body.max.bytes` | `2097152` | MONITOR 响应体**断言**上限（2 MiB），超限降级为仅校验 status/headers |
 
-> **取值优先级例外**：以上四键为**环境变量 > 系统属性 > 配置文件 > 默认值**（由 `ConfigSource.ENV_FIRST_PRECEDENCE` 声明），与其余键（系统属性优先）语义不同。
+> **取值优先级例外**：以上四键为**环境变量 > 系统属性 > 配置文件 > 默认值**（由 `ConfigReader.ENV_FIRST_PRECEDENCE` 声明），与其余键（系统属性优先）语义不同。
 
 ## 7. 边界与非目标
 

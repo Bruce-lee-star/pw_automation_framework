@@ -2,7 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.async;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.SoftAssertions;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.FrameworkFlags;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.LazyInit;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
@@ -650,7 +650,7 @@ public final class AsyncPool {
 
     // ─── 内部工具 ──────────────────────────────────────────────
 
-    // 修复 CORE-P1-N7：配置改走统一配置门面 ConfigSource（合并 -D 系统属性 / 环境变量 /
+    // 修复 CORE-P1-N7：配置改走统一配置门面 ConfigReader（合并 -D 系统属性 / 环境变量 /
     // serenity.properties 并透明解密），消除"直读 ASYNC_* 环境变量"这第三套割裂的配置体系，
     // 使 ASYNC_* 可被 serenity.properties 与 -D 覆盖、并支持 ENC() 加密。env 名映射与历史一致
     // （toEnvKey("ASYNC_CORE_THREADS") == "ASYNC_CORE_THREADS"），对现网零变更。
@@ -677,12 +677,12 @@ public final class AsyncPool {
      * 否则既有 {@code -DASYNC_CORE_THREADS=…} 会被静默忽略（历史文档只写了环境变量形式，但静默失效不可接受）。</p>
      */
     private static String resolveWithLegacy(String key) {
-        String value = ConfigSource.resolve(key, null);
+        String value = ConfigReader.resolve(key, null);
         if (value != null && !value.trim().isEmpty()) {
             return value;
         }
         String legacyKey = FrameworkFlags.toEnvKey(key);
-        String legacy = ConfigSource.resolve(legacyKey, null);
+        String legacy = ConfigReader.resolve(legacyKey, null);
         if (legacy != null && !legacy.trim().isEmpty()) {
             LOGGER.warn("[AsyncPool] 配置键 '{}' 为历史（未规范化）形式，仍生效：{}；请改用 '{}'",
                     legacyKey, legacy, key);

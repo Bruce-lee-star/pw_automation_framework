@@ -28,7 +28,7 @@
 </file>
 <file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigResolver.java">
 </file>
-<file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigSource.java">
+<file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigReader.java">
 </file>
 <file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/FrameworkFlags.java">
 </file>

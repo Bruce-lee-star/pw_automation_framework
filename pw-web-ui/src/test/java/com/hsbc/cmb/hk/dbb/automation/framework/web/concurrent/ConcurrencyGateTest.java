@@ -46,7 +46,7 @@ public class ConcurrencyGateTest {
     /**
      * 前提确定性（本轮修复既有失败，<b>关键</b>）：本类用系统属性表达每条用例的配置前提，
      * 但 <b>{@code System.clearProperty} 并不能把配置拉回默认值</b> ——
-     * {@code ConfigSource.resolve} 的第 1 步（实时系统属性）之后还有第 3 步「SPI 扩展配置源」，
+     * {@code ConfigReader.resolve} 的第 1 步（实时系统属性）之后还有第 3 步「SPI 扩展配置源」，
      * web 侧即 框架 合并源（{@code FrameworkConfigResolver} → {@code SystemEnvironmentVariables}），
      * 它是<b>启动期系统属性快照 + Typesafe {@code ConfigFactory} 静态缓存</b>：一旦前序用例设过某键，
      * 之后即使 {@code clearProperty}，{@code WebFrameworkConfig.getValue()} 仍返回<b>旧值</b>

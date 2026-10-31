@@ -35,7 +35,7 @@ public enum ConfigRegistry {
 
     // ============ 框架自有开关 / 异步池（P2-1 收口：此前未登记，注册表查不到）============
     //  键名遵循注册表的结构化命名约定（小写点分）。历史读取形式为环境变量 ASYNC_* ——
-    //  ConfigSource.toEnvKey 把点转为下划线并大写，故 async.core.threads 归一后仍映射到
+    //  ConfigReader.toEnvKey 把点转为下划线并大写，故 async.core.threads 归一后仍映射到
     //  ASYNC_CORE_THREADS，**环境变量兼容性零损失**；历史 -D ASYNC_* 形式由 AsyncPool.resolveCfg 兜底。
 
     /** AsyncPool 核心线程数（环境变量形式：{@code ASYNC_CORE_THREADS}）。 */
@@ -982,7 +982,7 @@ public enum ConfigRegistry {
     API_CAPTURE_MAX_RESPONSE_SIZE_MB("api.capture.max.response.size.mb", "50", "API 捕获响应体最大体积（MB），超出即截断"),
 
     // ===================== Route 采集（对应 RouteConfig.DEFAULT_CAPTURE_*）=====================
-    //  层序经 ConfigSource.ENV_FIRST_PRECEDENCE 声明：环境变量 → 系统属性 → 配置文件属性 → 下列默认值
+    //  层序经 ConfigReader.ENV_FIRST_PRECEDENCE 声明：环境变量 → 系统属性 → 配置文件属性 → 下列默认值
     //  （框架其余键仍为系统属性优先 ⇒ 语义零变化）。默认值须与 RouteConfig.DEFAULT_CAPTURE_* 同值
     //  （由 RouteCapturePolicyTest 防漂移）。
 
@@ -994,23 +994,23 @@ public enum ConfigRegistry {
      */
     ROUTE_CAPTURE_ALL_TYPE("route.capture.all.type", "false",
             "路由采集范围：false 只采 MONITOR；true 连 DELAY / MODIFY / MOCK 一并采（逐规则 .capture(false) 优先）",
-            ConfigSource.ENV_FIRST_PRECEDENCE),
+            ConfigReader.ENV_FIRST_PRECEDENCE),
 
     /** 响应体内联阈值（字节）：不超过即原字节持内存。 */
     ROUTE_CAPTURE_INLINE_MAX_BYTES("route.capture.inline.max.bytes", "262144",
             "路由采集响应体内联阈值（字节）",
-            ConfigSource.ENV_FIRST_PRECEDENCE),
+            ConfigReader.ENV_FIRST_PRECEDENCE),
 
     /** 响应体文本型 gzip 上限（字节）：不超过即 gzip 持内存，否则落盘临时文件。 */
     ROUTE_CAPTURE_GZIP_MAX_BYTES("route.capture.gzip.max.bytes", "8388608",
             "路由采集响应体文本型 gzip 上限（字节）",
-            ConfigSource.ENV_FIRST_PRECEDENCE),
+            ConfigReader.ENV_FIRST_PRECEDENCE),
 
     /** MONITOR 响应体断言上限（字节，默认 2 MB）：超限自动降级为仅 status/headers 断言
      *  （记 inconclusive，不误判、不假绿）。与采集留存无关（capture 侧仍整存不截断）。 */
     ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES("route.monitor.assert.body.max.bytes", "2097152",
             "路由 monitor 响应体断言上限（字节）；超限自动降级为仅 status/headers 断言",
-            ConfigSource.ENV_FIRST_PRECEDENCE),
+            ConfigReader.ENV_FIRST_PRECEDENCE),
 
     /** Monitor API 响应是否持久化到数据库。 */
     MONITOR_DB_STORE_ENABLED("monitor.db.store.enabled", "false", "Monitor API 响应数据库持久化"),
@@ -1108,20 +1108,20 @@ public enum ConfigRegistry {
     private final String key;
     private final String defaultValue;
     private final String description;
-    /** 声明式解析层序（高 → 低，见 {@link ConfigSource}）。 */
-    private final List<ConfigSource.Layer> precedence;
+    /** 声明式解析层序（高 → 低，见 {@link ConfigReader}）。 */
+    private final List<ConfigReader.Layer> precedence;
 
-    /** 键名 → 条目 索引（类加载期构建；供 {@link ConfigSource#precedenceFor(String)} 查声明层序）。 */
+    /** 键名 → 条目 索引（类加载期构建；供 {@link ConfigReader#precedenceFor(String)} 查声明层序）。 */
     private static final java.util.Map<String, ConfigRegistry> BY_KEY = buildIndex();
 
     /** 既有 3 参构造：层序取框架默认（系统属性 → 环境变量 → 配置文件 → 默认值）⇒ 既有键语义零变化。 */
     ConfigRegistry(String key, String defaultValue, String description) {
-        this(key, defaultValue, description, ConfigSource.DEFAULT_PRECEDENCE);
+        this(key, defaultValue, description, ConfigReader.DEFAULT_PRECEDENCE);
     }
 
-    /** 4 参构造：显式声明层序（如 route 采集三键用 {@link ConfigSource#ENV_FIRST_PRECEDENCE}）。 */
+    /** 4 参构造：显式声明层序（如 route 采集三键用 {@link ConfigReader#ENV_FIRST_PRECEDENCE}）。 */
     ConfigRegistry(String key, String defaultValue, String description,
-               List<ConfigSource.Layer> precedence) {
+               List<ConfigReader.Layer> precedence) {
         this.key = key;
         this.defaultValue = defaultValue;
         this.description = description;
@@ -1140,7 +1140,7 @@ public enum ConfigRegistry {
     }
 
     /** 本键的声明式解析层序（高 → 低，含末位兜底层）。 */
-    public List<ConfigSource.Layer> precedence() {
+    public List<ConfigReader.Layer> precedence() {
         return precedence;
     }
 

@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestStep;
 import freemarker.template.Configuration;
@@ -238,11 +238,11 @@ public final class AggregateBuilder {
      * 报告标题：读框架配置 {@code project.report.name}（历史键 {@code framework.project.name} 仍作兜底），
      * 缺省回退 {@code Test Report}。index / 邮件报告共用。
      *
-     * <p>统一走 {@link ConfigSource#resolve}：系统属性 → 环境变量 → SPI 配置源 → 默认值，
+     * <p>统一走 {@link ConfigReader#resolve}：系统属性 → 环境变量 → SPI 配置源 → 默认值，
      * 与框架其它配置读取链路一致，保证「所有报告使用同一个 name」。</p>
      */
     static String projectName() {
-        String name = ConfigSource.resolve(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.key(),
+        String name = ConfigReader.resolve(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.key(),
                 ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.defaultValue());
         if (name == null || name.isBlank()) {
             // 兼容旧桥接：早期实现直接把项目名塞进该系统属性

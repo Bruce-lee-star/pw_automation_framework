@@ -63,7 +63,7 @@ public class PageEventMonitorConcurrencyTest {
     @Test
     // @DisplayName: "四项诊断显式开启后：同一 Page 多线程并发 register，每项各仅注册一次"
     public void enabledDiagnosticsAreRegisteredExactlyOnceUnderConcurrency() throws InterruptedException {
-        //  ConfigSource.resolve 实时读 System.getProperty，故测试内 toggle 即时生效；用完必须复位防污染
+        //  ConfigReader.resolve 实时读 System.getProperty，故测试内 toggle 即时生效；用完必须复位防污染
         System.setProperty(KEY_CONSOLE, "true");
         System.setProperty(KEY_PAGE_ERROR, "true");
         System.setProperty(KEY_REQUEST_FAILED, "true");

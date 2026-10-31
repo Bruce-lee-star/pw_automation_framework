@@ -17,7 +17,7 @@ import java.util.zip.GZIPOutputStream;
  * 使"整响应不截断"在超大 body 下**不撑爆堆**，同时对业务保持同一套读取语义。
  *
  * <p><b>三档策略</b>（阈值由装配方冻结的 {@code RouteCapturePolicy} 提供：层序在 {@code ConfigRegistry}
- * 声明、解析由 {@code ConfigSource} 承担，不再由本类自带任何配置读取）：
+ * 声明、解析由 {@code ConfigReader} 承担，不再由本类自带任何配置读取）：
  * <ol>
  *   <li>{@code len <= route.capture.inline.max.bytes}（默认 256 KB）⇒ 原字节持内存；</li>
  *   <li>文本型（json / xml / html / text / form，按 {@code content-type} 判定）且

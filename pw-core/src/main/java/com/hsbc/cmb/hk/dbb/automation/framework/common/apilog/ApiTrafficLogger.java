@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.apilog;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.async.AsyncPool;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.FrameworkFlags;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import org.slf4j.Logger;
@@ -87,8 +87,8 @@ public final class ApiTrafficLogger {
     /**
      * 当前是否启用（实时读取，便于测试与运行期开关）。
      *
-     * <p><b>为什么直读系统属性 / 环境变量，而不走 {@link ConfigSource}</b>：
-     * {@code ConfigSource} 的第 3 优先级是 SPI 合并源（web 提供的 框架 源），
+     * <p><b>为什么直读系统属性 / 环境变量，而不走 {@link ConfigReader}</b>：
+     * {@code ConfigReader} 的第 3 优先级是 SPI 合并源（web 提供的 框架 源），
      * 实测该源会<b>缓存</b>系统属性快照 —— 一旦某处 {@code setProperty(key,"true")}
      * 之后再 {@code clearProperty}，SPI 仍返回旧值 "true"，使开关行为不可预期
      * （对"默认必须关闭"的安全开关是不可接受的非确定性）。

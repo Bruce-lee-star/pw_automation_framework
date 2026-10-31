@@ -53,7 +53,7 @@
 Jenkinsfile environment { PLAYWRIGHT_BROWSERS_PATH = '0' }
         │  （框架把 OS 环境变量视为配置层，键名归一化后覆盖 playwright.browsers.path）
         ▼
-ConfigSource: effective playwright.browsers.path (layer=ENVIRONMENT) = "0"
+ConfigReader: effective playwright.browsers.path (layer=ENVIRONMENT) = "0"
         ▼
 PlaywrightInitializer.initializePlaywrightPaths()  → System property PLAYWRIGHT_BROWSERS_PATH = "0"
 PlaywrightInitializer.installBrowsers()            → 子进程 env PLAYWRIGHT_BROWSERS_PATH = "0"

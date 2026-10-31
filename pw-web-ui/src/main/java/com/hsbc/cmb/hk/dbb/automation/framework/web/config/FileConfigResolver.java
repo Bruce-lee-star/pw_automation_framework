@@ -25,7 +25,7 @@ import java.util.Properties;
  * <p><b>为什么需要它</b>：去 框架（CORE-P0-1）时，原「框架 合并源」（读
  * {@code serenity.conf} + {@code serenity.properties} + private）被换成只读系统属性 / 环境变量的
  * {@link FrameworkConfigResolver}，<b>配置文件这一来源随之丢失</b>——导致配置值虽仍在
- * {@code serenity.conf}/{@code serenity.properties} 里，框架 {@code ConfigSource} 却读不到
+ * {@code serenity.conf}/{@code serenity.properties} 里，框架 {@code ConfigReader} 却读不到
  * （曾表现为迁 {@code BDDUtils} 时从「类缺失」变成「配置读不到」）。本实现恢复该来源，且完全
  * 框架自有、不依赖 框架。</p>
  *
@@ -36,7 +36,7 @@ import java.util.Properties;
  *   <li>{@code pw.properties}      —— 框架原生（预留，扁平 key=value）</li>
  *   <li>{@code pw.conf}            —— 框架原生（预留，HOCON）</li>
  * </ol>
- * 更高的系统属性 / 环境变量覆盖由 {@code ConfigSource} 的 {@code SYSTEM_PROPERTY} /
+ * 更高的系统属性 / 环境变量覆盖由 {@code ConfigReader} 的 {@code SYSTEM_PROPERTY} /
  * {@code ENVIRONMENT} 层保证，与本 resolver 无关；本 resolver 只填补 {@code CONFIG_FILE} 层。</p>
  *
  * <p><b>HOCON 语义对齐 thucydides</b>（同一 Typesafe Config 解析器）：嵌套对象与点分叶子键
@@ -45,7 +45,7 @@ import java.util.Properties;
  * {@code userinfo_O63.WP7UAT2_2.token.security.url}。缺文件 / 解析失败均<b>静默跳过该来源</b>，
  * 返回 {@code null} 由上层降级，绝不影响其它来源与内置层。</p>
  *
- * <p>解密不在本层：值经 {@code ConfigSource} 统一做 {@code ENC(...)} 透明解密，本 resolver 只原样返回原始串。</p>
+ * <p>解密不在本层：值经 {@code ConfigReader} 统一做 {@code ENC(...)} 透明解密，本 resolver 只原样返回原始串。</p>
  */
 public final class FileConfigResolver implements ConfigResolver {
 

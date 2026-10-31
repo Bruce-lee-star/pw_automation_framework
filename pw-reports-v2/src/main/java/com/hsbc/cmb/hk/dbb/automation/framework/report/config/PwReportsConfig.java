@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.config;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -147,7 +147,7 @@ public final class PwReportsConfig {
 
     /**
      * 产物目录解析顺序：<b>{@code pw.report.output}</b>（系统属性 / 环境变量 {@code PW_REPORT_OUTPUT}）
-     * → <b>{@code framework.output.directory}</b>（框架通用配置，经 {@link ConfigSource} 解析：
+     * → <b>{@code framework.output.directory}</b>（框架通用配置，经 {@link ConfigReader} 解析：
      * 系统属性 / 环境变量 / 配置源）→ 默认 {@code target/site/serenity}。
      *
      * <p>第二级是刻意保留的兼容：业务侧早已用 {@code framework.output.directory} 表达"报告生成位置"，
@@ -159,7 +159,7 @@ public final class PwReportsConfig {
         if (out != null && !out.isBlank()) {
             return out.trim();
         }
-        String frameworkDir = ConfigSource.resolve(
+        String frameworkDir = ConfigReader.resolve(
                 ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY.key(),
                 ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY.defaultValue());
         if (frameworkDir != null && !frameworkDir.isBlank()) {

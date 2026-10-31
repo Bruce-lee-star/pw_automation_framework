@@ -13,8 +13,8 @@ import java.util.Map;
  * 于是「同一键三层不同值」无法被观察、更无法被门禁拦住（P2-1 点名的状态）。</p>
  *
  * <p><b>本类是唯一答案</b>：{@link #snapshot()} 逐键给出 {@code 生效值 + 来源}；来源为
- * {@link ConfigSource.Layer} 四层之一（系统属性 / 环境变量 / 配置文件属性 / 注册表默认值），
- * 层序<b>不再本类自实现</b>，而是复用 {@link ConfigSource} 的声明式层序
+ * {@link ConfigReader.Layer} 四层之一（系统属性 / 环境变量 / 配置文件属性 / 注册表默认值），
+ * 层序<b>不再本类自实现</b>，而是复用 {@link ConfigReader} 的声明式层序
  * （{@link ConfigRegistry#precedence()}）——彻底消除此前"漏掉配置文件属性层"的口径分裂。</p>
  *
  * <p><b>可观测性副产品</b>：{@link #envNameCollisions()} 检出「两个不同登记键映射到同一环境变量名」
@@ -59,23 +59,23 @@ public final class ConfigEffectiveView {
     }
 
     /**
-     * 单键生效视图：按该键<b>声明的层序</b>经 {@link ConfigSource#resolveWithLayer} 解析
+     * 单键生效视图：按该键<b>声明的层序</b>经 {@link ConfigReader#resolveWithLayer} 解析
      * （含 ③ 配置文件属性层）；空白视为未命中（与改造前一致）。
      */
     public static Entry entry(ConfigRegistry key) {
-        ConfigSource.Resolved resolved = ConfigSource.resolveWithLayer(key.key(), key.defaultValue(),
-                ConfigSource.precedenceFor(key.key()), true);
+        ConfigReader.Resolved resolved = ConfigReader.resolveWithLayer(key.key(), key.defaultValue(),
+                ConfigReader.precedenceFor(key.key()), true);
         return new Entry(key.key(), value(resolved), source(resolved.layer()));
     }
 
     /** 生效值：默认值层为注册表字面量（不 trim），其余层 trim（与改造前一致）。 */
-    private static String value(ConfigSource.Resolved resolved) {
-        return resolved.layer() == ConfigSource.Layer.DEFAULT
+    private static String value(ConfigReader.Resolved resolved) {
+        return resolved.layer() == ConfigReader.Layer.DEFAULT
                 ? resolved.value() : resolved.value().trim();
     }
 
     /** 来源层 → 视图来源。 */
-    private static Source source(ConfigSource.Layer layer) {
+    private static Source source(ConfigReader.Layer layer) {
         switch (layer) {
             case ENVIRONMENT:
                 return Source.ENVIRONMENT;

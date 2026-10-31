@@ -4,7 +4,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
  * 惰性初始化守卫（评审 P2-2）：把「配置失败快」从 static 初始化块移到<b>首次使用</b>。
  *
  * <p><b>要解决的问题</b>：组件（如 {@code AsyncPool}）原在 {@code static {}} 块里读配置
- * （经 {@link ConfigSource} → {@code SecretValue} 解密失败即抛）。JVM 会把 static 块抛出的异常包装为
+ * （经 {@link ConfigReader} → {@code SecretValue} 解密失败即抛）。JVM 会把 static 块抛出的异常包装为
  * {@link ExceptionInInitializerError}，且该类在同一 JVM 内<b>永久不可用</b>（后续任何访问直接
  * {@code NoClassDefFoundError}）—— 错误形态难懂，且失去了失败后重试/降级的任何可能。</p>
  *

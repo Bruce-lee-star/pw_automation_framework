@@ -113,7 +113,7 @@ public final class BrowserCrashGuard {
     }
 
     /**
-     * 守卫是否启用。经 {@code WebFrameworkConfig} → {@code ConfigSource} 统一解析链
+     * 守卫是否启用。经 {@code WebFrameworkConfig} → {@code ConfigReader} 统一解析链
      * （实时 {@code System.getProperty} → 环境变量 → 框架(serenity.conf/properties) → 默认值），
      * 故系统属性与环境变量均可覆盖，与框架其它配置一致。默认 {@code true}（纯韧性增强）。
      */

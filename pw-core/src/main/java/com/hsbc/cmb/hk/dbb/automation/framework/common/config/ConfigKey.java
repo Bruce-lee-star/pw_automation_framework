@@ -7,7 +7,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
  * 命名可发现：{@code key} 即配置源中的实际键名，{@code defaultValue} 为键缺失时的兜底值，
  * {@code description} 为人工可读说明（供文档 / 审计 / 排查使用）。
  *
- * <p>解析由各域自行负责（Web 走 {@link ConfigSource#resolve(String, String)}，API 走 Typesafe Config），
+ * <p>解析由各域自行负责（Web 走 {@link ConfigReader#resolve(String, String)}，API 走 Typesafe Config），
  * 本记录仅承载不可变的元数据，不含任何解析 / 解密逻辑。构造期即强校验 {@code key} 与
  * {@code description} 非空，保证每个配置项都「可定位、可解读」。
  *

@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.UserStory;
@@ -209,7 +209,7 @@ public final class EmailReportRenderer {
 
     /** 解析 {@code report.error.types}（每次渲染读取，便于测试用系统属性覆盖）。 */
     private static List<ErrorTypeRule> errorTypeRules() {
-        String raw = ConfigSource.resolve(ConfigRegistry.REPORT_ERROR_TYPES.key(),
+        String raw = ConfigReader.resolve(ConfigRegistry.REPORT_ERROR_TYPES.key(),
                 ConfigRegistry.REPORT_ERROR_TYPES.defaultValue());
         if (raw == null || raw.isBlank()) {
             return List.of();

@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.security;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -344,13 +344,13 @@ final class SanitizerRules {
 
     /**
      * 读取附加敏感键配置：优先取 {@code -D} 系统属性（保留运行时 {@code System.setProperty} 即时生效能力），
-     * 回退到 core 统一配置源 {@link ConfigSource#resolve}（合并 serenity.properties / serenity.conf / 环境变量）。
+     * 回退到 core 统一配置源 {@link ConfigReader#resolve}（合并 serenity.properties / serenity.conf / 环境变量）。
      * 两条路径均经 {@code SecretValue.decryptIfNeeded} 透明解密，与框架其它配置读取一致。
      */
     private static String readExtraConfig(String key) {
         String raw = System.getProperty(key);
         if (raw == null || raw.trim().isEmpty()) {
-            raw = ConfigSource.resolve(key, "");
+            raw = ConfigReader.resolve(key, "");
         }
         return raw == null ? "" : SecretValue.decryptIfNeeded(raw);
     }
@@ -359,7 +359,7 @@ final class SanitizerRules {
     private static String resolveConfig(String key, String def) {
         String raw = System.getProperty(key);
         if (raw == null || raw.trim().isEmpty()) {
-            raw = ConfigSource.resolve(key, def);
+            raw = ConfigReader.resolve(key, def);
         }
         return raw == null ? def : raw;
     }

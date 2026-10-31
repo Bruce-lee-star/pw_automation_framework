@@ -7,7 +7,7 @@ import com.microsoft.playwright.Page;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.RoleElement;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.utils.NLSUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -312,7 +312,7 @@ public final class RoleElementPicker {
      * <p>配置值 {@code ≤0} 时返回 0（维持「不超时」原语义），作为受控本地调试的逃生门。
      */
     private static double pickerWaitTimeoutMs() {
-        String raw = ConfigSource.resolve(ConfigRegistry.PICKER_WAIT_TIMEOUT_MS.key(),
+        String raw = ConfigReader.resolve(ConfigRegistry.PICKER_WAIT_TIMEOUT_MS.key(),
                 ConfigRegistry.PICKER_WAIT_TIMEOUT_MS.defaultValue());
         try {
             double v = Double.parseDouble(raw.trim());

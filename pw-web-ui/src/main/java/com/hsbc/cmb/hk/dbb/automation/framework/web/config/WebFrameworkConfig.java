@@ -4,7 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.Context
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -867,7 +867,7 @@ public enum WebFrameworkConfig {
     //   monitor.file.store.enabled、monitor.file.store.dir、monitor.file.store.pretty、
     //   monitor.file.store.group.by.scenario
     // 原因：route 需读取这些键，但不依赖 web（ArchUnit L6），故统一收敛至 core；此处不再重复定义。
-    // 键名 / 默认值与 core 完全一致，经 ConfigSource 统一解析，对既有 serenity.properties 配置零影响；
+    // 键名 / 默认值与 core 完全一致，经 ConfigReader 统一解析，对既有 serenity.properties 配置零影响；
     // 运行时读取入口：{@code com.hsbc.cmb.hk.dbb.automation.framework.common.config.MonitorConfig}。
 
     // ==================== 统一代理配置 ====================
@@ -1046,7 +1046,7 @@ public enum WebFrameworkConfig {
             String fallback = (fileProps != null && fileProps.containsKey(frameworkKey))
                     ? fileProps.getProperty(frameworkKey)
                     : fwKey.defaultValue();
-            String value = ConfigSource.resolve(frameworkKey, fallback);
+            String value = ConfigReader.resolve(frameworkKey, fallback);
             if (value != null && !value.isEmpty()) {
                 System.setProperty(serenityKey, value);
             }
@@ -1082,7 +1082,7 @@ public enum WebFrameworkConfig {
      * @return 配置值（字符串）
      */
     public String getValue() {
-        return ConfigSource.resolve(key, defaultValue);
+        return ConfigReader.resolve(key, defaultValue);
     }
 
     /**

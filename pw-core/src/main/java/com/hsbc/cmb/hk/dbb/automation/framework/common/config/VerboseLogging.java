@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
 
 import ch.qos.logback.classic.Level;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,13 +79,13 @@ public final class VerboseLogging {
     }
 
     private static boolean isVerboseConfigured() {
-        return isTraceConfigured() || isTrue(ConfigSource.resolve(
+        return isTraceConfigured() || isTrue(ConfigReader.resolve(
                 ConfigRegistry.WEB_FRAMEWORK_VERBOSE_LOGGING.key(),
                 ConfigRegistry.WEB_FRAMEWORK_VERBOSE_LOGGING.defaultValue()));
     }
 
     private static boolean isTraceConfigured() {
-        return isTrue(ConfigSource.resolve(
+        return isTrue(ConfigReader.resolve(
                 ConfigRegistry.WEB_FRAMEWORK_TRACE_LOGGING.key(),
                 ConfigRegistry.WEB_FRAMEWORK_TRACE_LOGGING.defaultValue()));
     }
@@ -101,7 +101,7 @@ public final class VerboseLogging {
 
     private static String serenityLoggingLevel() {
         // 经 core 统一配置源解析（与框架其它配置读取一致，收敛原先直读 框架 环境变量的逻辑）
-        return ConfigSource.resolve(FRAMEWORK_LOGGING_KEY, "").trim();
+        return ConfigReader.resolve(FRAMEWORK_LOGGING_KEY, "").trim();
     }
 
     /**

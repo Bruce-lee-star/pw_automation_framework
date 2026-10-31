@@ -9,8 +9,8 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
  * 编译期强依赖，让"core 是纯净底座"在 classpath 层面成立。</p>
  *
  * <p>语义约定：{@link #resolve(String)} 返回该来源解析出的配置值；若该来源无此键则返回
- * {@code null}，由 {@link ConfigSource} 降级到下一来源（系统属性 / 环境变量 / 默认值）。
- * 实现方<b>不得</b>在 {@code resolve} 内抛受检异常——异常由 {@link ConfigSource} 的 SPI 加载处吞掉。</p>
+ * {@code null}，由 {@link ConfigReader} 降级到下一来源（系统属性 / 环境变量 / 默认值）。
+ * 实现方<b>不得</b>在 {@code resolve} 内抛受检异常——异常由 {@link ConfigReader} 的 SPI 加载处吞掉。</p>
  */
 public interface ConfigResolver {
 
