@@ -65,11 +65,11 @@ python3 tools/check_doc_standard.py --strict
 
 ### 配置键变更
 
-配置键的**唯一事实来源**是 `pw-core` 的 `ConfigKeys`。新增键必须：
+配置键的**唯一事实来源**是 `pw-core` 的 `ConfigRegistry`。新增键必须：
 
-1. 在 `ConfigKeys` 登记（重复键在类加载期 fail-fast）；
+1. 在 `ConfigRegistry` 登记（重复键在类加载期 fail-fast）；
 2. 由对应域的门面（`WebFrameworkConfig` / `ApiFrameworkConfig`）引用，**门面不得私藏字面量**；
-3. 通过 `ConfigKeysGoldenTest`（默认值不漂移）与 `ConfigUnificationTest`（门面必须委派）；
+3. 通过 golden 快照（默认值不漂移）与 `ConfigUnificationTest`（门面必须委派）；
 4. 同步更新 [配置参考文档](docs/standards/03-metadata-and-lifecycle.md)。
 
 ### 分层依赖

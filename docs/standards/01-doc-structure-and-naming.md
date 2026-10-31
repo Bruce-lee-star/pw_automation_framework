@@ -69,9 +69,9 @@ pw_automation_framework/
 
 ### 2.3 标识符与符号
 
-- 引用代码符号一律用反引号包裹：`` `RouteDsl` ``、`` `ConfigKeys` ``、`` `framework.web.route` ``。
+- 引用代码符号一律用反引号包裹：`` `RouteDsl` ``、`` `ConfigRegistry` ``、`` `framework.web.route` ``。
 - 引用配置键用其完整键名：`` `route.capture.all.type` ``。
-- 引用文件用相对仓库根的路径：`pw-core/src/main/java/.../ConfigKeys.java`。
+- 引用文件用相对仓库根的路径：`pw-core/src/main/java/.../ConfigRegistry.java`。
 - 引用模块用**目录名**（`core` / `web` / `api` / `route` / `codegen` / `reporting`），不用 Maven artifactId 的历史别名。
 
 ## 3. 文档与代码的对应关系
@@ -93,7 +93,7 @@ pw_automation_framework/
 | 信息 | 唯一来源 | 其他文档如何引用 |
 |---|---|---|
 | 技术栈版本 | 根 `pom.xml` 的 `<properties>` | README 版本表（由 `tools/check-doc-drift.ps1` 校验） |
-| 配置键清单 | `ConfigKeys.java` | `docs/reference/` 引用类名与数量，不重复列举 |
+| 配置键清单 | `ConfigRegistry.java` | `docs/reference/` 引用类名与数量，不重复列举 |
 | 模块依赖方向 | 根 `pom.xml` + `ArchitectureTest` | README 模块表只给一句话摘要 |
 | 报告字段与对齐规则 | `docs/report-alignment/` | 其他文档链接之 |
 

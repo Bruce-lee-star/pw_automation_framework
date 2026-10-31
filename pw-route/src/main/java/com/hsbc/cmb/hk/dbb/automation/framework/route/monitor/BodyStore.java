@@ -16,7 +16,7 @@ import java.util.zip.GZIPOutputStream;
  * 响应体留存（<b>内部使用</b>）：按大小与类型在"内存原字节 / 内存 gzip / 临时文件"三档之间自动选择，
  * 使"整响应不截断"在超大 body 下**不撑爆堆**，同时对业务保持同一套读取语义。
  *
- * <p><b>三档策略</b>（阈值由装配方冻结的 {@code RouteCapturePolicy} 提供：层序在 {@code ConfigKeys}
+ * <p><b>三档策略</b>（阈值由装配方冻结的 {@code RouteCapturePolicy} 提供：层序在 {@code ConfigRegistry}
  * 声明、解析由 {@code ConfigSource} 承担，不再由本类自带任何配置读取）：
  * <ol>
  *   <li>{@code len <= route.capture.inline.max.bytes}（默认 256 KB）⇒ 原字节持内存；</li>

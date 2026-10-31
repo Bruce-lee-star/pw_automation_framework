@@ -25,13 +25,13 @@ import java.util.Set;
  * 该风险在结构上被消除。
  *
  * <p><b>校验</b>：类加载时对所有键做<b>重复键 fail-fast 静态校验</b>（见 {@link #validateUniqueKeys()}），
- * 新增配置键必须且只能在此登记。默认值不漂移由 {@code ConfigKeysGoldenTest} 的 golden 快照守住。
+ * 新增配置键必须且只能在此登记。默认值不漂移由 golden 快照守住。
  *
  * <p><b>运行期自适应默认值</b>：个别键的默认值依赖运行环境（如 {@link #WEB_PLAYWRIGHT_CONCURRENT_MAX}
  * 按 CPU 核数自适应），此类默认值在本枚举类加载时求值一次并固定，语义与收敛前一致
  * （收敛前同样在枚举类加载时求值）。该键在 golden 快照中以 {@code <adaptive>} 标记。
  */
-public enum ConfigKeys {
+public enum ConfigRegistry {
 
     // ============ 框架自有开关 / 异步池（P2-1 收口：此前未登记，注册表查不到）============
     //  键名遵循注册表的结构化命名约定（小写点分）。历史读取形式为环境变量 ASYNC_* ——
@@ -1112,15 +1112,15 @@ public enum ConfigKeys {
     private final List<ConfigSource.Layer> precedence;
 
     /** 键名 → 条目 索引（类加载期构建；供 {@link ConfigSource#precedenceFor(String)} 查声明层序）。 */
-    private static final java.util.Map<String, ConfigKeys> BY_KEY = buildIndex();
+    private static final java.util.Map<String, ConfigRegistry> BY_KEY = buildIndex();
 
     /** 既有 3 参构造：层序取框架默认（系统属性 → 环境变量 → 配置文件 → 默认值）⇒ 既有键语义零变化。 */
-    ConfigKeys(String key, String defaultValue, String description) {
+    ConfigRegistry(String key, String defaultValue, String description) {
         this(key, defaultValue, description, ConfigSource.DEFAULT_PRECEDENCE);
     }
 
     /** 4 参构造：显式声明层序（如 route 采集三键用 {@link ConfigSource#ENV_FIRST_PRECEDENCE}）。 */
-    ConfigKeys(String key, String defaultValue, String description,
+    ConfigRegistry(String key, String defaultValue, String description,
                List<ConfigSource.Layer> precedence) {
         this.key = key;
         this.defaultValue = defaultValue;
@@ -1135,7 +1135,7 @@ public enum ConfigKeys {
      * @param key 配置键
      * @return 对应条目或 {@code null}
      */
-    public static ConfigKeys of(String key) {
+    public static ConfigRegistry of(String key) {
         return key == null ? null : BY_KEY.get(key);
     }
 
@@ -1144,9 +1144,9 @@ public enum ConfigKeys {
         return precedence;
     }
 
-    private static java.util.Map<String, ConfigKeys> buildIndex() {
-        java.util.Map<String, ConfigKeys> index = new java.util.HashMap<>();
-        for (ConfigKeys c : values()) {
+    private static java.util.Map<String, ConfigRegistry> buildIndex() {
+        java.util.Map<String, ConfigRegistry> index = new java.util.HashMap<>();
+        for (ConfigRegistry c : values()) {
             index.put(c.key, c);
         }
         return java.util.Map.copyOf(index);
@@ -1173,9 +1173,9 @@ public enum ConfigKeys {
     }
 
     /** 全框架配置键清单（供审计/文档/重复校验）。 */
-    public static List<ConfigKeys> all() {
-        List<ConfigKeys> list = new ArrayList<>();
-        for (ConfigKeys c : values()) {
+    public static List<ConfigRegistry> all() {
+        List<ConfigRegistry> list = new ArrayList<>();
+        for (ConfigRegistry c : values()) {
             list.add(c);
         }
         return list;
@@ -1199,10 +1199,10 @@ public enum ConfigKeys {
 
     private static void validateUniqueKeys() {
         Set<String> seen = new java.util.HashSet<>();
-        for (ConfigKeys c : values()) {
+        for (ConfigRegistry c : values()) {
             if (!seen.add(c.key)) {
                 throw new IllegalStateException(
-                        "ConfigKeys 注册表存在重复配置键: '" + c.key + "'"
+                        "ConfigRegistry 注册表存在重复配置键: '" + c.key + "'"
                                 + " —— 新增配置键前请先查重，避免键名冲突（C-6 / M-2）");
             }
         }

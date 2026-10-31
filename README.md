@@ -72,16 +72,16 @@ mvn -pl test-automation -am test
 取值优先级：**系统属性 > 环境变量 > `-P` profile 的 `environment-*.conf` > `serenity.conf` / `serenity.properties` > 代码默认值**。
 
 > 例外：route 采集三键（`route.capture.all.type` / `route.capture.inline.max.bytes` / `route.capture.gzip.max.bytes`）
-> 为 **环境变量 > 系统属性 > 配置文件 > 默认值**，经 `ConfigKeys` 的**声明式层序**
+> 为 **环境变量 > 系统属性 > 配置文件 > 默认值**，经 `ConfigRegistry` 的**声明式层序**
 > （`ConfigSource.ENV_FIRST_PRECEDENCE`）声明；其余键仍为系统属性优先，语义不变。
 
 配置键的**唯一事实来源**是 `core` 的
-`com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys`（当前 **216** 个键）：
+`com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry`（当前 **216** 个键）：
 Web / API / Monitor 三侧配置类（`WebFrameworkConfig` / `ApiFrameworkConfig` / `MonitorConfig`）均为
 **引用它的门面**，不再各自持有 key / 默认值字面量。新增配置键必须在此登记，并由三重守卫把关：
 
-- **重复键**：类加载期 fail-fast（`ConfigKeys.validateUniqueKeys()`）；
-- **默认值不漂移**：`ConfigKeysGoldenTest` 以迁移前基线逐键逐字比对；
+- **重复键**：类加载期 fail-fast（`ConfigRegistry.validateUniqueKeys()`）；
+- **默认值不漂移**：golden 快照以迁移前基线逐键逐字比对；
 - **门面不得私藏定义**：`ConfigUnificationTest#facadesMustDelegateToRegistry`。
 
 ## 安全基线

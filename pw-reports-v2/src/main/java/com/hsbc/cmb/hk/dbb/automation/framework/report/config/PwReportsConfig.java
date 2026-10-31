@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.config;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -151,7 +151,7 @@ public final class PwReportsConfig {
      * 系统属性 / 环境变量 / 配置源）→ 默认 {@code target/site/serenity}。
      *
      * <p>第二级是刻意保留的兼容：业务侧早已用 {@code framework.output.directory} 表达"报告生成位置"，
-     * 该键此前只在 {@code ConfigKeys} 登记却<b>无任何读取方</b>（等于死配置）。现在它真正生效，
+     * 该键此前只在 {@code ConfigRegistry} 登记却<b>无任何读取方</b>（等于死配置）。现在它真正生效，
      * 且与 {@code pw.report.output} 明确分层——后者是报告模块的专用开关，优先级更高。</p>
      */
     private static String resolveOutputDir() {
@@ -160,8 +160,8 @@ public final class PwReportsConfig {
             return out.trim();
         }
         String frameworkDir = ConfigSource.resolve(
-                ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY.key(),
-                ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY.defaultValue());
+                ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY.key(),
+                ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY.defaultValue());
         if (frameworkDir != null && !frameworkDir.isBlank()) {
             log.debug("pw.report.outputDir falls back to framework.output.directory={}", frameworkDir);
             return frameworkDir.trim();

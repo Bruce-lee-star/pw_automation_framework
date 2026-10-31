@@ -9,13 +9,13 @@ import java.util.Map;
  * 配置<b>生效值单一视图</b>（P2-1 门禁）。
  *
  * <p><b>要解决的问题</b>：同一个键可被三层配置影响 —— ① 系统属性（{@code -D}）、② 环境变量、
- * ③ 注册表默认值（{@link ConfigKeys}）。此前没有任何入口能回答「这个键现在到底生效什么值、来自哪一层」，
+ * ③ 注册表默认值（{@link ConfigRegistry}）。此前没有任何入口能回答「这个键现在到底生效什么值、来自哪一层」，
  * 于是「同一键三层不同值」无法被观察、更无法被门禁拦住（P2-1 点名的状态）。</p>
  *
  * <p><b>本类是唯一答案</b>：{@link #snapshot()} 逐键给出 {@code 生效值 + 来源}；来源为
  * {@link ConfigSource.Layer} 四层之一（系统属性 / 环境变量 / 配置文件属性 / 注册表默认值），
  * 层序<b>不再本类自实现</b>，而是复用 {@link ConfigSource} 的声明式层序
- * （{@link ConfigKeys#precedence()}）——彻底消除此前"漏掉配置文件属性层"的口径分裂。</p>
+ * （{@link ConfigRegistry#precedence()}）——彻底消除此前"漏掉配置文件属性层"的口径分裂。</p>
  *
  * <p><b>可观测性副产品</b>：{@link #envNameCollisions()} 检出「两个不同登记键映射到同一环境变量名」
  * —— 这种情况下两层键会<b>静默共享</b>同一个值，是「同一键多层不同值」的 env 变体，且无法从键名看出。</p>
@@ -32,7 +32,7 @@ public final class ConfigEffectiveView {
         ENVIRONMENT,
         /** 配置文件属性（SPI 配置源，如 框架 合并源）。 */
         CONFIG_FILE,
-        /** {@link ConfigKeys} 注册表默认值（未配置时）。 */
+        /** {@link ConfigRegistry} 注册表默认值（未配置时）。 */
         REGISTRY_DEFAULT
     }
 
@@ -52,7 +52,7 @@ public final class ConfigEffectiveView {
     /** 全量登记键的生效视图（键序与注册表一致，便于逐键 diff）。 */
     public static Map<String, Entry> snapshot() {
         Map<String, Entry> view = new LinkedHashMap<>();
-        for (ConfigKeys key : ConfigKeys.values()) {
+        for (ConfigRegistry key : ConfigRegistry.values()) {
             view.put(key.key(), entry(key));
         }
         return view;
@@ -62,7 +62,7 @@ public final class ConfigEffectiveView {
      * 单键生效视图：按该键<b>声明的层序</b>经 {@link ConfigSource#resolveWithLayer} 解析
      * （含 ③ 配置文件属性层）；空白视为未命中（与改造前一致）。
      */
-    public static Entry entry(ConfigKeys key) {
+    public static Entry entry(ConfigRegistry key) {
         ConfigSource.Resolved resolved = ConfigSource.resolveWithLayer(key.key(), key.defaultValue(),
                 ConfigSource.precedenceFor(key.key()), true);
         return new Entry(key.key(), value(resolved), source(resolved.layer()));
@@ -97,7 +97,7 @@ public final class ConfigEffectiveView {
      */
     public static List<String> envNameCollisions() {
         Map<String, List<String>> byEnvName = new LinkedHashMap<>();
-        for (ConfigKeys key : ConfigKeys.values()) {
+        for (ConfigRegistry key : ConfigRegistry.values()) {
             byEnvName.computeIfAbsent(FrameworkFlags.toEnvKey(key.key()), k -> new ArrayList<>())
                     .add(key.key());
         }

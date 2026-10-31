@@ -108,7 +108,7 @@ public final class ConfigSource {
      * 按 key 解析配置值，并对 {@code ENC(<base64>)} / 裸 base64 密文透明解密。
      *
      * <p>解析层序取该键的<b>声明式层序</b>（{@link #precedenceFor}）：已登记键用其
-     * {@link ConfigKeys#precedence()} 声明；未登记键用 {@link #DEFAULT_PRECEDENCE}。
+     * {@link ConfigRegistry#precedence()} 声明；未登记键用 {@link #DEFAULT_PRECEDENCE}。
      * 语义与改造前完全一致（系统属性优先、仅 {@code null} 视为未命中、默认值按 C-9 解密）。
      *
      * @param key          配置键（如 {@code playwright.browser.type}）
@@ -120,13 +120,13 @@ public final class ConfigSource {
     }
 
     /**
-     * 键的声明式层序：已登记键取其在 {@link ConfigKeys} 的声明，未登记键取框架默认层序。
+     * 键的声明式层序：已登记键取其在 {@link ConfigRegistry} 的声明，未登记键取框架默认层序。
      *
      * @param key 配置键
      * @return 该键的解析层序（高 → 低，含末位 {@link Layer#DEFAULT}）
      */
     public static List<Layer> precedenceFor(String key) {
-        ConfigKeys registered = ConfigKeys.of(key);
+        ConfigRegistry registered = ConfigRegistry.of(key);
         return registered == null ? DEFAULT_PRECEDENCE : registered.precedence();
     }
 
@@ -232,7 +232,7 @@ public final class ConfigSource {
      * 容量有界（≤ 注册表规模 × 层数），热路径不刷屏。
      */
     private static void reportOnce(String key, Layer layer) {
-        if (ConfigKeys.of(key) == null || !REPORTED.add(key + '@' + layer)) {
+        if (ConfigRegistry.of(key) == null || !REPORTED.add(key + '@' + layer)) {
             return;
         }
         LOGGER.info("[ConfigSource] effective {} (layer={})", key, layer);

@@ -30,7 +30,7 @@ public final class PageNavigation {
 
     /**
      * 导航超时下限兜底：配置项 {@code navigationTimeout} 为 0/负时 Playwright 语义为「无限等待」，
-     * 弱网下会永久挂起导航。回落到与 {@code ConfigKeys} 导航超时默认一致的正数，避免死等。
+     * 弱网下会永久挂起导航。回落到与 {@code ConfigRegistry} 导航超时默认一致的正数，避免死等。
      */
     private static final long DEFAULT_NAVIGATION_TIMEOUT_MS = 15_000;
 

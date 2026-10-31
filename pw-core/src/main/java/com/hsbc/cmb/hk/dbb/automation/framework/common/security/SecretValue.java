@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.security;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.FrameworkFlags;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -132,17 +132,17 @@ public final class SecretValue {
      * （命中即告警，保留排障用法的向后兼容）→ 注册表默认值（{@code true}）。</p>
      */
     private static boolean isStrictMode() {
-        String current = FrameworkFlags.resolve(ConfigKeys.SECURITY_SECRET_STRICT.key(), null);
+        String current = FrameworkFlags.resolve(ConfigRegistry.SECURITY_SECRET_STRICT.key(), null);
         if (current != null) {
             return Boolean.parseBoolean(current);
         }
-        String legacy = FrameworkFlags.resolve(ConfigKeys.LEGACY_SECURITY_SECRET_STRICT.key(), null);
+        String legacy = FrameworkFlags.resolve(ConfigRegistry.LEGACY_SECURITY_SECRET_STRICT.key(), null);
         if (legacy != null) {
             LOGGER.warn("配置键 '{}' 已废弃（缺 {} 前缀），请改用 '{}'；本次仍按旧值生效：{}",
-                    ConfigKeys.LEGACY_SECURITY_SECRET_STRICT.key(), FrameworkFlags.PREFIX,
-                    ConfigKeys.SECURITY_SECRET_STRICT.key(), legacy);
+                    ConfigRegistry.LEGACY_SECURITY_SECRET_STRICT.key(), FrameworkFlags.PREFIX,
+                    ConfigRegistry.SECURITY_SECRET_STRICT.key(), legacy);
             return Boolean.parseBoolean(legacy);
         }
-        return Boolean.parseBoolean(ConfigKeys.SECURITY_SECRET_STRICT.defaultValue().trim());
+        return Boolean.parseBoolean(ConfigRegistry.SECURITY_SECRET_STRICT.defaultValue().trim());
     }
 }

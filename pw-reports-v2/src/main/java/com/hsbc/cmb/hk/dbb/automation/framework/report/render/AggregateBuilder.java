@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestStep;
@@ -242,8 +242,8 @@ public final class AggregateBuilder {
      * 与框架其它配置读取链路一致，保证「所有报告使用同一个 name」。</p>
      */
     static String projectName() {
-        String name = ConfigSource.resolve(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME.key(),
-                ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME.defaultValue());
+        String name = ConfigSource.resolve(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.key(),
+                ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.defaultValue());
         if (name == null || name.isBlank()) {
             // 兼容旧桥接：早期实现直接把项目名塞进该系统属性
             name = System.getProperty("framework.project.name");

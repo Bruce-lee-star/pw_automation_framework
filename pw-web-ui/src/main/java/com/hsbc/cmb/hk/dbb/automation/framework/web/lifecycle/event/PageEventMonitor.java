@@ -36,7 +36,7 @@ import java.util.WeakHashMap;
  * 1.60+ 保证每个页面仅触发一次；因此<b>无需</b>自研幂等去重与关闭清理（升级评估报 §3.2 已删除该逻辑）。
  * 诊断监听仅在页面创建接缝处注册一次，不叠加、不跨 scenario 残留。
  *
- * <p><b>订阅开关（全部配置驱动，见 {@code WebFrameworkConfig} / {@code ConfigKeys}）</b>：
+ * <p><b>订阅开关（全部配置驱动，见 {@code WebFrameworkConfig} / {@code ConfigRegistry}）</b>：
  * {@code context.onPage} 扇出由 {@code playwright.page.events.page.enabled}（默认 true）控制；
  * 四个诊断订阅分别由 {@code playwright.page.events.<console|pageError|requestFailed|crash>.enabled}
  * 控制，<b>默认全部关闭</b>。关闭后服务端不再下发对应事件，同时消除"驱动按 payload guid 解析已回收
@@ -48,7 +48,7 @@ public final class PageEventMonitor {
 
     private static final Logger logger = LoggerFactory.getLogger(PageEventMonitor.class);
 
-    //  逐事件订阅开关（已由硬编码迁至配置注册表，见 WebFrameworkConfig / ConfigKeys）：
+    //  逐事件订阅开关（已由硬编码迁至配置注册表，见 WebFrameworkConfig / ConfigRegistry）：
     //    · 扇出总闸：PLAYWRIGHT_PAGE_EVENTS_PAGE_ENABLED（控制 context.onPage，默认 true）
     //      —— 关闭后本类与 PageInteractionMonitor 的每页监听都不会注册（挂载点即 onPage 回调）；
     //    · 本类四个诊断订阅默认全部【关闭】：console / pageError / requestFailed / crash。

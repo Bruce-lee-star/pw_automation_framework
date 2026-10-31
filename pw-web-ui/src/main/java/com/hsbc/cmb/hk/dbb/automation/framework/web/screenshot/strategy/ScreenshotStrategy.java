@@ -128,7 +128,7 @@ public enum ScreenshotStrategy {
      */
     static ScreenshotStrategy resolve(String configured) {
         if (configured == null || configured.trim().isEmpty()) {
-            return AFTER_EACH_STEP; // 未配置：保持既有默认（见 ConfigKeys 的默认值）
+            return AFTER_EACH_STEP; // 未配置：保持既有默认（见 ConfigRegistry 的默认值）
         }
         ScreenshotStrategy strategy = NAME_ALIASES.get(configured.trim().toUpperCase(Locale.ROOT));
         if (strategy != null) {

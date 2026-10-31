@@ -6,7 +6,7 @@ import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Page;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.RoleElement;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.utils.NLSUtils;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -354,19 +354,19 @@ public final class RoleElementPicker {
      *
      * <p>原实现两处 {@code waitForFunction} 用 {@code setTimeout(0)} = <b>永不超时</b>：
      * 用户遗忘拾取会话时，调用线程被<b>永久阻塞</b>（只能杀进程）。现改为读
-     * {@link ConfigKeys#PICKER_WAIT_TIMEOUT_MS}（默认 30 分钟）；超时后走既有 catch 分支
+     * {@link ConfigRegistry#PICKER_WAIT_TIMEOUT_MS}（默认 30 分钟）；超时后走既有 catch 分支
      * —— 拾取降级为「生成已拾取子集」、代码面板静默结束，不再无限挂起。
      *
      * <p>配置值 {@code ≤0} 时返回 0（维持「不超时」原语义），作为受控本地调试的逃生门。
      */
     private static double pickerWaitTimeoutMs() {
-        String raw = ConfigSource.resolve(ConfigKeys.PICKER_WAIT_TIMEOUT_MS.key(),
-                ConfigKeys.PICKER_WAIT_TIMEOUT_MS.defaultValue());
+        String raw = ConfigSource.resolve(ConfigRegistry.PICKER_WAIT_TIMEOUT_MS.key(),
+                ConfigRegistry.PICKER_WAIT_TIMEOUT_MS.defaultValue());
         try {
             double v = Double.parseDouble(raw.trim());
             return v > 0 ? v : 0;
         } catch (Exception e) {
-            return Double.parseDouble(ConfigKeys.PICKER_WAIT_TIMEOUT_MS.defaultValue());
+            return Double.parseDouble(ConfigRegistry.PICKER_WAIT_TIMEOUT_MS.defaultValue());
         }
     }
 

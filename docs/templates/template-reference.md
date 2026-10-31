@@ -16,7 +16,7 @@ superseded_by: null
 
 > {{一句话说明本参考手册覆盖什么、什么时候该查它。}}
 >
-> **事实来源**：<唯一来源，如 `pw-core/src/main/java/.../ConfigKeys.java`> —— 本文档为该来源的**呈现**，来源变更时必须同步本文。
+> **事实来源**：<唯一来源，如 `pw-core/src/main/java/.../ConfigRegistry.java`> —— 本文档为该来源的**呈现**，来源变更时必须同步本文。
 
 ## 1. {{分类一}}
 
@@ -70,8 +70,8 @@ superseded_by: null
 若存在机器可读的全量清单，在此链接而非复制内容。
 -->
 
-- 全量配置键：`pw-core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigKeys.java`
-- 键数量校验：`ConfigKeysGoldenTest`
+- 全量配置键：`pw-core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigRegistry.java`
+- 键数量校验：注册表类加载期静态校验 + golden 快照
 
 ## 5. 相关文档
 

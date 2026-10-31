@@ -47,7 +47,7 @@ superseded_by: null
 | `page.factory` / `page.binding` | `PageObjectFactory` 实例工厂；role 定位绑定 |
 | `lifecycle` | Playwright / Context / Page / 浏览器生命周期、并发执行器、截图、trace、锁 |
 | `listener` | `PlaywrightListener`（Cucumber ↔ 框架事件桥）、`LifecycleOrchestrator`、失败截图 |
-| `config` | `WebFrameworkConfig`（Web 域配置门面，代理 `ConfigKeys`） |
+| `config` | `WebFrameworkConfig`（Web 域配置门面，代理 `ConfigRegistry`） |
 | `concurrent` | 并发闸门与分区键（SSO 感知） |
 | `junit` | `CucumberWithPw` JUnit4 Runner（零配置挂载框架插件） |
 | `accessibility` | axe-core 可访问性扫描 |
@@ -77,7 +77,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PageElement;
 import com.microsoft.playwright.options.AriaRole;
 
-// 读配置：WebFrameworkConfig 是 ConfigKeys 的门面，不持有字面量
+// 读配置：WebFrameworkConfig 是 ConfigRegistry 的门面，不持有字面量
 boolean headless = WebFrameworkConfig.PLAYWRIGHT_BROWSER_HEADLESS.getBooleanValue();
 int timeout = WebFrameworkConfig.PLAYWRIGHT_BROWSER_TIMEOUT.getIntValue();
 
@@ -115,7 +115,7 @@ core.afterTest(false);
 
 ## 6. 配置
 
-Web 域全部键为 `ConfigKeys.WEB_*`（约 110 项），由 `WebFrameworkConfig` 门面代理。代表性条目：
+Web 域全部键为 `ConfigRegistry.WEB_*`（约 110 项），由 `WebFrameworkConfig` 门面代理。代表性条目：
 
 | 键 | 默认值 | 说明 |
 |---|---|---|

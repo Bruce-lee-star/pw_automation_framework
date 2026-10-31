@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * 路由采集策略（<b>不可变值对象</b>）—— 三项采集配置的<b>唯一解析点与冻结快照</b>。
  *
- * <p>层序不在本类硬编码：由 {@link ConfigKeys} 对 {@code route.capture.*} 三键的**声明式层序**
+ * <p>层序不在本类硬编码：由 {@link ConfigRegistry} 对 {@code route.capture.*} 三键的**声明式层序**
  * （{@link ConfigSource#ENV_FIRST_PRECEDENCE}：环境变量 → 系统属性 → 配置文件属性 → 默认值）
  * 决定，逐层回退、透明解密、来源层上报全部复用 {@link ConfigSource} —— 框架内只有一套解析实现。
  *
@@ -73,13 +73,13 @@ public final class RouteCapturePolicy {
      * @return 冻结后的采集策略
      */
     public static RouteCapturePolicy resolveNow() {
-        ConfigSource.Resolved allTypes = resolve(ConfigKeys.ROUTE_CAPTURE_ALL_TYPE.key(),
+        ConfigSource.Resolved allTypes = resolve(ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.key(),
                 Boolean.toString(RouteConfig.DEFAULT_CAPTURE_ALL_TYPES));
-        ConfigSource.Resolved inline = resolve(ConfigKeys.ROUTE_CAPTURE_INLINE_MAX_BYTES.key(),
+        ConfigSource.Resolved inline = resolve(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_CAPTURE_INLINE_MAX_BYTES));
-        ConfigSource.Resolved gzip = resolve(ConfigKeys.ROUTE_CAPTURE_GZIP_MAX_BYTES.key(),
+        ConfigSource.Resolved gzip = resolve(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_CAPTURE_GZIP_MAX_BYTES));
-        ConfigSource.Resolved assertBody = resolve(ConfigKeys.ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES.key(),
+        ConfigSource.Resolved assertBody = resolve(ConfigRegistry.ROUTE_MONITOR_ASSERT_BODY_MAX_BYTES.key(),
                 Integer.toString(RouteConfig.DEFAULT_ASSERT_BODY_MAX_BYTES));
         RouteCapturePolicy policy = new RouteCapturePolicy(
                 Boolean.parseBoolean(allTypes.value()),

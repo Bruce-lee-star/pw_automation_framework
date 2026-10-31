@@ -45,7 +45,7 @@ superseded_by: null
 | `core.schema` | `JsonSchemaValidator` 响应 Schema 校验 |
 | `core.services` | `TestServices`——`BaseStep` 的唯一创建入口（thread-scoped） |
 | `client` / `client.rest` | `ApiJob`、`RestJobProvider`（各 HTTP 动词发起点）、`AbstractRestJob`（重试循环） |
-| `config` | `ApiFrameworkConfig`（API 域配置门面，代理 `ConfigKeys.API_*`） |
+| `config` | `ApiFrameworkConfig`（API 域配置门面，代理 `ConfigRegistry.API_*`） |
 | `assembler` | 请求头装配器 |
 | `security` / `logging` | `SecurityAudit`、`SanitizingPrintStream`、`ApiLogSanitizer` |
 | `utility` | `FileReader`、`JsonUtils`、`EnvironmentUtils` |

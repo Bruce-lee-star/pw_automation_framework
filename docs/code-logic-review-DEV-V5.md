@@ -4,7 +4,7 @@
 
 **覆盖范围**：`pw-core` / `pw-web-ui` / `pw-route` / `pw-reports-v2` / `pw-codegen` 主源码，重点为生命周期、并发、证据链、报告落盘四条主线。
 
-**规模基线**：主源码 423 文件；热点文件 `RouteDsl` 1342、`ConfigKeys` 1210、`ApiSpec` 1209、`WebFrameworkConfig` 1191、`PageElement` 1162、`RoleElementPageGenerator` 1109、`RoleElementPicker` 1105、`BasePage` 1020。
+**规模基线**：主源码 423 文件；热点文件 `RouteDsl` 1342、`ConfigRegistry` 1210、`ApiSpec` 1209、`WebFrameworkConfig` 1191、`PageElement` 1162、`RoleElementPageGenerator` 1109、`RoleElementPicker` 1105、`BasePage` 1020。
 
 ---
 

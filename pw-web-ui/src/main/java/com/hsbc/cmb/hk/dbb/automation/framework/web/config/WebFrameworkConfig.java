@@ -3,7 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.config;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ContextTaskResult;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKey;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 
 import java.util.ArrayList;
@@ -32,7 +32,7 @@ public enum WebFrameworkConfig {
     /**
      * 报告项目名称（所有报告统一使用该名称）
      */
-    FRAMEWORK_PROJECT_NAME(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME),
+    FRAMEWORK_PROJECT_NAME(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME),
 
 
     // ==================== Playwright 浏览器配置 ====================
@@ -43,14 +43,14 @@ public enum WebFrameworkConfig {
      * firefox - Firefox 浏览器
      * webkit - WebKit 浏览器（Safari）
      */
-    PLAYWRIGHT_BROWSER_TYPE(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_TYPE),
+    PLAYWRIGHT_BROWSER_TYPE(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_TYPE),
 
     /**
      * 页面未捕获 JS 异常（page.onPageError）是否触发测试失败。
      * 默认 false：仅记录 error 级日志；设为 true 时，未捕获异常会在步骤结束时经
      * 框架 StepListener 标记测试失败并抛出，便于前端脚本错误即时暴露。
      */
-    PLAYWRIGHT_PAGE_ERROR_FAIL(ConfigKeys.WEB_PLAYWRIGHT_PAGE_ERROR_FAIL),
+    PLAYWRIGHT_PAGE_ERROR_FAIL(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_ERROR_FAIL),
 
     /**
      * 导航「驱动竞态自愈」开关（默认 true）。
@@ -64,14 +64,14 @@ public enum WebFrameworkConfig {
      * <p>背景：Playwright Java 在连接/对象生命周期上的竞态会**在任意在途调用上抛错**，
      * 而该异常发生在业务回调之前、无法在业务侧拦截（详见 {@code DriverRaceErrors} 类注释）。
      */
-    PLAYWRIGHT_NAVIGATION_SELFHEAL_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_NAVIGATION_SELFHEAL_ENABLED),
+    PLAYWRIGHT_NAVIGATION_SELFHEAL_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_NAVIGATION_SELFHEAL_ENABLED),
 
     /**
      * 浏览器模式
      * true - 无头模式（后台运行）
      * false - 有头模式（显示浏览器窗口）
      */
-    PLAYWRIGHT_BROWSER_HEADLESS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_HEADLESS),
+    PLAYWRIGHT_BROWSER_HEADLESS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_HEADLESS),
 
     /**
      * 浏览器 channel - 使用本地安装的浏览器
@@ -82,7 +82,7 @@ public enum WebFrameworkConfig {
      * 注意：channel 仅适用于 Chromium 系列浏览器（Chrome、Edge）
      * 对于 Firefox，请使用 executablePath 指定本地浏览器路径
      */
-    PLAYWRIGHT_BROWSER_CHANNEL(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_CHANNEL),
+    PLAYWRIGHT_BROWSER_CHANNEL(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CHANNEL),
 
     /**
      * Chrome 浏览器可执行文件路径
@@ -95,7 +95,7 @@ public enum WebFrameworkConfig {
      * 
      * 注意：Firefox 和 WebKit 必须使用 Playwright 编译的版本，不支持 executablePath
      */
-    PLAYWRIGHT_BROWSER_CHROME_EXECUTABLE_PATH(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_CHROME_EXECUTABLE_PATH),
+    PLAYWRIGHT_BROWSER_CHROME_EXECUTABLE_PATH(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CHROME_EXECUTABLE_PATH),
 
     /**
      * Edge 浏览器可执行文件路径
@@ -106,7 +106,7 @@ public enum WebFrameworkConfig {
      * macOS 示例: "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
      * Linux 示例: "/usr/bin/microsoft-edge"
      */
-    PLAYWRIGHT_BROWSER_EDGE_EXECUTABLE_PATH(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_EDGE_EXECUTABLE_PATH),
+    PLAYWRIGHT_BROWSER_EDGE_EXECUTABLE_PATH(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_EDGE_EXECUTABLE_PATH),
 
     /**
      * 跳过 Playwright 浏览器下载
@@ -120,7 +120,7 @@ public enum WebFrameworkConfig {
      * 
      * 示例: "--disable-web-security"
      */
-    PLAYWRIGHT_BROWSER_FIREFOX_ARGS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_FIREFOX_ARGS),
+    PLAYWRIGHT_BROWSER_FIREFOX_ARGS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_FIREFOX_ARGS),
 
     /**
      * Chrome 浏览器启动参数（逗号分隔）
@@ -130,7 +130,7 @@ public enum WebFrameworkConfig {
      * 
      * 注意：反后台节流 flags 已硬编码到 PlaywrightConfigManager，会自动追加，无需在此配置。
      */
-    PLAYWRIGHT_BROWSER_CHROME_ARGS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_CHROME_ARGS),
+    PLAYWRIGHT_BROWSER_CHROME_ARGS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CHROME_ARGS),
 
     /**
      * Edge 浏览器启动参数（逗号分隔）
@@ -138,7 +138,7 @@ public enum WebFrameworkConfig {
      * 
      * 示例: "--disable-blink-features=AutomationControlled,--disable-pinch,--start-maximized"
      */
-    PLAYWRIGHT_BROWSER_EDGE_ARGS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_EDGE_ARGS),
+    PLAYWRIGHT_BROWSER_EDGE_ARGS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_EDGE_ARGS),
 
     /**
      * Chromium 浏览器启动参数（逗号分隔）
@@ -146,7 +146,7 @@ public enum WebFrameworkConfig {
      * 
      * 示例: "--disable-blink-features=AutomationControlled,--disable-pinch"
      */
-    PLAYWRIGHT_BROWSER_CHROMIUM_ARGS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_CHROMIUM_ARGS),
+    PLAYWRIGHT_BROWSER_CHROMIUM_ARGS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CHROMIUM_ARGS),
 
     /**
      * WebKit 浏览器启动参数（逗号分隔）
@@ -156,39 +156,39 @@ public enum WebFrameworkConfig {
      * 
      * 示例: "--disable-web-security"
      */
-    PLAYWRIGHT_BROWSER_WEBKIT_ARGS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_WEBKIT_ARGS),
+    PLAYWRIGHT_BROWSER_WEBKIT_ARGS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_WEBKIT_ARGS),
 
     /**
      * 浏览器操作慢动作延迟（毫秒），用于调试
      */
-    PLAYWRIGHT_BROWSER_SLOWMO(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_SLOWMO),
+    PLAYWRIGHT_BROWSER_SLOWMO(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_SLOWMO),
 
     /**
      * 浏览器超时设置（毫秒）
      */
-    PLAYWRIGHT_BROWSER_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_TIMEOUT),
+    PLAYWRIGHT_BROWSER_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_TIMEOUT),
 
     // ==================== BrowserStack 云测试配置 ====================
 
     /**
      * 是否启用 BrowserStack
      */
-    BROWSERSTACK_ENABLED(ConfigKeys.WEB_BROWSERSTACK_ENABLED),
+    BROWSERSTACK_ENABLED(ConfigRegistry.WEB_BROWSERSTACK_ENABLED),
 
     /**
      * BrowserStack 用户名
      */
-    BROWSERSTACK_USERNAME(ConfigKeys.WEB_BROWSERSTACK_USERNAME),
+    BROWSERSTACK_USERNAME(ConfigRegistry.WEB_BROWSERSTACK_USERNAME),
 
     /**
      * BrowserStack 访问密钥
      */
-    BROWSERSTACK_ACCESS_KEY(ConfigKeys.WEB_BROWSERSTACK_ACCESS_KEY),
+    BROWSERSTACK_ACCESS_KEY(ConfigRegistry.WEB_BROWSERSTACK_ACCESS_KEY),
 
     /**
      * BrowserStack 会话名称
      */
-    BROWSERSTACK_SESSION_NAME(ConfigKeys.WEB_BROWSERSTACK_SESSION_NAME),
+    BROWSERSTACK_SESSION_NAME(ConfigRegistry.WEB_BROWSERSTACK_SESSION_NAME),
 
     /**
      * BrowserStack 操作系统
@@ -197,39 +197,39 @@ public enum WebFrameworkConfig {
      * BrowserStack 浏览器名称（chrome / firefox / webkit / edge）。
      * <p>BrowserStack 云端支持 Chromium (CDP)、Firefox 和 WebKit (Playwright 自有协议) 三种引擎。
      */
-    BROWSERSTACK_BROWSER_NAME(ConfigKeys.WEB_BROWSERSTACK_BROWSER_NAME),
+    BROWSERSTACK_BROWSER_NAME(ConfigRegistry.WEB_BROWSERSTACK_BROWSER_NAME),
 
-    BROWSERSTACK_OS(ConfigKeys.WEB_BROWSERSTACK_OS),
+    BROWSERSTACK_OS(ConfigRegistry.WEB_BROWSERSTACK_OS),
 
     /**
      * BrowserStack 操作系统版本
      */
-    BROWSERSTACK_OS_VERSION(ConfigKeys.WEB_BROWSERSTACK_OS_VERSION),
+    BROWSERSTACK_OS_VERSION(ConfigRegistry.WEB_BROWSERSTACK_OS_VERSION),
 
     /**
      * BrowserStack 浏览器版本
      */
-    BROWSERSTACK_BROWSER_VERSION(ConfigKeys.WEB_BROWSERSTACK_BROWSER_VERSION),
+    BROWSERSTACK_BROWSER_VERSION(ConfigRegistry.WEB_BROWSERSTACK_BROWSER_VERSION),
 
     /**
      * BrowserStack 超时设置（秒）
      */
-    BROWSERSTACK_TIMEOUT(ConfigKeys.WEB_BROWSERSTACK_TIMEOUT),
+    BROWSERSTACK_TIMEOUT(ConfigRegistry.WEB_BROWSERSTACK_TIMEOUT),
 
     /**
      * BrowserStack 调试模式
      */
-    BROWSERSTACK_DEBUG(ConfigKeys.WEB_BROWSERSTACK_DEBUG),
+    BROWSERSTACK_DEBUG(ConfigRegistry.WEB_BROWSERSTACK_DEBUG),
 
     /**
      * BrowserStack 网络日志
      */
-    BROWSERSTACK_NETWORK_LOGS(ConfigKeys.WEB_BROWSERSTACK_NETWORK_LOGS),
+    BROWSERSTACK_NETWORK_LOGS(ConfigRegistry.WEB_BROWSERSTACK_NETWORK_LOGS),
 
     /**
      * BrowserStack 视频录制
      */
-    BROWSERSTACK_VIDEO(ConfigKeys.WEB_BROWSERSTACK_VIDEO),
+    BROWSERSTACK_VIDEO(ConfigRegistry.WEB_BROWSERSTACK_VIDEO),
 
     // ==================== BrowserStack Local Testing ====================
 
@@ -240,13 +240,13 @@ public enum WebFrameworkConfig {
      * <p>启用后自动设置 {@code browserstack.local.force.local=true}，
      * CDP/Playwright WebSocket 流量强制走 Local 隧道（官方原生方案，零额外组件）。
      */
-    BROWSERSTACK_LOCAL(ConfigKeys.WEB_BROWSERSTACK_LOCAL),
+    BROWSERSTACK_LOCAL(ConfigRegistry.WEB_BROWSERSTACK_LOCAL),
 
     /**
      * BrowserStack Local 隧道标识符（多构建并行时区分隧道）。
      * <p>留空则自动生成 {@code automation_<timestamp>}。
      */
-    BROWSERSTACK_LOCAL_IDENTIFIER(ConfigKeys.WEB_BROWSERSTACK_LOCAL_IDENTIFIER),
+    BROWSERSTACK_LOCAL_IDENTIFIER(ConfigRegistry.WEB_BROWSERSTACK_LOCAL_IDENTIFIER),
 
     /**
      * BrowserStack Local 二进制文件路径。
@@ -254,13 +254,13 @@ public enum WebFrameworkConfig {
      * <p>可从 https://www.browserstack.com/local-testing/automate 下载，放到项目工具目录或系统 PATH。
      * <p>留空则在 PATH 中查找。
      */
-    BROWSERSTACK_LOCAL_PATH(ConfigKeys.WEB_BROWSERSTACK_LOCAL_PATH),
+    BROWSERSTACK_LOCAL_PATH(ConfigRegistry.WEB_BROWSERSTACK_LOCAL_PATH),
 
     /**
      * BrowserStack Local 启动超时（秒）。
      * <p>隧道建立完成前最多等待此时间。
      */
-    BROWSERSTACK_LOCAL_TIMEOUT(ConfigKeys.WEB_BROWSERSTACK_LOCAL_TIMEOUT),
+    BROWSERSTACK_LOCAL_TIMEOUT(ConfigRegistry.WEB_BROWSERSTACK_LOCAL_TIMEOUT),
 
     /**
      * BrowserStack CDP WebSocket 端点域名。
@@ -270,7 +270,7 @@ public enum WebFrameworkConfig {
      * <p>仅影响 Playwright {@code browserType.connect()} 的 wss:// 连接地址。
      * 不影响 BrowserStack Local tunnel 的连接（tunnel 使用自己的控制通道）。
      */
-    BROWSERSTACK_CDP_ENDPOINT(ConfigKeys.WEB_BROWSERSTACK_CDP_ENDPOINT),
+    BROWSERSTACK_CDP_ENDPOINT(ConfigRegistry.WEB_BROWSERSTACK_CDP_ENDPOINT),
 
 
     // ==================== Playwright 窗口配置 ====================
@@ -278,12 +278,12 @@ public enum WebFrameworkConfig {
     /**
      * 窗口最大化
      */
-    PLAYWRIGHT_WINDOW_MAXIMIZE(ConfigKeys.WEB_PLAYWRIGHT_WINDOW_MAXIMIZE),
+    PLAYWRIGHT_WINDOW_MAXIMIZE(ConfigRegistry.WEB_PLAYWRIGHT_WINDOW_MAXIMIZE),
 
     /**
      * 窗口最大化参数
      */
-    PLAYWRIGHT_WINDOW_MAXIMIZE_ARGS(ConfigKeys.WEB_PLAYWRIGHT_WINDOW_MAXIMIZE_ARGS),
+    PLAYWRIGHT_WINDOW_MAXIMIZE_ARGS(ConfigRegistry.WEB_PLAYWRIGHT_WINDOW_MAXIMIZE_ARGS),
 
     /*
      *  （移除留痕，2026-09-17 评审）：此处原为「共享 Browser 模式（opt-in）」配置项的 javadoc ——
@@ -301,13 +301,13 @@ public enum WebFrameworkConfig {
      * 并发上下文执行器并行度（{@code ConcurrentContextExecutor}）。
      * 控制同时运行的独立 BrowserContext 任务数；执行器内部再与任务数、硬上限（默认 16）取 min。
      */
-    PLAYWRIGHT_CONCURRENT_PARALLELISM(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_PARALLELISM),
+    PLAYWRIGHT_CONCURRENT_PARALLELISM(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_PARALLELISM),
 
     /**
      * 单任务超时（秒）。{@code ConcurrentContextExecutor} 对单个任务做 best-effort 超时兜底，
      * 超时后 cancel(true) 中断任务线程；真实耗时上限仍依赖框架既有 navigation / element 超时。
      */
-    PLAYWRIGHT_CONCURRENT_TASK_TIMEOUT_SECONDS(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_TASK_TIMEOUT_SECONDS),
+    PLAYWRIGHT_CONCURRENT_TASK_TIMEOUT_SECONDS(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_TASK_TIMEOUT_SECONDS),
 
     /**
      * 并发执行器是否启用虚拟线程（JDK 21+）。
@@ -315,7 +315,7 @@ public enum WebFrameworkConfig {
      * carrier 线程 pinning 风险（并发方案 R6），确认无 {@code Object.wait} 长持锁；
      * 另需保证运行环境为 JDK 21+，否则框架应安全降级为平台线程（见 {@code ConcurrentContextExecutor}）。
      */
-    PLAYWRIGHT_CONCURRENT_USE_VIRTUAL_THREADS(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_USE_VIRTUAL_THREADS),
+    PLAYWRIGHT_CONCURRENT_USE_VIRTUAL_THREADS(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_USE_VIRTUAL_THREADS),
 
     /**
      * 并发执行器硬上限（HARD CAP）。
@@ -324,7 +324,7 @@ public enum WebFrameworkConfig {
      * <p>默认按 CPU 核数自适应（核/2，下限 2、上限 32），可经 serenity.properties 或
      * -Dframework.playwright.concurrent.max 覆盖；CI 低核机应显式调小以防资源耗尽。
      */
-    PLAYWRIGHT_CONCURRENT_MAX(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_MAX),
+    PLAYWRIGHT_CONCURRENT_MAX(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_MAX),
 
     /**
      * SSO 感知并发（按身份分区互斥）总开关。
@@ -340,7 +340,7 @@ public enum WebFrameworkConfig {
      * （SSO 单会话互踢、storageState 覆写），且现象随机难查。默认在并行时启用，使
      * <b>「同一 sessionKey 串行、不同 sessionKey 并行」成为并行的默认语义</b>；串行下恒为 no-op、零回归。
      */
-    CONCURRENCY_PARTITION_ENABLED(ConfigKeys.WEB_CONCURRENCY_PARTITION_ENABLED),
+    CONCURRENCY_PARTITION_ENABLED(ConfigRegistry.WEB_CONCURRENCY_PARTITION_ENABLED),
 
     /**
      * 每个并发分区键允许的并发许可数。
@@ -360,9 +360,9 @@ public enum WebFrameworkConfig {
      * <p><b>超时后的行为</b>见 {@link #CONCURRENCY_PARTITION_FAIL_CLOSED}：默认<b>失败快</b>
      * （该场景判失败），可显式降级为 fail-open 放行。</p>
      */
-    CONCURRENCY_PARTITION_MAX_WAIT_MS(ConfigKeys.WEB_CONCURRENCY_PARTITION_MAX_WAIT_MS),
+    CONCURRENCY_PARTITION_MAX_WAIT_MS(ConfigRegistry.WEB_CONCURRENCY_PARTITION_MAX_WAIT_MS),
 
-    CONCURRENCY_PARTITION_PER_KEY_PERMITS(ConfigKeys.WEB_CONCURRENCY_PARTITION_PER_KEY_PERMITS),
+    CONCURRENCY_PARTITION_PER_KEY_PERMITS(ConfigRegistry.WEB_CONCURRENCY_PARTITION_PER_KEY_PERMITS),
 
     /**
      * 闸门等待超时后是否「失败快」（fail-closed）。默认 {@code true}。
@@ -374,7 +374,7 @@ public enum WebFrameworkConfig {
      * <p><b>逃生舱</b>：设 {@code false} 可退回「放行 + ERROR 日志」的旧行为 ——
      * 仅建议在确认串行化失败不会造成数据/会话破坏的场景下使用。</p>
      */
-    CONCURRENCY_PARTITION_FAIL_CLOSED(ConfigKeys.WEB_CONCURRENCY_PARTITION_FAIL_CLOSED),
+    CONCURRENCY_PARTITION_FAIL_CLOSED(ConfigRegistry.WEB_CONCURRENCY_PARTITION_FAIL_CLOSED),
 
     /**
      * 浏览器崩溃韧性守卫（BrowserCrashGuard）总开关。
@@ -382,7 +382,7 @@ public enum WebFrameworkConfig {
      * 关闭（默认仍 true，属纯韧性增强）时退化为「失败直接随 {@link ContextTaskResult} 返回」，行为不变。
      * 仅对崩溃型失败（见 {@code BrowserCrashGuard#isCrash}）触发，正常业务失败不重跑。
      */
-    CONCURRENCY_BROWSER_CRASH_GUARD_ENABLED(ConfigKeys.WEB_CONCURRENCY_BROWSER_CRASH_GUARD_ENABLED),
+    CONCURRENCY_BROWSER_CRASH_GUARD_ENABLED(ConfigRegistry.WEB_CONCURRENCY_BROWSER_CRASH_GUARD_ENABLED),
 
     /**
      * 崩溃型失败的消息特征白名单（{@code |} 分隔，大小写不敏感）。
@@ -390,7 +390,7 @@ public enum WebFrameworkConfig {
      * （如 {@code "execution context was destroyed"} / {@code "browser process"} 已剔除，避免误判掩盖真实缺陷）。
      * 经本键可运行时调窄/调宽签名集（W-10：签名可配置），默认与历史收窄白名单一致。</p>
      */
-    PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES),
+    PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES),
 
     /**
      * 崩溃识别是否启用「异常类型 + Playwright 事件」双重佐证（W-10 三重判定之一）。
@@ -398,69 +398,69 @@ public enum WebFrameworkConfig {
      * 即使异常消息未命中 {@link #PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES} 也判为崩溃（覆盖消息被包装吞掉的场景）。
      * 关闭时退化为「仅消息签名匹配」（与 W-15 去类名模糊匹配一致，最保守）。</p>
      */
-    PLAYWRIGHT_CONCURRENT_CRASH_CORROBORATION_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_CRASH_CORROBORATION_ENABLED),
+    PLAYWRIGHT_CONCURRENT_CRASH_CORROBORATION_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_CRASH_CORROBORATION_ENABLED),
 
     /**
      * 条件驱动重试的默认重试间隔（毫秒）。W-9：原散落字面量 {@code 500} 抽为可配置键。
      */
-    PLAYWRIGHT_WAITS_RETRY_INTERVAL_DEFAULT_MS(ConfigKeys.WEB_PLAYWRIGHT_WAITS_RETRY_INTERVAL_DEFAULT_MS),
+    PLAYWRIGHT_WAITS_RETRY_INTERVAL_DEFAULT_MS(ConfigRegistry.WEB_PLAYWRIGHT_WAITS_RETRY_INTERVAL_DEFAULT_MS),
 
     /**
      * {@code PageWaits.retry} 默认重试次数。W-9：原散落字面量 {@code 3} 抽为可配置键。
      */
-    PLAYWRIGHT_WAITS_RETRY_COUNT(ConfigKeys.WEB_PLAYWRIGHT_WAITS_RETRY_COUNT),
+    PLAYWRIGHT_WAITS_RETRY_COUNT(ConfigRegistry.WEB_PLAYWRIGHT_WAITS_RETRY_COUNT),
 
     /**
      * {@code PageWaits.retry} 默认重试间隔（毫秒）。W-9：原散落字面量 {@code 1000} 抽为可配置键。
      */
-    PLAYWRIGHT_WAITS_RETRY_INTERVAL_MS(ConfigKeys.WEB_PLAYWRIGHT_WAITS_RETRY_INTERVAL_MS),
+    PLAYWRIGHT_WAITS_RETRY_INTERVAL_MS(ConfigRegistry.WEB_PLAYWRIGHT_WAITS_RETRY_INTERVAL_MS),
 
     /**
      * 浏览器启动重试的退避基数（毫秒，随尝试次数线性放大）。W-9：原散落字面量 {@code 2000} 抽为可配置键。
      */
-    PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS),
+    PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS),
 
     /**
      * 并发上下文执行器线程池关闭等待超时（秒）。W-9：原散落字面量 {@code 30} 抽为可配置键。
      */
-    PLAYWRIGHT_CONCURRENT_EXECUTOR_AWAIT_SECONDS(ConfigKeys.WEB_PLAYWRIGHT_CONCURRENT_EXECUTOR_AWAIT_SECONDS),
+    PLAYWRIGHT_CONCURRENT_EXECUTOR_AWAIT_SECONDS(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_EXECUTOR_AWAIT_SECONDS),
 
     /**
      * BrowserStack 会话连接超时（秒）。W-9：原散落字面量 {@code 60} 抽为可配置键。
      */
-    PLAYWRIGHT_BROWSERSTACK_CONNECT_TIMEOUT_SECONDS(ConfigKeys.WEB_PLAYWRIGHT_BROWSERSTACK_CONNECT_TIMEOUT_SECONDS),
+    PLAYWRIGHT_BROWSERSTACK_CONNECT_TIMEOUT_SECONDS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSERSTACK_CONNECT_TIMEOUT_SECONDS),
 
     /**
      * BrowserStack API 连接/读取超时（毫秒）。W-9：原散落字面量 {@code 30000} 抽为可配置键。
      */
-    PLAYWRIGHT_BROWSERSTACK_REQUEST_TIMEOUT_MS(ConfigKeys.WEB_PLAYWRIGHT_BROWSERSTACK_REQUEST_TIMEOUT_MS),
+    PLAYWRIGHT_BROWSERSTACK_REQUEST_TIMEOUT_MS(ConfigRegistry.WEB_PLAYWRIGHT_BROWSERSTACK_REQUEST_TIMEOUT_MS),
 
     /**
      * 崩溃重跑严格有界次数（防止崩溃持续时无限循环）。W-9：原散落字面量 {@code 1} 抽为可配置键。
      */
-    PLAYWRIGHT_CRASH_GUARD_MAX_REPLAY(ConfigKeys.WEB_PLAYWRIGHT_CRASH_GUARD_MAX_REPLAY),
+    PLAYWRIGHT_CRASH_GUARD_MAX_REPLAY(ConfigRegistry.WEB_PLAYWRIGHT_CRASH_GUARD_MAX_REPLAY),
 
     /**
      * 关闭上下文时 tracing 写盘等待超时（秒）。W-9：原散落字面量 {@code 15} 抽为可配置键。
      */
-    PLAYWRIGHT_CONTEXT_CLOSE_TRACE_TIMEOUT_SECONDS(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_CLOSE_TRACE_TIMEOUT_SECONDS),
+    PLAYWRIGHT_CONTEXT_CLOSE_TRACE_TIMEOUT_SECONDS(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_CLOSE_TRACE_TIMEOUT_SECONDS),
 
     /**
      * 页面稳定化补偿延迟（毫秒，窗口定位异步重排）。W-9：原散落字面量 {@code 300} 抽为可配置键。
      */
-    PLAYWRIGHT_CONTEXT_STABILIZE_DELAY_MS(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_STABILIZE_DELAY_MS),
+    PLAYWRIGHT_CONTEXT_STABILIZE_DELAY_MS(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_STABILIZE_DELAY_MS),
 
     // ==================== Playwright 上下文配置 ====================
 
     /**
      * 禁用触摸功能
      */
-    PLAYWRIGHT_CONTEXT_HAS_TOUCH(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_HAS_TOUCH),
+    PLAYWRIGHT_CONTEXT_HAS_TOUCH(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_HAS_TOUCH),
 
     /**
      * 移动设备模拟
      */
-    PLAYWRIGHT_CONTEXT_IS_MOBILE(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_IS_MOBILE),
+    PLAYWRIGHT_CONTEXT_IS_MOBILE(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_IS_MOBILE),
 
     /**
      * 截图保存路径
@@ -468,17 +468,17 @@ public enum WebFrameworkConfig {
     /**
      * 录屏功能
      */
-    PLAYWRIGHT_CONTEXT_RECORD_VIDEO_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_RECORD_VIDEO_ENABLED),
+    PLAYWRIGHT_CONTEXT_RECORD_VIDEO_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_RECORD_VIDEO_ENABLED),
 
     /**
      * 录屏保存目录
      */
-    PLAYWRIGHT_CONTEXT_RECORD_VIDEO_DIR(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_RECORD_VIDEO_DIR),
+    PLAYWRIGHT_CONTEXT_RECORD_VIDEO_DIR(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_RECORD_VIDEO_DIR),
 
     /**
      * Trace 功能
      */
-    PLAYWRIGHT_CONTEXT_TRACE_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_ENABLED),
+    PLAYWRIGHT_CONTEXT_TRACE_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_ENABLED),
 
     /**
      * trace 是否按 <b>scenario 分段</b>（每个用例一个 trace 文件）——默认 true（方案 A，2026-09-17）。
@@ -488,71 +488,71 @@ public enum WebFrameworkConfig {
      * （2026-09-30 收口后每 case 重建 Context，chunk 边界与 context 边界天然一致）。
      * {@code false}：回退为「一个 context 一个整段 trace」（旧行为，逃生开关）。
      */
-    PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO),
+    PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_CHUNK_PER_SCENARIO),
 
     /** trace 目录磁盘治理开关（自动清理上一轮旧 trace.zip）。 */
-    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED),
+    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_ENABLED),
 
     /** trace 目录保留文件数上限。 */
-    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES),
+    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_FILES),
 
     /** trace 目录总容量上限（MB）。 */
-    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB),
+    PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_RETENTION_MAX_TOTAL_MB),
 
     /**
      * Trace 时截图
      */
-    PLAYWRIGHT_CONTEXT_TRACE_SCREENSHOTS(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_SCREENSHOTS),
+    PLAYWRIGHT_CONTEXT_TRACE_SCREENSHOTS(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_SCREENSHOTS),
 
     /**
      * Trace 时快照
      */
-    PLAYWRIGHT_CONTEXT_TRACE_SNAPSHOTS(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_SNAPSHOTS),
+    PLAYWRIGHT_CONTEXT_TRACE_SNAPSHOTS(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_SNAPSHOTS),
 
     /**
      * Trace 时源码
      */
-    PLAYWRIGHT_CONTEXT_TRACE_SOURCES(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TRACE_SOURCES),
+    PLAYWRIGHT_CONTEXT_TRACE_SOURCES(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TRACE_SOURCES),
 
     /**
      * Context locale 设置
      */
-    PLAYWRIGHT_CONTEXT_LOCALE(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_LOCALE),
+    PLAYWRIGHT_CONTEXT_LOCALE(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_LOCALE),
 
     /**
      * Context timezone 设置
      */
-    PLAYWRIGHT_CONTEXT_TIMEZONE_ID(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_TIMEZONE_ID),
+    PLAYWRIGHT_CONTEXT_TIMEZONE_ID(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_TIMEZONE_ID),
 
     /**
      * Context User-Agent 设置
      */
-    PLAYWRIGHT_CONTEXT_USER_AGENT(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_USER_AGENT),
+    PLAYWRIGHT_CONTEXT_USER_AGENT(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_USER_AGENT),
 
     /**
      * Context 权限设置（逗号分隔）
      */
-    PLAYWRIGHT_CONTEXT_PERMISSIONS(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_PERMISSIONS),
+    PLAYWRIGHT_CONTEXT_PERMISSIONS(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_PERMISSIONS),
 
     /**
      * ColorScheme (light, dark, no-preference)
      */
-    PLAYWRIGHT_CONTEXT_COLOR_SCHEME(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_COLOR_SCHEME),
+    PLAYWRIGHT_CONTEXT_COLOR_SCHEME(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_COLOR_SCHEME),
 
     /**
      * Geolocation 纬度
      */
-    PLAYWRIGHT_CONTEXT_GEOLOCATION_LATITUDE(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_GEOLOCATION_LATITUDE),
+    PLAYWRIGHT_CONTEXT_GEOLOCATION_LATITUDE(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_GEOLOCATION_LATITUDE),
 
     /**
      * Geolocation 经度
      */
-    PLAYWRIGHT_CONTEXT_GEOLOCATION_LONGITUDE(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_GEOLOCATION_LONGITUDE),
+    PLAYWRIGHT_CONTEXT_GEOLOCATION_LONGITUDE(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_GEOLOCATION_LONGITUDE),
 
     /**
      * 设备缩放因子（留空则自动检测）
      */
-    PLAYWRIGHT_CONTEXT_DEVICE_SCALE_FACTOR(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_DEVICE_SCALE_FACTOR),
+    PLAYWRIGHT_CONTEXT_DEVICE_SCALE_FACTOR(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_DEVICE_SCALE_FACTOR),
 
     /**
      * Context 代理服务器
@@ -561,7 +561,7 @@ public enum WebFrameworkConfig {
      * 示例: http://proxy.example.com:8080
      * 留空则不使用代理
      */
-    PLAYWRIGHT_CONTEXT_PROXY(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_PROXY),
+    PLAYWRIGHT_CONTEXT_PROXY(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_PROXY),
 
     /**
      * Context 代理启用开关。
@@ -569,19 +569,19 @@ public enum WebFrameworkConfig {
      * <p>false=禁用代理（即使配置了 proxy URL 也不会生效）
      * <p>方便在不同环境（公司网络/家庭网络）之间切换，无需反复修改 proxy URL
      */
-    PLAYWRIGHT_CONTEXT_PROXY_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_CONTEXT_PROXY_ENABLED),
+    PLAYWRIGHT_CONTEXT_PROXY_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_CONTEXT_PROXY_ENABLED),
 
     // ==================== Playwright 页面配置 ====================
 
     /**
      * 页面操作超时（毫秒）
      */
-    PLAYWRIGHT_PAGE_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_PAGE_TIMEOUT),
+    PLAYWRIGHT_PAGE_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_TIMEOUT),
 
     /**
      * 页面导航超时（毫秒）
      */
-    PLAYWRIGHT_PAGE_NAVIGATION_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_PAGE_NAVIGATION_TIMEOUT),
+    PLAYWRIGHT_PAGE_NAVIGATION_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_NAVIGATION_TIMEOUT),
 
     /**
      * 页面加载状态
@@ -589,12 +589,12 @@ public enum WebFrameworkConfig {
      * DOMCONTENTLOADED - DOM 完全加载时触发（推荐）
      * NETWORKIDLE - 所有网络请求完成时触发（最稳定）
      */
-    PLAYWRIGHT_PAGE_LOAD_STATE(ConfigKeys.WEB_PLAYWRIGHT_PAGE_LOAD_STATE),
+    PLAYWRIGHT_PAGE_LOAD_STATE(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_LOAD_STATE),
 
     /**
      * 页面稳定化等待超时（毫秒）
      */
-    PLAYWRIGHT_STABILIZE_WAIT_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_STABILIZE_WAIT_TIMEOUT),
+    PLAYWRIGHT_STABILIZE_WAIT_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_STABILIZE_WAIT_TIMEOUT),
 
     // ==================== 截图配置 ====================
 
@@ -605,19 +605,19 @@ public enum WebFrameworkConfig {
      * FOR_FAILURES - 仅失败时截图
      * DISABLED - 禁用截图
      */
-    FRAMEWORK_SCREENSHOT_STRATEGY(ConfigKeys.WEB_FRAMEWORK_SCREENSHOT_STRATEGY),
+    FRAMEWORK_SCREENSHOT_STRATEGY(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOT_STRATEGY),
 
     /**
      * 全页截图配置
      * true - 截图整个页面（包括滚动区域，较慢）
      * false - 仅截图可见区域 viewport（快，推荐）
      */
-    PLAYWRIGHT_SCREENSHOT_FULLPAGE(ConfigKeys.WEB_PLAYWRIGHT_SCREENSHOT_FULLPAGE),
+    PLAYWRIGHT_SCREENSHOT_FULLPAGE(ConfigRegistry.WEB_PLAYWRIGHT_SCREENSHOT_FULLPAGE),
 
     /**
      * 截图等待超时（毫秒）
      */
-    PLAYWRIGHT_SCREENSHOT_WAIT_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_SCREENSHOT_WAIT_TIMEOUT),
+    PLAYWRIGHT_SCREENSHOT_WAIT_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_SCREENSHOT_WAIT_TIMEOUT),
 
     /**
      * 全页截图时允许的最大滚动高度（像素）。
@@ -625,17 +625,17 @@ public enum WebFrameworkConfig {
      * 避免 Playwright 全页拼图一直滚动导致卡死。
      * <= 0 表示不限制（沿用 Playwright 默认行为）。
      */
-    PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT(ConfigKeys.WEB_PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT),
+    PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT(ConfigRegistry.WEB_PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT),
 
     /**
      * 框架 报告截图目录
      */
-    FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY),
+    FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY),
 
     /**
      * 框架 截图目录
      */
-    FRAMEWORK_SCREENSHOTS_DIRECTORY(ConfigKeys.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY),
+    FRAMEWORK_SCREENSHOTS_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY),
 
     // ==================== 日志配置 ====================
 
@@ -645,14 +645,14 @@ public enum WebFrameworkConfig {
      * NORMAL - 正常日志
      * VERBOSE - 详细日志
      */
-    FRAMEWORK_LOGGING(ConfigKeys.WEB_FRAMEWORK_LOGGING),
+    FRAMEWORK_LOGGING(ConfigRegistry.WEB_FRAMEWORK_LOGGING),
 
     // ==================== 报告配置 ====================
 
     /**
      * 报告输出目录
      */
-    FRAMEWORK_OUTPUT_DIRECTORY(ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY),
+    FRAMEWORK_OUTPUT_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY),
 
 
     // ==================== 测试执行配置 ====================
@@ -660,12 +660,12 @@ public enum WebFrameworkConfig {
     /**
      * 特性文件根目录
      */
-    FRAMEWORK_FEATURES_ROOT(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT),
+    FRAMEWORK_FEATURES_ROOT(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT),
 
     /**
      * 浏览器配置（Playwright 原生配置）
      */
-    FRAMEWORK_BROWSER(ConfigKeys.WEB_FRAMEWORK_BROWSER),
+    FRAMEWORK_BROWSER(ConfigRegistry.WEB_FRAMEWORK_BROWSER),
 
 
 
@@ -684,7 +684,7 @@ public enum WebFrameworkConfig {
      * <p>关闭方式：{@code -Dframework.playwright.hang.watchdog.interval.ms=0}。
      */
     FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS(
-            ConfigKeys.WEB_FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS),
+            ConfigRegistry.WEB_FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS),
 
 
 
@@ -694,27 +694,27 @@ public enum WebFrameworkConfig {
     /**
      * 失败测试重跑等待时间（毫秒）
      */
-    FRAMEWORK_RERUN_FAILURES_WAIT_TIME(ConfigKeys.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME),
+    FRAMEWORK_RERUN_FAILURES_WAIT_TIME(ConfigRegistry.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME),
 
     /**
      * 重试延迟策略（fixed, exponential）
      */
-    FRAMEWORK_RETRY_DELAY_STRATEGY(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY),
+    FRAMEWORK_RETRY_DELAY_STRATEGY(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY),
 
     /**
      * 指数退避基础延迟（毫秒）
      */
-    FRAMEWORK_RETRY_DELAY_BASE(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_BASE),
+    FRAMEWORK_RETRY_DELAY_BASE(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_BASE),
 
     /**
      * 指数退避最大延迟（毫秒）
      */
-    FRAMEWORK_RETRY_DELAY_MAX(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MAX),
+    FRAMEWORK_RETRY_DELAY_MAX(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MAX),
 
     /**
      * 指数退避乘数
      */
-    FRAMEWORK_RETRY_DELAY_MULTIPLIER(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER),
+    FRAMEWORK_RETRY_DELAY_MULTIPLIER(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER),
 
 
 
@@ -723,18 +723,18 @@ public enum WebFrameworkConfig {
     /**
      * 全局启用 API Mock
      */
-    API_MOCK_ENABLED(ConfigKeys.WEB_API_MOCK_ENABLED),
+    API_MOCK_ENABLED(ConfigRegistry.WEB_API_MOCK_ENABLED),
 
     /**
      * Mock 规则配置目录
      */
-    API_MOCK_RULES_DIRECTORY(ConfigKeys.WEB_API_MOCK_RULES_DIRECTORY),
+    API_MOCK_RULES_DIRECTORY(ConfigRegistry.WEB_API_MOCK_RULES_DIRECTORY),
 
     /**
      * Mock 日志级别
      * DEBUG, INFO, WARN, ERROR
      */
-    API_MOCK_LOG_LEVEL(ConfigKeys.WEB_API_MOCK_LOG_LEVEL),
+    API_MOCK_LOG_LEVEL(ConfigRegistry.WEB_API_MOCK_LOG_LEVEL),
 
     // ==================== Playwright SDK 配置 ====================
 
@@ -742,28 +742,28 @@ public enum WebFrameworkConfig {
      * Playwright Driver 路径
      * 指定 Playwright Driver 的存储目录
      */
-    PLAYWRIGHT_DRIVER_PATH(ConfigKeys.WEB_PLAYWRIGHT_DRIVER_PATH),
+    PLAYWRIGHT_DRIVER_PATH(ConfigRegistry.WEB_PLAYWRIGHT_DRIVER_PATH),
     
     /**
      * Playwright SDK 目录
      * 指定 Playwright SDK 的存储目录
      */
-    PLAYWRIGHT_SDK_PATH(ConfigKeys.WEB_PLAYWRIGHT_SDK_PATH),
+    PLAYWRIGHT_SDK_PATH(ConfigRegistry.WEB_PLAYWRIGHT_SDK_PATH),
 
     /**
      * Playwright Driver 临时目录
      * 指定 Playwright Driver 的临时文件存储目录
      */
-    PLAYWRIGHT_DRIVER_TMPDIR(ConfigKeys.WEB_PLAYWRIGHT_DRIVER_TMPDIR),
+    PLAYWRIGHT_DRIVER_TMPDIR(ConfigRegistry.WEB_PLAYWRIGHT_DRIVER_TMPDIR),
 
-    PLAYWRIGHT_BROWSERS_PATH(ConfigKeys.WEB_PLAYWRIGHT_BROWSERS_PATH),
+    PLAYWRIGHT_BROWSERS_PATH(ConfigRegistry.WEB_PLAYWRIGHT_BROWSERS_PATH),
 
     /**
      * 浏览器下载代理启用开关。
      * <p>true=启用下载代理（需同时配置下方下载代理地址/凭据，或统一代理地址）
      * <p>false=禁用下载代理（即使配置了代理地址也不会注入到 CLI 环境变量）
      */
-    PLAYWRIGHT_DOWNLOAD_PROXY_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_DOWNLOAD_PROXY_ENABLED),
+    PLAYWRIGHT_DOWNLOAD_PROXY_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_DOWNLOAD_PROXY_ENABLED),
 
     /**
      * 浏览器下载 HTTP 代理地址
@@ -772,7 +772,7 @@ public enum WebFrameworkConfig {
      * 
      * 示例: proxy.company.com:8080
      */
-    PLAYWRIGHT_BROWSER_DOWNLOAD_HTTP_PROXY(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_HTTP_PROXY),
+    PLAYWRIGHT_BROWSER_DOWNLOAD_HTTP_PROXY(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_HTTP_PROXY),
 
     /**
      * 浏览器下载 HTTPS 代理地址
@@ -780,20 +780,20 @@ public enum WebFrameworkConfig {
      * 
      * 示例: proxy.company.com:8443
      */
-    PLAYWRIGHT_BROWSER_DOWNLOAD_HTTPS_PROXY(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_HTTPS_PROXY),
+    PLAYWRIGHT_BROWSER_DOWNLOAD_HTTPS_PROXY(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_HTTPS_PROXY),
 
     /**
      * No login session timeout in minutes
      * After this period, saved sessions will be considered expired
      */
-    PLAYWRIGHT_NO_LOGIN_SESSION_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_NO_LOGIN_SESSION_TIMEOUT),
+    PLAYWRIGHT_NO_LOGIN_SESSION_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_NO_LOGIN_SESSION_TIMEOUT),
 
     /**
      * 同 user 登录单飞（single-flight）等待超时（毫秒）
      * follower 线程等待 leader 完成登录/落盘的最大时长；超时则摘除失效守卫、本线程接替为 leader，
      * 防止 leader 异常时 follower 永久阻塞。
      */
-    PLAYWRIGHT_NO_LOGIN_SINGLE_FLIGHT_TIMEOUT_MS(ConfigKeys.WEB_PLAYWRIGHT_NO_LOGIN_SINGLE_FLIGHT_TIMEOUT_MS),
+    PLAYWRIGHT_NO_LOGIN_SINGLE_FLIGHT_TIMEOUT_MS(ConfigRegistry.WEB_PLAYWRIGHT_NO_LOGIN_SINGLE_FLIGHT_TIMEOUT_MS),
     /**
      * storageState 快照是否包含 IndexedDB（1.51+ 官方能力）。
      * 默认 false：保持快照最小（传统 Java Web 登录态在 Cookie，无需 IndexedDB）；
@@ -801,40 +801,40 @@ public enum WebFrameworkConfig {
      * 否则恢复出的 session 会缺 IndexedDB 数据 → 随机 401 / 回登录页。
      * 注意：开启后快照体积显著增大（含全部 IndexedDB 数据）。
      */
-    PLAYWRIGHT_NO_LOGIN_SESSION_INCLUDE_INDEXED_DB(ConfigKeys.WEB_PLAYWRIGHT_NO_LOGIN_SESSION_INCLUDE_INDEXED_DB),
+    PLAYWRIGHT_NO_LOGIN_SESSION_INCLUDE_INDEXED_DB(ConfigRegistry.WEB_PLAYWRIGHT_NO_LOGIN_SESSION_INCLUDE_INDEXED_DB),
 
     /**
      * 元素等待时间（毫秒）
      * 用于 isVisible, exists, isChecked, isEnabled, isDisabled, isElementClickable 等立即执行方法的重试超时
      * 这些方法会重试检查，直到超时，提高测试稳定性
      */
-    PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK),
-    PLAYWRIGHT_ELEMENT_WAIT_TIMEOUT(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_WAIT_TIMEOUT),
+    PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CLOSE_AFTER_CONCURRENT_TASK),
+    PLAYWRIGHT_ELEMENT_WAIT_TIMEOUT(ConfigRegistry.WEB_PLAYWRIGHT_ELEMENT_WAIT_TIMEOUT),
 
     /**
      * 轮询间隔时间（毫秒）
      * 用于各种等待方法的轮询检查间隔
      */
-    PLAYWRIGHT_POLLING_INTERVAL(ConfigKeys.WEB_PLAYWRIGHT_POLLING_INTERVAL),
+    PLAYWRIGHT_POLLING_INTERVAL(ConfigRegistry.WEB_PLAYWRIGHT_POLLING_INTERVAL),
 
     // ==================== Axe-core 配置 ====================
 
     /**
      * 是否启用 axe-core 扫描
      */
-    AXE_SCAN_ENABLED(ConfigKeys.WEB_AXE_SCAN_ENABLED),
+    AXE_SCAN_ENABLED(ConfigRegistry.WEB_AXE_SCAN_ENABLED),
 
     /**
      * Axe-core WCAG 标签（逗号分隔）
      * 留空则运行所有规则
      * 例如: wcag2aa,wcag21aa
      */
-    AXE_SCAN_TAGS(ConfigKeys.WEB_AXE_SCAN_TAGS),
+    AXE_SCAN_TAGS(ConfigRegistry.WEB_AXE_SCAN_TAGS),
 
     /**
      * Axe-core 报告输出目录
      */
-    AXE_SCAN_OUTPUT_DIR(ConfigKeys.WEB_AXE_SCAN_OUTPUT_DIR),
+    AXE_SCAN_OUTPUT_DIR(ConfigRegistry.WEB_AXE_SCAN_OUTPUT_DIR),
 
     // ==================== Playwright 原生快照测试配置 ====================
 
@@ -844,13 +844,13 @@ public enum WebFrameworkConfig {
      * 元素操作后等待时间（毫秒）
      * 用于 click/fill 等操作后等待 DOM 稳定
      */
-    PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY),
+    PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY(ConfigRegistry.WEB_PLAYWRIGHT_ELEMENT_ACTION_POST_DELAY),
 
     /**
      * 是否收集详细诊断信息
      * true=收集完整诊断信息, false=收集基本信息
      */
-    PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED(ConfigKeys.WEB_PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED),
+    PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED(ConfigRegistry.WEB_PLAYWRIGHT_ELEMENT_DIAGNOSTICS_DETAILED),
 
     // ==================== API 断言配置 ====================
 
@@ -858,7 +858,7 @@ public enum WebFrameworkConfig {
      * API 断言等待超时时间（毫秒）
      * 用于等待所有异步 API 请求完成
      */
-    API_ASSERTION_WAIT_TIMEOUT(ConfigKeys.WEB_API_ASSERTION_WAIT_TIMEOUT),
+    API_ASSERTION_WAIT_TIMEOUT(ConfigRegistry.WEB_API_ASSERTION_WAIT_TIMEOUT),
 
     // ==================== API Monitor / 持久化配置（唯一事实来源已收敛至 core MonitorConfig）====================
     // 监控 / 持久化域配置键的单一事实来源为 core 的 MonitorConfig：
@@ -883,40 +883,40 @@ public enum WebFrameworkConfig {
      * HTTP 代理地址（host:port，可含 http:// 或 https:// scheme）。
      * <p>示例: {@code http://proxy.company.com:8888} 或 {@code proxy.company.com:8888}
      */
-    PLAYWRIGHT_PROXY_HTTP(ConfigKeys.WEB_PLAYWRIGHT_PROXY_HTTP),
+    PLAYWRIGHT_PROXY_HTTP(ConfigRegistry.WEB_PLAYWRIGHT_PROXY_HTTP),
 
     /**
      * HTTPS 代理地址（host:port，可含 http:// 或 https:// scheme）。
      * <p>HTTP 和 HTTPS 各自独立配置，互不回退。
      * <p>示例: {@code https://proxy.company.com:8443} 或 {@code proxy.company.com:8443}
      */
-    PLAYWRIGHT_PROXY_HTTPS(ConfigKeys.WEB_PLAYWRIGHT_PROXY_HTTPS),
+    PLAYWRIGHT_PROXY_HTTPS(ConfigRegistry.WEB_PLAYWRIGHT_PROXY_HTTPS),
 
     /**
      * HTTP 代理用户名（可选）。
      */
-    PLAYWRIGHT_PROXY_HTTP_USERNAME(ConfigKeys.WEB_PLAYWRIGHT_PROXY_HTTP_USERNAME),
+    PLAYWRIGHT_PROXY_HTTP_USERNAME(ConfigRegistry.WEB_PLAYWRIGHT_PROXY_HTTP_USERNAME),
 
     /**
      * HTTP 代理密码（可选）。
      */
-    PLAYWRIGHT_PROXY_HTTP_PASSWORD(ConfigKeys.WEB_PLAYWRIGHT_PROXY_HTTP_PASSWORD),
+    PLAYWRIGHT_PROXY_HTTP_PASSWORD(ConfigRegistry.WEB_PLAYWRIGHT_PROXY_HTTP_PASSWORD),
 
     /**
      * HTTPS 代理用户名（可选）。
      */
-    PLAYWRIGHT_PROXY_HTTPS_USERNAME(ConfigKeys.WEB_PLAYWRIGHT_PROXY_HTTPS_USERNAME),
+    PLAYWRIGHT_PROXY_HTTPS_USERNAME(ConfigRegistry.WEB_PLAYWRIGHT_PROXY_HTTPS_USERNAME),
 
     /**
      * HTTPS 代理密码（可选）。
      */
-    PLAYWRIGHT_PROXY_HTTPS_PASSWORD(ConfigKeys.WEB_PLAYWRIGHT_PROXY_HTTPS_PASSWORD),
+    PLAYWRIGHT_PROXY_HTTPS_PASSWORD(ConfigRegistry.WEB_PLAYWRIGHT_PROXY_HTTPS_PASSWORD),
 
     /**
      * Playwright 浏览器下载超时时间（分钟）
      * 下载超过此时间未完成则强制终止进程
      */
-    PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES),
+    PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_TIMEOUT_MINUTES),
 
     /**
      * 下载文件保存目录（<b>仅是业务 {@code Download.saveAs} 的推荐根目录，非 Playwright 自动落盘点</b>）。
@@ -930,7 +930,7 @@ public enum WebFrameworkConfig {
      * <p>实际落盘根目录为 {@code <downloadsPath>/thread-<线程序号>}，用于并发执行下按用例隔离；每个用例
      * （scenario）结束时框架只清理本线程的子目录，不影响其他并发用例。</p>
      */
-    PLAYWRIGHT_BROWSER_DOWNLOADS_PATH(ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOADS_PATH),
+    PLAYWRIGHT_BROWSER_DOWNLOADS_PATH(ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_DOWNLOADS_PATH),
 
     /**
      * 下载文件自动挂载测试报告开关（默认 {@code false}）。
@@ -943,24 +943,24 @@ public enum WebFrameworkConfig {
      * 或直接调用 {@code DownloadInfo.attachToReport()}（该方法不受本开关约束，调用即上报）。</p>
      */
     PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED(
-            ConfigKeys.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED),
+            ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_DOWNLOAD_ATTACH_TO_REPORT_ENABLED),
 
     /**
      * 附加敏感请求/响应头名（逗号分隔），叠加在内置脱敏清单之上。
      * <p>由 {@code common.security.SensitiveDataSanitizer} 经 框架 配置体系读取，
      * 键名走规范化匹配（忽略大小写与 _ - . 空格）。
      */
-    SENSITIVE_DATA_EXTRA_HEADER_KEYS(ConfigKeys.WEB_SENSITIVE_DATA_EXTRA_HEADER_KEYS),
+    SENSITIVE_DATA_EXTRA_HEADER_KEYS(ConfigRegistry.WEB_SENSITIVE_DATA_EXTRA_HEADER_KEYS),
 
     /**
      * 附加敏感体字段名（逗号分隔），叠加在内置脱敏清单之上。
      */
-    SENSITIVE_DATA_EXTRA_BODY_KEYS(ConfigKeys.WEB_SENSITIVE_DATA_EXTRA_BODY_KEYS),
+    SENSITIVE_DATA_EXTRA_BODY_KEYS(ConfigRegistry.WEB_SENSITIVE_DATA_EXTRA_BODY_KEYS),
 
     /**
      * 附加敏感 URL query 参数名（逗号分隔），叠加在内置脱敏清单之上。
      */
-    SENSITIVE_DATA_EXTRA_QUERY_KEYS(ConfigKeys.WEB_SENSITIVE_DATA_EXTRA_QUERY_KEYS),
+    SENSITIVE_DATA_EXTRA_QUERY_KEYS(ConfigRegistry.WEB_SENSITIVE_DATA_EXTRA_QUERY_KEYS),
 
     // ==================== 页面事件订阅开关（playwright.page.events.*）====================
     // 逐事件可关：遇问题时改配置即可关闭，无需改代码。
@@ -973,21 +973,21 @@ public enum WebFrameworkConfig {
      * {@code PageInteractionMonitor} 的每页监听（含 frameNavigated / popup / console 等）
      * 都不会注册，因为它们的挂载点正是 {@code context.onPage} 回调。
      */
-    PLAYWRIGHT_PAGE_EVENTS_PAGE_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_PAGE_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_PAGE_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_PAGE_ENABLED),
 
     /** 是否订阅 {@code page.onLoad}（新页加载完成 debug 日志）。 */
-    PLAYWRIGHT_PAGE_EVENTS_LOAD_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_LOAD_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_LOAD_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_LOAD_ENABLED),
 
     /** 是否订阅 {@code page.onFrameNavigated}（导航轨迹诊断，失败回放用）。 */
-    PLAYWRIGHT_PAGE_EVENTS_FRAME_NAVIGATED_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_FRAME_NAVIGATED_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_FRAME_NAVIGATED_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_FRAME_NAVIGATED_ENABLED),
 
     /** 是否订阅 {@code page.onPopup}（未受管弹窗诊断，失败告警用）。 */
-    PLAYWRIGHT_PAGE_EVENTS_POPUP_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_POPUP_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_POPUP_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_POPUP_ENABLED),
 
     /**
      * 是否订阅 {@code page.onConsoleMessage}（控制台 error/warning 诊断）。<b>默认关闭</b>。
      */
-    PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_CONSOLE_ENABLED),
 
     /**
      * 是否订阅 {@code page.onPageError}（未捕获 JS 异常诊断）。<b>默认关闭</b>。
@@ -995,49 +995,49 @@ public enum WebFrameworkConfig {
      * <p><b>与 {@link #PLAYWRIGHT_PAGE_ERROR_FAIL} 的关系</b>：后者只在<b>本开关开启</b>时才可能生效
      * ——异常先要经本订阅收集，才谈得上"步骤结束时判失败"。二者同时开启才能得到 fail-on-page-error 行为。
      */
-    PLAYWRIGHT_PAGE_EVENTS_PAGE_ERROR_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_PAGE_ERROR_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_PAGE_ERROR_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_PAGE_ERROR_ENABLED),
 
     /** 是否订阅 {@code page.onRequestFailed}（网络请求失败诊断）。<b>默认关闭</b>。 */
-    PLAYWRIGHT_PAGE_EVENTS_REQUEST_FAILED_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_REQUEST_FAILED_ENABLED),
+    PLAYWRIGHT_PAGE_EVENTS_REQUEST_FAILED_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_REQUEST_FAILED_ENABLED),
 
     /** 是否订阅 {@code page.onCrash}（页面崩溃诊断）。<b>默认关闭</b>。 */
-    PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED(ConfigKeys.WEB_PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED);
+    PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED);
 
     // ==================== Serenity 兼容性回填（DEV-V5 去 Serenity 适配器）====================
-    // 框架已把 serenity.* 配置命名空间收敛到 framework.*（见 core ConfigKeys 中的 framework.* 键）。
+    // 框架已把 serenity.* 配置命名空间收敛到 framework.*（见 core ConfigRegistry 中的 framework.* 键）。
     // 但 Serenity-core 仍经 CucumberWithSerenity 生成 index.html，并直接读取 serenity.* 系统属性
     // （如 serenity.browser 默认 firefox、serenity.project.name 默认 "Serenity"），故报告/浏览器行为
     // 会回落到 Serenity 原生默认值。为避免回归，初始化时把 framework.* 的解析值回填给 serenity.*
     // 系统属性；仅当 serenity.* 未被 -D 显式覆盖时回填，保留运维手动 override 的能力。
-    private static final java.util.Map<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys, String> SERENITY_COMPAT_KEYS =
+    private static final java.util.Map<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry, String> SERENITY_COMPAT_KEYS =
             java.util.Map.ofEntries(
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_PROJECT_NAME, "serenity.project.name"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_SCREENSHOT_STRATEGY, "serenity.screenshot.strategy"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY, "serenity.reports.screenshots.directory"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY, "serenity.screenshots.directory"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.outputDirectory"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME, "serenity.rerun.failures.wait.time"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY, "serenity.retry.delay.strategy"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_BASE, "serenity.retry.delay.base"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MAX, "serenity.retry.delay.max"),
-                    java.util.Map.entry(ConfigKeys.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier"),
-                    java.util.Map.entry(ConfigKeys.API_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.output-directory"),
-                    java.util.Map.entry(ConfigKeys.API_FRAMEWORK_HISTORY_FOLDER, "serenity.history.folder")
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME, "serenity.project.name"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOT_STRATEGY, "serenity.screenshot.strategy"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY, "serenity.reports.screenshots.directory"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY, "serenity.screenshots.directory"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.outputDirectory"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME, "serenity.rerun.failures.wait.time"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY, "serenity.retry.delay.strategy"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_BASE, "serenity.retry.delay.base"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MAX, "serenity.retry.delay.max"),
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier"),
+                    java.util.Map.entry(ConfigRegistry.API_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.output-directory"),
+                    java.util.Map.entry(ConfigRegistry.API_FRAMEWORK_HISTORY_FOLDER, "serenity.history.folder")
             );
 
     /**
      * 把 framework.* 配置回填给 Serenity-core 使用的 serenity.* 系统属性（见 {@link #SERENITY_COMPAT_KEYS}）。
      * 解析值优先级：{@code -D framework.*} / 环境变量 / {@code serenity.properties} 中对应 framework.* 条目 /
-     * {@link com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys} 内置默认值；
+     * {@link com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry} 内置默认值；
      * 仅当 serenity.* 未被 -D 显式覆盖时回填。
      */
     public static void publishSerenityCompatibility() {
         java.util.Properties fileProps = loadSerenityProperties();
-        for (java.util.Map.Entry<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys, String> e : SERENITY_COMPAT_KEYS.entrySet()) {
-            com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys fwKey = e.getKey();
+        for (java.util.Map.Entry<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry, String> e : SERENITY_COMPAT_KEYS.entrySet()) {
+            com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry fwKey = e.getKey();
             String serenityKey = e.getValue();
             if (System.getProperty(serenityKey) != null) {
                 continue;
@@ -1071,7 +1071,7 @@ public enum WebFrameworkConfig {
     private final String defaultValue;
     private final String description;
 
-    WebFrameworkConfig(ConfigKeys definition) {
+    WebFrameworkConfig(ConfigRegistry definition) {
         this.key = definition.key();
         this.defaultValue = definition.defaultValue();
         this.description = definition.description();

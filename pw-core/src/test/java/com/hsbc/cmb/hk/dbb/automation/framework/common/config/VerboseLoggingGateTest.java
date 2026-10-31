@@ -27,9 +27,9 @@ import static org.junit.Assert.assertTrue;
  */
 public class VerboseLoggingGateTest {
 
-    private static final String FRAMEWORK_LOGGING = ConfigKeys.WEB_FRAMEWORK_LOGGING.key();
-    private static final String FRAMEWORK_VERBOSE = ConfigKeys.WEB_FRAMEWORK_VERBOSE_LOGGING.key();
-    private static final String FRAMEWORK_TRACE = ConfigKeys.WEB_FRAMEWORK_TRACE_LOGGING.key();
+    private static final String FRAMEWORK_LOGGING = ConfigRegistry.WEB_FRAMEWORK_LOGGING.key();
+    private static final String FRAMEWORK_VERBOSE = ConfigRegistry.WEB_FRAMEWORK_VERBOSE_LOGGING.key();
+    private static final String FRAMEWORK_TRACE = ConfigRegistry.WEB_FRAMEWORK_TRACE_LOGGING.key();
     private static final String PROJECT_LOGGER = "com.hsbc.cmb.hk.dbb.automation";
 
     private String prevSerenity;
@@ -52,9 +52,9 @@ public class VerboseLoggingGateTest {
 
     @After
     public void tearDown() {
-        restore(FRAMEWORK_LOGGING, prevSerenity, ConfigKeys.WEB_FRAMEWORK_LOGGING.defaultValue());
-        restore(FRAMEWORK_VERBOSE, prevVerbose, ConfigKeys.WEB_FRAMEWORK_VERBOSE_LOGGING.defaultValue());
-        restore(FRAMEWORK_TRACE, prevTrace, ConfigKeys.WEB_FRAMEWORK_TRACE_LOGGING.defaultValue());
+        restore(FRAMEWORK_LOGGING, prevSerenity, ConfigRegistry.WEB_FRAMEWORK_LOGGING.defaultValue());
+        restore(FRAMEWORK_VERBOSE, prevVerbose, ConfigRegistry.WEB_FRAMEWORK_VERBOSE_LOGGING.defaultValue());
+        restore(FRAMEWORK_TRACE, prevTrace, ConfigRegistry.WEB_FRAMEWORK_TRACE_LOGGING.defaultValue());
         VerboseLogging.isVerboseEnabled(); // 让级别按恢复后的配置重新同步
         projectLogger().setLevel(projectLevelBefore);
         rootLogger().setLevel(rootLevelBefore);

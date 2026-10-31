@@ -108,11 +108,11 @@ RoleElementPageGenerator.write(page, "src/test/java", "com.x.pages", "LoginPage"
 
 ## 6. 配置
 
-本模块**不新增** `ConfigKeys` 条目。
+本模块**不新增** `ConfigRegistry` 条目。
 
 | 键 | 默认值 | 来源 |
 |---|---|---|
-| `picker.wait.timeout.ms` | `1800000`（30 分钟；≤0 表示不超时） | `ConfigKeys.PICKER_WAIT_TIMEOUT_MS` |
+| `picker.wait.timeout.ms` | `1800000`（30 分钟；≤0 表示不超时） | `ConfigRegistry.PICKER_WAIT_TIMEOUT_MS` |
 | `dbb.codegen.enabled` | `false` | 系统属性，`RoleElementPicker.isCodegenEnabled()` 读取 |
 | `codegen.picker.eval.timeout.ms` | `10000` | 模块内常量 |
 | `codegen.picker.eval.softTimeout.ms` | `2000` | 模块内常量 |

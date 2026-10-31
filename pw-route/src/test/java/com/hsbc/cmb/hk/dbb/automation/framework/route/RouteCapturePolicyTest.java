@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import org.junit.After;
 import org.junit.Test;
@@ -85,13 +85,13 @@ public class RouteCapturePolicyTest {
     public void routeKeysDeclareEnvFirstPrecedence() {
         // 声明式层序：只有 route 三键为 ENV 优先，其余键保持框架默认（语义零变化）
         assertEquals(ConfigSource.ENV_FIRST_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigKeys.ROUTE_CAPTURE_ALL_TYPE.key()));
+                ConfigSource.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.key()));
         assertEquals(ConfigSource.ENV_FIRST_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigKeys.ROUTE_CAPTURE_INLINE_MAX_BYTES.key()));
+                ConfigSource.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.key()));
         assertEquals(ConfigSource.ENV_FIRST_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigKeys.ROUTE_CAPTURE_GZIP_MAX_BYTES.key()));
+                ConfigSource.precedenceFor(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.key()));
         assertEquals(ConfigSource.DEFAULT_PRECEDENCE,
-                ConfigSource.precedenceFor(ConfigKeys.MONITOR_OBSERVE_THREADS.key()));
+                ConfigSource.precedenceFor(ConfigRegistry.MONITOR_OBSERVE_THREADS.key()));
         assertEquals("未登记键走框架默认层序", ConfigSource.DEFAULT_PRECEDENCE,
                 ConfigSource.precedenceFor("route.capture.not.registered"));
     }
@@ -100,11 +100,11 @@ public class RouteCapturePolicyTest {
     public void configKeyDefaultsMatchRouteConfigFallbackConstants() {
         // 防漂移：注册处默认值必须与 RouteConfig 兜底常量同值（两处任一改动都会在此暴露）
         assertEquals(String.valueOf(RouteConfig.DEFAULT_CAPTURE_ALL_TYPES),
-                ConfigKeys.ROUTE_CAPTURE_ALL_TYPE.defaultValue());
+                ConfigRegistry.ROUTE_CAPTURE_ALL_TYPE.defaultValue());
         assertEquals(RouteConfig.DEFAULT_CAPTURE_INLINE_MAX_BYTES,
-                Integer.parseInt(ConfigKeys.ROUTE_CAPTURE_INLINE_MAX_BYTES.defaultValue()));
+                Integer.parseInt(ConfigRegistry.ROUTE_CAPTURE_INLINE_MAX_BYTES.defaultValue()));
         assertEquals(RouteConfig.DEFAULT_CAPTURE_GZIP_MAX_BYTES,
-                Integer.parseInt(ConfigKeys.ROUTE_CAPTURE_GZIP_MAX_BYTES.defaultValue()));
+                Integer.parseInt(ConfigRegistry.ROUTE_CAPTURE_GZIP_MAX_BYTES.defaultValue()));
     }
 
     /** 取某项生效值的来源层（诊断用 provenance）。 */

@@ -24,7 +24,7 @@
 </file>
 <file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigKey.java">
 </file>
-<file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigKeys.java">
+<file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigRegistry.java">
 </file>
 <file name="core/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/common/config/ConfigResolver.java">
 </file>

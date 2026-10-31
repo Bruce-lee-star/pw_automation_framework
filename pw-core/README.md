@@ -42,7 +42,7 @@ superseded_by: null
 
 | 子包 | 职责 |
 |---|---|
-| `common.config` | 配置键唯一注册表 `ConfigKeys`、解析器 `ConfigSource`、`FrameworkFlags`、`MonitorConfig` |
+| `common.config` | 配置键唯一注册表 `ConfigRegistry`、解析器 `ConfigSource`、`FrameworkFlags`、`MonitorConfig` |
 | `common.security` | `SensitiveDataSanitizer` 脱敏、`ConfigCipher` 的 `ENC()` 密文解密 |
 | `common.assertion` | `FrameworkAssertions` 统一断言、`SoftAssertions` 软断言聚合 |
 | `common.result` | `TestResult` / `StepResult` 语义结果模型、`ResultReporters` 上报注册表 |
@@ -68,17 +68,17 @@ superseded_by: null
 ## 4. 最小可用示例
 
 ```java
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
-// 读配置：键必须先在 ConfigKeys 登记，未登记的键在类加载期就会 fail-fast
+// 读配置：键必须先在 ConfigRegistry 登记，未登记的键在类加载期就会 fail-fast
 String timeout = ConfigSource.resolve(
-        ConfigKeys.WEB_PLAYWRIGHT_BROWSER_TIMEOUT.key(),
-        ConfigKeys.WEB_PLAYWRIGHT_BROWSER_TIMEOUT.defaultValue()); // "30000"
+        ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_TIMEOUT.key(),
+        ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_TIMEOUT.defaultValue()); // "30000"
 
 // 脱敏：统一出口，日志与报告共用
 String safeUrl = SensitiveDataSanitizer.sanitizeUrl("https://h/token?password=x");
@@ -96,7 +96,7 @@ String v = ctx.get(KEY);
 
 | 类型 | 作用 | 何时使用 |
 |---|---|---|
-| `ConfigKeys` | 全框架配置键唯一注册表（枚举，含 key / 默认值 / 描述） | 新增任何配置键时 |
+| `ConfigRegistry` | 全框架配置键唯一注册表（枚举，含 key / 默认值 / 描述） | 新增任何配置键时 |
 | `ConfigSource` | 配置解析唯一实现，按声明层序取值 | 读取配置值 |
 | `TestContext` / `TestContextHolder` | per-scenario 状态容器 | 跨步骤传递数据（替代 static ThreadLocal） |
 | `ContextKey` | 类型安全的上下文键 | 定义 `TestContext` 的键 |
@@ -108,7 +108,7 @@ String v = ctx.get(KEY);
 
 ## 6. 配置
 
-本模块**拥有** `ConfigKeys` 注册表本身，其中以下族为本模块自有：
+本模块**拥有** `ConfigRegistry` 注册表本身，其中以下族为本模块自有：
 
 | 键 | 默认值 | 说明 |
 |---|---|---|
@@ -125,21 +125,21 @@ String v = ctx.get(KEY);
 > **取值优先级**：系统属性 > 环境变量 > `-P` profile 的 `environment-*.conf` > `serenity.conf` / `serenity.properties` > 代码默认值。
 > 例外：`route.capture.*` 三键为**环境变量优先**（由 `ConfigSource.ENV_FIRST_PRECEDENCE` 声明式声明）。
 >
-> 全量 216 个键见 `ConfigKeys.java`；`ConfigKeysGoldenTest` 逐键逐字比对默认值，任何漂移即失败。
+> 全量 216 个键见 `ConfigRegistry.java`；golden 快照逐键逐字比对默认值，任何漂移即失败。
 
 ## 7. 边界与非目标
 
-- **不负责**任何业务域逻辑——配置门面（`WebFrameworkConfig` / `ApiFrameworkConfig`）只是 `ConfigKeys` 的读取代理，不持有字面量。
+- **不负责**任何业务域逻辑——配置门面（`WebFrameworkConfig` / `ApiFrameworkConfig`）只是 `ConfigRegistry` 的读取代理，不持有字面量。
 - **不负责**浏览器操作——Playwright 相关能力在 `pw-web-ui`。
 - **不负责**报告渲染——只定义 `ReportingBridge` 契约，实现在 `pw-reports-v2`。
-- **不持有**任何 `static` 可变状态（除 `ConfigKeys` 枚举与只读注册表），以保证并行安全。
+- **不持有**任何 `static` 可变状态（除 `ConfigRegistry` 枚举与只读注册表），以保证并行安全。
 
 ## 8. 测试与验证
 
 | 类型 | 位置 |
 |---|---|
 | 单元测试 | `pw-core/src/test/java/`（`AsyncPoolTimeoutReaperTest`、`RuleRegistryTest`、`ShutdownCoordinatorTimeoutTest` 等） |
-| 配置守卫 | `ConfigKeysGoldenTest`、`ConfigUnificationTest`（位于 `test-automation`） |
+| 配置守卫 | golden 快照、`ConfigUnificationTest`（位于 `test-automation`） |
 
 ```bash
 # 在仓库根目录执行

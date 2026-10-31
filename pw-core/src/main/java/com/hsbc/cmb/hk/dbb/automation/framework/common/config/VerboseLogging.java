@@ -80,14 +80,14 @@ public final class VerboseLogging {
 
     private static boolean isVerboseConfigured() {
         return isTraceConfigured() || isTrue(ConfigSource.resolve(
-                ConfigKeys.WEB_FRAMEWORK_VERBOSE_LOGGING.key(),
-                ConfigKeys.WEB_FRAMEWORK_VERBOSE_LOGGING.defaultValue()));
+                ConfigRegistry.WEB_FRAMEWORK_VERBOSE_LOGGING.key(),
+                ConfigRegistry.WEB_FRAMEWORK_VERBOSE_LOGGING.defaultValue()));
     }
 
     private static boolean isTraceConfigured() {
         return isTrue(ConfigSource.resolve(
-                ConfigKeys.WEB_FRAMEWORK_TRACE_LOGGING.key(),
-                ConfigKeys.WEB_FRAMEWORK_TRACE_LOGGING.defaultValue()));
+                ConfigRegistry.WEB_FRAMEWORK_TRACE_LOGGING.key(),
+                ConfigRegistry.WEB_FRAMEWORK_TRACE_LOGGING.defaultValue()));
     }
 
     /** 宽松布尔：{@code true}/{@code yes}/{@code 1}（忽略大小写）为真，其余（含 null）为假。 */

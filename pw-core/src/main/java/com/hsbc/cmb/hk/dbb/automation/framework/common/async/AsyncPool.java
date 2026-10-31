@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.async;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.SoftAssertions;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigSource;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.FrameworkFlags;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.LazyInit;
@@ -139,15 +139,15 @@ public final class AsyncPool {
      * 使 {@link #shutdown()} 可安全短路，也避免"半初始化的池被子线程误用"。</p>
      */
     private static void doInit() {
-        //  P2-1：键名与默认值统一取自 ConfigKeys 注册表（SSoT）—— 调用点不再持有字面量，
+        //  P2-1：键名与默认值统一取自 ConfigRegistry 注册表（SSoT）—— 调用点不再持有字面量，
         //  避免「注册表默认值」与「读取点默认值」两处漂移（golden 快照只守得住前者）。
-        int coreThreads = cfgInt(ConfigKeys.ASYNC_CORE_THREADS);
-        int maxThreads = cfgInt(ConfigKeys.ASYNC_MAX_THREADS);
-        int queueCapacity = cfgInt(ConfigKeys.ASYNC_QUEUE_CAPACITY);
-        long defaultTaskTimeoutMs = cfgLong(ConfigKeys.ASYNC_TASK_TIMEOUT_MS);
-        double queueUsageAlertThreshold = cfgDouble(ConfigKeys.ASYNC_QUEUE_USAGE_ALERT_THRESHOLD);
-        double threadUsageAlertThreshold = cfgDouble(ConfigKeys.ASYNC_THREAD_USAGE_ALERT_THRESHOLD);
-        int maxPendingTimeouts = cfgInt(ConfigKeys.ASYNC_MAX_PENDING_TIMEOUTS);
+        int coreThreads = cfgInt(ConfigRegistry.ASYNC_CORE_THREADS);
+        int maxThreads = cfgInt(ConfigRegistry.ASYNC_MAX_THREADS);
+        int queueCapacity = cfgInt(ConfigRegistry.ASYNC_QUEUE_CAPACITY);
+        long defaultTaskTimeoutMs = cfgLong(ConfigRegistry.ASYNC_TASK_TIMEOUT_MS);
+        double queueUsageAlertThreshold = cfgDouble(ConfigRegistry.ASYNC_QUEUE_USAGE_ALERT_THRESHOLD);
+        double threadUsageAlertThreshold = cfgDouble(ConfigRegistry.ASYNC_THREAD_USAGE_ALERT_THRESHOLD);
+        int maxPendingTimeouts = cfgInt(ConfigRegistry.ASYNC_MAX_PENDING_TIMEOUTS);
 
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 coreThreads, maxThreads, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS,
@@ -655,17 +655,17 @@ public final class AsyncPool {
     // 使 ASYNC_* 可被 serenity.properties 与 -D 覆盖、并支持 ENC() 加密。env 名映射与历史一致
     // （toEnvKey("ASYNC_CORE_THREADS") == "ASYNC_CORE_THREADS"），对现网零变更。
     /** P2-1：按注册表条目解析 int（键名 + 默认值均来自 SSoT）。 */
-    private static int cfgInt(ConfigKeys key) {
+    private static int cfgInt(ConfigRegistry key) {
         return getEnvInt(key.key(), Integer.parseInt(key.defaultValue().trim()));
     }
 
     /** P2-1：按注册表条目解析 long（键名 + 默认值均来自 SSoT）。 */
-    private static long cfgLong(ConfigKeys key) {
+    private static long cfgLong(ConfigRegistry key) {
         return getEnvLong(key.key(), Long.parseLong(key.defaultValue().trim()));
     }
 
     /** P2-1：按注册表条目解析 double（键名 + 默认值均来自 SSoT）。 */
-    private static double cfgDouble(ConfigKeys key) {
+    private static double cfgDouble(ConfigRegistry key) {
         return getEnvDouble(key.key(), Double.parseDouble(key.defaultValue().trim()));
     }
 

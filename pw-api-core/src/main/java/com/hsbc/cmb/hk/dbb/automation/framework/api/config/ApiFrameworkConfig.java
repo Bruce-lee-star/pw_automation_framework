@@ -1,7 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.api.config;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKey;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigKeys;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.typesafe.config.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,64 +30,64 @@ public class ApiFrameworkConfig {
     // ========================================
 
     /** HTTP 连接超时（毫秒）。 */
-    public static final ConfigKey HTTP_CONNECTION_TIMEOUT = ConfigKeys.API_HTTP_CONNECTION_TIMEOUT.toConfigKey();
+    public static final ConfigKey HTTP_CONNECTION_TIMEOUT = ConfigRegistry.API_HTTP_CONNECTION_TIMEOUT.toConfigKey();
 
     /** HTTP socket 超时回退值（毫秒）。 */
-    public static final ConfigKey HTTP_SOCKET_TIMEOUT_FALLBACK = ConfigKeys.API_HTTP_SOCKET_TIMEOUT_FALLBACK.toConfigKey();
+    public static final ConfigKey HTTP_SOCKET_TIMEOUT_FALLBACK = ConfigRegistry.API_HTTP_SOCKET_TIMEOUT_FALLBACK.toConfigKey();
 
     /** HTTP socket 超时（毫秒），主键（兼容历史键 http.socket.timeout.value / .fallback）。 */
-    public static final ConfigKey HTTP_SOCKET_TIMEOUT = ConfigKeys.API_HTTP_SOCKET_TIMEOUT.toConfigKey();
+    public static final ConfigKey HTTP_SOCKET_TIMEOUT = ConfigRegistry.API_HTTP_SOCKET_TIMEOUT.toConfigKey();
 
     /** HTTP 连接池最大总连接数（P-3：连接池治理，RestAssured 默认每路由仅 2 连接）。 */
-    public static final ConfigKey HTTP_MAX_CONNECTIONS_TOTAL = ConfigKeys.API_HTTP_MAX_CONNECTIONS_TOTAL.toConfigKey();
+    public static final ConfigKey HTTP_MAX_CONNECTIONS_TOTAL = ConfigRegistry.API_HTTP_MAX_CONNECTIONS_TOTAL.toConfigKey();
 
     /** HTTP 连接池每路由（目标 host:port）最大连接数（P-3：连接池治理）。 */
-    public static final ConfigKey HTTP_MAX_CONNECTIONS_PER_ROUTE = ConfigKeys.API_HTTP_MAX_CONNECTIONS_PER_ROUTE.toConfigKey();
+    public static final ConfigKey HTTP_MAX_CONNECTIONS_PER_ROUTE = ConfigRegistry.API_HTTP_MAX_CONNECTIONS_PER_ROUTE.toConfigKey();
 
     /** 是否放宽 SSL 校验（默认 false，安全优先）。 */
-    public static final ConfigKey HTTP_SSL_RELAX_VALIDATION = ConfigKeys.API_HTTP_SSL_RELAX_VALIDATION.toConfigKey();
+    public static final ConfigKey HTTP_SSL_RELAX_VALIDATION = ConfigRegistry.API_HTTP_SSL_RELAX_VALIDATION.toConfigKey();
 
     /** 默认文件编码。 */
-    public static final ConfigKey FILE_ENCODING_DEFAULT = ConfigKeys.API_FILE_ENCODING_DEFAULT.toConfigKey();
+    public static final ConfigKey FILE_ENCODING_DEFAULT = ConfigRegistry.API_FILE_ENCODING_DEFAULT.toConfigKey();
 
     /** payload 文件编码。 */
-    public static final ConfigKey FILE_ENCODING_PAYLOAD = ConfigKeys.API_FILE_ENCODING_PAYLOAD.toConfigKey();
+    public static final ConfigKey FILE_ENCODING_PAYLOAD = ConfigRegistry.API_FILE_ENCODING_PAYLOAD.toConfigKey();
 
     /** JSON 解析遇未知属性是否失败。 */
-    public static final ConfigKey JSON_FAIL_ON_UNKNOWN_PROPERTIES = ConfigKeys.API_JSON_FAIL_ON_UNKNOWN_PROPERTIES.toConfigKey();
+    public static final ConfigKey JSON_FAIL_ON_UNKNOWN_PROPERTIES = ConfigRegistry.API_JSON_FAIL_ON_UNKNOWN_PROPERTIES.toConfigKey();
 
     /** JSON 单值是否接受为数组。 */
-    public static final ConfigKey JSON_ACCEPT_SINGLE_VALUE_AS_ARRAY = ConfigKeys.API_JSON_ACCEPT_SINGLE_VALUE_AS_ARRAY.toConfigKey();
+    public static final ConfigKey JSON_ACCEPT_SINGLE_VALUE_AS_ARRAY = ConfigRegistry.API_JSON_ACCEPT_SINGLE_VALUE_AS_ARRAY.toConfigKey();
 
     /** JSON 原始类型是否忽略 null。 */
-    public static final ConfigKey JSON_IGNORE_NULL_FOR_PRIMITIVES = ConfigKeys.API_JSON_IGNORE_NULL_FOR_PRIMITIVES.toConfigKey();
+    public static final ConfigKey JSON_IGNORE_NULL_FOR_PRIMITIVES = ConfigRegistry.API_JSON_IGNORE_NULL_FOR_PRIMITIVES.toConfigKey();
 
     /** 根日志级别。 */
-    public static final ConfigKey LOGGING_ROOT_LEVEL = ConfigKeys.API_LOGGING_ROOT_LEVEL.toConfigKey();
+    public static final ConfigKey LOGGING_ROOT_LEVEL = ConfigRegistry.API_LOGGING_ROOT_LEVEL.toConfigKey();
 
     /** 控制台日志格式。 */
-    public static final ConfigKey LOGGING_CONSOLE_PATTERN = ConfigKeys.API_LOGGING_CONSOLE_PATTERN.toConfigKey();
+    public static final ConfigKey LOGGING_CONSOLE_PATTERN = ConfigRegistry.API_LOGGING_CONSOLE_PATTERN.toConfigKey();
 
     /** 是否启用文件日志。 */
-    public static final ConfigKey LOGGING_FILE_ENABLED = ConfigKeys.API_LOGGING_FILE_ENABLED.toConfigKey();
+    public static final ConfigKey LOGGING_FILE_ENABLED = ConfigRegistry.API_LOGGING_FILE_ENABLED.toConfigKey();
 
     /** 文件日志格式。 */
-    public static final ConfigKey LOGGING_FILE_PATTERN = ConfigKeys.API_LOGGING_FILE_PATTERN.toConfigKey();
+    public static final ConfigKey LOGGING_FILE_PATTERN = ConfigRegistry.API_LOGGING_FILE_PATTERN.toConfigKey();
 
     /** API 默认 base URI（主键，兼容历史键 api.base-uri.default）。 */
-    public static final ConfigKey API_BASE_URI_DEFAULT = ConfigKeys.API_API_BASE_URI_DEFAULT.toConfigKey();
+    public static final ConfigKey API_BASE_URI_DEFAULT = ConfigRegistry.API_API_BASE_URI_DEFAULT.toConfigKey();
 
     /** 测试重试次数。 */
-    public static final ConfigKey TEST_RETRY_COUNT = ConfigKeys.API_TEST_RETRY_COUNT.toConfigKey();
+    public static final ConfigKey TEST_RETRY_COUNT = ConfigRegistry.API_TEST_RETRY_COUNT.toConfigKey();
 
     /** 测试重试延迟（毫秒）。 */
-    public static final ConfigKey TEST_RETRY_DELAY = ConfigKeys.API_TEST_RETRY_DELAY.toConfigKey();
+    public static final ConfigKey TEST_RETRY_DELAY = ConfigRegistry.API_TEST_RETRY_DELAY.toConfigKey();
 
     /** 框架 输出目录。 */
-    public static final ConfigKey FRAMEWORK_OUTPUT_DIRECTORY = ConfigKeys.API_FRAMEWORK_OUTPUT_DIRECTORY.toConfigKey();
+    public static final ConfigKey FRAMEWORK_OUTPUT_DIRECTORY = ConfigRegistry.API_FRAMEWORK_OUTPUT_DIRECTORY.toConfigKey();
 
     /** 框架 历史目录。 */
-    public static final ConfigKey FRAMEWORK_HISTORY_FOLDER = ConfigKeys.API_FRAMEWORK_HISTORY_FOLDER.toConfigKey();
+    public static final ConfigKey FRAMEWORK_HISTORY_FOLDER = ConfigRegistry.API_FRAMEWORK_HISTORY_FOLDER.toConfigKey();
 
     /**
      * API 请求/响应日志是否启用。
@@ -95,7 +95,7 @@ public class ApiFrameworkConfig {
      * 默认不应落日志以免明文泄露；确需排查时显式开启 {@code api.request.response.logging.enabled=true}
      * （开启后输出经 {@code SanitizingPrintStream} 出口强制脱敏，不绕过 {@code SensitiveDataSanitizer}）。
      */
-    public static final ConfigKey API_REQUEST_RESPONSE_LOGS_ENABLED = ConfigKeys.API_API_REQUEST_RESPONSE_LOGS_ENABLED.toConfigKey();
+    public static final ConfigKey API_REQUEST_RESPONSE_LOGS_ENABLED = ConfigRegistry.API_API_REQUEST_RESPONSE_LOGS_ENABLED.toConfigKey();
 
     /**
      *  修复 A3：原实现在【类加载时】把配置缓存成静态快照
