@@ -11,6 +11,7 @@ import java.util.List;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.AriaRole;
 import com.microsoft.playwright.options.MouseButton;
 import com.microsoft.playwright.options.SelectOption;
 import com.microsoft.playwright.options.WaitForSelectorState;
@@ -30,6 +31,7 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 public class PageElement {
     private static final Logger logger = LoggerFactory.getLogger(PageElement.class);
@@ -191,6 +193,87 @@ public class PageElement {
         Objects.requireNonNull(other, "other locator cannot be null");
         return new PageElement(() -> locatorInternal().or(other.locatorInternal()),
                 selector + " | " + other.getSelector(), page);
+    }
+
+    // ==================== Role 定位：在已定位元素上下文内按 ARIA role 向下定位（对齐 Playwright Locator.getByRole） ====================
+    /**
+     * 按 ARIA role 定位本元素上下文内的子元素（对齐 Playwright {@code locator.getByRole(role)}）。
+     *
+     * <p>业务侧"明确 Role 角色定位方法"（2026-10-31 用户需求）：BasePage 已有整页级
+     * {@code elementByRole} 系列，本方法族补齐<b>元素级向下定位</b>——先定位容器（如对话框/
+     * 表单/卡片），再在其内按 role 找目标元素，避免全页 role 匹配歧义。返回的新
+     * {@link PageElement} 复用本类全套重试 / 诊断 / 截图能力，底层定位器动态解析。</p>
+     *
+     * @param role ARIA role（如 {@code AriaRole.BUTTON} / {@code AriaRole.LINK}）
+     * @return 按 role 定位的 PageElement
+     */
+    public PageElement role(AriaRole role) {
+        Objects.requireNonNull(role, "role cannot be null");
+        return new PageElement(() -> locatorInternal().getByRole(role),
+                selector + " >> role=" + role, page);
+    }
+
+    /**
+     * 按 ARIA role + accessible name 定位（对齐 Playwright {@code getByRole(role, {name})}）。
+     *
+     * @param role ARIA role
+     * @param name accessible name（子串匹配；要精确匹配用 {@link #role(AriaRole, String, boolean)}）
+     * @return 定位结果
+     */
+    public PageElement role(AriaRole role, String name) {
+        Objects.requireNonNull(role, "role cannot be null");
+        Objects.requireNonNull(name, "name cannot be null");
+        return new PageElement(() -> locatorInternal().getByRole(role,
+                        new Locator.GetByRoleOptions().setName(name)),
+                selector + " >> role=" + role + " name=" + name, page);
+    }
+
+    /**
+     * 按 ARIA role + accessible name 定位（可指定精确匹配）。
+     *
+     * @param role  ARIA role
+     * @param name  accessible name
+     * @param exact {@code true} 精确匹配 whole word（区分大小写、不做子串）
+     * @return 定位结果
+     */
+    public PageElement role(AriaRole role, String name, boolean exact) {
+        Objects.requireNonNull(role, "role cannot be null");
+        Objects.requireNonNull(name, "name cannot be null");
+        return new PageElement(() -> locatorInternal().getByRole(role,
+                        new Locator.GetByRoleOptions().setName(name).setExact(exact)),
+                selector + " >> role=" + role + " name=" + name + (exact ? " exact" : ""), page);
+    }
+
+    /**
+     * 按 ARIA role + accessible name 正则定位（对齐 Playwright {@code getByRole(role, {name: pattern})}）。
+     *
+     * @param role        ARIA role
+     * @param namePattern accessible name 正则（Java {@link Pattern}）
+     * @return 定位结果
+     */
+    public PageElement role(AriaRole role, Pattern namePattern) {
+        Objects.requireNonNull(role, "role cannot be null");
+        Objects.requireNonNull(namePattern, "namePattern cannot be null");
+        return new PageElement(() -> locatorInternal().getByRole(role,
+                        new Locator.GetByRoleOptions().setName(namePattern)),
+                selector + " >> role=" + role + " name~" + namePattern.pattern(), page);
+    }
+
+    /**
+     * 按 ARIA role + 完整 {@link Locator.GetByRoleOptions} 定位（透传：level / checked /
+     * pressed / selected / disabled / expanded / includeHidden 等）。
+     *
+     * @param role    ARIA role
+     * @param options Playwright 角色选项（可空——空时等价 {@link #role(AriaRole)}）
+     * @return 定位结果
+     */
+    public PageElement role(AriaRole role, Locator.GetByRoleOptions options) {
+        Objects.requireNonNull(role, "role cannot be null");
+        if (options == null) {
+            return role(role);
+        }
+        return new PageElement(() -> locatorInternal().getByRole(role, options),
+                selector + " >> role=" + role + " (options)", page);
     }
 
     // ==================== Safe Execution Template（委托 ElementOperationSupport） ====================
@@ -458,6 +541,40 @@ public class PageElement {
 
     public boolean isDisabled(int timeoutSec) {
         return !isEnabled(timeoutSec);
+    }
+
+    /**
+     * 判断元素当前是否可点击（可见且可用），带框架默认超时（页面加载友好）。
+     *
+     * <p>语义（2026-10-31 用户需求）：可点击 = <b>可见（visible）且可用（enabled）</b>——
+     * disabled 按钮是"看得见但点不了"的典型；Playwright 无原生 {@code isClickable}，本方法以
+     * visible + enabled 组合给出务实语义。采用与 {@link #isVisible(int)} 同款的快速探测：
+     * 先无等待查询，已满足立即毫秒级返回；未满足再按超时等待（先 {@code waitFor VISIBLE}，
+     * 再以原生 {@code isEnabled(timeout)} 等待启用），保持"页面加载中稍后出现/启用"的等待语义。
+     *
+     * <p>边界：不含"被遮挡导致无法接收事件"的命中测试（Playwright Java 无公开 actionability
+     * 查询 API）；真正可点击性由 {@link #click()} 内置 actionability 保证，
+     * 需要强可点击断言时用 {@link #waitForClickable()} 或直接 {@code click()}。</p>
+     */
+    public boolean isClickable() {
+        return isClickable(defaultTimeoutSec());
+    }
+
+    /**
+     * 在指定超时内等待元素变为可点击（可见且可用）。超时仍未满足则返回 {@code false}。
+     */
+    public boolean isClickable(int timeoutSec) {
+        try {
+            Locator loc = locatorInternal();
+            if (loc.isVisible() && loc.isEnabled()) {
+                return true; // 已可点击：毫秒级返回
+            }
+            loc.waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.VISIBLE)
+                    .setTimeout((long) timeoutSec * 1000));
+            return loc.isEnabled(new Locator.IsEnabledOptions().setTimeout((double) timeoutSec * 1000));
+        } catch (PlaywrightException e) {
+            return false;
+        }
     }
 
     /**

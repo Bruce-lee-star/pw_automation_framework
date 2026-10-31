@@ -4,6 +4,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationE
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.AriaRole;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -12,13 +14,17 @@ import org.junit.rules.TemporaryFolder;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -124,6 +130,145 @@ public class PageElementTest {
 
         assertNotSame("nth 应返回新元素，不原地修改", el, second);
         assertTrue("新元素选择器须带索引便于诊断：" + second.getSelector(), second.getSelector().contains("nth=2"));
+    }
+
+    // ---------- Role 定位（2026-10-31 新增：元素级向下按 ARIA role 定位） ----------
+
+    @Test
+    public void role_returnsNewElement_withRoleSelector_andResolvesViaGetByRole() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#dialog", bp);
+        Locator child = mock(Locator.class);
+        when(base.getByRole(AriaRole.BUTTON)).thenReturn(child);
+
+        PageElement found = el.role(AriaRole.BUTTON);
+
+        assertNotSame("role 应返回新元素，不原地修改", el, found);
+        assertTrue("新元素选择器须带 role 便于诊断：" + found.getSelector(), found.getSelector().contains("role=" + AriaRole.BUTTON));
+        assertSame("底层定位器应动态解析到 getByRole 结果", child, found.locatorInternal());
+        verify(base).getByRole(AriaRole.BUTTON);
+    }
+
+    @Test
+    public void role_withName_passesNameOption_andDescriptorsRoleAndName() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#form", bp);
+        Locator child = mock(Locator.class);
+        when(base.getByRole(eq(AriaRole.LINK), any(Locator.GetByRoleOptions.class))).thenReturn(child);
+
+        PageElement found = el.role(AriaRole.LINK, "忘记密码");
+
+        assertTrue("描述须含 role 与 name：" + found.getSelector(), found.getSelector().contains("role=" + AriaRole.LINK) && found.getSelector().contains("忘记密码"));
+        assertSame("底层定位器应动态解析到 getByRole 结果", child, found.locatorInternal());
+        var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByRoleOptions.class);
+        verify(base).getByRole(org.mockito.ArgumentMatchers.eq(AriaRole.LINK), captor.capture());
+        assertEquals("name 应透传进选项", "忘记密码", captor.getValue().name);
+    }
+
+    @Test
+    public void role_withExact_setsExactFlag() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#nav", bp);
+        when(base.getByRole(eq(AriaRole.BUTTON), any(Locator.GetByRoleOptions.class))).thenReturn(mock(Locator.class));
+
+        PageElement found = el.role(AriaRole.BUTTON, "提交", true);
+
+        found.locatorInternal(); // 触发惰性 supplier 解析，验证透传
+        var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByRoleOptions.class);
+        verify(base).getByRole(org.mockito.ArgumentMatchers.eq(AriaRole.BUTTON), captor.capture());
+        assertEquals("exact 应透传为布尔 true", Boolean.TRUE, captor.getValue().exact);
+    }
+
+    @Test
+    public void role_withPattern_usesRegexName() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#list", bp);
+        when(base.getByRole(eq(AriaRole.OPTION), any(Locator.GetByRoleOptions.class))).thenReturn(mock(Locator.class));
+
+        PageElement found = el.role(AriaRole.OPTION, Pattern.compile("保存.*"));
+
+        found.locatorInternal(); // 触发惰性 supplier 解析，验证透传
+        var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByRoleOptions.class);
+        verify(base).getByRole(org.mockito.ArgumentMatchers.eq(AriaRole.OPTION), captor.capture());
+        assertEquals("正则应透传进 name pattern", "保存.*", captor.getValue().name.toString());
+    }
+
+    @Test
+    public void role_rejectsNullRole() {
+        BasePage bp = bpWith(mock(Page.class));
+        PageElement el = new PageElement(() -> mock(Locator.class), "#x", bp);
+
+        assertThrows(NullPointerException.class, () -> el.role(null));
+        assertThrows(NullPointerException.class, () -> el.role(null, "提交"));
+        assertThrows(NullPointerException.class, () -> el.role(AriaRole.BUTTON, (String) null));
+        assertThrows(NullPointerException.class, () -> el.role(AriaRole.BUTTON, (Pattern) null));
+    }
+
+    @Test
+    public void role_withNullOptions_fallsBackToPlainRole() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator base = mock(Locator.class);
+        PageElement el = new PageElement(() -> base, "#x", bp);
+        when(base.getByRole(AriaRole.BUTTON)).thenReturn(mock(Locator.class));
+
+        PageElement found = el.role(AriaRole.BUTTON, (Locator.GetByRoleOptions) null);
+
+        found.locatorInternal(); // 触发惰性 supplier 解析，验证回落 to getByRole(role)
+        verify(base).getByRole(AriaRole.BUTTON);
+        assertTrue(found.getSelector().contains("role=" + AriaRole.BUTTON));
+    }
+
+    // ---------- isClickable（2026-10-31 新增：可见且可用 = 可点击，快速探测 + 等待兜底） ----------
+
+    @Test
+    public void isClickable_returnsTrue_whenVisibleAndEnabled() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator loc = mock(Locator.class);
+        when(loc.isVisible()).thenReturn(true);
+        when(loc.isEnabled()).thenReturn(true);
+        PageElement el = new PageElement(() -> loc, "role=button name=提交", bp);
+
+        assertTrue("可见且可用应判可点击", el.isClickable());
+        verify(loc, never()).waitFor(any(Locator.WaitForOptions.class));
+    }
+
+    @Test
+    public void isClickable_returnsFalse_whenHidden_andWaitTimesOut() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator loc = mock(Locator.class);
+        when(loc.isVisible()).thenReturn(false);
+        doThrow(new TimeoutError("timeout")).when(loc).waitFor(any(Locator.WaitForOptions.class));
+        PageElement el = new PageElement(() -> loc, "#hidden-btn", bp);
+
+        assertFalse("隐藏且等待超时应判不可点击", el.isClickable());
+    }
+
+    @Test
+    public void isClickable_returnsFalse_whenVisibleButDisabled() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator loc = mock(Locator.class);
+        when(loc.isVisible()).thenReturn(true);
+        when(loc.isEnabled()).thenReturn(false);
+        when(loc.isEnabled(any(Locator.IsEnabledOptions.class))).thenReturn(false);
+        PageElement el = new PageElement(() -> loc, "#disabled-btn", bp);
+
+        assertFalse("可见但禁用应判不可点击", el.isClickable());
+    }
+
+    @Test
+    public void isClickable_returnsTrue_afterWaitWhenBecomesEnabled() {
+        BasePage bp = bpWith(mock(Page.class));
+        Locator loc = mock(Locator.class);
+        when(loc.isVisible()).thenReturn(false); // 首查不可见 → 走等待兜底
+        when(loc.isEnabled(any(Locator.IsEnabledOptions.class))).thenReturn(true);
+        PageElement el = new PageElement(() -> loc, "#late-btn", bp);
+
+        assertTrue("等待后可用应判可点击", el.isClickable());
+        verify(loc).waitFor(any(Locator.WaitForOptions.class));
     }
 
     // ---------- 上传文件解析：resources 首选 / 用户路径兜底 / 多文件 ----------
