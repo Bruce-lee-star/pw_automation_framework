@@ -203,36 +203,4 @@ class EmailReportRendererTest {
             }
         }
     }
-
-    @Test
-    @DisplayName("配置的 report.error.types 在明细行同样生效（优先于内置分类，原样展示类型名）")
-    void failureRowsRespectConfiguredType() throws Exception {
-        String saved = System.getProperty("report.error.types");
-        System.setProperty("report.error.types", "AuthFailure=401|unauthorized");
-        try {
-            String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
-
-            assertThat(html)
-                    .contains("Full Failure List")
-                    .contains(">AuthFailure</span>")                 // 配置类型名原样进明细行徽章
-                    .doesNotContain(">Assertion failure</span>");    // 配置命中时内置分类不覆盖
-        } finally {
-            if (saved == null) {
-                System.clearProperty("report.error.types");
-            } else {
-                System.setProperty("report.error.types", saved);
-            }
-        }
-    }
-
-    @Test
-    @DisplayName("Full Failure List 每条失败用例带分类徽章（与聚合榜同源：AssertionError → Assertion failure）")
-    void failureRowsCarryTypeBadge() throws Exception {
-        String html = EmailReportRenderer.renderToString(List.of(OutcomeFixtures.full()));
-
-        assertThat(html)
-                .contains("Full Failure List")
-                .contains("background:#b91c1c")            // Assertion failure 分类徽章底色（typeBg）
-                .contains(">Assertion failure</span>");     // 分类徽章文本（failureTypeLabel）
-    }
 }

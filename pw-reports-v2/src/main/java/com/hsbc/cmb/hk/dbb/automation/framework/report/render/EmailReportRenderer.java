@@ -122,25 +122,14 @@ public final class EmailReportRenderer {
         return model;
     }
 
-    /** 失败明细（邮件最关心的可执行信息）：用例名 / feature / 结果徽章 / 失败分类 / 首行失败原因。 */
+    /** 失败明细（邮件最关心的可执行信息）：用例名 / feature / 结果徽章 / 首行失败原因。 */
     private static List<Map<String, Object>> failureRows(List<TestOutcome> outcomes) {
         List<Map<String, Object>> rows = new ArrayList<>();
-        //  基行复用 SummaryHtmlRenderer.failureRows（同一失败过滤与字段口径）；
-        //  分类需真实 TestOutcome，故按相同过滤顺序 zip 配对（行序一一对应）。
-        List<Map<String, Object>> base = SummaryHtmlRenderer.failureRows(outcomes);
-        int idx = 0;
-        for (TestOutcome o : outcomes) {
-            if (o.getResult() == null || !o.getResult().isFailure()) {
-                continue;
-            }
-            Map<String, Object> row = new LinkedHashMap<>(base.get(idx++));
-            String key = String.valueOf(row.get("result"));
+        for (Map<String, Object> r : SummaryHtmlRenderer.failureRows(outcomes)) {
+            Map<String, Object> row = new LinkedHashMap<>(r);
+            String key = String.valueOf(r.get("result"));
             row.put("resultKey", key);
             row.put("resultLabel", ReportView.label(key));
-            //  失败分类（与「Most Frequent Failure Types」聚合榜同源：failureTypeOf）
-            String type = failureTypeOf(o);
-            row.put("failureType", type);
-            row.put("failureTypeLabel", ErrorClassifier.displayLabel(type));
             rows.add(row);
         }
         return rows;
