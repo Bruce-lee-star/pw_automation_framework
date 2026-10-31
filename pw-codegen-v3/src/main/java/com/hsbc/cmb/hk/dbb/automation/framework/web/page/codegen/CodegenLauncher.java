@@ -337,6 +337,15 @@ public final class CodegenLauncher {
                 }
             }
 
+            /** 拾取聚焦：把本页带到前台（浏览器窗口/标签），实现「拾取哪个页面的元素，就聚焦哪个页面」。 */
+            void focusPick() {
+                try {
+                    cdpSession().bringToFront();
+                } catch (Throwable t) {
+                    log.warn("[codegen][focus] bringToFront on {} failed: {}", page.url(), t.toString());
+                }
+            }
+
             /** 同元素并发去重 + 失败冷却（避免重复条目与「每个输入事件重跑一次 CDP」）。 */
             private final PickGuard guard = new PickGuard();
 
@@ -354,6 +363,9 @@ public final class CodegenLauncher {
                         try {
                             cdpSession();
                             openPickChannel();
+                            // 拾取哪个页面的元素，就聚焦哪个页面：每次点击解析前把本页带到前台
+                            // （多标签/多窗口下用户点击始终落在被拾取页面；fail-soft，失败不阻断）。
+                            focusPick();
                         } catch (Throwable t) {
                             log.warn("[codegen][cdp] pick session/channel init failed on {}: {}",
                                     page.url(), t.getMessage());
@@ -556,7 +568,7 @@ public final class CodegenLauncher {
                             final Page fb = fallback;
                             if (pickOn.get()) {
                                 engine.submit(CodegenEngine.Kind.ENABLE, fb, () -> {
-                                    try { enablePick(fb); }
+                                    try { enablePick(fb); of(fb).focusPick(); }
                                     catch (Exception e) { log.warn("[codegen][follow] re-enable pick on fallback {} failed: {}", fb.url(), e.toString()); }
                                 });
                             }
@@ -609,6 +621,7 @@ public final class CodegenLauncher {
                         }
                         CodegenScriptInjector.inject(np);
                         pushPickStatus(np, pickStatusArg(pickOn.get(), started.get(), stopped.get()));
+                        of(np).focusPick();
                         log.debug("[codegen][follow] injected recorder + bridge into new page {}", np.url());
                     } catch (Exception e) {
                         log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} — {}",
@@ -636,6 +649,7 @@ public final class CodegenLauncher {
                             }
                             if (ready) {
                                 enablePick(np);
+                                of(np).focusPick();
                                 log.debug("[codegen][follow] enabled pick channel on ready new page {}", np.url());
                             } else {
                                 // 1.5s 内没 ready：不硬等 —— 交给 submitPick 懒加载兜底（每条点击重试开通道）
@@ -794,6 +808,9 @@ public final class CodegenLauncher {
                         if (!anyEnabled) {
                             throw new IllegalStateException("pick channel could not be enabled on any page (see logs)");
                         }
+                        // 拾取哪个页面的元素，就聚焦哪个页面：Start 即把当前活动页带到前台。
+                        Page act = sessions.active.get();
+                        if (act != null && !act.isClosed()) sessions.of(act).focusPick();
                         if (panelRef[0] != null) panelRef[0].setStatus("inspecting");
                         broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
                     } catch (Exception e) {
@@ -1482,6 +1499,28 @@ public final class CodegenLauncher {
 
     private static final AtomicLong REGEN_SEQ = new AtomicLong();
     private static final AtomicBoolean REGEN_INFLIGHT = new AtomicBoolean(false);
+    // 【regen 明细日志节流】高频拾取/合并时 regen 每 80–200ms 一轮，逐条 INFO 会刷爆 IDEA 控制台
+    //（数千行/分钟），拖卡 IDE UI、令 Stop 按钮失去响应。规则：慢轮（total > 500ms）保留完整 INFO
+    //（推包/装配瓶颈逐轮可见）；正常轮与后台 verify+repush 入桶，每累计 25 轮或距上次汇总 ≥8s
+    // 输出一条合并 INFO，既降频又保留「regen 是否在持续跑」的诊断能力。
+    private static final AtomicInteger REGEN_LOG_CNT = new AtomicInteger();
+    private static final AtomicLong REGEN_LOG_SUM_MS = new AtomicLong();
+    private static final AtomicLong REGEN_LOG_LAST_AT = new AtomicLong(System.currentTimeMillis());
+
+    private static void regenLogBucket(int ms) {
+        int n = REGEN_LOG_CNT.incrementAndGet();
+        REGEN_LOG_SUM_MS.addAndGet(ms);
+        long now = System.currentTimeMillis();
+        long last = REGEN_LOG_LAST_AT.get();
+        if (n >= 25 || now - last >= 8000) {
+            int cnt = REGEN_LOG_CNT.getAndSet(0);
+            long sumMs = REGEN_LOG_SUM_MS.getAndSet(0);
+            long spanMs = Math.max(1, now - last);
+            log.info("[codegen][regen] {} regen round(s) merged: avg {}ms in {}ms window "
+                            + "(per-round detail only on slow >{}ms rounds)",
+                    cnt, sumMs / Math.max(1, cnt), spanMs, 500L);
+        }
+    }
     private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanelHandle[] panelRef,
                                                 List<Pick> picks, CodegenRecorder recorder,
                                                 List<DialogOp> dialogOps, String[] nlsFiles,
@@ -1523,8 +1562,9 @@ public final class CodegenLauncher {
                     if (anyPending && !stopped.get()) {
                         long tBack = System.nanoTime();
                         generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/false);
-                        log.info("[codegen][regen] background verify+repush took {} ms (off the first-push path)",
-                                (System.nanoTime() - tBack) / 1_000_000);
+                        // 后台 verify+repush 并入明细桶：高频时不再逐条 INFO（汇总条里已含耗时），
+                        // 慢轮在 generateMultiPage 内以 (slow) INFO 单独呈现。
+                        regenLogBucket((int) ((System.nanoTime() - tBack) / 1_000_000));
                     }
                 } catch (Throwable t) {
                     log.warn("[codegen][regen] regeneration failed: {}", t.toString());
@@ -1606,8 +1646,15 @@ public final class CodegenLauncher {
         pushBlocks(panel, "step", result.stepBlocks);
         pushBlocks(panel, "assert", result.assertBlocks);
         tPush = (System.nanoTime() - tp) / 1_000_000;
-        log.info("[codegen][regen] generated (skipVerify={}): verify={}ms render={}ms push={}ms total={}ms",
-                skipVerify, tVerify, tRender, tPush, tVerify + tRender + tPush);
+        long regenTotal = tVerify + tRender + tPush;
+        if (regenTotal > 500) {
+            // 慢轮（verify/render/push 任一瓶颈，>500ms 首推警戒线）：保留完整明细 INFO，逐轮可见。
+            log.info("[codegen][regen] generated (skipVerify={}): verify={}ms render={}ms push={}ms total={}ms (slow)",
+                    skipVerify, tVerify, tRender, tPush, regenTotal);
+        } else {
+            // 正常轮：并入汇总桶，避免高频 INFO 刷爆 IDEA 控制台（见 regenLogBucket）。
+            regenLogBucket((int) regenTotal);
+        }
     }
 
     /**
