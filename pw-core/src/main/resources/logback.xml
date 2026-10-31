@@ -57,6 +57,22 @@
     <logger name="io.cucumber" level="WARN"/>
     <logger name="io.github.bonigarcia" level="WARN"/>
 
+    <!--
+      Codegen 输出日志死开关（v2.16）：默认 WARN —— 关掉刷屏级 INFO/DEBUG
+      （regen 汇总、拾取/解析/面板推送、RoleElementPicker 细节等），
+      保留 WARN/ERROR 异常（失败必须可见，不做黑盒）。
+      需要详细日志时重启并显式打开（二选一）：
+        -Dpw.codegen.log=INFO   拾取/生成/面板常规过程
+        -Dpw.codegen.log=DEBUG  含 CDP/选择器反查等细节
+      完全静默（异常也不输出，不建议）：-Dpw.codegen.log=OFF
+      属性在 JVM 启动时由 logback 读取，改动后需重启生效；
+      覆盖范围：v3 录制引擎（...web.page.codegen）与 v2 scan 引擎（...web.page.scan）。
+    -->
+    <logger name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen"
+            level="${pw.codegen.log:-WARN}"/>
+    <logger name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan"
+            level="${pw.codegen.log:-WARN}"/>
+
     <!-- 项目代码日志级别：root 默认 INFO；VerboseLogging 会按 serenity.logging(VERBOSE→DEBUG / TRACE→TRACE) 在运行时提升至对应级别 -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
