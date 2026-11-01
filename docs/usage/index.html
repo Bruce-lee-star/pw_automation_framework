@@ -1047,11 +1047,9 @@ framework.screenshot.strategy = AFTER_EACH_STEP</code></pre>
       <tr><td><code>framework.output.directory</code></td><td>target/site/serenity</td><td>报告输出目录</td></tr>
       <tr><td><code>framework.project.name</code></td><td>框架 Playwright Demo</td><td>报告项目名</td></tr>
       <tr><td><code>framework.features.root</code></td><td>src/test/resources/features</td><td>feature 根目录</td></tr>
-      <tr><td><code>framework.logging</code></td><td>VERBOSE</td><td>日志级别（Serenity 侧）</td></tr>
-      <tr><td><code>framework.verbose.logging</code></td><td>false</td><td>框架详细日志</td></tr>
-      <tr><td><code>framework.trace.logging</code></td><td>false</td><td>框架超详细日志</td></tr>
+      <tr><td><code>logging.root.level</code></td><td>INFO</td><td>统一日志阈值（TRACE / DEBUG / INFO / WARN / ERROR / OFF）；DEBUG 时打印框架配置生效值与来源，敏感值脱敏</td></tr>
+      <tr><td><code>framework.recording.enabled</code></td><td>true</td><td>是否将浏览器动作写入测试报告；与日志级别独立，旧版 framework.logging 仅作兼容回退</td></tr>
       <tr><td><code>framework.playwright.hang.watchdog.interval.ms</code></td><td>60000</td><td>卡住诊断看门狗采样间隔(ms)</td></tr>
-      <tr><td><code>logging.root.level</code></td><td>INFO</td><td>根日志级别</td></tr>
     </tbody>
   </table>
 
@@ -1149,7 +1147,8 @@ playwright.page.timeout = 20000
 
 framework.screenshot.strategy = AFTER_EACH_STEP
 
-framework.verbose.logging = false
+logging.root.level = INFO
+framework.recording.enabled = true
 route.capture.all.type = false</code></pre>
 </section>
 
@@ -1269,7 +1268,7 @@ sensitive.data.extra.query.keys   = sign, ts</code></pre>
   </details>
 
   <details><summary>日志太吵 / 想定位卡在哪一步？</summary>
-    <div class="body">默认 <code>framework.verbose.logging=false</code> 只留关键日志；排查时打开它，或调 <code>framework.playwright.hang.watchdog.interval.ms</code>（用例跑太久时周期性打印线程栈，定位无日志的阻塞点）。</div>
+    <div class="body">日志统一由 <code>logging.root.level</code> 控制；设为 <code>DEBUG</code> 或 <code>TRACE</code> 可查看更多框架诊断日志。报告动作录制使用独立的 <code>framework.recording.enabled</code>。</div>
   </details>
 
   <details><summary>报告在哪？怎么只跑某几个用例？</summary>

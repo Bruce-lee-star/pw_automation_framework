@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,7 +74,7 @@ public final class TraceRetention {
             }
             totalBytes = bytes;
         } catch (IOException e) {
-            VerboseLogging.logDebugIfVerbose(logger, "TraceRetention list {} failed: {}", dir, e.getMessage());
+            logger.debug("TraceRetention list {} failed: {}", dir, e.getMessage());
             return;
         }
 
@@ -117,7 +116,7 @@ public final class TraceRetention {
                 overflowFiles--;
                 overflowBytes -= sz;
             } catch (IOException e) {
-                VerboseLogging.logDebugIfVerbose(logger, "TraceRetention delete {} failed: {}", p, e.getMessage());
+                logger.debug("TraceRetention delete {} failed: {}", p, e.getMessage());
             }
         }
         if (deleted > 0) {

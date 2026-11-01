@@ -70,7 +70,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CapturedApiCall;
 import com.microsoft.playwright.BrowserContext;
 import java.util.List;
 
-BrowserContext context = /* 已有的 Playwright context */;
+void scenario(BrowserContext context) throws Exception {
 
 // MONITOR：断言真实响应（fail-open，不影响业务请求）
 AutoCloseable monitor = RouteDsl.on(context)
@@ -82,8 +82,15 @@ AutoCloseable monitor = RouteDsl.on(context)
         .timeout(30)          // 单位：秒
         .register();
 
+// 需要在 context 关闭前精确注销时，保留句柄并在使用结束后显式关闭
+AutoCloseable temporary = RouteDsl.on(context)
+        .api("/api/temporary/**")
+        .monitor()
+        .register();
+// 请求会经过临时规则
+
 // MOCK：静态伪造响应
-RouteDsl.on(context)
+AutoCloseable mock = RouteDsl.on(context)
         .api("/api/login")
         .onlyApi()
         .matchMethod("POST")
@@ -94,28 +101,33 @@ RouteDsl.on(context)
         .register();
 
 // MODIFY_REQUEST：改请求头后放行
-RouteDsl.on(context)
+AutoCloseable modifier = RouteDsl.on(context)
         .api("/api/user")
         .modifyRequest()
         .setRequestHeader("X-Env", "mock")
         .register();
 
 // DELAY：延迟后放行（单位：秒）
-RouteDsl.on(context).api("/api/pay/**").delay(3).done().start();
+AutoCloseable delay = RouteDsl.on(context).api("/api/pay/**").delay(3).done().start();
 
 // 采集消费：dump 为消费式（第二次返回空），peek 为非消费式
 List<CapturedApiCall> calls = RouteDsl.dumpCaptured(context);
 List<CapturedApiCall> peek = RouteDsl.peekCaptured(context);
 
-// 精确注销 / 清理
+// 场景 teardown：关闭显式持有的句柄；Context 关闭时也会自动清理绑定。
 monitor.close();
-RouteDsl.clearRules(context); // 只清规则，保留 runtime 与 Context
-RouteDsl.resetAll();          // 关闭全部运行时
+temporary.close();
+mock.close();
+modifier.close();
+delay.close();
+}
 ```
 
 **预期结果**：被拦截的接口按声明行为响应；`dumpCaptured` 返回采集到的调用记录。
 
-> **单位注意**：`MonitorDsl.timeout(long)` 与 `CapabilityDsl.delay(long)` 的单位是**秒**（内部 ×1000 转毫秒）。`expectStatus` / `expectJsonPath` 只存在于 `MonitorDsl` 段。
+> **生命周期与 IDE 提示**：`register()` / `start()` 返回 `AutoCloseable` 注销句柄，规则也会随所属 `BrowserContext` 关闭而自动清理。为避免 IDE 将被忽略的返回值标黄，业务代码应将句柄保存在场景对象/测试步骤作用域中，并在 teardown 中显式关闭；若规则只在一个词法作用域内生效，可用 `try-with-resources`。不要直接丢弃返回值，也不要在 context 生命周期结束后继续使用规则。
+
+**单位注意**：`MonitorDsl.timeout(long)` 与 `CapabilityDsl.delay(long)` 的单位是**秒**（内部 ×1000 转毫秒）。`expectStatus` / `expectJsonPath` 只存在于 `MonitorDsl` 段。
 
 ## 5. 核心 API 速查
 

@@ -1,6 +1,7 @@
 # AI 自动录制脚本 + 独立 Inspector 窗口方案
 
-> 状态：设计稿（Phase 0 已落地，Phase 1 实施中）
+> 历史方案：文中 `pw-codegen-v2` 设计已退役；当前唯一受支持实现为 `pw-codegen-v3`。本文保留作设计演进记录，不代表现行模块结构。
+> 状态：已退役的设计稿（不代表当前实现状态）
 > 关联：`docs/architecture/CDP捕获层改造方案.md`（Phase 0 基座）
 > 模块：`pw-codegen-v2`（独立模块，不改动 `pw-core` / `pw-web-ui`）
 

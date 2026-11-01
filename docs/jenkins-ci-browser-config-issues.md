@@ -43,7 +43,7 @@
 | 7 | 高 | 底座 | 无跨场景熔断 | 后续场景会各自重试 5 分钟下载 | 首次失败后短路后续场景 |
 | 8 | 高 | 底座 | 缺配置时无启动期诊断 | 3 个场景在 `BDDUtils.java:64` 抛异常；框架未告警"未加载到配置文件" | 启动期打印已加载配置源，缺失时 WARN/FAIL |
 | 9 | 中 | 底座 | HangWatchdog 只诊断不熔断 | 180s/420s 采样后仍等满 5min×2 | 触发中止/降级 |
-| 10 | 中 | 环境 | 控制台中文/制表符乱码（mojibake） | `?T?T...`、`?????` | `-Dfile.encoding=UTF-8`（含 Jenkins 侧），或日志避免非 ASCII 装饰字符 |
+| 10 | 中 | 环境 | 控制台中文/制表符乱码（mojibake） | `?T?T...`、`?????` | 框架 Logback encoder 使用 UTF-8；同时核对 Jenkins agent/controller JVM 字符集及原生子进程输出解码，不能只靠应用 JVM 参数 |
 | 11 | 中 | 流水线 | 安装命令绕过框架代理注入 | `Jenkinsfile:101` 用原生 `mvn exec:java ... CLI`；框架自带 `HTTP(S)_PROXY` 注入 | 用框架安装入口或预装 |
 | 12 | 待确认 | 底座 | 报告可能只走 LogSink | 日志仅见 `LogSink - [report] case FAILED` | 确认 HTML 产物是否真的落盘 |
 
@@ -68,7 +68,7 @@ Playwright 解析 browsers 目录 = <cwd>/0   （默认本应为 .playwright/bro
 
 1. **删除 `Jenkinsfile:63` 的 `PLAYWRIGHT_BROWSERS_PATH='0'`**（一行改动，先重跑验证）。
 2. agent 预装浏览器到固定目录；CI 设 `headless=true`；关闭运行期自动下载。
-3. 底座加固：preflight 校验、失败熔断、`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` 语义修复、配置缺失告警、控制台 UTF-8。
+3. 底座加固：preflight 校验、失败熔断、`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` 语义修复、配置缺失告警。
 
 ## 6. 验证方法
 
@@ -76,6 +76,16 @@ Playwright 解析 browsers 目录 = <cwd>/0   （默认本应为 .playwright/bro
 - 浏览器可执行文件存在：`<browsers.path>/chromium-<rev>/chrome-win64/chrome.exe`。
 - 首个 Web 场景不再触发下载（无 `downloading...` / 无 5 分钟超时）。
 - 配置：补齐 `pw.conf` / `pw.properties` 后，`URL configuration is required ...` 消失。
+
+### 日志乱码定位
+
+框架主 Logback 配置及 route demo 测试配置的 Console encoder 均显式写 UTF-8。若乱码仍只出现在 Jenkins 控制台，应区分「应用输出字节编码」与「控制台/子进程字节解码」：
+
+1. 对比同一条中文日志在控制台和 UTF-8 文件 appender 中的内容。文件正常而控制台乱码，优先检查 Jenkins agent/controller 与控制台采集链路；两处都乱码则先检查日志源文件、消息构造和 appender 编码。
+2. 检查运行测试的 agent JVM `-Dfile.encoding`、Jenkins agent/controller 启动配置，以及 Windows shell/native 子进程使用的代码页和输出编码。仅设置测试 JVM 的 `-Dfile.encoding=UTF-8` 不能保证 Jenkins 对 native 子进程字节流按 UTF-8 解码。
+3. 不要用替换非 ASCII 日志文字来掩盖编码不一致；修复后用包含中文的实际日志分别验证控制台与文件输出。
+
+本仓库无法验证外部 Jenkins agent/controller 的解码配置；该部分仍需在目标流水线环境实测。
 
 ## 附：报告 UI 待优化（本次后续处理）
 

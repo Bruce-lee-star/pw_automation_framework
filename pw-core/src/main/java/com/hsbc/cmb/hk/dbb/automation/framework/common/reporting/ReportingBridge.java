@@ -155,76 +155,65 @@ public interface ReportingBridge {
     }
 
     /**
-     * 按<b>显式用例 id</b> 解析 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}）——与
-     * {@link #traceTarget()} 同目标，但不依赖 ThreadLocal 句柄。供<b>收尾线程</b>（CloseGuard 的
-     * {@code close-bounded-*} worker）在句柄缺失时，仍能凭"跨线程可见的活动用例 id"把 trace
-     * <b>直接导出到 per-case</b>，从源头避免"traces/ + per-case"两份与事后拷贝/移动。
+     * 按显式用例 id 解析 trace 落点，供 context 绑定的异步收尾使用。不得以最近活动用例替代缺失的 id。
      *
-     * <p>默认 {@code null}：未接报告 / 该 id 无活动会话时回落框架自有证据目录。</p>
-     *
-     * @param outcomeId 用例 id（可为 null——直接回落）
-     * @return trace 目标文件路径；不需要指导落点时返回 {@code null}
+     * @param outcomeId 显式用例 id
+     * @return trace 目标文件路径；未接报告或 id 无活动会话时返回 {@code null}
      */
     default Path traceTargetByOutcomeId(String outcomeId) {
         return null;
     }
 
     /**
-     * 按<b>显式用例 id</b> 解析录屏落点（{@code <outputDir>/<outcomeId>/records}）——与
-     * {@link #videoTarget()} 同源，但不依赖 ThreadLocal 句柄。供收尾线程在句柄缺失时，仍能凭
-     * "跨线程可见的活动用例 id"把录屏直接录进 per-case。
+     * 按显式用例 id 解析录屏落点，供 context 绑定的异步收尾使用。
      *
-     * <p>默认 {@code null}：未接报告 / 该 id 无活动会话时回落框架配置的录屏目录（随后由
-     * {@link #attachVideo(Path)} 搬入）。</p>
-     *
-     * @param outcomeId 用例 id（可为 null——直接回落）
-     * @return 录屏目录；不需要指导落点时返回 {@code null}
+     * @param outcomeId 显式用例 id
+     * @return 录屏目录；未接报告或 id 无活动会话时返回 {@code null}
      */
     default Path videoTargetByOutcomeId(String outcomeId) {
         return null;
     }
 
     /**
-     * 当前活动用例 id（<b>不依赖线程上下文</b>）——供<b>非用例线程</b>在产物生成 / 挂载时抓取归属，
-     * 以及框架把 {@code context → outcomeId} 绑定后据此回填绑定关系。
-     *
-     * <p>默认 {@code null}：未装配报告引擎 / 无活动用例时调用方按既有最佳努力逻辑处理。</p>
+     * 当前线程绑定的用例 id。异步线程无句柄时返回 {@code null}，调用方必须从显式 context 绑定获取归属，
+     * 不得回退到最近活动用例。
      */
     default String currentOutcomeId() {
         return null;
     }
 
     /**
-     * 按<b>显式用例 id</b> 挂载场景录屏（recordVideo 产出，webm）——与 {@link #attachVideo(Path)} 同语义，
-     * 但归属不依赖线程上下文，直接由调用方（凭 context 绑定）传入。未接报告 / id 为 {@code null} 时
-     * 回落 {@link #attachVideo(Path)}（最佳努力）。默认 no-op。
+     * 按显式用例 id 挂载场景录屏；归属由调用方凭 context 绑定传入。id 为 {@code null} 时不挂载。
      *
-     * @param outcomeId 用例 id（可为 null——回落 {@link #attachVideo(Path)}）
+     * @param outcomeId 显式用例 id
      * @param video     录屏文件（可为 null）
      */
     default void attachVideo(String outcomeId, Path video) {
+        if (outcomeId == null || outcomeId.isBlank()) {
+            return;
+        }
         attachVideo(video);
     }
 
     /**
-     * 按<b>显式用例 id</b> 挂载 trace.zip——与 {@link #attachTrace(Path)} 同语义，归属不依赖线程上下文，
-     * 由调用方（凭 context 绑定）传入。默认回落 {@link #attachTrace(Path)}（最佳努力）。no-op 桥无需改动。
+     * 按显式用例 id 挂载 trace.zip；归属由调用方凭 context 绑定传入。id 为 {@code null} 时不挂载。
      *
-     * @param outcomeId 用例 id（可为 null——回落 {@link #attachTrace(Path)}）
+     * @param outcomeId 显式用例 id
      * @param traceZip  已落盘的 trace 源文件
      */
     default void attachTrace(String outcomeId, Path traceZip) {
+        if (outcomeId == null || outcomeId.isBlank()) {
+            return;
+        }
         attachTrace(traceZip);
     }
 
-    /**
-     * 按<b>显式用例 id</b> 挂载 trace.zip 并附带录制窗口——与
-     * {@link #attachTrace(Path, String, String, long)} 同语义，归属不依赖线程上下文。
-     *
-     * @param outcomeId 用例 id（可为 null——回落 {@link #attachTrace(Path, String, String, long)}）
-     */
+    /** 按显式用例 id 挂载 trace.zip 并附带录制窗口；id 为 {@code null} 时不挂载。 */
     default void attachTrace(String outcomeId, Path traceZip,
                              String traceStartTime, String traceEndTime, long traceDurationMs) {
+        if (outcomeId == null || outcomeId.isBlank()) {
+            return;
+        }
         attachTrace(traceZip, traceStartTime, traceEndTime, traceDurationMs);
     }
 

@@ -2,7 +2,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptions;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.microsoft.playwright.options.ColorScheme;
@@ -107,7 +106,7 @@ public class CustomOptionsManager implements CustomOptions {
     private static <T> void applyCustomOption(T value, String optionName, Runnable setter) {
         setter.run();
         setCustomContextOptionsFlag(true);
-        VerboseLogging.logInfoIfVerbose(logger, "Custom {} set: {} (custom context options auto-enabled)", optionName, value);
+        logger.debug("Custom {} set: {} (custom context options auto-enabled)", optionName, value);
         PlaywrightRuntime.instance().contextRegistry.scheduleContextRebuild();
     }
 
@@ -213,7 +212,7 @@ public class CustomOptionsManager implements CustomOptions {
         } else {
             TestContextHolder.get().set(CUSTOM_STORAGE_STATE_KEY, storageState);
         }
-        VerboseLogging.logInfoIfVerbose(logger, "Custom storageState set (no rebuild): {}", "storageState");
+        logger.debug("Custom storageState set (no rebuild): {}", "storageState");
         return this;
     }
 
@@ -226,7 +225,7 @@ public class CustomOptionsManager implements CustomOptions {
         } else {
             TestContextHolder.get().set(CUSTOM_STORAGE_STATE_PATH_KEY, storageStatePath);
         }
-        VerboseLogging.logInfoIfVerbose(logger, "Custom storageStatePath set (no rebuild): {}", storageStatePath);
+        logger.debug("Custom storageStatePath set (no rebuild): {}", storageStatePath);
         return this;
     }
 

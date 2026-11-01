@@ -1,5 +1,7 @@
 # CDP Element Capture 改造方案
 
+> 历史方案：文中旧 `pw-codegen` / `pw-codegen-v2` 路径和实施步骤已被 `pw-codegen-v3` 取代；本文仅保留作设计演进记录。
+
 ## 目标
 
 把 RoleElementPicker 的元素捕获层从"页面内 JS 注入 + click 监听"切换为"CDP Overlay inspect mode"，

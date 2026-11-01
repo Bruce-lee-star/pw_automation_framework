@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory;
  * 与 {@link CodegenLogGate}）：
  *
  * <ul>
- *   <li>配置级（默认，无 {@code -Dpw.codegen.log}）→ codegen v3 / scan v2 包有效级别 ≥ WARN：
+ *   <li>配置级（默认，无 {@code -Dpw.codegen.log}）→ codegen v3 包有效级别 ≥ WARN：
  *       刷屏级 INFO/DEBUG（regen 汇总、拾取/解析/面板推送、RoleElementPicker 细节等）
  *       默认不输出，WARN/ERROR 异常保留可见；</li>
  *   <li>代码级兜底：即使外部配置把包级别显式设为 INFO（模拟外部工程自带 logback 配置
@@ -25,8 +25,6 @@ public class CodegenLogGateTest {
 
     private static final String CODGEN_LAUNCHER =
             "com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.CodegenLauncher";
-    private static final String SCAN_PICKER =
-            "com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan.engine.RoleElementPicker";
     private static final String PKG_CODGEN =
             "com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen";
 
@@ -44,16 +42,18 @@ public class CodegenLogGateTest {
     public void defaultGateBlocksVerboseInfoOnCodegenV3() {
         // 打开开关的 JVM 里级别被显式降为 INFO/DEBUG，本条默认断言不适用 → 跳过
         Assume.assumeTrue(!verboseOpened());
+        CodegenLogGate.apply();
         Level lv = effectiveLevel(CODGEN_LAUNCHER);
         Assert.assertTrue("codegen v3 默认级别应 ≥ WARN（死开关默认关），实际 " + lv,
                 lv.levelInt >= Level.WARN_INT);
     }
 
     @Test
-    public void defaultGateBlocksVerboseInfoOnScanV2() {
+    public void defaultGateBlocksVerboseInfoOnCodegenPackage() {
         Assume.assumeTrue(!verboseOpened());
-        Level lv = effectiveLevel(SCAN_PICKER);
-        Assert.assertTrue("scan v2 默认级别应 ≥ WARN（死开关默认关），实际 " + lv,
+        CodegenLogGate.apply();
+        Level lv = effectiveLevel(PKG_CODGEN);
+        Assert.assertTrue("codegen v3 默认级别应 ≥ WARN（死开关默认关），实际 " + lv,
                 lv.levelInt >= Level.WARN_INT);
     }
 

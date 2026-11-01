@@ -27,7 +27,7 @@ superseded_by: null
 
 - 文档规范与模板库：新增 `docs/standards/`（S1–S5 五篇规范）、`docs/templates/`（8 份可直接复制的模板）、`docs/README.md` 文档总索引。
 - 新增文档规范门禁 `tools/check_doc_standard.py`，覆盖元数据完整性、`type` 与目录匹配、文档内链可达性、模板占位符残留、模块 README 存在性。
-- 5 个框架模块补齐 README：`pw-core`、`pw-web-ui`、`pw-api-core`、`pw-route`、`pw-codegen`；`pw-reports-v2` README 补齐元数据头与「边界与非目标」章节。
+- 5 个框架模块补齐 README：`pw-core`、`pw-web-ui`、`pw-api-core`、`pw-route`、`pw-codegen-v3`；`pw-reports-v2` README 补齐元数据头与「边界与非目标」章节。
 
 ### 变更
 

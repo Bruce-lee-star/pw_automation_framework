@@ -8,7 +8,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.config.AutoBrowserProcessor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.BrowserOverrideManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 
 import java.awt.*;
 
@@ -51,11 +50,11 @@ public class PlaywrightConfigManager {
             int logicalWidth = bounds.width;
             int logicalHeight = bounds.height;
 
-            VerboseLogging.logInfoIfVerbose(logger, "Using logical screen size: {}x{}", logicalWidth, logicalHeight);
+            logger.debug("Using logical screen size: {}x{}", logicalWidth, logicalHeight);
 
             return new Dimension(logicalWidth, logicalHeight);
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to get screen size, using default: {}", e.getMessage());
+            logger.warn("Failed to get screen size, using default: {}", e.getMessage());
             return new Dimension(1920, 1080);
         }
     }
@@ -98,7 +97,7 @@ public class PlaywrightConfigManager {
         // 优先级1: 检查是否有测试用例级别的浏览器覆盖
         if (BrowserOverrideManager.hasOverride()) {
             String overrideBrowser = BrowserOverrideManager.getEffectiveBrowserType();
-            VerboseLogging.logDebugIfVerbose(logger, "Using override browser type: {}", overrideBrowser);
+            logger.debug("Using override browser type: {}", overrideBrowser);
             return overrideBrowser;
         }
         // 优先级2: 使用配置文件中的默认值

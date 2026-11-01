@@ -16,7 +16,6 @@
         <module>pw-reports-v2</module>
         <module>pw-api-core</module>
         <module>pw-web-ui</module>
-<!--        <module>pw-codegen-v2</module>-->
         <module>pw-codegen-v3</module>
         <module>pw-route</module>
         <module>pw-framework-bom</module>

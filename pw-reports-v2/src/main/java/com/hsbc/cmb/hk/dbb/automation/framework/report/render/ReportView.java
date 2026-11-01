@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 
@@ -167,10 +168,12 @@ public final class ReportView {
         List<Map<String, Object>> rows = new ArrayList<>();
         add(rows, "JDK", join(System.getProperty("java.version"), System.getProperty("java.vm.name")));
         add(rows, "Build tool", buildTool());
-        add(rows, "Test framework", ConfigReader.getProperty("pw.report.test.framework", "Cucumber · JUnit"));
+        add(rows, "Test framework", ConfigReader.getProperty(
+                ConfigRegistry.REPORT_TEST_FRAMEWORK.key(),
+                ConfigRegistry.REPORT_TEST_FRAMEWORK.defaultValue()));
         add(rows, "Browser driver", playwrightDriver());
         add(rows, "OS", join(System.getProperty("os.name"), System.getProperty("os.version")));
-        add(rows, "Target", firstNonBlank(ConfigReader.getProperty("pw.report.target"),
+        add(rows, "Target", firstNonBlank(ConfigReader.getProperty(ConfigRegistry.REPORT_TARGET.key()),
                 ConfigReader.getProperty("base.url")));
         rows.removeIf(row -> row.get("v") == null);
         return rows;
@@ -179,7 +182,7 @@ public final class ReportView {
     /** 浏览器分布；无数据时返回空列表（模板据此隐藏分布条）。 */
     public static List<Map<String, Object>> browsers() {
         List<Map<String, Object>> out = new ArrayList<>();
-        String configured = System.getProperty("pw.report.browsers");
+        String configured = ConfigReader.getProperty(ConfigRegistry.REPORT_BROWSERS.key());
         if (configured != null && !configured.isBlank()) {
             for (String part : configured.split(",")) {
                 String[] kv = part.split(":", 2);
@@ -229,7 +232,7 @@ public final class ReportView {
         //  BUILD_URL 自带过时/错误的 context path（如多余 /jenkins 前缀），直连即 404；
         //  业务填一个可达的等价链接即可，无需改动 Jenkins 系统配置。
         //  支持占位符 ${BUILD_NUMBER} / ${JOB_NAME} / ${BUILD_URL}（取自本环境）。
-        String override = firstNonBlank(System.getProperty("pw.report.ci.url"),
+        String override = firstNonBlank(ConfigReader.getProperty(ConfigRegistry.REPORT_CI_URL.key()),
                 env.get("PW_REPORT_CI_URL"));
         if (override != null) {
             override = override
@@ -296,7 +299,7 @@ public final class ReportView {
      * 探测失败视为未知——只是不展示该行，绝不影响报告生成）。
      */
     private static String playwrightDriver() {
-        String v = firstNonBlank(System.getProperty("pw.report.browser.driver"),
+        String v = firstNonBlank(ConfigReader.getProperty(ConfigRegistry.REPORT_BROWSER_DRIVER.key()),
                 System.getProperty("playwright.version"));
         if (v == null) {
             v = probePlaywrightVersion();

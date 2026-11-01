@@ -80,6 +80,46 @@ public enum ConfigRegistry {
         "",
         "报告项目名称（所有报告统一使用；<b>未配置时报告显示 Test Report</b>）"
     ),
+    LEGACY_FRAMEWORK_PROJECT_NAME(
+        "framework.project.name",
+        "",
+        "[deprecated] 旧报告项目名称，未配置 project.report.name 时兼容读取"
+    ),
+    REPORT_BROWSERS(
+        "pw.report.browsers",
+        "",
+        "报告浏览器分布（逗号分隔，格式 name:version）"
+    ),
+    REPORT_CI_URL(
+        "pw.report.ci.url",
+        "",
+        "覆盖报告中的 CI 构建链接"
+    ),
+    REPORT_BROWSER_DRIVER(
+        "pw.report.browser.driver",
+        "",
+        "报告中展示的 Playwright 浏览器驱动版本"
+    ),
+    REPORT_TEST_FRAMEWORK(
+        "pw.report.test.framework",
+        "Cucumber · JUnit",
+        "报告中展示的测试框架"
+    ),
+    REPORT_TARGET(
+        "pw.report.target",
+        "",
+        "报告中展示的测试目标"
+    ),
+    REPORT_RENDER_TIMEOUT_SECONDS(
+        "pw.report.render.timeout.seconds",
+        "300",
+        "报告渲染超时（秒）"
+    ),
+    CONSOLE_REPORT_ENABLED(
+        "playwright.console.report.enabled",
+        "true",
+        "是否输出场景级控制台 reporter"
+    ),
 
     /**
      * 失败类型分类规则（报告「Most Frequent Failures」按<b>类型</b>而非整段消息聚合）。
@@ -594,19 +634,12 @@ public enum ConfigRegistry {
     WEB_FRAMEWORK_LOGGING(
         "framework.logging",
         "VERBOSE",
-        "日志级别（框架 侧；本框架的详细日志改由 framework.verbose.logging 决定，"
-            + "本键仅保留录制开关等历史语义）"
+        "[deprecated] 旧报告动作录制设置；请改用 framework.recording.enabled"
     ),
-    WEB_FRAMEWORK_VERBOSE_LOGGING(
-        "framework.verbose.logging",
-        "false",
-        "框架详细日志（默认 false）：控制 VerboseLogging.logXxxIfVerbose 一族；"
-            + "关闭时日志只留必要信息（直调 logger.info/warn/error 的关键事件）"
-    ),
-    WEB_FRAMEWORK_TRACE_LOGGING(
-        "framework.trace.logging",
-        "false",
-        "框架超详细日志（默认 false）：等同于 framework.verbose.logging，并额外开启 trace 档"
+    FRAMEWORK_RECORDING_ENABLED(
+        "framework.recording.enabled",
+        "true",
+        "是否将浏览器动作写入测试报告；与日志级别无关"
     ),
     WEB_FRAMEWORK_OUTPUT_DIRECTORY(
         "framework.output.directory",
@@ -995,6 +1028,20 @@ public enum ConfigRegistry {
     ROUTE_CAPTURE_ALL_TYPE("route.capture.all.type", "false",
             "路由采集范围：false 只采 MONITOR；true 连 DELAY / MODIFY / MOCK 一并采（逐规则 .capture(false) 优先）",
             ConfigReader.ENV_FIRST_PRECEDENCE),
+
+    /** Route 报告证据的进程级待写上限；满时拒绝新证据，不挤掉其它用例的数据。 */
+    ROUTE_EVIDENCE_MAX_PENDING("route.evidence.max.pending", "500",
+            "Route 报告证据的进程级待写上限；队列满时拒绝新证据并计数",
+            ConfigReader.ENV_FIRST_PRECEDENCE),
+
+    /** 单个 outcome 的 Route 报告证据待写上限；超限只淘汰该 outcome 最旧证据。 */
+    ROUTE_EVIDENCE_MAX_PENDING_PER_OUTCOME("route.evidence.max.pending.per.outcome", "100",
+            "单个 outcome 的 Route 报告证据待写上限；超限时只淘汰本 outcome 最旧证据",
+            ConfigReader.ENV_FIRST_PRECEDENCE),
+
+    /** 延迟/轮询调度器的在途加排队任务准入上限。 */
+    ROUTE_DELAY_MAX_PENDING("route.delay.max.pending", "1024",
+            "Route 延迟调度器的在途加排队任务准入上限"),
 
     /** 响应体内联阈值（字节）：不超过即原字节持内存。 */
     ROUTE_CAPTURE_INLINE_MAX_BYTES("route.capture.inline.max.bytes", "262144",

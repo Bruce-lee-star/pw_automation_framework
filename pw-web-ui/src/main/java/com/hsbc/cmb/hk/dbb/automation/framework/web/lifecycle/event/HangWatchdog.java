@@ -1,7 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.async.AsyncPool;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,7 +106,7 @@ public final class HangWatchdog {
             sampler = AsyncPool.scheduleWithFixedDelay(() -> sample(token, interval), interval, interval);
         } catch (Throwable t) {
             // 诊断设施绝不影响主流程：调度失败即"无采样"，仅记 debug
-            VerboseLogging.logDebugIfVerbose(logger, "[HangWatchdog] arm failed (sampling disabled): {}",
+            logger.debug("[HangWatchdog] arm failed (sampling disabled): {}",
                     t.getMessage());
         }
     }
@@ -197,7 +196,7 @@ public final class HangWatchdog {
                 logger.warn(renderSample(owner, scenarioId, elapsed, interval));
             }
         } catch (Throwable t) {
-            VerboseLogging.logDebugIfVerbose(logger, "[HangWatchdog] sample failed: {}", t.getMessage());
+            logger.debug("[HangWatchdog] sample failed: {}", t.getMessage());
         }
     }
 

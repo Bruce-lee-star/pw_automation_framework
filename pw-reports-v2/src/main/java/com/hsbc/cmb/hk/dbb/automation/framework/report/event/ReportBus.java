@@ -66,21 +66,8 @@ public final class ReportBus {
     private final CopyOnWriteArrayList<ReportSink> sinks = new CopyOnWriteArrayList<>();
     private final ThreadLocal<StepHandle> current = new ThreadLocal<>();
 
-    /**
-     * 跨线程可见的「最近启动的步骤」——{@code ThreadLocal} 只在本线程有效，而 Playwright 事件线程
-     * （route 命中线程）没有该上下文。此 volatile 快照让事件线程也能把证据归到「当时正在跑的步骤」，
-     * 是<b>最佳努力</b>归属：并行执行下可能落到另一线程的步骤，但总比全部落到用例级更接近真相。
-     */
-    private volatile StepHandle activeStep;
-
-    /**
-     * 跨线程可见的「当前活动用例 id」——与 {@link #activeStep} 同源，供<b>非测试线程</b>
-     * （CloseGuard 的 {@code close-bounded-*} 收尾线程）在挂接证据（录屏）时定位归属。
-     * 并行执行下取"最近开始的用例"，属最佳努力；总比因 ThreadLocal 缺失而整份丢弃强。
-     */
-    private volatile String activeOutcomeId;
-
     private final AtomicLong sinkErrors = new AtomicLong();
+    private final AtomicLong unattributedArtifacts = new AtomicLong();
     private final AtomicBoolean runFinished = new AtomicBoolean(false);
     private volatile boolean enabled;
 
@@ -148,12 +135,7 @@ public final class ReportBus {
         }
         sessions.clear();
         runFinished.set(false);
-        //  P1-5：复位跨线程可见的"活动步骤 / 活动用例"指针 —— 否则上一轮收尾之后、本轮刚开始的
-        //    跨线程事件（route 命中线程 / CloseGuard 收尾线程的 trace/video/证据 flush）会挂到上一轮
-        //    的 outcomeId 上，造成"报告归属串到上一轮用例"。
-        activeStep = null;
-        activeOutcomeId = null;
-        current.remove(); // 本线程残留的用例级 ThreadLocal 句柄（防御性；其它线程在各自 startCase 覆盖）
+        current.remove(); // 防止本线程残留的用例级 ThreadLocal 句柄
         sinkErrors.set(0); // 让 getSinkErrorCount() 反映"本轮"而非跨轮累计值
         //  向各 sink 派发整场开始：清掉 sink 侧进程级残留（LocalReportSink 的 writtenIds/errors 等，P1-9）。
         for (ReportSink sink : sinks) {
@@ -250,7 +232,7 @@ public final class ReportBus {
     /**
      * 用例开始。冲突 id（outline 同名 / 重试插件重发）自动加 {@code -2/-3} 后缀（R7）。
      *
-     * @param baseId    {@code slug(feature)-line-slug(scenario)}
+     * @param baseId    用例基础 ID（由 {@code OutcomeIdFactory} 按时间戳和 SHA-256 摘要生成）
      * @param feature   feature 名
      * @param scenario  场景名
      * @param tags      标签（不含 @）
@@ -267,7 +249,6 @@ public final class ReportBus {
         RecordingSession session = placeSession(safeBase, feature, scenario, tags, featurePath);
         StepHandle handle = StepHandle.ofCase(session.outcomeId());
         current.set(handle);
-        activeOutcomeId = session.outcomeId();
         // 用例级控制台捕获（钩子输出等）：压栈，步骤开始时再压步骤 sink 盖在上层
         ConsoleCapture.clear();
         ConsoleCapture.push((isError, line) -> session.appendConsole(isError, scrub.scrubLine(line)));
@@ -355,10 +336,6 @@ public final class ReportBus {
         StepHandle cur = current.get();
         if (cur != null && cur.outcomeId().equals(handle.outcomeId())) {
             current.remove();
-            activeStep = null;
-        }
-        if (handle.outcomeId().equals(activeOutcomeId)) {
-            activeOutcomeId = null;
         }
         ConsoleCapture.clear();
         fanOut(new CaseFinishedEvent(session.toOutcome(scrub)));
@@ -443,7 +420,6 @@ public final class ReportBus {
         step.setDocString(docString);
         StepHandle handle = StepHandle.ofStep(cur.outcomeId(), step.getStepId(), cur);
         current.set(handle);
-        activeStep = handle;
         // 步骤级控制台捕获：盖在用例级 sink 之上，本步骤内输出归本步骤
         ConsoleCapture.push((isError, line) -> session.appendStepConsole(step.getStepId(), isError, scrub.scrubLine(line)));
         return handle;
@@ -464,7 +440,6 @@ public final class ReportBus {
         if (handle.equals(current.get())) {
             StepHandle parent = handle.parent();
             current.set(parent == null ? StepHandle.ofCase(handle.outcomeId()) : parent);
-            activeStep = parent == null ? StepHandle.ofCase(handle.outcomeId()) : parent;
         }
         ConsoleCapture.pop();
     }
@@ -531,34 +506,29 @@ public final class ReportBus {
         return h == null ? StepHandle.NOOP : h;
     }
 
-    /**
-     * 当前（或最近）活动步骤的 id —— 供<b>非测试线程</b>（Playwright 事件线程）在证据产生时抓取归属。
-     *
-     * <p>解析顺序：本线程 ThreadLocal（业务线程上精确）→ 跨线程 volatile 快照（事件线程上的最佳努力）。
-     * 两者都取不到步骤上下文（如场景边界）时返回 {@code null}，调用方应按「用例级」处理。</p>
-     */
-    /**
-     * 当前活动用例 id（<b>不依赖线程上下文</b>）——供收尾线程（CloseGuard worker）挂接录屏等证据。
-     * 用例结束（finishCase）后清空；并行执行下取"最近开始的用例"（最佳努力）。
-     */
+    /** 当前线程绑定的用例 id；异步收尾应使用 context 显式绑定的 outcome id。 */
     public String activeOutcomeId() {
         StepHandle local = current.get();
-        if (local != null && !local.isNoop()) {
-            return local.outcomeId();
-        }
-        return activeOutcomeId;
+        return local == null || local.isNoop() ? null : local.outcomeId();
     }
 
+    /** 当前线程的步骤 id；无本地步骤上下文时返回 null，不推测并行用例归属。 */
     public String activeStepId() {
         StepHandle local = current.get();
         if (local != null && !local.isNoop() && !local.isCaseLevel()) {
             return local.stepId();
         }
-        StepHandle shared = activeStep;
-        if (shared != null && !shared.isNoop() && !shared.isCaseLevel()) {
-            return shared.stepId();
-        }
         return null;
+    }
+
+    /** 产物缺少明确用例上下文的次数；用于监控收尾/调用方漏传 outcome id。 */
+    public long unattributedArtifactCount() {
+        return unattributedArtifacts.get();
+    }
+
+    private void noteUnattributedArtifact(String kind) {
+        long count = unattributedArtifacts.incrementAndGet();
+        log.warn("Skipping {} artifact without an explicit outcome context (unattributed count={})", kind, count);
     }
 
     /**
@@ -735,10 +705,8 @@ public final class ReportBus {
     }
 
     /**
-     * 按显式用例 id 解析 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}）——绕开 ThreadLocal 句柄，
-     * 供收尾线程（CloseGuard worker）凭"跨线程可见的活动用例 id"把 trace <b>直接导出到 per-case</b>，
-     * 从源头避免"traces/ + per-case"两份与事后移动（与 {@link #traceTarget} 同语义，仅入参不同）。
-     * 无活动会话时返回 {@code null}（框架回落其固定 {@code traces/} 证据目录）。
+     * 按显式用例 id 解析 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}），供持有 context 绑定
+     * outcome ID 的异步收尾线程使用。无对应会话时返回 {@code null}。
      */
     public Path traceTargetByOutcomeId(String outcomeId) {
         if (!enabled || outcomeId == null || outcomeId.isBlank()) {
@@ -752,9 +720,8 @@ public final class ReportBus {
     }
 
     /**
-     * 按显式用例 id 解析录屏落点（{@code <outputDir>/<outcomeId>/records}）——绕开 ThreadLocal 句柄，
-     * 供收尾线程凭"跨线程可见的活动用例 id"把录屏<b>直接录进 per-case</b>（与 {@link #videoTarget} 同语义，
-     * 仅入参不同）。无活动会话时返回 {@code null}（框架回落其配置的录屏目录，由 {@link #attachVideo} 事后搬入）。
+     * 按显式用例 id 解析录屏落点（{@code <outputDir>/<outcomeId>/records}），供持有 context 绑定
+     * outcome ID 的异步收尾线程使用。无对应会话时返回 {@code null}。
      */
     public Path videoTargetByOutcomeId(String outcomeId) {
         if (!enabled || outcomeId == null || outcomeId.isBlank()) {
@@ -785,10 +752,7 @@ public final class ReportBus {
             return;
         }
         if (handle.isNoop()) {
-            //  兜底：关闭常发生在 CloseGuard 的 worker 线程（close-bounded-context-close），
-            //   该线程没有 ThreadLocal 用例上下文 → captureHandle() 恒 NOOP → 录像被静默丢弃
-            //   （2026-10-22 实测：dbb-1 有句柄却进不了报告）。改用跨线程可见的活动用例。
-            attachVideoToOutcome(activeOutcomeId(), video);
+            noteUnattributedArtifact("video");
             return;
         }
         attachVideoToOutcome(handle.outcomeId(), video);
@@ -878,10 +842,7 @@ public final class ReportBus {
             return;
         }
         if (handle.isNoop()) {
-            //  兜底：context 关闭常发生在 CloseGuard 的 worker 线程（close-bounded-*），
-            //    该线程无 ThreadLocal 用例上下文 → captureHandle() 恒 NOOP → trace 被静默丢弃
-            //    （与 attachVideo 同策略：改用跨线程可见的活动用例 id 定位归属，绝不丢 trace）。
-            attachTraceToOutcome(activeOutcomeId(), traceZip, traceStartTime, traceEndTime, traceDurationMs);
+            noteUnattributedArtifact("trace");
             return;
         }
         attachTraceToOutcome(handle.outcomeId(), traceZip, traceStartTime, traceEndTime, traceDurationMs);

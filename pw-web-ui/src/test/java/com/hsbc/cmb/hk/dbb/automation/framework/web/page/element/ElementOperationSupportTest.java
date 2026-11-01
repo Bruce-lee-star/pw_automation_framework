@@ -49,11 +49,38 @@ public class ElementOperationSupportTest {
         } catch (ElementOperationException e) {
             assertTrue("action 必须被实际调用", invoked.get());
             assertNotNull("失败异常须带诊断信息", e.getMessage());
+            assertNotNull("失败异常须带诊断快照", e.getDiagnosticInfo());
+            assertTrue("未发生重试时重试次数应为 0", e.getDiagnosticInfo().retryCount() == 0);
+            assertTrue("未重试时总尝试次数应为 1", e.getMessage().contains("failed after 1 attempts"));
             //  逻辑失败文本经 buildRetryException 置于 cause（lastEx）
             assertNotNull("须携带 logical failure 的 cause", e.getCause());
             assertTrue("cause 须标识为 logical failure",
                     e.getCause().getMessage() != null
                             && e.getCause().getMessage().contains("logical failure"));
+        }
+    }
+
+    @Test
+    public void executeWithRetry_reportsOneRetryAfterNavigationFailure() {
+        BasePage bp = nullPage();
+        Locator loc = mock(Locator.class);
+        AtomicBoolean first = new AtomicBoolean(true);
+        AtomicBoolean invokedTwice = new AtomicBoolean(false);
+
+        try {
+            ElementOperationSupport.executeWithRetry(() -> loc, "#el", bp, () -> {
+                if (first.getAndSet(false)) {
+                    throw new PlaywrightException("Execution context was destroyed during navigation");
+                }
+                invokedTwice.set(true);
+                return false;
+            }, "click");
+            fail("expected ElementOperationException after failed navigation retry");
+        } catch (ElementOperationException e) {
+            assertTrue("导航失败后 action 应重试一次", invokedTwice.get());
+            assertNotNull("失败异常须带诊断快照", e.getDiagnosticInfo());
+            assertTrue("应报告实际发生的一次重试", e.getDiagnosticInfo().retryCount() == 1);
+            assertTrue("应报告两次总尝试", e.getMessage().contains("failed after 2 attempts"));
         }
     }
 

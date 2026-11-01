@@ -1,12 +1,15 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.core;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigEffectiveView;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.LoggingLevelConfig;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.InitializationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.listener.ListenerRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
-import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +43,7 @@ public class FrameworkCore {
         try {
             java.awt.Toolkit.getDefaultToolkit();
         } catch (Throwable t) {
-            VerboseLogging.logWarnIfVerbose(logger, "AWT toolkit pre-init skipped: {}", t.getMessage());
+            logger.warn("AWT toolkit pre-init skipped: {}", t.getMessage());
         }
 
         com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator.register(
@@ -79,7 +82,7 @@ public class FrameworkCore {
                         }
                     } catch (Exception e) {
                         //  N-06（doc 21 HIGH）：关闭期清理失败必须【非 verbose 门控】地可观测 ——
-                        //  原实现走 logErrorIfVerbose，默认日志级别下【完全无输出】，而这正是
+                        //  原实现把错误日志放在详细日志门控内，默认级别下【完全无输出】，而这正是
                         //  「孤儿浏览器进程堆积 → JVM 外内存耗尽（hs_err native OOM）」的唯一归因手段。
                         //  recordFailure 写 ERROR（含堆栈）并递增可断言的失败计数。
                         com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator
@@ -87,7 +90,7 @@ public class FrameworkCore {
                     }
                     try {
                         frameworkState.cleanup();
-                        VerboseLogging.logInfoIfVerbose(logger, "JVM Shutdown Hook completed");
+                        logger.debug("JVM Shutdown Hook completed");
                     } catch (Exception e) {
                         com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator
                                 .recordFailure("pw-core/shutdownHook/stateCleanup", e);
@@ -107,28 +110,30 @@ public class FrameworkCore {
     // 初始化框架
     public void initialize() {
         try {
+            LoggingLevelConfig.apply();
+            logFrameworkConfigurationIfDebugEnabled();
             // DEV-V5 去 Serenity 适配器：把 framework.* 配置回填给 serenity.* 系统属性，避免 Serenity-core 报告/浏览器行为回归
             com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig.publishSerenityCompatibility();
             if (frameworkState.isInitialized()) {
-                VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is already initialized");
+                logger.debug("FrameworkCore is already initialized");
                 return;
             }
 
             logger.info("Initializing FrameworkCore...");
-            VerboseLogging.logDebugIfVerbose(logger, "Starting framework initialization process");
+            logger.debug("Starting framework initialization process");
 
             //  先初始化 Playwright 管理器（失败时 frameworkState 不会被标记为 initialized）
             PlaywrightManager.initialize();
-            VerboseLogging.logDebugIfVerbose(logger, "Playwright manager initialized");
+            logger.debug("Playwright manager initialized");
 
             // 初始化监听器注册表（支持自动重试）
             String basePackage = getBasePackage();
             ListenerRegistry.initialize(basePackage);
-            VerboseLogging.logDebugIfVerbose(logger, "Listener registry initialized for package: {}", basePackage);
+            logger.debug("Listener registry initialized for package: {}", basePackage);
 
             //  最后标记 frameworkState：仅在全部组件初始化成功后标记
             frameworkState.initialize();
-            VerboseLogging.logDebugIfVerbose(logger, "Framework state initialized");
+            logger.debug("Framework state initialized");
 
             logger.info("FrameworkCore initialized successfully");
         } catch (Exception e) {
@@ -136,6 +141,43 @@ public class FrameworkCore {
             frameworkState.setLastException(e);
             throw new InitializationException("Failed to initialize FrameworkCore", e);
         }
+    }
+
+    static void logFrameworkConfigurationIfDebugEnabled() {
+        if (!logger.isDebugEnabled()) {
+            return;
+        }
+
+        logger.debug("=== Effective framework configuration ===");
+        for (ConfigRegistry config : ConfigRegistry.values()) {
+            try {
+                ConfigEffectiveView.Entry entry = ConfigEffectiveView.entry(config);
+                String value = isSensitiveConfigurationKey(entry.key())
+                        ? SensitiveDataSanitizer.maskToken() : entry.value();
+                logger.debug("{} = {} (source={})", entry.key(), value, entry.source());
+            } catch (RuntimeException e) {
+                logger.warn("Unable to include framework configuration '{}' in debug output ({})",
+                        config.key(), e.getClass().getSimpleName());
+            }
+        }
+        logger.debug("=== End effective framework configuration ===");
+    }
+
+    private static boolean isSensitiveConfigurationKey(String key) {
+        int separator = key.lastIndexOf('.');
+        String leaf = separator < 0 ? key : key.substring(separator + 1);
+        String normalized = key.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return SensitiveDataSanitizer.isSensitiveBodyKey(key)
+                || SensitiveDataSanitizer.isSensitiveBodyKey(leaf)
+                || normalized.contains("password")
+                || normalized.contains("passwd")
+                || normalized.contains("secret")
+                || normalized.contains("token")
+                || normalized.contains("credential")
+                || normalized.contains("apikey")
+                || normalized.contains("accesskey")
+                || normalized.contains("privatekey")
+                || normalized.contains("authorization");
     }
     
     /**
@@ -168,26 +210,26 @@ public class FrameworkCore {
             // DEV-V5 去 Serenity 适配器：把 framework.* 配置回填给 serenity.* 系统属性，避免 Serenity-core 报告/浏览器行为回归
             com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig.publishSerenityCompatibility();
             if (frameworkState.isInitialized()) {
-                VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is already initialized");
+                logger.debug("FrameworkCore is already initialized");
                 return;
             }
 
             logger.info("Initializing FrameworkCore with custom listener packages...");
-            VerboseLogging.logDebugIfVerbose(logger, "Starting framework initialization with custom packages");
+            logger.debug("Starting framework initialization with custom packages");
 
             //  先初始化 Playwright 管理器（失败时 frameworkState 不会被标记为 initialized）
             PlaywrightManager.initialize();
-            VerboseLogging.logDebugIfVerbose(logger, "Playwright manager initialized");
+            logger.debug("Playwright manager initialized");
 
             // 初始化监听器注册表：使用传入的监听器包，若未指定则回退到默认包
             String basePackage = (listenerPackages != null && listenerPackages.length > 0)
                 ? listenerPackages[0] : getBasePackage();
             ListenerRegistry.initialize(basePackage);
-            VerboseLogging.logDebugIfVerbose(logger, "Listener registry initialized for package: {}", basePackage);
+            logger.debug("Listener registry initialized for package: {}", basePackage);
 
             //  最后标记 frameworkState：仅在全部组件初始化成功后标记
             frameworkState.initialize();
-            VerboseLogging.logDebugIfVerbose(logger, "Framework state initialized");
+            logger.debug("Framework state initialized");
 
             logger.info("FrameworkCore initialized successfully");
         } catch (Exception e) {
@@ -205,20 +247,20 @@ public class FrameworkCore {
             }
 
             if (frameworkState.isRunning()) {
-                VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is already running");
+                logger.debug("FrameworkCore is already running");
                 return;
             }
 
-            VerboseLogging.logInfoIfVerbose(logger, "Starting FrameworkCore...");
-            VerboseLogging.logDebugIfVerbose(logger, "Starting framework core");
+            logger.debug("Starting FrameworkCore...");
+            logger.debug("Starting framework core");
 
             // 标记框架为运行状态
             frameworkState.start();
-            VerboseLogging.logDebugIfVerbose(logger, "Framework state set to running");
+            logger.debug("Framework state set to running");
 
-            VerboseLogging.logInfoIfVerbose(logger, " FrameworkCore started successfully");
+            logger.debug(" FrameworkCore started successfully");
         } catch (Exception e) {
-            VerboseLogging.logErrorIfVerbose(logger, " Failed to start FrameworkCore", e);
+            logger.error(" Failed to start FrameworkCore", e);
             frameworkState.setLastException(e);
             throw new InitializationException("Failed to start FrameworkCore", e);
         }
@@ -228,20 +270,20 @@ public class FrameworkCore {
     public void stop() {
         try {
             if (!frameworkState.isRunning()) {
-                VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is not running");
+                logger.debug("FrameworkCore is not running");
                 return;
             }
 
-            VerboseLogging.logInfoIfVerbose(logger, "Stopping FrameworkCore...");
-            VerboseLogging.logDebugIfVerbose(logger, "Stopping framework core");
+            logger.debug("Stopping FrameworkCore...");
+            logger.debug("Stopping framework core");
 
             // 标记框架为停止状态
             frameworkState.stop();
-            VerboseLogging.logDebugIfVerbose(logger, "Framework state set to stopped");
+            logger.debug("Framework state set to stopped");
 
-            VerboseLogging.logInfoIfVerbose(logger, " FrameworkCore stopped successfully");
+            logger.debug(" FrameworkCore stopped successfully");
         } catch (Exception e) {
-            VerboseLogging.logErrorIfVerbose(logger, " Failed to stop FrameworkCore", e);
+            logger.error(" Failed to stop FrameworkCore", e);
             frameworkState.setLastException(e);
             throw new InitializationException("Failed to stop FrameworkCore", e);
         }
@@ -251,38 +293,38 @@ public class FrameworkCore {
     public void cleanup() {
         try {
             if (!frameworkState.isInitialized()) {
-                VerboseLogging.logInfoIfVerbose(logger, "FrameworkCore is not initialized");
+                logger.debug("FrameworkCore is not initialized");
                 return;
             }
 
             logger.info("Cleaning up FrameworkCore...");
-            VerboseLogging.logDebugIfVerbose(logger, "Starting framework cleanup");
+            logger.debug("Starting framework cleanup");
 
             // 停止框架
             if (frameworkState.isRunning()) {
                 stop();
-                VerboseLogging.logDebugIfVerbose(logger, "Framework stopped during cleanup");
+                logger.debug("Framework stopped during cleanup");
             }
 
             //  清理路由引擎（停止调度器 + unroute 所有 Playwright 路由）
             try {
                 RouteLifecycleRegistry.get().shutdownRouteEngine();
-                VerboseLogging.logDebugIfVerbose(logger, "RouteEngine shut down");
+                logger.debug("RouteEngine shut down");
             } catch (Exception e) {
-                VerboseLogging.logWarnIfVerbose(logger, "Failed to shutdown RouteEngine: {}", e.getMessage());
+                logger.warn("Failed to shutdown RouteEngine: {}", e.getMessage());
             }
 
             // 清理 Playwright 资源
             PlaywrightManager.cleanupAll();
-            VerboseLogging.logDebugIfVerbose(logger, "Playwright resources cleaned up");
+            logger.debug("Playwright resources cleaned up");
 
             //  清理监听器注册表
             ListenerRegistry.cleanup();
-            VerboseLogging.logDebugIfVerbose(logger, "Listener registry cleaned up");
+            logger.debug("Listener registry cleaned up");
 
             // 清理框架状态
             frameworkState.cleanup();
-            VerboseLogging.logDebugIfVerbose(logger, "Framework state cleaned up");
+            logger.debug("Framework state cleaned up");
 
             logger.info("FrameworkCore cleaned up successfully");
         } catch (Exception e) {
@@ -296,7 +338,7 @@ public class FrameworkCore {
     // 测试开始前的准备
     public void beforeTest() {
         try {
-            VerboseLogging.logDebugIfVerbose(logger, "Preparing for test execution...");
+            logger.debug("Preparing for test execution...");
 
             // 确保框架已初始化
             if (!frameworkState.isInitialized()) {
@@ -310,11 +352,11 @@ public class FrameworkCore {
 
             // 初始化Playwright实例
             PlaywrightManager.initializeForScenario();
-            VerboseLogging.logDebugIfVerbose(logger, "Playwright initialized for scenario");
+            logger.debug("Playwright initialized for scenario");
 
-            VerboseLogging.logDebugIfVerbose(logger, " Test preparation completed");
+            logger.debug(" Test preparation completed");
         } catch (Exception e) {
-            VerboseLogging.logErrorIfVerbose(logger, " Failed to prepare for test", e);
+            logger.error(" Failed to prepare for test", e);
             frameworkState.setLastException(e);
             throw new InitializationException("Failed to prepare for test", e);
         }
@@ -344,16 +386,16 @@ public class FrameworkCore {
      */
     public void afterTest(boolean scenarioFailed) {
         try {
-            VerboseLogging.logDebugIfVerbose(logger, "Cleaning up after test execution... (scenarioFailed={})",
+            logger.debug("Cleaning up after test execution... (scenarioFailed={})",
                     scenarioFailed);
 
             // 清理Playwright资源
             PlaywrightManager.cleanupForScenario(scenarioFailed);
-            VerboseLogging.logDebugIfVerbose(logger, "Playwright resources cleaned up for scenario");
+            logger.debug("Playwright resources cleaned up for scenario");
 
-            VerboseLogging.logDebugIfVerbose(logger, " Test cleanup completed");
+            logger.debug(" Test cleanup completed");
         } catch (Exception e) {
-            VerboseLogging.logErrorIfVerbose(logger, " Failed to cleanup after test", e);
+            logger.error(" Failed to cleanup after test", e);
             frameworkState.setLastException(e);
             // 不抛出异常，避免影响测试报告
         }
@@ -372,7 +414,7 @@ public class FrameworkCore {
                 }
             }
         } catch (Throwable ignore) {
-            VerboseLogging.logDebugIfVerbose(logger, "browser log flush skipped: {}", ignore.getMessage());
+            logger.debug("browser log flush skipped: {}", ignore.getMessage());
         }
     }
     

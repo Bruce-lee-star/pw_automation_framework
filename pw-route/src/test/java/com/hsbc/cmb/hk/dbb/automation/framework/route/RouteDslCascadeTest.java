@@ -121,6 +121,22 @@ public class RouteDslCascadeTest {
     }
 
     @Test
+    public void registrationMethodsRetainCloseHandles() throws Exception {
+        assertEquals(AutoCloseable.class, RouteDsl.class.getMethod("register").getReturnType());
+        assertEquals(AutoCloseable.class, RouteDsl.class.getMethod("start").getReturnType());
+        assertEquals(AutoCloseable.class, RouteDsl.MonitorDsl.class
+                .getMethod("register").getReturnType());
+        mockContext();
+        AutoCloseable registration = RouteDsl.on(ctx)
+                .api("/scoped")
+                .monitor()
+                .register();
+
+        verify(ctx).route(anyString(), any(), any());
+        assertTrue(registration instanceof AutoCloseable);
+    }
+
+    @Test
     public void cascadeMockSegmentFulfillsOnDispatch() {
         mockContext();
         RouteDsl.on(ctx)

@@ -71,24 +71,25 @@ import java.util.Objects;
  * <p>示例：
  * <pre>{@code
  * // MONITOR（fail-open，绝不影响请求）
- * AutoCloseable m = RouteDsl.on(context)
- *     .api("/api/users/**").monitor().expectStatus(200).expectJsonPath("$.code", 0).register();
+ * List<AutoCloseable> registrations = new ArrayList<>();
+ * registrations.add(RouteDsl.on(context)
+ *     .api("/api/users/**").monitor().expectStatus(200).expectJsonPath("$.code", 0).register());
  *
  * // MOCK 静态伪造 + 匹配条件
- * AutoCloseable mock = RouteDsl.on(context)
+ * registrations.add(RouteDsl.on(context)
  *     .api("/api/login").onlyApi().matchMethod("POST")
- *     .mock().status(200).body("{\"token\":\"t\"}").contentType("application/json").register();
+ *     .mock().status(200).body("{\"token\":\"t\"}").contentType("application/json").register());
  *
- * // MODIFY_REQUEST
- * RouteDsl.on(context)
- *     .api("/api/user").modifyRequest().setRequestHeader("X-Env", "mock").register();
+ * // 场景内持续生效，到 BrowserContext 关闭时自动清理
+ * registrations.add(RouteDsl.on(context)
+ *     .api("/api/user").modifyRequest().setRequestHeader("X-Env", "mock").register());
  *
  * // DELAY（IO 线程延迟放行，事件线程不阻塞）
- * RouteDsl.on(context)
- *     .api("/api/pay/**").delay(3000).register();
+ * registrations.add(RouteDsl.on(context)
+ *     .api("/api/pay/**").delay(3).done().start());
  *
- * // 精确注销
- * m.close();
+ * // 场景 teardown 中关闭所有显式持有的句柄；Context 关闭时也会自动清理绑定。
+ * for (AutoCloseable registration : registrations) registration.close();
  * }</pre>
  *
  * <p><b>scenario 级语义（每 case 重建 Context）</b>：web 层在每个 scenario 的 {@code testFinished} 对 Context 调
@@ -981,6 +982,7 @@ public final class RouteDsl {
             pending.add(b.build());
             return RouteDsl.this.register();
         }
+
     }
 
     /** MOCK 配置。 */

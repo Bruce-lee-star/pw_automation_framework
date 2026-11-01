@@ -2,7 +2,7 @@
 
 **评审约束**：只读源码的控制流、并发原语与资源生命周期。**不参考**历史评审文档、`MEMORY.md`、`.workbuddy` 记忆，**不把代码注释中的"已修复/已加固/已评审"作为结论依据**（注释仅用于定位意图，结论一律由代码路径自行推导）。
 
-**覆盖范围**：`pw-core` / `pw-web-ui` / `pw-route` / `pw-reports-v2` / `pw-codegen` 主源码，重点为生命周期、并发、证据链、报告落盘四条主线。
+**覆盖范围**：`pw-core` / `pw-web-ui` / `pw-route` / `pw-reports-v2` / `pw-codegen-v3` 主源码，重点为生命周期、并发、证据链、报告落盘四条主线。
 
 **规模基线**：主源码 423 文件；热点文件 `RouteDsl` 1342、`ConfigRegistry` 1210、`ApiSpec` 1209、`WebFrameworkConfig` 1191、`PageElement` 1162、`RoleElementPageGenerator` 1109、`RoleElementPicker` 1105、`BasePage` 1020。
 

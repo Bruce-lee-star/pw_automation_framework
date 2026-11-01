@@ -20,7 +20,7 @@ class ReportViewEnvironmentTest {
 
     private static final String[] TOUCHED = {
             "pw.report.target", "base.url", "maven.version", "maven.build.version",
-            "playwright.version", "pw.report.browser.driver"};
+            "playwright.version", "pw.report.browser.driver", "pw.report.browsers"};
 
     private final Map<String, String> backup = new HashMap<>();
 
@@ -65,6 +65,16 @@ class ReportViewEnvironmentTest {
         assertThat(rows).containsEntry("Build tool", "Maven 3.9.9")
                 .containsEntry("Browser driver", "Playwright 1.62.0")
                 .containsEntry("Target", "https://sit.example");
+    }
+
+    @Test
+    @DisplayName("浏览器分布从统一配置读取并解析")
+    void browsersReadFromUnifiedConfig() {
+        set("pw.report.browsers", "chromium:128,firefox:130");
+
+        assertThat(ReportView.browsers())
+                .extracting(browser -> browser.get("name") + ":" + browser.get("version"))
+                .containsExactly("chromium:128", "firefox:130");
     }
 
     @Test

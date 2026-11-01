@@ -23,7 +23,7 @@ superseded_by: null
 ## 2. 在架构中的位置
 
 ```text
-        pw-codegen
+      pw-codegen-v3
              |
           pw-web-ui
           /      \
@@ -32,10 +32,10 @@ superseded_by: null
 
 | 项 | 内容 |
 |---|---|
-| 被谁依赖 | `pw-codegen`（依赖本模块的 `PageObject` 模型） |
+| 被谁依赖 | `pw-codegen-v3`（依赖本模块的 `PageObject` 模型） |
 | 依赖谁 | `pw-core`、`pw-reports-v2` |
 | 包名 | `com.hsbc.cmb.hk.dbb.automation.framework.web` |
-| 分层约束 | `CodegenDecouplingArchTest` 保证本模块对 `pw-codegen` **零编译依赖**（经 `RoleCodegenBridge` SPI 解耦） |
+| 分层约束 | `CodegenDecouplingArchTest` 保证本模块对 `pw-codegen-v3` **零编译依赖**（经 `RoleCodegenBridge` SPI 解耦） |
 
 ### 主要子包
 
@@ -132,14 +132,15 @@ Web 域全部键为 `ConfigRegistry.WEB_*`（约 110 项），由 `WebFrameworkC
 | `framework.playwright.concurrent.parallelism` | `4` | 并行度 |
 | `framework.screenshot.strategy` | `AFTER_EACH_STEP` | 截图时机策略 |
 | `framework.output.directory` | `target/site/serenity` | 报告输出目录 |
-| `framework.verbose.logging` | `false` | 详细日志开关 |
+| `logging.root.level` | `INFO` | 日志级别；DEBUG/TRACE 控制详细诊断日志 |
+| `framework.recording.enabled` | `true` | 是否将浏览器动作写入测试报告（独立于日志级别） |
 
 > 页面事件订阅默认取向：交互/生命周期类（`page` / `load` / `frameNavigated` / `popup`）为 `true`；诊断类（`console` / `pageError` / `requestFailed` / `crash`）为 `false`。
 
 ## 7. 边界与非目标
 
 - **不负责**网络拦截——`monitor` / `mock` / `modify` / `delay` 在 `pw-route`；本模块只提供 `ApiCaptureContext` 桥接点。
-- **不负责**代码生成——`pw-codegen` 通过 `RoleCodegenBridge` SPI 与本模块解耦，本模块对其零编译依赖。
+- **不负责**代码生成——`pw-codegen-v3` 通过 `RoleCodegenBridge` SPI 与本模块解耦，本模块对其零编译依赖。
 - **不负责**报告渲染——只上报事件，渲染在 `pw-reports-v2`。
 - **不管理**用例业务逻辑——Gherkin 步骤在 `test-automation` 仓库。
 

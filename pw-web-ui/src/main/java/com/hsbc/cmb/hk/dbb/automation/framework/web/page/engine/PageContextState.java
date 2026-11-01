@@ -2,7 +2,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightRuntime;
 
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
@@ -211,7 +210,7 @@ final class PageContextState {
         try {
             return p.isClosed();
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "page.isClosed() threw exception, treating as closed: {}", e.getMessage());
+            logger.warn("page.isClosed() threw exception, treating as closed: {}", e.getMessage());
             return true;
         }
     }
@@ -374,7 +373,7 @@ final class PageContextState {
         try {
             owner.page.bringToFront();
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "bringToFront() failed: {}", e.getMessage());
+            logger.warn("bringToFront() failed: {}", e.getMessage());
         }
     }
 
@@ -383,8 +382,7 @@ final class PageContextState {
         for (int i = startFrom; i >= 0; i--) {
             try {
                 if (!pages.get(i).isClosed()) {
-                    VerboseLogging.logWarnIfVerbose(logger,
-                            "Latest window was closed, falling back to window at index {}", i);
+                    logger.warn("Latest window was closed, falling back to window at index {}", i);
                     return pages.get(i);
                 }
             } catch (Exception e) {

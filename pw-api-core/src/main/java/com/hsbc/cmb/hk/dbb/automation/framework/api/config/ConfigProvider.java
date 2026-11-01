@@ -3,7 +3,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.api.config;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.ApiLogSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.Constants;
-import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.EnvironmentUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
@@ -180,7 +179,7 @@ public class ConfigProvider {
      * 并行 scenario 下线程 A 设置的环境会被线程 B 读到，造成配置串扰。
      *
      * @param entity      Entity to load configuration for; may be null or empty-named
-     * @param envOverride 环境覆盖值；null/空表示回退到 {@code EnvironmentUtils} 解析出的环境
+     * @param envOverride 环境覆盖值；null/空表示回退到统一配置解析出的环境
      * @return merged configuration
      */
     //  CT2-13：原为 {@code static synchronized} —— 整个「读配置 + 磁盘解析 + 合并」跑在
@@ -334,15 +333,14 @@ public class ConfigProvider {
      * 合并环境专属配置。
      *
      * @param baseCombinedConfig 基础配置（default + entity）
-     * @param envOverride        显式环境覆盖值；null/空时回退到 EnvironmentUtils 解析结果
+     * @param envOverride        显式环境覆盖值；null/空时回退到统一配置解析结果
      * @return 合并后的配置
      */
     private static Config mergeEnvConfig(Config baseCombinedConfig, String envOverride) {
-        // Use EnvironmentUtils (replacement for deprecated SystemEnvironmentVariables) to get environment configuration
         //  优先采用显式传入的 env，避免依赖 JVM 全局 System property
         String activeEnv = (envOverride != null && !envOverride.trim().isEmpty())
                 ? envOverride.trim()
-                : EnvironmentUtils.currentEnvironment().getProperty(Constants.ENV);
+                : ConfigReader.getProperty(Constants.ENV);
         LOGGER.info("Active environment: {}", activeEnv);
 
         // If no environment specified, return base config

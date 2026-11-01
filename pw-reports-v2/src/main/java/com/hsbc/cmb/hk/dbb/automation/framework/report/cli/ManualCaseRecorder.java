@@ -5,6 +5,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestStep;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.UserStory;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.OutcomeIdFactory;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.AggregateBuilder;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.CsvWriter;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.HtmlRenderer;
@@ -120,7 +121,7 @@ public final class ManualCaseRecorder {
                 System.err.println("missing: --feature --scenario --result PASS|FAIL (or use --append <outcomeId>)");
                 System.exit(2);
             }
-            String outcomeId = "manual-" + slug(feature) + "-" + slug(scenario);
+            String outcomeId = OutcomeIdFactory.timestampedId(feature + ":" + scenario);
             TestResult tr = "PASS".equalsIgnoreCase(result) ? TestResult.SUCCESS : TestResult.FAILURE;
             ZonedDateTime now = ZonedDateTime.now();
             outcome = new TestOutcome();
@@ -185,12 +186,6 @@ public final class ManualCaseRecorder {
         StaticAssets.copyAssets(outputDir);
 
         System.out.println("OK: " + outcome.getOutcomeId() + " (" + screenshots.size() + " screenshots)");
-    }
-
-    private static String slug(String s) {
-        return s.toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("^-|-$", "");
     }
 
     private ManualCaseRecorder() {

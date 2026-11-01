@@ -59,7 +59,7 @@ class CucumberMappingTest {
         @Test
         void baseIdFormat() {
             String id = OutcomeIdFactory.baseId("file:///features/login.feature", 12, "User logs in with valid creds");
-            assertThat(id).isEqualTo("login-12-user-logs-in-with-valid-creds");
+            assertThat(id).matches("\\d{8}-\\d{6}-[0-9a-f]{64}");
         }
 
         @Test

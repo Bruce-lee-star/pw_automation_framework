@@ -4,8 +4,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -16,6 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 泄漏到同 JVM 其它测试类。
  */
 class ConsoleCaptureTest {
+
+    @org.junit.jupiter.api.io.TempDir
+    Path tempDir;
 
     @AfterEach
     void tearDown() {
@@ -73,5 +80,49 @@ class ConsoleCaptureTest {
             ConsoleCapture.pop();
         }
         // 到这里没抛即通过
+    }
+
+    @Test
+    @DisplayName("UTF-8 多字节字符跨多次 write 时仍按完整行捕获")
+    void capturesUtf8CharactersSplitAcrossWrites() throws Exception {
+        assertThat(ConsoleCapture.install()).isTrue();
+        List<String> out = new CopyOnWriteArrayList<>();
+        ConsoleCapture.push((isError, line) -> out.add(line));
+        try {
+            byte[] line = "账户处理完成\n".getBytes(StandardCharsets.UTF_8);
+            int split = 2;
+            System.out.write(line, 0, split);
+            System.out.write(line, split, line.length - split);
+            System.out.flush();
+        } finally {
+            ConsoleCapture.pop();
+        }
+        assertThat(out).containsExactly("账户处理完成");
+    }
+
+    @Test
+    @DisplayName("UTF-8 捕获不依赖子进程的 JVM 默认字符集")
+    void captureUsesUtf8WhenJvmDefaultCharsetDiffers() throws Exception {
+        Path resultFile = tempDir.resolve("captured.txt");
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        Path java = Path.of(System.getProperty("java.home"), "bin", windows ? "java.exe" : "java");
+        Process process = new ProcessBuilder(
+                java.toString(),
+                "-Dfile.encoding=ISO-8859-1",
+                "-cp", System.getProperty("java.class.path"),
+                ConsoleCaptureEncodingProbe.class.getName(),
+                resultFile.toString())
+                .redirectErrorStream(true)
+                .start();
+        boolean exited = process.waitFor(15, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+        }
+        byte[] output = process.getInputStream().readAllBytes();
+        assertThat(exited).as("encoding probe must exit; child output: %s",
+                new String(output, StandardCharsets.UTF_8)).isTrue();
+        assertThat(process.exitValue()).as("child output: %s",
+                new String(output, StandardCharsets.UTF_8)).isZero();
+        assertThat(Files.readString(resultFile, StandardCharsets.UTF_8)).isEqualTo("账户处理完成");
     }
 }

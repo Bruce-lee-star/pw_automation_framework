@@ -94,7 +94,7 @@ public final class ScenarioDataNamespace {
         String key = domainKey();
         CLEANUPS.computeIfAbsent(key, k -> new CopyOnWriteArrayList<>()).add(cleanup);
         if (key.startsWith(THREAD_KEY_PREFIX) && LOGGER.isDebugEnabled()) {
-            //  注意：此处刻意用本类 LOGGER 而非 common.config.VerboseLogging ——
+            //  注意：此处刻意用本类 LOGGER ——
             //  后者会让 `core` 反向依赖 `common`，与既有 `common -> core` 边构成切片循环
             //  （ArchUnit `frameworkSlicesMustBeFreeOfCycles` 已实测报红）。
             LOGGER.debug("[ScenarioDataNamespace] cleanup registered without a bound scenario (domain={}) — "

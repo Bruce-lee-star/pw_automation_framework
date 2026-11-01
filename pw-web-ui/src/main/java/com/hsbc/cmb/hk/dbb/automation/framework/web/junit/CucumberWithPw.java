@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.junit;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.PwReportPlugin;
@@ -74,11 +75,11 @@ public final class CucumberWithPw extends Runner implements Filterable {
      * runner 类可能被同时实例化，而 System 属性是 JVM 全局共享状态。</p>
      */
     public static synchronized void ensureFrameworkDefaults() {
-        Set<String> plugins = new LinkedHashSet<>(split(System.getProperty(PLUGIN_PROPERTY)));
+        Set<String> plugins = new LinkedHashSet<>(split(ConfigReader.getProperty(PLUGIN_PROPERTY)));
         if (plugins.addAll(FRAMEWORK_PLUGINS)) {
             System.setProperty(PLUGIN_PROPERTY, String.join(",", plugins));
         }
-        String factory = System.getProperty(OBJECT_FACTORY_PROPERTY);
+        String factory = ConfigReader.getProperty(OBJECT_FACTORY_PROPERTY);
         if (factory == null || factory.isBlank()) {
             System.setProperty(OBJECT_FACTORY_PROPERTY, FRAMEWORK_OBJECT_FACTORY);
         }
@@ -87,7 +88,7 @@ public final class CucumberWithPw extends Runner implements Filterable {
         //  仅当业务未显式用 cucumber.options 指定 --features 时才注入，尊重其显式配置。
         String featuresRoot = ConfigReader.resolve(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT.key(), null);
         if (featuresRoot != null && !featuresRoot.isBlank()) {
-            String cucumberOpts = System.getProperty("cucumber.options");
+            String cucumberOpts = ConfigReader.getProperty("cucumber.options");
             if (cucumberOpts == null || !cucumberOpts.contains("--features")) {
                 String injected = ((cucumberOpts == null || cucumberOpts.isBlank()) ? "" : cucumberOpts + " ")
                         + "--features " + featuresRoot.trim();

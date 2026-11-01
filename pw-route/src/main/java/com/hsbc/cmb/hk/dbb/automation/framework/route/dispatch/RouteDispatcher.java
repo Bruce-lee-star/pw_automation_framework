@@ -271,7 +271,7 @@ public final class RouteDispatcher {
             detail = rule;
         }
         com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry.record(
-                spec.capability().name(), request == null ? null : request.url(), detail);
+                spec.capability().name(), request == null ? null : request.url(), detail, request);
     }
 
     /**
@@ -299,7 +299,8 @@ public final class RouteDispatcher {
                                     "applied   : " + actionLine,
                                     "result    : " + result,
                                     trace == null ? null : trace.elapsedLine(),
-                                    trace == null ? null : trace.delayLine()));
+                                    trace == null ? null : trace.delayLine()),
+                    request);
         } catch (Throwable t) {
             LOGGER.debug("[Route] outcome evidence skipped (non-fatal): {}", t.toString());
         }

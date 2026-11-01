@@ -45,7 +45,7 @@ superseded_by: null
 | `pw-web-ui` | 见根 README 模块表 |
 | `pw-api-core` | 见根 README 模块表 |
 | `pw-route` | 见根 README 模块表 |
-| `pw-codegen` | 见根 README 模块表 |
+| `pw-codegen-v3` | [pw-codegen-v3/README.md](../pw-codegen-v3/README.md)（唯一受支持的 codegen） |
 | `pw-reports-v2` | [pw-reports-v2/README.md](../pw-reports-v2/README.md) |
 
 ## 架构与技术方案

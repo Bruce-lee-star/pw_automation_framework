@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.exec;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +47,10 @@ public final class RouteDelayScheduler {
 
     /** 累计被拒绝（丢弃）的调度任务数：> 0 即说明调度池曾饱和 —— 延迟/轮询出现"少跑几次"的根因。 */
     private static final AtomicLong REJECTED = new AtomicLong(0);
+    private static final AtomicLong STARTED = new AtomicLong(0);
+    private static final AtomicLong TOTAL_START_LATENESS_NANOS = new AtomicLong(0);
+    private static final AtomicLong MAX_START_LATENESS_NANOS = new AtomicLong(0);
+    private static final AtomicInteger OUTSTANDING = new AtomicInteger(0);
 
     /**
      * 软上限（P1-7 修复）：在途+排队任务超过此值时，{@link #delay} 在<b>准入阶段</b>即 fail-open 丢弃并计数。
@@ -54,8 +60,25 @@ public final class RouteDelayScheduler {
      * {@link #rejectedCount()} 恒为 0，"调度池饱和"这一诊断信号是<b>死信号</b>。故改为 admit 阶段软上限：
      * 积压超阈值即丢弃+计数，让饱和信号在真实过载时可触发，且对内存有界（不再无限堆积）。</p>
      */
-    private static final int DEFAULT_MAX_PENDING = 1024;
-    private static int maxPending = DEFAULT_MAX_PENDING;
+    private static final int DEFAULT_MAX_PENDING =
+            Integer.parseInt(ConfigRegistry.ROUTE_DELAY_MAX_PENDING.defaultValue());
+    private static volatile int maxPending = configuredMaxPending();
+
+    private static int configuredMaxPending() {
+        String raw = ConfigReader.getProperty(ConfigRegistry.ROUTE_DELAY_MAX_PENDING.key(),
+                ConfigRegistry.ROUTE_DELAY_MAX_PENDING.defaultValue());
+        try {
+            int value = Integer.parseInt(raw.trim());
+            if (value > 0) {
+                return value;
+            }
+        } catch (NumberFormatException ignored) {
+            // Report malformed values below, then use the registered safe default.
+        }
+        LOGGER.warn("[Route] invalid {} value '{}'; using registered default {}",
+                ConfigRegistry.ROUTE_DELAY_MAX_PENDING.key(), raw, DEFAULT_MAX_PENDING);
+        return DEFAULT_MAX_PENDING;
+    }
 
     /** 测试接缝：覆盖软上限（默认 {@link #DEFAULT_MAX_PENDING}）。同包测试用。 */
     static void setMaxPending(int n) {
@@ -94,26 +117,51 @@ public final class RouteDelayScheduler {
             return;
         }
         //  P1-7：无界队列下，executor 级 RejectedExecutionException 只在 shutdown 后触发 → rejectedCount()
-        //  在正常运营中恒为 0（死信号）。改为 admit 阶段软上限：积压（在途+排队）超 maxPending 即 fail-open
+        //  在正常运营中恒为 0（死信号）。改为 admit 阶段软上限：在途+排队超 maxPending 即 fail-open
         //  丢弃并计数 —— 真实饱和时信号可触发，且对内存有界（不再无限堆积）。被丢弃的延迟/轮询由 sweep 兜底，
         //  请求不悬挂。
-        if (SCHED.getQueue().size() >= maxPending) {
+        if (!reserveSlot()) {
             long rejected = REJECTED.incrementAndGet();
             if (rejected <= 8 || (rejected & (rejected - 1)) == 0) {
                 LOGGER.warn("[Route] delay/poll task rejected #{} (scheduler backlog {} >= maxPending={})"
-                        + " -- fail-open, task dropped", rejected, SCHED.getQueue().size(), maxPending);
+                        + " -- fail-open, task dropped", rejected, OUTSTANDING.get(), maxPending);
             }
             return;
         }
         try {
-            SCHED.schedule(task, Math.max(0L, millis), TimeUnit.MILLISECONDS);
+            long delayNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(0L, millis));
+            long deadlineNanos = System.nanoTime() + delayNanos;
+            SCHED.schedule(() -> {
+                long latenessNanos = Math.max(0L, System.nanoTime() - deadlineNanos);
+                TOTAL_START_LATENESS_NANOS.addAndGet(latenessNanos);
+                MAX_START_LATENESS_NANOS.accumulateAndGet(latenessNanos, Math::max);
+                STARTED.incrementAndGet();
+                try {
+                    task.run();
+                } finally {
+                    OUTSTANDING.decrementAndGet();
+                }
+            }, Math.max(0L, millis), TimeUnit.MILLISECONDS);
         } catch (RejectedExecutionException shuttingDown) {
+            OUTSTANDING.decrementAndGet();
             // shutdown 期的拒绝（常态下不会到这；软上限已先拦截）。fail-open：不把异常抛回事件线程；
             // 延迟终结的兜底由 sweep 负责。每条都计数（供诊断/断言），但只在前若干次打日志，避免刷爆。
             long rejected = REJECTED.incrementAndGet();
             if (rejected <= 8 || (rejected & (rejected - 1)) == 0) {
                 LOGGER.warn("[Route] delay/poll task rejected #{} (scheduler shutting down)"
                         + " -- fail-open, task dropped", rejected);
+            }
+        }
+    }
+
+    private static boolean reserveSlot() {
+        while (true) {
+            int current = OUTSTANDING.get();
+            if (current >= maxPending) {
+                return false;
+            }
+            if (OUTSTANDING.compareAndSet(current, current + 1)) {
+                return true;
             }
         }
     }
@@ -136,6 +184,32 @@ public final class RouteDelayScheduler {
      * {@code maxPending} 软上限、开始丢任务。O(1) 读取，可在监控/探针里周期采样。</p>
      */
     public static int backlog() {
-        return SCHED.getQueue().size();
+        return OUTSTANDING.get();
+    }
+
+    /** 当前配置的准入上限（在途+排队任务数）。 */
+    public static int maxPending() {
+        return maxPending;
+    }
+
+    /** 已开始执行的延迟任务数（进程级）。 */
+    public static long startedCount() {
+        return STARTED.get();
+    }
+
+    /** 累计调度启动迟延（纳秒；只统计超出请求延迟的部分）。 */
+    public static long totalStartLatenessNanos() {
+        return TOTAL_START_LATENESS_NANOS.get();
+    }
+
+    /** 最大调度启动迟延（纳秒；只统计超出请求延迟的部分）。 */
+    public static long maxStartLatenessNanos() {
+        return MAX_START_LATENESS_NANOS.get();
+    }
+
+    /** 平均调度启动迟延（纳秒）；尚无任务执行时返回 0。 */
+    public static long averageStartLatenessNanos() {
+        long started = STARTED.get();
+        return started == 0 ? 0 : TOTAL_START_LATENESS_NANOS.get() / started;
     }
 }

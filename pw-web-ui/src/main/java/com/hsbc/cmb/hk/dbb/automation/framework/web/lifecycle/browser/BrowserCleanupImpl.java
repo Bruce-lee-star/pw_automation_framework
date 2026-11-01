@@ -11,7 +11,6 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.*;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
@@ -87,7 +86,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
                         + "teardown steps (route drain / AsyncPool / ThreadLocal) still run", null);
             }
         };
-        VerboseLogging.logInfoIfVerbose(logger, "Cleaning up all Playwright resources...");
+        logger.debug("Cleaning up all Playwright resources...");
 
         // 关闭当前线程的页面和上下文
         PlaywrightRuntime.instance().pageRegistry.closePage();
@@ -177,7 +176,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
                         logger.warn("[cleanupAll] Browser.close() took {}ms (slow close — this is what can push JVM exit past "
                                 + "surefire's 30s grace and get the fork hard-killed)", closeMs);
                     }
-                    VerboseLogging.logInfoIfVerbose(logger, "Browser instance closed in {}ms", closeMs);
+                    logger.debug("Browser instance closed in {}ms", closeMs);
                 } catch (Exception e) {
                     logger.warn("Error closing browser instance during cleanupAll: {}", e.getMessage());
                 }
@@ -189,7 +188,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         PlaywrightRuntime.instance().state.allPlaywrights().forEach(playwright -> {
             try {
                 playwright.close();
-                VerboseLogging.logInfoIfVerbose(logger, "Playwright instance closed");
+                logger.debug("Playwright instance closed");
             } catch (Exception e) {
                 logger.warn("Error closing Playwright instance", e);
             }
@@ -220,7 +219,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
             logger.warn("[cleanupAll] cleanupAll took {}ms — JVM exit may exceed surefire's 30s grace "
                     + "(hard kill truncates the remaining shutdown tasks and can orphan browsers)", totalMs);
         }
-        VerboseLogging.logInfoIfVerbose(logger, "All Playwright resources cleaned up ({}ms)", totalMs);
+        logger.debug("All Playwright resources cleaned up ({}ms)", totalMs);
     }
 
     /**
@@ -396,8 +395,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
                 //  其浏览器子进程随 driver 被回收，不波及其他并行 worker，亦不留孤儿窗口。
                 forceReapThreadPlaywright(configId);
             }
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "[closeBrowserForCurrentThread] closed browser for key={}", key);
+            logger.debug("[closeBrowserForCurrentThread] closed browser for key={}", key);
             return 1;
         }
         return 0;
@@ -496,8 +494,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
             }
         }
         if (closed > 0) {
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "[closeOrphanContextsForCurrentThread] reaped {} leaked BrowserContext(s)", closed);
+            logger.debug("[closeOrphanContextsForCurrentThread] reaped {} leaked BrowserContext(s)", closed);
         }
         return closed;
     }

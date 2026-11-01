@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.DriverFailureSignal;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.binding.GenerationRegistry;
@@ -141,7 +140,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         // 之前无法被拦截，且因 Connection 为共享单连接，会以「此刻在等结果的任意调用线程」为宿主抛出
         // （实测：会话校验导航被炸 → 误判会话失效 → 删缓存 → 每轮全量重登）。
         // 响应侧观测改走 route 通道：recordObservation 持有 Request，轮询 existingResponse()（本地字段）。
-        VerboseLogging.logInfoIfVerbose(LOGGER, "[Route] runtime installed for context @{} (maxPending={})",
+        LOGGER.debug("[Route] runtime installed for context @{} (maxPending={})",
                 System.identityHashCode(context), config.maxPending());
         // 临时诊断看门狗（与 web HangWatchdog 同源，待去除）：按本 runtime 生命周期武装。
         // P1-5：改为 opt-in —— 默认不武装（不常驻诊断 daemon、不污染生产日志），
@@ -149,12 +148,10 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         this.hangWatchdog = new HangWatchdog("ctx@" + System.identityHashCode(context));
         if (Boolean.getBoolean("route.hang.watchdog.enabled")) {
             this.hangWatchdog.arm();
-            VerboseLogging.logInfoIfVerbose(LOGGER,
-                    "[Route] HangWatchdog armed (diag, opt-in) for context @{}",
+            LOGGER.debug("[Route] HangWatchdog armed (diag, opt-in) for context @{}",
                     System.identityHashCode(context));
         } else {
-            VerboseLogging.logInfoIfVerbose(LOGGER,
-                    "[Route] HangWatchdog not armed (opt-in disabled) for context @{}; "
+            LOGGER.debug("[Route] HangWatchdog not armed (opt-in disabled) for context @{}; "
                             + "set -Droute.hang.watchdog.enabled=true to enable",
                     System.identityHashCode(context));
         }
@@ -624,8 +621,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
             recordArmedDuration(pattern); // T1：定稿本次被清规则的 armed 时长
             retiredByPurpose.incrementAndGet(); // 退役观测：本次清掉的规则计入目的退役
         }
-        VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[Route] clearRules @{}: {} rule(s) cleared in memory (driver bindings kept; "
+        LOGGER.debug("[Route] clearRules @{}: {} rule(s) cleared in memory (driver bindings kept; "
                         + "flushed at teardown), runtime and context kept",
                 System.identityHashCode(context), size);
         return size;
@@ -646,8 +642,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         }
         int cleared = generations.snapshot().rules().size();
         clearGenerations();
-        VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[Route] detachRules @{}: {} rule(s) detached in memory; {} native binding(s) kept "
+        LOGGER.debug("[Route] detachRules @{}: {} rule(s) detached in memory; {} native binding(s) kept "
                         + "(zero protocol calls — hits fall back to pass-through)",
                 System.identityHashCode(context), cleared, binders.size());
         return cleared;
@@ -709,7 +704,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
             return;
         }
         drainMainThreadActions(); // 方案 B：收尾 seam —— 最后一批 DELAY 协议动作（resume/fulfill）先执行
-        VerboseLogging.logInfoIfVerbose(LOGGER, "[Route] closing runtime for context @{}",
+        LOGGER.debug("[Route] closing runtime for context @{}",
                 System.identityHashCode(context));
         sweeper.shutdownNow();
         claims.closeAll();
@@ -725,8 +720,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         }
         binders.clear();
         DriverFailureSignal.reset(context);   // B：消费即清零（本场景收尾已过，下一个场景重新开始）
-        VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown",
+        LOGGER.debug("[Route] route state: {} rule(s) retired by purpose, {} flushed at teardown",
                 retiredByPurpose.get(), flushed);
         // T1 度量基线：每用例（= 每 runtime 生命周期）汇总一行，报表可见、真跑归档。
         LOGGER.info("[Route] case metrics @{}: dispatches={}, hits={}, retiredByPurpose={}, "

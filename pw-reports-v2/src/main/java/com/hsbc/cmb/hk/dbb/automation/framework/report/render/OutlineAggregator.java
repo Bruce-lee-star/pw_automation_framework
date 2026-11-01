@@ -80,7 +80,7 @@ public final class OutlineAggregator {
     private static TestOutcome buildParent(String outlineKey, List<TestOutcome> rows) {
         TestOutcome first = rows.get(0);
         TestOutcome parent = new TestOutcome();
-        parent.setOutcomeId(OutcomeIdFactory.slug(outlineKey) + "-outline");
+        parent.setOutcomeId(OutcomeIdFactory.timestampedId(outlineKey));
         parent.setName(first.getName());
         parent.setUserStory(first.getUserStory());
         parent.setTags(first.getTags());

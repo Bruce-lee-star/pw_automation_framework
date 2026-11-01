@@ -2,7 +2,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.ScreenshotAnimations;
@@ -58,7 +57,7 @@ public class PlaywrightScreenshotManager {
             }
             return hexString.toString();
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to generate hash, using fallback method", e);
+            logger.warn("Failed to generate hash, using fallback method", e);
             return Long.toHexString(System.currentTimeMillis()) +
                     Long.toHexString(System.nanoTime()) +
                     Long.toHexString(Thread.currentThread().threadId());
@@ -107,8 +106,7 @@ public class PlaywrightScreenshotManager {
                             + "document.documentElement.offsetHeight) | 0");
                     int pageHeight = (rawHeight instanceof Number) ? ((Number) rawHeight).intValue() : 0;
                     if (pageHeight > maxHeight) {
-                        VerboseLogging.logWarnIfVerbose(logger,
-                                "Full-page scroll height {} exceeds cap {}, clipping to cap to avoid infinite scroll",
+                        logger.warn("Full-page scroll height {} exceeds cap {}, clipping to cap to avoid infinite scroll",
                                 pageHeight, maxHeight);
                         // 注入样式把页面高度锁死在上限内，并禁用溢出滚动。
                         page.addStyleTag(new Page.AddStyleTagOptions()
@@ -119,12 +117,11 @@ public class PlaywrightScreenshotManager {
                                         + "}"));
                     }
                 } catch (Exception e) {
-                    VerboseLogging.logWarnIfVerbose(logger,
-                            "Failed to apply full-page height cap: {}", e.getMessage());
+                    logger.warn("Failed to apply full-page height cap: {}", e.getMessage());
                 }
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Screenshot stabilization failed: {}", e.getMessage());
+            logger.warn("Screenshot stabilization failed: {}", e.getMessage());
         }
     }
 
@@ -155,7 +152,7 @@ public class PlaywrightScreenshotManager {
                     + "  } catch (e) {}"
                     + "}");
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to bypass fonts ready: {}", e.getMessage());
+            logger.warn("Failed to bypass fonts ready: {}", e.getMessage());
         }
     }
 
@@ -194,8 +191,7 @@ public class PlaywrightScreenshotManager {
                             + " overflow: visible !important;"
                             + "}"));
         } catch (Exception ignore) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Failed to restore page height style after screenshot: {}", ignore.getMessage());
+            logger.debug("Failed to restore page height style after screenshot: {}", ignore.getMessage());
         }
     }
 
@@ -228,14 +224,13 @@ public class PlaywrightScreenshotManager {
         try {
             Files.createDirectories(screenshotDir);
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to create screenshot dir {}: {}",
+            logger.warn("Failed to create screenshot dir {}: {}",
                     screenshotDir, e.getMessage());
             return null;
         }
         boolean fullPage = PlaywrightManager.config().isFullPageScreenshot();
         long timeoutMs = (long) PlaywrightManager.config().getScreenshotTimeout();
-        VerboseLogging.logDebugIfVerbose(logger,
-                "Screenshot request: title={}, fullPage={}, timeout={}ms", title, fullPage, timeoutMs);
+        logger.debug("Screenshot request: title={}, fullPage={}, timeout={}ms", title, fullPage, timeoutMs);
         try {
             return captureScreenshot(page, title, screenshotDir, ".png", null, null, fullPage, timeoutMs);
         } finally {
@@ -267,7 +262,7 @@ public class PlaywrightScreenshotManager {
                 return target;
             }
         } catch (Throwable t) {
-            VerboseLogging.logDebugIfVerbose(logger, "screenshotTarget unavailable, fallback: {}", t.toString());
+            logger.debug("screenshotTarget unavailable, fallback: {}", t.toString());
         }
         return Paths.get("target/site/serenity");
     }
@@ -301,7 +296,7 @@ public class PlaywrightScreenshotManager {
                 Files.deleteIfExists(screenshotPath);
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to delete existing screenshot: {}", e.getMessage());
+            logger.warn("Failed to delete existing screenshot: {}", e.getMessage());
         }
 
         // 截图前稳定化（仅 fullPage 时滚动 + 高度上限保护；非全页不滚动）
@@ -315,26 +310,22 @@ public class PlaywrightScreenshotManager {
             page.waitForLoadState(LoadState.DOMCONTENTLOADED,
                     new Page.WaitForLoadStateOptions().setTimeout(timeoutMs));
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Screenshot wait timeout ({}ms) - continuing: {}", timeoutMs, e.getMessage());
+            logger.debug("Screenshot wait timeout ({}ms) - continuing: {}", timeoutMs, e.getMessage());
         }
 
         // 主路径：按配置尝试全页或视口截图
         try {
             doScreenshot(page, screenshotPath, fullPage, timeoutMs, type, quality);
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Screenshot saved (fullPage={}, type={}): {}", fullPage, type, screenshotPath);
+            logger.debug("Screenshot saved (fullPage={}, type={}): {}", fullPage, type, screenshotPath);
             return screenshotPath.toString();
         } catch (Exception primaryFail) {
             if (!fullPage) {
                 // 视口截图失败：用更短超时再尝试一次，避免页面抖动/动画卡住。
-                VerboseLogging.logWarnIfVerbose(logger,
-                        "Viewport screenshot failed, retrying with short timeout: {}", primaryFail.getMessage());
+                logger.warn("Viewport screenshot failed, retrying with short timeout: {}", primaryFail.getMessage());
                 try {
                     long shortTimeout = Math.max(1000L, timeoutMs / 2);
                     doScreenshot(page, screenshotPath, false, shortTimeout, type, quality);
-                    VerboseLogging.logDebugIfVerbose(logger,
-                            "Short-timeout viewport screenshot saved: {}", screenshotPath);
+                    logger.debug("Short-timeout viewport screenshot saved: {}", screenshotPath);
                     return screenshotPath.toString();
                 } catch (Exception e) {
                     logger.error("All screenshot attempts failed for title '{}'", title, e);
@@ -345,14 +336,12 @@ public class PlaywrightScreenshotManager {
             // fullPage=true 但主路径失败——不直接降级为视口（否则用户以为全页生效实则只截视口）。
             // 常见原因：注入的高度裁切样式（max-height/overflow:hidden）干扰了 Playwright 全页拼图，
             // 或页面半加载/懒加载导致超时。先还原裁切样式、再重试一次全页。
-            VerboseLogging.logWarnIfVerbose(logger,
-                    "Full-page screenshot (attempt 1) failed: {}. Retrying full-page without height cap...",
+            logger.warn("Full-page screenshot (attempt 1) failed: {}. Retrying full-page without height cap...",
                     primaryFail.getMessage());
             try {
                 restorePageHeightStyle(page);
                 doScreenshot(page, screenshotPath, true, timeoutMs, type, quality);
-                VerboseLogging.logDebugIfVerbose(logger,
-                        "Full-page screenshot saved on retry (fullPage=true): {}", screenshotPath);
+                logger.debug("Full-page screenshot saved on retry (fullPage=true): {}", screenshotPath);
                 return screenshotPath.toString();
             } catch (Exception retryFail) {
                 // 全页重试仍失败：降级为视口，但明确以 ERROR 记录，提醒 fullPage 未生效。
@@ -360,18 +349,15 @@ public class PlaywrightScreenshotManager {
                         + "Primary cause: {}, retry cause: {}", primaryFail.getMessage(), retryFail.getMessage());
                 try {
                     doScreenshot(page, screenshotPath, false, timeoutMs, type, quality);
-                    VerboseLogging.logDebugIfVerbose(logger,
-                            "Viewport fallback screenshot saved: {}", screenshotPath);
+                    logger.debug("Viewport fallback screenshot saved: {}", screenshotPath);
                     return screenshotPath.toString();
                 } catch (Exception viewportFail) {
                     // 视口兜底：更短超时再试一次。
-                    VerboseLogging.logWarnIfVerbose(logger,
-                            "Viewport fallback failed, retrying with short timeout: {}", viewportFail.getMessage());
+                    logger.warn("Viewport fallback failed, retrying with short timeout: {}", viewportFail.getMessage());
                     try {
                         long shortTimeout = Math.max(1000L, timeoutMs / 2);
                         doScreenshot(page, screenshotPath, false, shortTimeout, type, quality);
-                        VerboseLogging.logDebugIfVerbose(logger,
-                                "Short-timeout viewport fallback screenshot saved: {}", screenshotPath);
+                        logger.debug("Short-timeout viewport fallback screenshot saved: {}", screenshotPath);
                         return screenshotPath.toString();
                     } catch (Exception e) {
                         logger.error("All screenshot attempts failed for title '{}'", title, e);

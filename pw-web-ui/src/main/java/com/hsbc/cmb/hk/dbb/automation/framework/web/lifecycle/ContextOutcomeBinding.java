@@ -25,7 +25,7 @@ public final class ContextOutcomeBinding {
     }
 
     /**
-     * 绑定 context 到其所属用例 id（id 为 null / 空时忽略，回落既有最佳努力逻辑）。
+     * 绑定 context 到其所属用例 id（id 为 null / 空时忽略；无绑定时异步产物不得猜测归属）。
      *
      * @param context   浏览器上下文（非 null）
      * @param outcomeId 报告侧用例 id（{@link com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridge#currentOutcomeId()}）

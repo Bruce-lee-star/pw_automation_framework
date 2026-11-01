@@ -14,7 +14,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.BrowserException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
@@ -54,7 +53,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
             return;
         }
 
-        VerboseLogging.logInfoIfVerbose(logger, "🔄 Restarting browser for config: {}", oldConfigId);
+        logger.debug("🔄 Restarting browser for config: {}", oldConfigId);
 
         try {
             // 锁外关闭本线程的 Page/Context（避免持有 BROWSER_LOCK 时再进入细粒度锁导致顺序反转）
@@ -103,7 +102,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
                     if (browser != null && browser.isConnected()) {
                         try {
                             browser.close();
-                            VerboseLogging.logInfoIfVerbose(logger, "Browser closed for config: {}", entry.getKey());
+                            logger.debug("Browser closed for config: {}", entry.getKey());
                         } catch (Exception e) {
                             logger.warn("Error closing browser instance for config {}: {}", entry.getKey(), e.getMessage());
                         }
@@ -120,7 +119,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
                     if (playwright != null) {
                         try {
                             playwright.close();
-                            VerboseLogging.logInfoIfVerbose(logger, "Playwright instance closed for config: {}", entry.getKey());
+                            logger.debug("Playwright instance closed for config: {}", entry.getKey());
                         } catch (Exception e) {
                             logger.warn("Error closing Playwright instance for config {}: {}", entry.getKey(), e.getMessage());
                         }
@@ -137,13 +136,13 @@ public final class BrowserRestartImpl implements BrowserRestart {
                 //  修复 L1/H9：newConfigId 生成 + 初始化必须在 BROWSER_LOCK 内原子完成；
                 // 附加 nanoTime 后缀确保与旧 key 不碰撞（配置未变时 generateConfigId 可能复用旧值）。
                 String newConfigId = PlaywrightRuntime.instance().browserStartup.generateConfigId() + "_r" + System.nanoTime();
-                VerboseLogging.logInfoIfVerbose(logger, "Generating new configId: {} (old was: {})", newConfigId, oldConfigId);
+                logger.debug("Generating new configId: {} (old was: {})", newConfigId, oldConfigId);
 
                 PlaywrightRuntime.instance().browserStartup.initializePlaywright(newConfigId);
                 PlaywrightRuntime.instance().browserStartup.initializeBrowser(newConfigId);
                 TestContextHolder.get().set(PlaywrightManager.CURRENT_CONFIG_ID_KEY,newConfigId);
 
-                VerboseLogging.logInfoIfVerbose(logger, " Browser restarted successfully for config: {}", newConfigId);
+                logger.debug(" Browser restarted successfully for config: {}", newConfigId);
             });
         } catch (Exception e) {
             logger.error("Failed to restart browser for config: {}", oldConfigId, e);
@@ -184,8 +183,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
                     logger.debug("[BrowserRestart] close of disconnected browser skipped: {}", e.toString());
                 }
             }
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "Rebuilding disconnected browser for config: {}", configId);
+            logger.debug("Rebuilding disconnected browser for config: {}", configId);
             PlaywrightRuntime.instance().browserStartup.initializeBrowser(configId);
             // W-4：重建后恢复登录态/storageState——置位 customContextOptionsFlag，使后续 getContext() 经既有
             // configureCustomContextOptions 逻辑把本线程已保存的 storageState（per-thread TestContext 跨崩溃存活）
@@ -225,8 +223,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
                     logger.debug("[BrowserRestart] old browser close failed during rebuild: {}", e.toString());
                 }
             }
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "[browser-rebuild] Forcibly rebuilding this thread's browser for config: {}", configId);
+            logger.debug("[browser-rebuild] Forcibly rebuilding this thread's browser for config: {}", configId);
             PlaywrightRuntime.instance().browserStartup.initializeBrowser(configId);
             // W-4：同 rebuildBrowserIfDisconnected，重建后恢复登录态/storageState。
             restoreStorageStateFlag();
@@ -245,8 +242,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
             CustomOptionsManager custom = CustomOptionsManager.getInstance();
             if (custom.getStorageState() != null || custom.getStorageStatePath() != null) {
                 custom.enableCustomOptions();
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "[browser-rebuild] storageState flag restored after rebuild; recreated context will reapply login state");
+                logger.debug("[browser-rebuild] storageState flag restored after rebuild; recreated context will reapply login state");
             }
         } catch (Throwable ignore) {
             // 恢复标志为韧性增强，任何异常不应阻断重建流程

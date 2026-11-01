@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.logging.LogContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
@@ -95,7 +94,7 @@ public class PlaywrightListener implements
         //  与 javadoc 意图一致；per-scenario 的 initializeForScenario 仍留 onScenarioStarted。
         //  幂等（isInitialized 短路）；onScenarioStarted 的 beforeTest() 仍保留 !isInitialized 兜底重试。
         FrameworkCore.getInstance().initialize();
-        VerboseLogging.logInfoIfVerbose(logger, "Framework lifecycle: test run started");
+        logger.debug("Framework lifecycle: test run started");
     }
 
     /** 场景开始（对应 serenity testStarted）：建立 MDC、重置守卫、记录起点、桥接业务监听。 */
@@ -149,7 +148,7 @@ public class PlaywrightListener implements
             // 记录场景开始的面包屑（便于失败排障）
             recordTestData("scenarioStartTimestamp", Instant.now().toString());
 
-            VerboseLogging.logInfoIfVerbose(logger, "Scenario started: {}", uniqueName);
+            logger.debug("Scenario started: {}", uniqueName);
         } catch (Exception e) {
             logger.error("Error in onScenarioStarted for: {}", scenarioName, e);
         }
@@ -191,7 +190,7 @@ public class PlaywrightListener implements
             // 记录步骤开始的面包屑
             recordTestData("stepStartTimestamp", Instant.now().toString());
 
-            VerboseLogging.logInfoIfVerbose(logger, "Step started: {}", stepTitle);
+            logger.debug("Step started: {}", stepTitle);
         } catch (Exception e) {
             logger.error("Error in onStepStarted: {}", stepTitle, e);
         }
@@ -257,7 +256,7 @@ public class PlaywrightListener implements
             mergeAndAttachScreenshots(screenshots);
 
             recordTestData("stepFinishTimestamp", String.valueOf(System.currentTimeMillis()));
-            VerboseLogging.logInfoIfVerbose(logger, "Step finished: {} (success={})",
+            logger.debug("Step finished: {} (success={})",
                     stepTitle, isSuccess);
         } catch (Exception e) {
             logger.error("Error in onStepFinished: {}", stepTitle, e);
@@ -280,8 +279,7 @@ public class PlaywrightListener implements
             return;
         }
         if (!ListenerGuard.guards().isScenarioActive()) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Skipping onScenarioFinished - scenarioStarted was not called for: {}", scenarioName);
+            logger.debug("Skipping onScenarioFinished - scenarioStarted was not called for: {}", scenarioName);
             return;
         }
 
@@ -322,7 +320,7 @@ public class PlaywrightListener implements
             TestContextHolder.get().set(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY, Boolean.FALSE);
 
             recordTestData("scenarioFinishTimestamp", Instant.now().toString());
-            VerboseLogging.logInfoIfVerbose(logger, "Scenario finished: {} (result={}, durationMs={})",
+            logger.debug("Scenario finished: {} (result={}, durationMs={})",
                     scenarioName, frameworkResult, durationMs);
         } catch (Exception e) {
             logger.error("Error in onScenarioFinished for: {}", scenarioName, e);
@@ -363,7 +361,7 @@ public class PlaywrightListener implements
     @Override
     public void onTestRunFinished() {
         try {
-            VerboseLogging.logInfoIfVerbose(logger, "Framework lifecycle: test run finished - global cleanup");
+            logger.debug("Framework lifecycle: test run finished - global cleanup");
             //  全局清理：关闭所有 Playwright 实例 + 停止路由引擎（仅一次）
             if (!Boolean.TRUE.equals(TestContextHolder.get().get(TEARDOWN_COMPLETED_KEY))) {
                 TestContextHolder.get().set(TEARDOWN_COMPLETED_KEY, Boolean.TRUE);
@@ -550,8 +548,7 @@ public class PlaywrightListener implements
     }
 
     private void cleanupAfterAbnormalTermination(String scenarioName) {
-        VerboseLogging.logInfoIfVerbose(logger,
-                "Scenario aborted abnormally - cleaning up: {}", scenarioName);
+        logger.debug("Scenario aborted abnormally - cleaning up: {}", scenarioName);
         try {
             //  步骤级失败不拆资源（2026-10-16 修正），仅 testSkipped 等异常终止路径走此清理
             SessionManager.resetCurrentSession();

@@ -101,7 +101,7 @@ pw_automation_framework/
 
 ## 4. 模块文档最小信息集
 
-每个对外可用的 Maven 模块**必须**有 `README.md`（`pw-core` / `pw-web-ui` / `pw-api-core` / `pw-route` / `pw-codegen` / `pw-reports-v2`）。缺少即视为文档缺陷，CI 门禁可拦截。
+每个对外可用的 Maven 模块**必须**有 `README.md`（`pw-core` / `pw-web-ui` / `pw-api-core` / `pw-route` / `pw-codegen-v3` / `pw-reports-v2`）。缺少即视为文档缺陷，CI 门禁可拦截。
 
 模块 README 必须包含以下章节，顺序不可调换：
 

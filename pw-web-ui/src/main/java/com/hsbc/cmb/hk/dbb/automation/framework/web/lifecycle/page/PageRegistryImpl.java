@@ -9,7 +9,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.Playwrig
 
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.BrowserException;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 
 import com.microsoft.playwright.*;
 import org.slf4j.Logger;
@@ -113,7 +112,7 @@ public final class PageRegistryImpl implements PageRegistry {
                 page = CURRENT_PAGE_BY_THREAD.get();
             }
             if (page != null) {
-                VerboseLogging.logDebugIfVerbose(logger, "[PageRegistry] closePage: page=#{} (fromThread={})",
+                logger.debug("[PageRegistry] closePage: page=#{} (fromThread={})",
                         System.identityHashCode(page), page == CURRENT_PAGE_BY_THREAD.get());
                 try {
                     PlaywrightContextManager.closePage(page);

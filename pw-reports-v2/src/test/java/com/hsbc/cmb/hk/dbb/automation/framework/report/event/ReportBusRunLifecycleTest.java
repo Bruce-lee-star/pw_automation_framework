@@ -20,9 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 总线运行级生命周期（P1-5 / P1-9 回归门禁）。
  *
  * <ul>
- *   <li><b>P1-5</b>：{@link ReportBus#startRun()} 必须复位<b>跨线程可见</b>的活动用例指针
- *       （{@code activeOutcomeId} / {@code activeStep}）——否则上一轮收尾之后、本轮刚开始的
- *       跨线程事件（route 命中线程 / CloseGuard 收尾线程的 trace/video/证据）会挂到上一轮的 outcomeId 上。</li>
+ *   <li>用例归属只对绑定了 ThreadLocal 句柄的线程可见；其它线程不得读取最近活动用例。</li>
  *   <li><b>P1-9</b>：{@code startRun} 触发 {@code onRunStarted}，清掉 {@code LocalReportSink} 的
  *       {@code writtenIds}——否则同 JVM 第二轮 run 出现相同 outcomeId 时会被判"已写"而跳过 per-case
  *       JSON 真相源。</li>
@@ -47,13 +45,11 @@ class ReportBusRunLifecycleTest {
     }
 
     @Test
-    @DisplayName("P1-5：startRun 复位跨线程活动用例指针，防止上一轮残留挂到本轮")
-    void startRunResetsActiveOutcomeForOtherThreads() throws Exception {
-        //  主线 startCase 设定活动用例（同时写入 volatile activeOutcomeId 与 ThreadLocal）
+    @DisplayName("其他线程始终无法读取当前线程的活动用例归属")
+    void activeOutcomeIsNotExposedToOtherThreads() throws Exception {
         bus.startCase("prev-case", "f", "s", List.of());
-        //  另一线程（模拟 CloseGuard 收尾线程，无 ThreadLocal 关联）读到的活动用例应为 prev-case
-        assertThat(readActiveOutcomeOnForeignThread()).isEqualTo("prev-case");
-        //  新一轮开始：必须复位跨线程指针，否则上一轮收尾后的跨线程事件会挂到 prev-case
+        assertThat(bus.activeOutcomeId()).isEqualTo("prev-case");
+        assertThat(readActiveOutcomeOnForeignThread()).isNull();
         bus.startRun();
         assertThat(readActiveOutcomeOnForeignThread()).isNull();
     }

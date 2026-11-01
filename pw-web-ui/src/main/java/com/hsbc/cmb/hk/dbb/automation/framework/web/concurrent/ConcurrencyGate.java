@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ConcurrencyGateTimeoutException;
 import org.slf4j.Logger;
@@ -174,8 +175,8 @@ public final class ConcurrencyGate {
 
     /** 引擎级并行是否开启（Cucumber / JUnit5）；用于 {@code auto} 判定。 */
     private static boolean parallelExecutionEnabled() {
-        return truthy(System.getProperty("cucumber.execution.parallel.enabled"))
-                || truthy(System.getProperty("junit.jupiter.execution.parallel.enabled"));
+        return truthy(ConfigReader.getProperty("cucumber.execution.parallel.enabled"))
+                || truthy(ConfigReader.getProperty("junit.jupiter.execution.parallel.enabled"));
     }
 
     private static boolean truthy(String raw) {

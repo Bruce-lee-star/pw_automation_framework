@@ -1,7 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.config;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.annotations.AutoBrowser;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import org.slf4j.Logger;
@@ -63,62 +62,61 @@ public class AutoBrowserProcessor {
     public static void processAutoBrowserAnnotation() {
         // 避免在同一个 Scenario 中重复处理
         if (Boolean.TRUE.equals(processedForCurrentScenario.get())) {
-            VerboseLogging.logDebugIfVerbose(logger, "Already processed for current scenario, skipping");
+            logger.debug("Already processed for current scenario, skipping");
             return;
         }
 
-        VerboseLogging.logInfoIfVerbose(logger, "Processing @AutoBrowser annotation...");
+        logger.debug("Processing @AutoBrowser annotation...");
 
         try {
             // 1. 从堆栈跟踪找到 Glue 类
             Class<?> glueClass = findGlueClass();
 
             if (glueClass == null) {
-                VerboseLogging.logWarnIfVerbose(logger, "No class with @AutoBrowser found in call stack");
-                VerboseLogging.logDebugIfVerbose(logger, "Call stack trace for debugging:");
+                logger.warn("No class with @AutoBrowser found in call stack");
+                logger.debug("Call stack trace for debugging:");
                 StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
                 for (int i = 0; i < Math.min(15, stackTrace.length); i++) {
-                    VerboseLogging.logDebugIfVerbose(logger, "  [{}] {}", i, stackTrace[i].getClassName());
+                    logger.debug("  [{}] {}", i, stackTrace[i].getClassName());
                 }
                 return;
             }
 
-            VerboseLogging.logDebugIfVerbose(logger, "Found class '{}' with @AutoBrowser", glueClass.getName());
+            logger.debug("Found class '{}' with @AutoBrowser", glueClass.getName());
 
             // 2. 检查 @AutoBrowser 注解
             AutoBrowser autoBrowser = glueClass.getAnnotation(AutoBrowser.class);
 
             if (autoBrowser == null || !autoBrowser.enabled()) {
-                VerboseLogging.logWarnIfVerbose(logger, "@AutoBrowser annotation not enabled on class '{}'",
+                logger.warn("@AutoBrowser annotation not enabled on class '{}'",
                         glueClass.getSimpleName());
                 return;
             }
 
-            VerboseLogging.logDebugIfVerbose(logger, "@AutoBrowser annotation is enabled (verbose={})",
+            logger.debug("@AutoBrowser annotation is enabled (verbose={})",
                     autoBrowser.verbose());
 
             // 3. 从原生生命周期上下文读取当前 scenario 标签
             List<String> tags = TestContextHolder.get().get(CURRENT_SCENARIO_TAGS);
 
             if (tags == null || tags.isEmpty()) {
-                VerboseLogging.logDebugIfVerbose(logger,
-                        "No tags found in lifecycle context - this is normal during early test initialization");
+                logger.debug("No tags found in lifecycle context - this is normal during early test initialization");
                 return;
             }
 
-            VerboseLogging.logDebugIfVerbose(logger, "Found {} tags: {}", tags.size(), tags);
+            logger.debug("Found {} tags: {}", tags.size(), tags);
 
             // 4. 设置 Scenario 标签
             BrowserOverrideManager.setScenarioTags(tags.toArray(new String[0]));
 
             String effectiveBrowser = BrowserOverrideManager.getEffectiveBrowserType();
-            VerboseLogging.logInfoIfVerbose(logger, "Effective browser type set to: {}", effectiveBrowser);
+            logger.debug("Effective browser type set to: {}", effectiveBrowser);
 
             // 标记为已处理
             processedForCurrentScenario.set(true);
 
         } catch (Exception e) {
-            VerboseLogging.logErrorIfVerbose(logger, "ERROR processing @AutoBrowser annotation: {}", e.getMessage(), e);
+            logger.error("ERROR processing @AutoBrowser annotation: {}", e.getMessage(), e);
         }
     }
 
@@ -146,13 +144,13 @@ public class AutoBrowserProcessor {
     private static Class<?> findGlueClass() {
         StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
 
-        VerboseLogging.logDebugIfVerbose(logger, "Scanning {} stack trace elements for @AutoBrowser annotation", stackTrace.length);
+        logger.debug("Scanning {} stack trace elements for @AutoBrowser annotation", stackTrace.length);
 
         for (int i = 0; i < stackTrace.length; i++) {
             StackTraceElement element = stackTrace[i];
             String className = element.getClassName();
 
-            VerboseLogging.logTraceIfVerbose(logger, "[{}] Checking class: {}", i, className);
+            logger.trace("[{}] Checking class: {}", i, className);
 
             // 跳过框架自身的类
             if (className.startsWith("com.hsbc.cmb.hk.dbb.automation.framework.")) {
@@ -173,7 +171,7 @@ public class AutoBrowserProcessor {
                 // 只要类有 @AutoBrowser 注解就处理
                 if (clazz.isAnnotationPresent(AutoBrowser.class)) {
                     AutoBrowser autoBrowser = clazz.getAnnotation(AutoBrowser.class);
-                    VerboseLogging.logDebugIfVerbose(logger, "[{}] Found @AutoBrowser annotation on class: {} (enabled={})",
+                    logger.debug("[{}] Found @AutoBrowser annotation on class: {} (enabled={})",
                             i, className, autoBrowser.enabled());
 
                     if (autoBrowser.enabled()) {
@@ -181,11 +179,11 @@ public class AutoBrowserProcessor {
                     }
                 }
             } catch (ClassNotFoundException e) {
-                VerboseLogging.logTraceIfVerbose(logger, "[{}] Could not load class: {}", i, className);
+                logger.trace("[{}] Could not load class: {}", i, className);
             } catch (NoClassDefFoundError e) {
-                VerboseLogging.logTraceIfVerbose(logger, "[{}] Could not load class (dependency issue): {}", i, className);
+                logger.trace("[{}] Could not load class (dependency issue): {}", i, className);
             } catch (Throwable e) {
-                VerboseLogging.logTraceIfVerbose(logger, "[{}] Error loading class {}: {}", i, className, e.getMessage());
+                logger.trace("[{}] Error loading class {}: {}", i, className, e.getMessage());
             }
         }
 

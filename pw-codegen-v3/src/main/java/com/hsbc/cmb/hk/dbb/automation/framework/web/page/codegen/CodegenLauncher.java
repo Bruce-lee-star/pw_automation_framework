@@ -84,7 +84,7 @@ public final class CodegenLauncher {
     /**
      * v2.17 代码级日志死开关兜底：不依赖 classpath 实际加载的 logback 配置来源
      * （外部工程自带 logback-test.xml / 旧 pw-core jar 会覆盖配置级门），
-     * 本类加载即强制把 codegen/scan 两包收敛到 pw.codegen.log 指定级别（默认 WARN）。
+     * 本类加载即强制把 codegen 包收敛到 pw.codegen.log 指定级别（默认 WARN）。
      */
     static {
         CodegenLogGate.apply();

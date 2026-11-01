@@ -419,7 +419,7 @@ public final class CaptureSink {
         }
         if (evidence != null) {
             try {
-                RouteEvidenceRegistry.record("CAPTURE", call.url(), evidence);
+                RouteEvidenceRegistry.record("CAPTURE", call.url(), evidence, snapshot.request());
             } catch (Throwable t) {
                 LOGGER.debug("[Route] capture evidence report skipped (non-fatal): {}", t.toString());
             }

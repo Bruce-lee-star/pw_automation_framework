@@ -637,14 +637,12 @@ public enum WebFrameworkConfig {
      */
     FRAMEWORK_SCREENSHOTS_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY),
 
-    // ==================== 日志配置 ====================
+    // ==================== 报告动作录制配置 ====================
 
-    /**
-     * 日志级别
-     * QUIET - 最少日志
-     * NORMAL - 正常日志
-     * VERBOSE - 详细日志
-     */
+    /** Whether browser actions are added to the test report. */
+    FRAMEWORK_RECORDING_ENABLED(ConfigRegistry.FRAMEWORK_RECORDING_ENABLED),
+
+    /** Deprecated legacy report recording setting; use {@code framework.recording.enabled}. */
     FRAMEWORK_LOGGING(ConfigRegistry.WEB_FRAMEWORK_LOGGING),
 
     // ==================== 报告配置 ====================

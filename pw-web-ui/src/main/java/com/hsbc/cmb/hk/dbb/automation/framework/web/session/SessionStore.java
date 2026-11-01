@@ -13,7 +13,6 @@ import com.google.gson.JsonSyntaxException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.ConcurrencyGate;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.concurrent.ConcurrencyPartitionKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
@@ -390,7 +389,7 @@ final class SessionStore {
             return false;
         }
         if (isSessionExpired(meta)) {
-            VerboseLogging.logInfoIfVerbose(LOGGER, "Session expired for: {}", sessionKey);
+            LOGGER.debug("Session expired for: {}", sessionKey);
             try {
                 Files.delete(getSessionPath(sessionKey));
                 Files.delete(getMetaPath(sessionKey));
@@ -407,7 +406,7 @@ final class SessionStore {
     // 2026-09-30 收口：原 in-memory feature 缓存已移除，此处仅清理本线程 CURRENT_SESSION_KEY，
     // 并兜底回收本线程可能滞留的单飞登录守卫（与 completeLoginGuard 互补，幂等）。
     static void resetCurrentSession() {
-        VerboseLogging.logInfoIfVerbose(LOGGER, "Resetting current session key at scenario/feature boundary");
+        LOGGER.debug("Resetting current session key at scenario/feature boundary");
         CURRENT_SESSION_KEY.remove();
         String leaderKey = MY_LOGIN_GUARD_KEY.get();
         if (leaderKey != null) {
@@ -507,13 +506,13 @@ final class SessionStore {
     private static boolean hasSession(String sessionKey) {
         SessionMeta meta = loadSessionMeta(sessionKey);
         if (meta == null || !meta.sessionFileExists) {
-            VerboseLogging.logInfoIfVerbose(LOGGER, "Session file not found: {}", sessionKey);
+            LOGGER.debug("Session file not found: {}", sessionKey);
             return false;
         }
         if (evictIfExpired(sessionKey)) {
             return false;
         }
-        VerboseLogging.logInfoIfVerbose(LOGGER, "Valid session found for: {}", sessionKey);
+        LOGGER.debug("Valid session found for: {}", sessionKey);
         return true;
     }
 
@@ -555,15 +554,13 @@ final class SessionStore {
                 STORAGE_CONTENT_CACHE.put(sessionKey, warm);
             }
         } catch (Exception ignored) {
-            VerboseLogging.logDebugIfVerbose(LOGGER,
-                    "storageState warm back-fill skipped for {} (non-fatal)", sessionKey);
+            LOGGER.debug("storageState warm back-fill skipped for {} (non-fatal)", sessionKey);
         }
 
         //  2026-09-30 收口：免登录复用已成为全局默认行为（每 case 重建 Context 但注入已落盘 storageState）。
         //  登记本线程当前 sessionKey，供 getHomeUrl() 从 meta 取权威 homeUrl（取代原 feature 缓存，不再按 feature/credential/scenario 分档）。
         CURRENT_SESSION_KEY.set(sessionKey);
-        VerboseLogging.logInfoIfVerbose(LOGGER,
-                "Reusing session persisted by single-flight leader: {}", sessionKey);
+        LOGGER.debug("Reusing session persisted by single-flight leader: {}", sessionKey);
         return true;
     }
 
@@ -671,7 +668,7 @@ final class SessionStore {
         if (reusePersistedSession(sessionKey)) {
             return true;
         }
-        VerboseLogging.logWarnIfVerbose(LOGGER, "Session file exists but unusable for: {} — will login", sessionKey);
+        LOGGER.warn("Session file exists but unusable for: {} — will login", sessionKey);
 
         LoginGuard guard = acquireOrAwait(sessionKey);
         if (guard == null) {
@@ -690,8 +687,7 @@ final class SessionStore {
             return true;
         }
         loginGuards.remove(sessionKey, guard);
-        VerboseLogging.logWarnIfVerbose(LOGGER,
-                "Single-flight leader did not produce a usable session for {} — this thread will login", sessionKey);
+        LOGGER.warn("Single-flight leader did not produce a usable session for {} — this thread will login", sessionKey);
         return false;
     }
 
@@ -708,7 +704,7 @@ final class SessionStore {
         if (reusePersistedSession(sessionKey)) {
             return true;
         }
-        VerboseLogging.logInfoIfVerbose(LOGGER, "No valid session for: {}, waiting for login", sessionKey);
+        LOGGER.debug("No valid session for: {}, waiting for login", sessionKey);
 
         LoginGuard guard = acquireOrAwait(sessionKey);
         if (guard == null) {
@@ -724,8 +720,7 @@ final class SessionStore {
             return true;
         }
         loginGuards.remove(sessionKey, guard);
-        VerboseLogging.logWarnIfVerbose(LOGGER,
-                "Single-flight leader did not produce a usable session for {} — this thread will login", sessionKey);
+        LOGGER.warn("Single-flight leader did not produce a usable session for {} — this thread will login", sessionKey);
         // leader 已结束但未产出可用态：本线程再尝试复用一次（完成守卫），否则执行登录
         if (hasUsableSession(sessionKey) && reusePersistedSession(sessionKey)) {
             completeLoginGuard(sessionKey, true);
@@ -805,7 +800,7 @@ final class SessionStore {
             if (sessionParent != null && !Files.exists(sessionParent)) {
                 Files.createDirectories(sessionParent);
             }
-            VerboseLogging.logInfoIfVerbose(LOGGER, "Saving session for: {} (homeUrl: {})", sessionKey, homeUrl);
+            LOGGER.debug("Saving session for: {} (homeUrl: {})", sessionKey, homeUrl);
 
             BrowserContext context = PlaywrightManager.getContext();
             BrowserContext.StorageStateOptions storageOptions = new BrowserContext.StorageStateOptions();
@@ -826,13 +821,12 @@ final class SessionStore {
             //  T8-6 代际：完整登录成功才自增（复用不递增），使"凭证被替换过几次"可观测。
             saveMeta(sessionKey, homeUrl, savedAt);
             META_CACHE.put(sessionKey, new SessionMeta(homeUrl, savedAt, true));
-            VerboseLogging.logInfoIfVerbose(LOGGER,
-                    "[Session] session saved for {} at {}", sessionKey, savedAt);
+            LOGGER.debug("[Session] session saved for {} at {}", sessionKey, savedAt);
 
             //  2026-09-30 收口：完整登录成功后登记本线程当前 sessionKey，
             //  与复用路径（reusePersistedSession）一致，homeUrl 统一走 meta 来源。
             CURRENT_SESSION_KEY.set(sessionKey);
-            VerboseLogging.logInfoIfVerbose(LOGGER, "Session saved successfully: {} -> {}", sessionKey, sessionPath);
+            LOGGER.debug("Session saved successfully: {} -> {}", sessionKey, sessionPath);
             completeLoginGuard(sessionKey, true);
         } catch (Exception e) {
             completeLoginGuard(sessionKey, false);
@@ -864,7 +858,7 @@ final class SessionStore {
             if (cleared) {
                 LOGGER.info("Session cleared successfully: {}", sessionKey);
             } else {
-                VerboseLogging.logInfoIfVerbose(LOGGER, "No session found to clear: {}", sessionKey);
+                LOGGER.debug("No session found to clear: {}", sessionKey);
             }
             return cleared;
         } catch (Exception e) {
@@ -927,8 +921,7 @@ final class SessionStore {
             try {
                 Files.deleteIfExists(tmp);
             } catch (Exception cleanupIgnored) {
-                VerboseLogging.logDebugIfVerbose(LOGGER,
-                        "Temp storageState file not deleted for {}: {}", sessionKey, cleanupIgnored.getMessage());
+                LOGGER.debug("Temp storageState file not deleted for {}: {}", sessionKey, cleanupIgnored.getMessage());
             }
             throw new RuntimeException("Failed to write storageState for " + sessionKey, e);
         }
@@ -956,7 +949,7 @@ final class SessionStore {
             try (var writer = Files.newBufferedWriter(metaPath, StandardCharsets.UTF_8)) {
                 props.store(writer, "Session Meta Data");
             }
-            VerboseLogging.logDebugIfVerbose(LOGGER, "Meta saved: {} (homeUrl: {})", sessionKey, homeUrl);
+            LOGGER.debug("Meta saved: {} (homeUrl: {})", sessionKey, homeUrl);
         } catch (Exception e) {
             LOGGER.error("Failed to save meta for: {} (session reuse may fall back to re-login)", sessionKey, e);
         }

@@ -9,7 +9,6 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -95,7 +94,18 @@ public class ConsoleScenarioListenerTest {
                 .info(LifecycleScenarioInfo.builder().name("x").build())
                 .status(LifecycleStatus.PASSED).build());
         l.onTestRunFinished();
-        assertEquals("", out().trim());
+        String output = out();
+        assertFalse(output.contains("TEST RUN STARTED"));
+        assertFalse(output.contains("SCENARIO STARTED"));
+        assertFalse(output.contains("SCENARIO PASSED"));
+        assertFalse(output.contains("SCENARIO FAILED"));
+    }
+
+    @Test
+    public void defaultsToEnabledWhenUnset() {
+        System.clearProperty(PROP);
+        new ConsoleScenarioListener().onTestRunStarted();
+        assertTrue(out().contains("TEST RUN STARTED"));
     }
 
     @Test

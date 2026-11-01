@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContext;
@@ -240,8 +239,7 @@ public final class PageInteractionMonitor {
                 return (System.nanoTime() - start) / 1_000_000L;
             }
             if (System.nanoTime() >= deadline) {
-                VerboseLogging.logDebugIfVerbose(logger,
-                        "[churn] gate hit its ceiling ({}ms) while navigations keep coming; proceeding", maxWaitMs);
+                logger.debug("[churn] gate hit its ceiling ({}ms) while navigations keep coming; proceeding", maxWaitMs);
                 return (System.nanoTime() - start) / 1_000_000L;
             }
             PlaywrightManager.parkMillis(stepMs);
@@ -286,9 +284,9 @@ public final class PageInteractionMonitor {
                 recordMainFrameChurn(page);
                 // 主框架导航轨迹本身已记入 navTrail（失败时回放用）；此处日志默认关闭，
                 // 仅在 serenity.logging=VERBOSE/TRACE 时输出，避免每次跳转刷屏。
-                VerboseLogging.logInfoIfVerbose(logger, "[nav] main frame navigated -> {}", url);
+                logger.debug("[nav] main frame navigated -> {}", url);
             } else {
-                VerboseLogging.logDebugIfVerbose(logger, "[nav] frame '{}' navigated -> {}", frame.name(), url);
+                logger.debug("[nav] frame '{}' navigated -> {}", frame.name(), url);
             }
             appendNavTrail(new NavEntry(isMain, url));
         } catch (Exception e) {
@@ -337,7 +335,7 @@ public final class PageInteractionMonitor {
             String title = safeTitle(popup);
             // 未受管弹窗的"逐次检测"日志默认关闭（verbose 才打印）；失败时的聚合告警仍由
             // StepFailureAggregator.drainUnmanagedPopups 负责，不因本行关闭而丢失。
-            VerboseLogging.logInfoIfVerbose(logger, "[popup] unmanaged popup detected: url={}, title={}", url, title);
+            logger.debug("[popup] unmanaged popup detected: url={}, title={}", url, title);
             unmanagedPopups().add(new PopupEntry(popup, url, title));
         } catch (Exception e) {
             logger.debug("[popup] observe failed: {}", e.toString());

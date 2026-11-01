@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.trace;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
@@ -91,22 +90,22 @@ public final class ScenarioTraceRecorder {
     }
 
     /**
-     * 上下文感知的落点解析：优先 {@link #resolveTraceTarget(String)}（场景线程上句柄有效 → per-case）；
-     * 句柄 NOOP 的<b>收尾 / CloseGuard 线程</b>上，改用 {@link ContextOutcomeBinding} 绑定的 outcomeId
-     * 精确解析 per-case——并行下不再取"最近开始的用例"，trace 始终直接落该 context 所属 per-case，永不搬/拷。
+     * 上下文感知的落点解析：优先使用 context 绑定的 outcomeId，避免收尾线程上的进程级活动用例快照
+     * 抢先命中并将 trace 落入并行场景的错误目录；无绑定时才回退到当前线程报告句柄。
      */
-    private static Path resolveTraceTarget(BrowserContext context, String fallbackName) {
+    static Path resolveTraceTarget(BrowserContext context, String fallbackName) {
         try {
-            Path reportTarget = ReportingBridgeRegistry.get().traceTarget();
-            if (reportTarget != null) {
-                return reportTarget;
-            }
             String id = context != null ? ContextOutcomeBinding.outcomeId(context) : null;
             if (id != null) {
                 Path byId = ReportingBridgeRegistry.get().traceTargetByOutcomeId(id);
                 if (byId != null) {
                     return byId;
                 }
+                return Paths.get(traceDir(), fallbackName);
+            }
+            Path reportTarget = ReportingBridgeRegistry.get().traceTarget();
+            if (reportTarget != null) {
+                return reportTarget;
             }
         } catch (Exception ignore) {
             // 桥缺失/异常 → 回落固定证据目录
@@ -149,11 +148,10 @@ public final class ScenarioTraceRecorder {
                     .setSnapshots(PlaywrightManager.config().isTraceSnapshots())
                     .setSources(PlaywrightManager.config().isTraceSources()));
             setChunkActive(true);
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[trace] chunk #0 started with context (chunkPerScenario={})", chunkPerScenario());
+            logger.debug("[trace] chunk #0 started with context (chunkPerScenario={})", chunkPerScenario());
         } catch (Exception e) {
             // tracing 未启用/已停止时 start 可能抛异常：降级，绝不影响 context 创建
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] start skipped: {}", e.getMessage());
+            logger.debug("[trace] start skipped: {}", e.getMessage());
         }
     }
 
@@ -177,9 +175,9 @@ public final class ScenarioTraceRecorder {
         try {
             context.tracing().startChunk();
             setChunkActive(true);
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] chunk started for scenario '{}'", scenarioId);
+            logger.debug("[trace] chunk started for scenario '{}'", scenarioId);
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] startChunk skipped: {}", e.getMessage());
+            logger.debug("[trace] startChunk skipped: {}", e.getMessage());
         }
     }
 
@@ -236,7 +234,7 @@ public final class ScenarioTraceRecorder {
                 context.tracing().stop();
             }
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] stop skipped on context close: {}", e.getMessage());
+            logger.debug("[trace] stop skipped on context close: {}", e.getMessage());
         } finally {
             setChunkActive(false);
         }
@@ -296,7 +294,7 @@ public final class ScenarioTraceRecorder {
                 Files.delete(file);
                 logger.warn("[trace] discarded incomplete trace file {} ({})", file.getFileName(), reason);
             } else {
-                VerboseLogging.logDebugIfVerbose(logger, "[trace] export failed ({}): {}", reason, file.getFileName());
+                logger.debug("[trace] export failed ({}): {}", reason, file.getFileName());
             }
         } catch (Exception ignored) {
             logger.warn("[trace] failed to delete incomplete trace file {}: {}", file.getFileName(), ignored.getMessage());
@@ -348,10 +346,10 @@ public final class ScenarioTraceRecorder {
                     ReportingBridgeRegistry.get().attachTrace(tracePath);
                 }
             }
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] recorded {} to 框架 report (outcomeId={})",
+            logger.debug("[trace] recorded {} to 框架 report (outcomeId={})",
                     tracePath.getFileName(), outcomeId);
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "[trace] record to report skipped: {}", e.getMessage());
+            logger.debug("[trace] record to report skipped: {}", e.getMessage());
         }
     }
 

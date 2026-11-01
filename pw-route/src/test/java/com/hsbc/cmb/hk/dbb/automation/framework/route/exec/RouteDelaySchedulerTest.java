@@ -52,6 +52,43 @@ public class RouteDelaySchedulerTest {
         assertTrue("负延迟必须按 0 处理并执行", done.await(5, TimeUnit.SECONDS));
     }
 
+    @Test
+    public void schedulerStartLatenessIsObservable() throws Exception {
+        long startedBefore = RouteDelayScheduler.startedCount();
+        long totalLatenessBefore = RouteDelayScheduler.totalStartLatenessNanos();
+        CountDownLatch done = new CountDownLatch(1);
+
+        RouteDelayScheduler.delay(1L, done::countDown);
+
+        assertTrue("任务必须在界内开始执行", done.await(5, TimeUnit.SECONDS));
+        assertTrue("开始执行计数必须递增", RouteDelayScheduler.startedCount() > startedBefore);
+        assertTrue("累计启动迟延不得倒退",
+                RouteDelayScheduler.totalStartLatenessNanos() >= totalLatenessBefore);
+        assertTrue("最大启动迟延必须非负", RouteDelayScheduler.maxStartLatenessNanos() >= 0);
+        assertTrue("平均启动迟延必须非负", RouteDelayScheduler.averageStartLatenessNanos() >= 0);
+    }
+
+    @Test
+    public void backlogIncludesTasksThatHaveStartedButAreStillRunning() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        RouteDelayScheduler.delay(0L, () -> {
+            started.countDown();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        try {
+            assertTrue("task must start", started.await(5, TimeUnit.SECONDS));
+            assertTrue("backlog includes running in-flight tasks", RouteDelayScheduler.backlog() > 0);
+        } finally {
+            release.countDown();
+        }
+    }
+
     /** null 任务安全忽略（绝不抛回事件线程）。 */
     @Test
     public void nullTaskIsIgnored() {

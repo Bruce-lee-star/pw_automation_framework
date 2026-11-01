@@ -24,6 +24,13 @@ public interface RouteEvidenceSink {
     void record(String operation, String url, String detail);
 
     /**
+     * 记录带有请求上下文的路由命中。实现可以用该对象解析 context 归属；无法识别时不得猜测其它活动用例。
+     */
+    default void record(String operation, String url, String detail, Object requestContext) {
+        record(operation, url, detail);
+    }
+
+    /**
      * 在<b>测试主线程</b>把已入队的记录批量写入报告（默认空实现：不需要 flush 的实现可忽略）。
      */
     default void flush() {

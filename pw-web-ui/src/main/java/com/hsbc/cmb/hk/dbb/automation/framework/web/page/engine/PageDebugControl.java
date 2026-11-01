@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,12 +48,12 @@ public final class PageDebugControl {
      */
     static boolean isDebugEnvironment() {
         // 1. 识别 BrowserStack 云端环境
-        boolean isBsEnv = System.getenv().containsKey("BROWSERSTACK_USERNAME")
-                || System.getenv().containsKey("BROWSERSTACK_ACCESS_KEY");
+        boolean isBsEnv = ConfigReader.getEnvironmentVariable("BROWSERSTACK_USERNAME") != null
+                || ConfigReader.getEnvironmentVariable("BROWSERSTACK_ACCESS_KEY") != null;
 
         // 2. 识别 Jenkins CI 环境
-        boolean isJenkinsEnv = System.getenv().containsKey("JENKINS_HOME")
-                || System.getProperty("ci", "false").equalsIgnoreCase("true");
+        boolean isJenkinsEnv = ConfigReader.getEnvironmentVariable("JENKINS_HOME") != null
+                || ConfigReader.getProperty("ci", "false").equalsIgnoreCase("true");
 
         // 云端/CI 直接判定为非调试环境
         return !isBsEnv && !isJenkinsEnv;

@@ -8,7 +8,6 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
 import com.microsoft.playwright.options.BoundingBox;
 import com.microsoft.playwright.options.Cookie;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ConfigurationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementException;
@@ -68,9 +67,7 @@ public final class PageRecorder {
 
     public PageElement element(BasePage bp, String selector) {
         ReportingBridgeRegistry.get().flushPendingApiOperations();
-        if (VerboseLogging.isVerboseEnabled()) {
-            VerboseLogging.logInfoIfVerbose(logger, "Creating element: {}", selector);
-        }
+        logger.debug("Creating element: {}", selector);
         recorder.addRecordingTestData("lastActionElement", selector);
         // 直接构造 PageElement，避免回调 bp.element() 形成递归（BasePage.element 已委托本门面）
         return new PageElement(selector, bp);
@@ -80,13 +77,11 @@ public final class PageRecorder {
 
     /**
      * 元素创建的统一前置（与 {@link #element(BasePage, String)} 同语义）：
-     * 刷新待报告 API 数据 + verbose 日志 + 记录「最近操作元素」（报告/失败诊断据此定位元素）。
+     * 刷新待报告 API 数据 + DEBUG 诊断日志 + 记录「最近操作元素」（报告/失败诊断据此定位元素）。
      */
     private void recordElementCreation(String desc) {
         ReportingBridgeRegistry.get().flushPendingApiOperations();
-        if (VerboseLogging.isVerboseEnabled()) {
-            VerboseLogging.logInfoIfVerbose(logger, "Creating role element: {}", desc);
-        }
+        logger.debug("Creating role element: {}", desc);
         recorder.addRecordingTestData("lastActionElement", desc);
     }
 
@@ -236,7 +231,7 @@ public final class PageRecorder {
             BrowserContext context = bp.getContextRaw();
             if (context != null) {
                 recorder.addRecordingTestData("contextRetrieved", true);
-                VerboseLogging.logDebugIfVerbose(logger, "BrowserContext retrieved successfully");
+                logger.debug("BrowserContext retrieved successfully");
             }
             return context;
         } catch (Exception e) {
@@ -250,9 +245,7 @@ public final class PageRecorder {
     public void navigateTo(BasePage bp, String url) {
         try {
             ReportingBridgeRegistry.get().flushPendingApiOperations();
-            if (VerboseLogging.isVerboseEnabled()) {
-                VerboseLogging.logInfoIfVerbose(logger, "Navigating to URL: {}", url);
-            }
+            logger.debug("Navigating to URL: {}", url);
             recorder.addRecordingTestData("lastAction", "navigate");
             recorder.addRecordingTestData("navigateUrl", url);
             PageNavigation.navigateTo(bp, url);

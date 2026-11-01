@@ -14,10 +14,10 @@ import com.microsoft.playwright.PlaywrightException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Locale;
 
 /**
  * BrowserStack 云测试管理器（企业级）
@@ -631,15 +632,11 @@ public class BrowserStackManager {
     }
 
     private static String getConfigValue(String envVar, WebFrameworkConfig configKey) {
-        // 1. 环境变量
-        String envVal = System.getenv(envVar);
-        if (envVal != null && !envVal.isEmpty())  {return envVal;} 
-        
-        // 2. 系统属性 (-D参数)
-        String sysProp = System.getProperty(envVar.toLowerCase().replace("_", "."));
-        if (sysProp != null && !sysProp.isEmpty())  {return sysProp;} 
-        
-        // 3. 配置文件
+        String alias = envVar.toLowerCase(Locale.ROOT).replace("_", ".");
+        String configuredAlias = ConfigReader.resolve(alias, null, ConfigReader.ENV_FIRST_PRECEDENCE);
+        if (configuredAlias != null && !configuredAlias.isEmpty()) {
+            return configuredAlias;
+        }
         return configKey != null ? FrameworkConfigManager.getString(configKey) : null;
     }
 
@@ -661,14 +658,11 @@ public class BrowserStackManager {
     }
 
     private static boolean getBooleanEnv(String envVar, WebFrameworkConfig configKey, boolean defaultVal) {
-        String envVal = System.getenv(envVar);
-        if (envVal != null && !envVal.isEmpty())  {return Boolean.parseBoolean(envVal);} 
-        if (configKey != null) {
-            try { return FrameworkConfigManager.getBoolean(configKey); } catch (Exception e) {
-                logger.debug("[BrowserStack] Failed to read boolean config: {}", configKey.name());
-            }
+        String value = getConfigValue(envVar, configKey);
+        if (value == null || value.isEmpty()) {
+            return defaultVal;
         }
-        return defaultVal;
+        return value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equals("1");
     }
 
     // ==================== 工具方法 ====================
@@ -821,8 +815,7 @@ public class BrowserStackManager {
                 if (httpsProxy != null) {
                     env.put("HTTPS_PROXY", httpsProxy);
                 } else {
-                    VerboseLogging.logWarnIfVerbose(logger,
-                            "[Proxy] HTTPS_PROXY not set — wss:// connection may fail without proxy tunnel. "
+                    logger.warn("[Proxy] HTTPS_PROXY not set — wss:// connection may fail without proxy tunnel. "
                             + "Configure playwright.proxy.https or ensure playwright.proxy.http is set for fallback.");
                 }
                 // NO_PROXY：排除内网地址即可。
@@ -834,8 +827,7 @@ public class BrowserStackManager {
                 String nodeOptions = env.get("NODE_OPTIONS");
                 env.put("NODE_OPTIONS", (nodeOptions != null ? nodeOptions + " " : "")
                         + "--no-network-family-autoselection");
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "[Proxy] Happy Eyeballs disabled (--no-network-family-autoselection) "
+                logger.debug("[Proxy] Happy Eyeballs disabled (--no-network-family-autoselection) "
                         + "to prevent premature connection abortion under corporate proxy.");
             }
         }

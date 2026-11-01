@@ -1,12 +1,15 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.api.utility;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Environment utility class for retrieving environment variables and system properties
- * This class provides a unified interface for accessing environment configuration
- * and is a replacement for the deprecated SystemEnvironmentVariables in older 框架 versions
+ * Compatibility facade for legacy environment/property access.
+ *
+ * <p>Configuration reads delegate to {@link ConfigReader}; new framework code should use
+ * {@code ConfigReader} directly. This facade remains available for existing business code and
+ * retains the explicit system-property mutation methods.</p>
  */
 public class EnvironmentUtils {
 
@@ -28,7 +31,7 @@ public class EnvironmentUtils {
      * @return the property value, or null if not found
      */
     public String getProperty(String key) {
-        return System.getProperty(key);
+        return ConfigReader.getProperty(key);
     }
 
     /**
@@ -39,7 +42,7 @@ public class EnvironmentUtils {
      * @return the property value, or default value if not found
      */
     public static String getProperty(String key, String defaultValue) {
-        return System.getProperty(key, defaultValue);
+        return ConfigReader.getProperty(key, defaultValue);
     }
 
     /**
@@ -49,7 +52,7 @@ public class EnvironmentUtils {
      * @return the environment variable value, or null if not found
      */
     public String getEnvironmentVariable(String key) {
-        return System.getenv(key);
+        return ConfigReader.getEnvironmentVariable(key);
     }
 
     /**
@@ -60,7 +63,7 @@ public class EnvironmentUtils {
      */
     public void setProperty(String key, String value) {
         System.setProperty(key, value);
-        LOGGER.debug("Set system property: {} = {}", key, value);
+        LOGGER.debug("Set system property: {}", key);
     }
 
     /**

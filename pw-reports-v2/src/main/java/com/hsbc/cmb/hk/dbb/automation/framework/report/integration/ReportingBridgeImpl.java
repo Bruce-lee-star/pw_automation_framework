@@ -3,7 +3,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.report.integration;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
-import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ScrubGate;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,7 +84,7 @@ public final class ReportingBridgeImpl implements ReportingBridge {
         if (traceZip == null || !Files.exists(traceZip)) {
             return;
         }
-        //  句柄→用例归属的解析统一收口在 ReportBus（NOOP → activeOutcomeId 兜底），bridge 仅透传。
+        //  无当前线程句柄时不猜测用例归属；异步收尾须调用带 outcomeId 的重载。
         bus.attachTrace(bus.captureHandle(), traceZip);
     }
 
@@ -99,16 +98,9 @@ public final class ReportingBridgeImpl implements ReportingBridge {
 
     @Override
     public Path traceTarget() {
-        //  指导框架把 trace 直接导出到 per-case（<outputDir>/<outcomeId>/trace.zip）——不产生
-        //    "traces/ + per-case" 两份、也无须移动。收尾线程（CloseGuard worker）无 ThreadLocal 句柄
-        //    （恒 NOOP）时，回落到"跨线程可见的活动用例 id"解析落点，使 trace 始终直接落 per-case，
-        //    从源头消除"traces/ 生成 + 事后拷贝/移动"的副本逻辑（与 attachTrace 兜底同源、同并行限制）。
+        //  当前线程有上下文时，直接导出到 per-case；异步收尾应使用 traceTargetByOutcomeId。
         StepHandle handle = bus.captureHandle();
-        if (!handle.isNoop()) {
-            return bus.traceTarget(handle);
-        }
-        String outcomeId = bus.activeOutcomeId();
-        return outcomeId != null ? bus.traceTargetByOutcomeId(outcomeId) : null;
+        return handle.isNoop() ? null : bus.traceTarget(handle);
     }
 
     @Override
@@ -129,15 +121,9 @@ public final class ReportingBridgeImpl implements ReportingBridge {
 
     @Override
     public Path videoTarget() {
-        //  指导框架把录屏直接写进 per-case（<outputDir>/<outcomeId>/records），避免「全局 videoDir
-        //    先落一份、再搬进 per-case」的两份。收尾线程无 ThreadLocal 句柄时，回落到"跨线程可见的
-        //    活动用例 id"解析落点，使录屏始终直接录进 per-case（与 attachVideo 兜底同源、同并行限制）。
+        //  当前线程有上下文时，直接导出到 per-case；异步收尾应使用 videoTargetByOutcomeId。
         StepHandle handle = bus.captureHandle();
-        if (!handle.isNoop()) {
-            return bus.videoTarget(handle);
-        }
-        String outcomeId = bus.activeOutcomeId();
-        return outcomeId != null ? bus.videoTargetByOutcomeId(outcomeId) : null;
+        return handle.isNoop() ? null : bus.videoTarget(handle);
     }
 
     @Override
@@ -150,13 +136,14 @@ public final class ReportingBridgeImpl implements ReportingBridge {
         if (video == null || !Files.exists(video)) {
             return;
         }
-        //  句柄→用例归属的解析统一收口在 ReportBus（NOOP → activeOutcomeId 兜底），bridge 仅透传。
+        //  无当前线程句柄时不猜测用例归属；异步收尾须调用带 outcomeId 的重载。
         bus.attachVideo(bus.captureHandle(), video);
     }
 
     @Override
     public String currentOutcomeId() {
-        return bus.activeOutcomeId();
+        StepHandle handle = bus.captureHandle();
+        return handle.isNoop() ? null : handle.outcomeId();
     }
 
     @Override
@@ -206,15 +193,12 @@ public final class ReportingBridgeImpl implements ReportingBridge {
         bus.recordRouteRegistration(line);
     }
 
-    /** 复用的脱敏器（无状态、线程安全）：API 行可能携带 URL query 中的 token / key / password。 */
-    private static final ScrubGate SCRUB = ScrubGate.defaults();
-
     @Override
     public void recordApiOperation(String line) {
         if (line == null || line.isEmpty()) {
             return;
         }
-        bus.recordApiOperation(SCRUB.scrubLine(line));
+        bus.recordApiOperation(line);
     }
 
     @Override
@@ -228,10 +212,10 @@ public final class ReportingBridgeImpl implements ReportingBridge {
             return;
         }
         if (stepId == null || stepId.isBlank()) {
-            bus.recordApiOperation(SCRUB.scrubLine(line));
+            bus.recordApiOperation(line);
             return;
         }
-        bus.recordApiOperationByStep(stepId, SCRUB.scrubLine(line));
+        bus.recordApiOperationByStep(stepId, line);
     }
 
     @Override

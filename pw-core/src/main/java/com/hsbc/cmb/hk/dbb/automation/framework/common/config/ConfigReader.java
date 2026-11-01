@@ -151,6 +151,15 @@ public final class ConfigReader {
     }
 
     /**
+     * 读取指定名称的原始环境变量（不做键名映射、系统属性回退或解密）。
+     *
+     * <p>仅供需要识别进程运行环境的边界代码使用；业务配置应使用 {@link #getProperty(String)}。</p>
+     */
+    public static String getEnvironmentVariable(String name) {
+        return name == null ? null : System.getenv(name);
+    }
+
+    /**
      * 键的声明式层序：已登记键取其在 {@link ConfigRegistry} 的声明，未登记键取框架默认层序。
      *
      * @param key 配置键

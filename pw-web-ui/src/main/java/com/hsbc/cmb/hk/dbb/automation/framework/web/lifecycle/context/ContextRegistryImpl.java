@@ -15,7 +15,6 @@ import com.microsoft.playwright.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
 /** Context registry (WEB-P1-1 Step 4). Package-private internal collaborator. */
@@ -86,7 +85,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
         // 检测是否需要重建Context（因为设置了自定义配置）
         Boolean customFlag = TestContextHolder.get().get(CustomOptionsManager.CUSTOM_CONTEXT_OPTIONS_FLAG_KEY);
         if (context != null && customFlag != null && customFlag) {
-            VerboseLogging.logInfoIfVerbose(logger, "Custom context options detected, recreating context to apply them...");
+            logger.debug("Custom context options detected, recreating context to apply them...");
             recreateContextIfCustomConfigNeeded();
             context = null;
         }
@@ -122,11 +121,11 @@ public final class ContextRegistryImpl implements ContextRegistry {
         if (existingPage != null) {
             try {
                 if (!existingPage.isClosed()) {
-                    VerboseLogging.logInfoIfVerbose(logger, "Closing existing page for context rebuild");
+                    logger.debug("Closing existing page for context rebuild");
                     existingPage.close();
                 }
             } catch (Exception e) {
-                VerboseLogging.logWarnIfVerbose(logger, "Failed to close existing page: {}", e.getMessage());
+                logger.warn("Failed to close existing page: {}", e.getMessage());
             }
             TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
         }
@@ -141,11 +140,11 @@ public final class ContextRegistryImpl implements ContextRegistry {
             existingContext = CURRENT_CONTEXT_BY_THREAD.get();
         }
         if (existingContext != null) {
-            VerboseLogging.logInfoIfVerbose(logger, "Closing existing context to apply new custom configurations...");
+            logger.debug("Closing existing context to apply new custom configurations...");
             cleanupContextScoped(existingContext);
             TestContextHolder.get().remove(PlaywrightManager.CONTEXT_KEY);
             CURRENT_CONTEXT_BY_THREAD.remove();
-            VerboseLogging.logInfoIfVerbose(logger, "Context closed, new context will be created with updated configurations on next access");
+            logger.debug("Context closed, new context will be created with updated configurations on next access");
         }
 
         // customContextOptionsFlag 已在 CustomOptionsManager.setXXX() 中设置
@@ -164,13 +163,13 @@ public final class ContextRegistryImpl implements ContextRegistry {
             existingContext = CURRENT_CONTEXT_BY_THREAD.get();
         }
         if (existingContext != null) {
-            VerboseLogging.logInfoIfVerbose(logger, "Context already exists, closing it to apply custom configurations...");
+            logger.debug("Context already exists, closing it to apply custom configurations...");
             // CT2-12：与 scheduleContextRebuild 共用 cleanupContextScoped 收口链
             TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
             cleanupContextScoped(existingContext);
             TestContextHolder.get().remove(PlaywrightManager.CONTEXT_KEY);
             CURRENT_CONTEXT_BY_THREAD.remove();
-            VerboseLogging.logInfoIfVerbose(logger, "Context closed, will create new one with custom configurations on next access");
+            logger.debug("Context closed, will create new one with custom configurations on next access");
         }
     }
     /**

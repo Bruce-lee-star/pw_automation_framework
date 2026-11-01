@@ -143,7 +143,7 @@ public final class ReportServer {
             String runId = (build != null && !build.isEmpty())
                     ? build
                     : ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-                      + "-" + HexFormat.of().formatHex(UUID.randomUUID().toString().getBytes(), 0, 4);
+                      + "-" + HexFormat.of().formatHex(UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8), 0, 4);
             Path runDir = root.resolve(project).resolve(runId);
             Files.createDirectories(runDir);
 

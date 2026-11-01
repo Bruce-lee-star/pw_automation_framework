@@ -14,7 +14,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.BrowserException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
@@ -89,7 +88,7 @@ public class PlaywrightContextManager {
      * 创建新的 BrowserContext
      */
     public static BrowserContext createContext() {
-        VerboseLogging.logInfoIfVerbose(logger, "Creating new BrowserContext...");
+        logger.debug("Creating new BrowserContext...");
 
         Browser currentBrowser = PlaywrightManager.getBrowser();
         Browser.NewContextOptions contextOptions = new Browser.NewContextOptions();
@@ -100,7 +99,7 @@ public class PlaywrightContextManager {
         // 条件注入自定义配置
         Boolean customFlag = CustomOptionsManager.getInstance().isCustomContextOptionsFlag();
         if (customFlag != null && customFlag) {
-            VerboseLogging.logInfoIfVerbose(logger, "Applying custom context options...");
+            logger.debug("Applying custom context options...");
             configureCustomContextOptions(contextOptions);
         }
 
@@ -131,8 +130,7 @@ public class PlaywrightContextManager {
                                     Boolean.TRUE.equals(MANAGED_PAGE_CREATION_IN_FLIGHT.get())));
                     if (WebFrameworkConfig.PLAYWRIGHT_PAGE_EVENTS_LOAD_ENABLED.getBooleanValue()) {
                         newPage.onLoad(pageLoad -> {
-                            VerboseLogging.logDebugIfVerbose(logger,
-                                    "New page loaded: url={}, title={}", newPage.url(), newPage.title());
+                            logger.debug("New page loaded: url={}, title={}", newPage.url(), newPage.title());
                         });
                     }
                 });
@@ -163,13 +161,13 @@ public class PlaywrightContextManager {
             } catch (RuntimeException ignore) {
                 //  报告未装配 / 桥缺失 → 不绑定，回落既有最佳努力逻辑
             }
-            VerboseLogging.logInfoIfVerbose(logger, "BrowserContext created successfully");
+            logger.debug("BrowserContext created successfully");
             return context;
         } finally {
             // 重置标志（成功或失败都执行）
             if (customFlag != null && customFlag) {
                 CustomOptionsManager.getInstance().disableCustomOptions();
-                VerboseLogging.logInfoIfVerbose(logger, "Custom context options applied, flag reset to false");
+                logger.debug("Custom context options applied, flag reset to false");
             }
             // CT2-05：初始化未成功（任一步骤抛异常）且已创建 context → 安全回收，杜绝泄漏
             if (!initialized && context != null) {
@@ -192,7 +190,7 @@ public class PlaywrightContextManager {
                             k -> java.util.Collections.synchronizedList(new java.util.ArrayList<>()))
                     .add(video);
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "[video] handle unavailable: {}", e.getMessage());
+            logger.debug("[video] handle unavailable: {}", e.getMessage());
         }
     }
 
@@ -225,12 +223,11 @@ public class PlaywrightContextManager {
                         videos.add(video);
                     }
                 } catch (Exception e) {
-                    VerboseLogging.logDebugIfVerbose(logger,
-                            "[video] handle unavailable for a page: {}", e.getMessage());
+                    logger.debug("[video] handle unavailable for a page: {}", e.getMessage());
                 }
             }
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "[video] collect skipped: {}", e.getMessage());
+            logger.debug("[video] collect skipped: {}", e.getMessage());
         }
         return videos;
     }
@@ -280,7 +277,7 @@ public class PlaywrightContextManager {
             } catch (Throwable t) {
                 //  Video.path() 在"无视频帧/未完成"时会抛异常：跳过该句柄，不拖累其它页面
                 detail.append(" | path error: ").append(t.getMessage());
-                VerboseLogging.logDebugIfVerbose(logger, "[video] path unavailable: {}", t.toString());
+                logger.debug("[video] path unavailable: {}", t.toString());
             }
         }
         if (best == null) {
@@ -292,7 +289,7 @@ public class PlaywrightContextManager {
         try {
             //  优先按 context 绑定的 outcomeId 精确挂载（并行下不归错用例）；id 缺失时桥回落最佳努力。
             ReportingBridgeRegistry.get().attachVideo(outcomeId, best);
-            VerboseLogging.logDebugIfVerbose(logger, "[video] recorded {} ({} bytes) to report (outcomeId={})",
+            logger.debug("[video] recorded {} ({} bytes) to report (outcomeId={})",
                     best.getFileName(), bestSize, outcomeId);
         } catch (Throwable t) {
             warnVideoOnce("[video] attach to report failed for " + best.getFileName() + ": " + t);
@@ -317,8 +314,7 @@ public class PlaywrightContextManager {
                 ctx.close();
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger,
-                    "Failed to close half-initialized BrowserContext on failure: {}", e.getMessage());
+            logger.warn("Failed to close half-initialized BrowserContext on failure: {}", e.getMessage());
         }
     }
 
@@ -326,7 +322,7 @@ public class PlaywrightContextManager {
      * 创建新的 Page
      */
     public static Page createPage(BrowserContext context) {
-        VerboseLogging.logInfoIfVerbose(logger, "Creating new Page...");
+        logger.debug("Creating new Page...");
         //  置位「框架受管页创建中」标记：createPage 是框架唯一调用 context.newPage() 的入口，
         //  其执行期间触发的 onPage 回调必属受管页；标记之外触发的 onPage 即业务弹窗 / 泄漏页。
         //  必须在 newPage() 之前置位、之后清除（含异常路径），否则归属判定失真。
@@ -344,7 +340,7 @@ public class PlaywrightContextManager {
         // 下载保存监听已迁移至 createContext 经 context.onDownload 一次性注册（见报告 §3.2），
         // 此处不再逐页注册，避免 window.open 弹窗内下载漏捕获。
         stabilizePage(page);
-        VerboseLogging.logInfoIfVerbose(logger, "Page created successfully");
+        logger.debug("Page created successfully");
         return page;
     }
 
@@ -381,7 +377,7 @@ public class PlaywrightContextManager {
                 try {
                     RouteLifecycleRegistry.get().clearContext(context);
                 } catch (Exception re) {
-                    VerboseLogging.logWarnIfVerbose(logger, "Failed to clear Route resources on context close: {}", re.getMessage());
+                    logger.warn("Failed to clear Route resources on context close: {}", re.getMessage());
                 }
                 //  trace 收尾（方案 A，2026-09-17）：交给 ScenarioTraceRecorder。
                 //  正常路径下每个用例已在 scenario 收尾时导出了自己的 chunk 文件；若仍有未导出的活动 chunk
@@ -402,10 +398,9 @@ public class PlaywrightContextManager {
                 long tClose = System.nanoTime();
                 try {
                     context.close(new BrowserContext.CloseOptions().setReason("teardown"));
-                    VerboseLogging.logInfoIfVerbose(logger, "BrowserContext closed");
+                    logger.debug("BrowserContext closed");
                 } catch (Exception closeEx) {
-                    VerboseLogging.logDebugIfVerbose(logger,
-                            "BrowserContext close skipped (already closed or browser gone): {}", closeEx.getMessage());
+                    logger.debug("BrowserContext close skipped (already closed or browser gone): {}", closeEx.getMessage());
                 }
                 if (logger.isTraceEnabled()) {
                     logger.trace("[CT] context.close() segment took {} ms (reason=teardown)",
@@ -449,21 +444,20 @@ public class PlaywrightContextManager {
                     try {
                         RouteLifecycleRegistry.get().clearContext(page);
                     } catch (Exception re) {
-                        VerboseLogging.logWarnIfVerbose(logger, "Failed to clear Route resources on page close: {}", re.getMessage());
+                        logger.warn("Failed to clear Route resources on page close: {}", re.getMessage());
                     }
-                    VerboseLogging.logInfoIfVerbose(logger, "Closing Page...");
+                    logger.debug("Closing Page...");
                     //  有界关闭：page.close() 亦可能挂（页面卸载 pending 导航/对话框）；超限即放弃等待，
                     //  该 page 会随后续 context/browser 关闭被回收，绝不让收尾线程被卡。
                     CloseGuard.Result pr = CloseGuard.runBoundedCapture("page-close",
                             () -> page.close(), CloseGuard.PAGE_CLOSE_LIMIT_MS);
                     if (!pr.completed()) {
-                        VerboseLogging.logWarnIfVerbose(logger,
-                                "page-close exceeded {}ms; abandoned (reclaimed with context/browser close)",
+                        logger.warn("page-close exceeded {}ms; abandoned (reclaimed with context/browser close)",
                                 CloseGuard.PAGE_CLOSE_LIMIT_MS);
                     } else if (pr.hasError()) {
                         throw new BrowserException("Failed to close page: " + pr.errorMessage());
                     }
-                    VerboseLogging.logInfoIfVerbose(logger, "Page closed");
+                    logger.debug("Page closed");
                 }
             } catch (BrowserException e) {
                 //  已是一层语义化异常（内部 CloseGuard 捕获的真实错误），直接抛出，避免同类再包一层把原始原因埋深。
@@ -505,7 +499,7 @@ public class PlaywrightContextManager {
         boolean proxyEnabled;
         if (customProxyOverride != null) {
             proxyEnabled = customProxyOverride;
-            VerboseLogging.logInfoIfVerbose(logger, "Using custom proxyEnabled override: {} (from business code)", proxyEnabled);
+            logger.debug("Using custom proxyEnabled override: {} (from business code)", proxyEnabled);
         } else {
             proxyEnabled = PlaywrightConfigManager.config().getContextProxyEnabled();
         }
@@ -514,9 +508,9 @@ public class PlaywrightContextManager {
             String proxyUrl = ProxyConfigResolver.getHttpProxyUrl();
             if (proxyUrl != null) {
                 contextOptions.setProxy(proxyUrl);
-                VerboseLogging.logInfoIfVerbose(logger, "Setting context proxy from unified config");
+                logger.debug("Setting context proxy from unified config");
             } else {
-                VerboseLogging.logWarnIfVerbose(logger, "Proxy enabled but no HTTP proxy configured, skipping context proxy");
+                logger.warn("Proxy enabled but no HTTP proxy configured, skipping context proxy");
             }
         }
 
@@ -542,8 +536,7 @@ public class PlaywrightContextManager {
         int estimatedChromeHeight = 100;
         viewportHeight = Math.max(viewportHeight - estimatedChromeHeight, 600);
         contextOptions.setViewportSize(viewportWidth, viewportHeight);
-        VerboseLogging.logInfoIfVerbose(logger,
-            "Context viewport: {}x{} (logical screen {}x{}, adjusted for browser chrome ~{}px, browser={})",
+        logger.debug("Context viewport: {}x{} (logical screen {}x{}, adjusted for browser chrome ~{}px, browser={})",
             viewportWidth, viewportHeight, (int) screenSize.getWidth(), (int) screenSize.getHeight(),
             estimatedChromeHeight, browserType);
 
@@ -571,7 +564,7 @@ public class PlaywrightContextManager {
             contextOptions.setRecordVideoDir(videoDir);
             contextOptions.setRecordVideoSize((int) screenSize.getWidth(), (int) screenSize.getHeight());
             //  自证落点：录屏"没进报告"时，第一现场要能看出到底录到哪个目录、多大
-            VerboseLogging.logInfoIfVerbose(logger, "[video] recordVideo dir={} size={}x{} (perCase={})",
+            logger.debug("[video] recordVideo dir={} size={}x{} (perCase={})",
                     videoDir, (int) screenSize.getWidth(), (int) screenSize.getHeight(),
                     perCaseVideoDir != null);
         }
@@ -594,12 +587,12 @@ public class PlaywrightContextManager {
         Path storagePath = cm.getStorageStatePath();
         if (storagePath != null && Files.exists(storagePath)) {
             contextOptions.setStorageStatePath(storagePath);
-            VerboseLogging.logInfoIfVerbose(logger, "Using custom storageStatePath (cold start / rebuild): {}", storagePath);
+            logger.debug("Using custom storageStatePath (cold start / rebuild): {}", storagePath);
         } else {
             String storageState = cm.getStorageState();
             if (storageState != null && !storageState.isEmpty()) {
                 contextOptions.setStorageState(storageState);
-                VerboseLogging.logInfoIfVerbose(logger, "Using in-memory storageState (from cache)");
+                logger.debug("Using in-memory storageState (from cache)");
             }
         }
 
@@ -623,7 +616,7 @@ public class PlaywrightContextManager {
         Integer vh = cm.getViewportHeight();
         if (vw != null && vh != null) {
             contextOptions.setViewportSize(vw, vh);
-            VerboseLogging.logInfoIfVerbose(logger, "Using custom viewportSize: {}x{}", vw, vh);
+            logger.debug("Using custom viewportSize: {}x{}", vw, vh);
         }
     }
 
@@ -633,7 +626,7 @@ public class PlaywrightContextManager {
     private static void applyIfNotNull(Object value, String name, Runnable applier) {
         if (value != null) {
             applier.run();
-            VerboseLogging.logInfoIfVerbose(logger, "Using custom {}: {}", name, value);
+            logger.debug("Using custom {}: {}", name, value);
         }
     }
 
@@ -643,7 +636,7 @@ public class PlaywrightContextManager {
     private static void applyIfNotEmpty(String value, String name, Runnable applier) {
         if (value != null && !value.isEmpty()) {
             applier.run();
-            VerboseLogging.logInfoIfVerbose(logger, "Using custom {}: {}", name, value);
+            logger.debug("Using custom {}: {}", name, value);
         }
     }
 
@@ -711,14 +704,14 @@ public class PlaywrightContextManager {
      */
     private static void stabilizePage(Page page) {
         try {
-            VerboseLogging.logDebugIfVerbose(logger, "Page stabilization: ensuring correct window size...");
+            logger.debug("Page stabilization: ensuring correct window size...");
 
             int stabilizeWaitTimeout = PlaywrightManager.config().getStabilizeTimeout();
             LoadState loadState = getConfiguredLoadState();
             try {
                 page.waitForLoadState(loadState, new Page.WaitForLoadStateOptions().setTimeout(stabilizeWaitTimeout));
             } catch (Exception e) {
-                VerboseLogging.logDebugIfVerbose(logger, "Page load wait timed out (LoadState: {}), continuing stabilization: {}", loadState, e.getMessage());
+                logger.debug("Page load wait timed out (LoadState: {}), continuing stabilization: {}", loadState, e.getMessage());
             }
 
             Dimension screenSize = PlaywrightManager.config().getAvailableScreenSize();
@@ -738,7 +731,7 @@ public class PlaywrightContextManager {
                     + WebFrameworkConfig.PLAYWRIGHT_CONTEXT_STABILIZE_DELAY_MS.getIntValue() + ");",
                     logicalWidth, logicalHeight, 0, 0
             ));
-            VerboseLogging.logDebugIfVerbose(logger, "Window maximize: window.resizeTo({}, {}), moveTo(0,0) delayed 300ms", logicalWidth, logicalHeight);
+            logger.debug("Window maximize: window.resizeTo({}, {}), moveTo(0,0) delayed 300ms", logicalWidth, logicalHeight);
 
             page.evaluate(
                     "document.body.style.zoom = '100%'; "
@@ -761,15 +754,15 @@ public class PlaywrightContextManager {
             if (customViewportWidthVal != null && customViewportHeightVal != null) {
                 // 用户自定义 viewport：直接应用
                 page.setViewportSize(customViewportWidthVal, customViewportHeightVal);
-                VerboseLogging.logDebugIfVerbose(logger, "Custom viewport applied: {}x{}",
+                logger.debug("Custom viewport applied: {}x{}",
                         customViewportWidthVal, customViewportHeightVal);
             } else {
                 // context 已统一设置 viewport = logical - chromeEstimate
                 // window.resizeTo + context viewport 配合 → 窗口填满屏幕
-                VerboseLogging.logDebugIfVerbose(logger, "No custom viewport, keeping viewport from context (window-adapted)");
+                logger.debug("No custom viewport, keeping viewport from context (window-adapted)");
             }
 
-            VerboseLogging.logDebugIfVerbose(logger, "Page stabilization completed");
+            logger.debug("Page stabilization completed");
         } catch (Exception e) {
             logger.warn("Page stabilization failed: {}", e.getMessage(), e);
         }
@@ -786,7 +779,7 @@ public class PlaywrightContextManager {
         try {
             return LoadState.valueOf(loadStateConfig.toUpperCase());
         } catch (IllegalArgumentException e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Invalid LoadState configuration: {}, using default: DOMCONTENTLOADED", loadStateConfig);
+            logger.warn("Invalid LoadState configuration: {}, using default: DOMCONTENTLOADED", loadStateConfig);
             return LoadState.DOMCONTENTLOADED;
         }
     }
@@ -844,8 +837,7 @@ public class PlaywrightContextManager {
      */
     static void logNewPageEvent(BrowserContext context, Page newPage, NewPageEvent event) {
         if (event.frameworkManaged) {
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "New page created by framework (managed): ctx=#{} pages={} url={}{}",
+            logger.debug("New page created by framework (managed): ctx=#{} pages={} url={}{}",
                     System.identityHashCode(context), event.pageCount, event.url,
                     event.aboutBlank ? " [about:blank until first navigate — expected]" : "");
             return;
@@ -867,7 +859,7 @@ public class PlaywrightContextManager {
             List<Page> pages = context.pages();
             return pages == null ? 0 : pages.size();
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "pages() unavailable while logging new page: {}", e.toString());
+            logger.debug("pages() unavailable while logging new page: {}", e.toString());
             return 0;
         }
     }

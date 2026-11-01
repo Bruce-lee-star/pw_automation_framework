@@ -66,7 +66,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
         if (!shouldDrive(bus)) {
             return;
         }
-        String baseId = OutcomeIdFactory.slug(stripScenarioSuffix(scenarioName));
+        String baseId = OutcomeIdFactory.timestampedId(stripScenarioSuffix(scenarioName));
         StepHandle handle = bus.startCase(baseId, "generic", scenarioName, List.of(), null);
         caseHandle.set(handle);
         caseStartNanos.set(System.nanoTime());

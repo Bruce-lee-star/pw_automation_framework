@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.ContextKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
@@ -44,8 +43,7 @@ final class FailureScreenshotHandler {
      */
     static CapturedScreenshot capture(String screenshotName) {
         if (Boolean.TRUE.equals(TestContextHolder.get().get(TAKING_SCREENSHOT_KEY))) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "Skipping screenshot - already taking screenshot to prevent recursion");
+            logger.debug("Skipping screenshot - already taking screenshot to prevent recursion");
             return null;
         }
         try {
@@ -55,15 +53,15 @@ final class FailureScreenshotHandler {
                 File pngFile = new File(screenshotPath);
                 if (pngFile.exists()) {
                     CapturedScreenshot result = new CapturedScreenshot(pngFile, screenshotName);
-                    VerboseLogging.logDebugIfVerbose(logger, "Screenshot captured: {} -> {}",
+                    logger.debug("Screenshot captured: {} -> {}",
                             screenshotName, pngFile.getName());
                     ListenerPerfStats.incrementScreenshot();
                     return result;
                 }
-                VerboseLogging.logInfoIfVerbose(logger, "Screenshot file not found: {}", screenshotPath);
+                logger.debug("Screenshot file not found: {}", screenshotPath);
             }
         } catch (Exception e) {
-            VerboseLogging.logInfoIfVerbose(logger, "Failed to capture screenshot: {}", screenshotName, e);
+            logger.debug("Failed to capture screenshot: {}", screenshotName, e);
         } finally {
             TestContextHolder.get().set(TAKING_SCREENSHOT_KEY, Boolean.FALSE);
         }

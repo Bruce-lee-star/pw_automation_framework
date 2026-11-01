@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,7 +59,7 @@ public final class ListenerPerfStats {
         if (testName != null && key != null && value != null) {
             String dataKey = testName + "." + key;
             testData.put(dataKey, value);
-            VerboseLogging.logDebugIfVerbose(logger, "Test data recorded: {} = {}", key, value);
+            logger.debug("Test data recorded: {} = {}", key, value);
         } else {
             if (testName == null) {
                 logger.debug("Skip recording test data: testName is null (key={})", key);

@@ -5,7 +5,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.FrameworkFlags;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.LazyInit;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.CapturedContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import org.slf4j.Logger;
@@ -196,8 +195,7 @@ public final class AsyncPool {
                     shutdownGracefully();
                 });
 
-        VerboseLogging.logInfoIfVerbose(LOGGER,
-                "[AsyncPool] Initialized: core={}, max={}, queue={}, timeout={}ms, maxPendingTimeouts={}",
+        LOGGER.debug("[AsyncPool] Initialized: core={}, max={}, queue={}, timeout={}ms, maxPendingTimeouts={}",
                 CORE_THREADS, MAX_THREADS, QUEUE_CAPACITY, DEFAULT_TASK_TIMEOUT_MS, MAX_PENDING_TIMEOUTS);
     }
 
@@ -306,8 +304,7 @@ public final class AsyncPool {
         // 随父线程场景末 assertAll() 一并判红（原实现下其失败落在 worker 自己的收集器上，无人上报 → 静默假绿）。
         final SoftAssertions.Collector assertionCollector = SoftAssertions.captureCollector();
         checkThresholdsBeforeSubmit();
-        VerboseLogging.logTraceIfVerbose(LOGGER,
-                "[AsyncPool] submit: timeout={}ms, queue={}/{}, active={}",
+        LOGGER.trace("[AsyncPool] submit: timeout={}ms, queue={}/{}, active={}",
                 timeoutMs, pool.getQueue().size(), QUEUE_CAPACITY, pool.getActiveCount());
         try {
             Future<?> future = pool.submit(() -> {
@@ -345,7 +342,7 @@ public final class AsyncPool {
             LOGGER.error("[AsyncPool] Submit REJECTED (pool shutting down or saturated) → task DROPPED "
                     + "(policy: never block the submitting thread). Dropped total: {}", dropped, e);
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(LOGGER, "[AsyncPool] Submit failed: {}", e.getMessage());
+            LOGGER.warn("[AsyncPool] Submit failed: {}", e.getMessage());
         }
     }
 
@@ -442,7 +439,7 @@ public final class AsyncPool {
             LOGGER.warn("[AsyncPool] context scheduler id collision on '{}' — previous pool lost tracking; "
                     + "context ids must be unique", contextId);
         }
-        VerboseLogging.logInfoIfVerbose(LOGGER, "[AsyncPool] Created context scheduler '{}' (active ctx schedulers: {})",
+        LOGGER.debug("[AsyncPool] Created context scheduler '{}' (active ctx schedulers: {})",
                 contextId, CONTEXT_SCHEDULERS.size());
         return ex;
     }
@@ -451,7 +448,7 @@ public final class AsyncPool {
     public static void removeContextScheduler(String contextId) {
         ScheduledThreadPoolExecutor ex = CONTEXT_SCHEDULERS.remove(contextId);
         if (ex != null) {
-            VerboseLogging.logInfoIfVerbose(LOGGER, "[AsyncPool] Removed context scheduler '{}' (active ctx schedulers: {})",
+            LOGGER.debug("[AsyncPool] Removed context scheduler '{}' (active ctx schedulers: {})",
                     contextId, CONTEXT_SCHEDULERS.size());
         }
     }

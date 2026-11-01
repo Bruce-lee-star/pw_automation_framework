@@ -17,7 +17,6 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.Locale;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.cloud.BrowserStackManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.cloud.BrowserStrategy;
@@ -80,15 +79,15 @@ public final class BrowserStartupImpl implements BrowserStartup {
      * 初始化 Playwright 实例
      */
     public void initializePlaywright(String configId) {
-        VerboseLogging.logInfoIfVerbose(logger, "Initializing Playwright for config: {}", configId);
+        logger.debug("Initializing Playwright for config: {}", configId);
 
         try {
             Playwright.CreateOptions createOptions = getCreateOptions();
             Playwright playwright = Playwright.create(createOptions);
             PlaywrightRuntime.instance().state.putPlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId), playwright);
-            VerboseLogging.logInfoIfVerbose(logger, "Playwright initialized successfully for config: {}", configId);
+            logger.debug("Playwright initialized successfully for config: {}", configId);
         } catch (Exception e) {
-            VerboseLogging.logErrorIfVerbose(logger, "Failed to initialize Playwright for config: {}", configId, e);
+            logger.error("Failed to initialize Playwright for config: {}", configId, e);
             // 清理已创建的实例（如果有）
             if (PlaywrightRuntime.instance().state.hasPlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId))) {
                 PlaywrightRuntime.instance().state.removePlaywright(PlaywrightRuntime.instance().browserRegistry.keyFor(configId));
@@ -108,12 +107,12 @@ public final class BrowserStartupImpl implements BrowserStartup {
         }
         String absoluteBrowsersPath = Paths.get(browserPath).toAbsolutePath().toString();
         env.put("PLAYWRIGHT_BROWSERS_PATH", absoluteBrowsersPath);
-        VerboseLogging.logDebugIfVerbose(logger, "Playwright browsers path: {}", absoluteBrowsersPath);
+        logger.debug("Playwright browsers path: {}", absoluteBrowsersPath);
 
         // 跳过 Playwright.create() 内部的自动下载，因为我们已经通过 ensureBrowserInstalledForType() 管理下载
         // 如果不禁用，Node.js 进程启动时会尝试连接 cdn.playwright.dev 下载所有浏览器
         env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
-        VerboseLogging.logInfoIfVerbose(logger, "Playwright instance created with browser download disabled (managed separately)");
+        logger.debug("Playwright instance created with browser download disabled (managed separately)");
 
         // ── 将 Node.js 子进程的临时目录重定向到 .playwright/temp ──
         // Playwright 使用 os.tmpdir() 决定 Firefox profile、WebKit 运行时等临时文件位置
@@ -127,7 +126,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
         } else {
             env.put("TMPDIR", playwrightTemp);
         }
-        VerboseLogging.logInfoIfVerbose(logger, "Playwright temp directory redirected to: {}", playwrightTemp);
+        logger.debug("Playwright temp directory redirected to: {}", playwrightTemp);
 
         // ── 抑制 Node.js 的 url.parse 弃用警告 (DEP0169) ──
         // Playwright 驱动内部 Node.js 代码使用了 url.parse()，这在 Node 11+ 已弃用
@@ -149,24 +148,24 @@ public final class BrowserStartupImpl implements BrowserStartup {
      * <p>浏览器下载为幂等检查（已安装时毫秒级返回），切换浏览器类型时可能需要下载新类型。
      */
     public void initializeBrowser(String configId) {
-        VerboseLogging.logInfoIfVerbose(logger, "Initializing Browser for config: {}", configId);
+        logger.debug("Initializing Browser for config: {}", configId);
 
         // 双重检查：如果已经有连接的浏览器实例，直接返回
         Browser existingBrowser = PlaywrightRuntime.instance().state.getBrowser(PlaywrightRuntime.instance().browserRegistry.keyFor(configId));
         if (existingBrowser != null && existingBrowser.isConnected()) {
-            VerboseLogging.logInfoIfVerbose(logger, "Browser already initialized and connected for config: {}", configId);
+            logger.debug("Browser already initialized and connected for config: {}", configId);
             return;
         }
 
         // 关闭现有浏览器实例（如果存在但未连接）
         if (existingBrowser != null) {
-            VerboseLogging.logInfoIfVerbose(logger, "Closing stale browser instance for config: {}", configId);
+            logger.debug("Closing stale browser instance for config: {}", configId);
             try {
                 //  N-22：与 cleanupAll 同一收口 —— 先 markClosing 再 close，使 onDisconnected 判定为
                 //    「框架主动关闭（预期）」；直接 close() 会让该 Browser 被记成 disconnected **unexpectedly**。
                 PlaywrightRuntime.instance().browserCleanup.closeBrowserInstance(existingBrowser);
             } catch (Exception e) {
-                VerboseLogging.logWarnIfVerbose(logger, "Failed to close stale browser, continuing", e);
+                logger.warn("Failed to close stale browser, continuing", e);
             }
         }
 
@@ -201,8 +200,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
             int originalTimeout = timeout;
             timeout = Math.max(timeout, 30000);  // 最小 30s
             if (timeout < 45000)  {timeout = (int)(originalTimeout * 1.5);} 
-            VerboseLogging.logInfoIfVerbose(logger,
-                "[Browser Init] Firefox detected: auto-adjusting launch timeout {}ms → {}ms", originalTimeout, timeout);
+            logger.debug("[Browser Init] Firefox detected: auto-adjusting launch timeout {}ms → {}ms", originalTimeout, timeout);
         }
 
         BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
@@ -220,7 +218,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
         long initStart = System.currentTimeMillis();
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                VerboseLogging.logInfoIfVerbose(logger, "[Browser Init] Launching browser (attempt {}/{}): type={}, channel={}, headless={}",
+                logger.debug("[Browser Init] Launching browser (attempt {}/{}): type={}, channel={}, headless={}",
                     attempt, maxRetries, browserType, PlaywrightManager.config().getBrowserChannel(), headless);
                 
                 Browser browser = setupBrowser(playwright, browserType, launchOptions);
@@ -229,15 +227,14 @@ public final class BrowserStartupImpl implements BrowserStartup {
                 recordBrowserForReport(browser, browserType);
 
                 long elapsed = System.currentTimeMillis() - initStart;
-                VerboseLogging.logInfoIfVerbose(logger, "[Browser Init] Browser initialized in {}ms: {} for config: {}",
+                logger.debug("[Browser Init] Browser initialized in {}ms: {} for config: {}",
                     elapsed, browserType, configId);
                 return;
             } catch (Exception e) {
                 lastException = e;
                 if (attempt < maxRetries) {
                     long backoffMs = WebFrameworkConfig.PLAYWRIGHT_BROWSER_STARTUP_BACKOFF_MS.getLongValue() * attempt;
-                    VerboseLogging.logWarnIfVerbose(logger,
-                        "[Browser Init] Launch attempt {} failed: {}. Retrying in {}ms...",
+                    logger.warn("[Browser Init] Launch attempt {} failed: {}. Retrying in {}ms...",
                         attempt, com.hsbc.cmb.hk.dbb.automation.framework.web.cloud.BrowserStackManager.sanitizeMessage(e.getMessage()), backoffMs);
                     // 退避等待：基于 LockSupport.parkNanos（不调用 Thread.sleep，也不依赖 ForkJoinPool）
                     LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(backoffMs));
@@ -245,7 +242,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
             }
         }
 
-        VerboseLogging.logErrorIfVerbose(logger, "Failed to initialize Browser after {} attempts for config: {}", maxRetries, configId, lastException);
+        logger.error("Failed to initialize Browser after {} attempts for config: {}", maxRetries, configId, lastException);
         PlaywrightRuntime.instance().state.removeBrowser(PlaywrightRuntime.instance().browserRegistry.keyFor(configId));
         //  修复 Medium：启动失败路径必须释放 L292 已创建的 Playwright 节点子进程，
         // 否则仅移除 Browser 实例仍会泄漏 Playwright 实例持有的进程。
@@ -349,8 +346,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
             launchOptions.setChannel(channel);
             logger.info("Browser channel: {}", channel);
         } else  {if (channel != null && !channel.isEmpty() && !isChromium) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                "Ignoring browser channel '{}' for browser type '{}' (channel only applies to Chromium-based browsers)",
+            logger.debug("Ignoring browser channel '{}' for browser type '{}' (channel only applies to Chromium-based browsers)",
                 channel, browserType);
         }} 
 
@@ -409,19 +405,19 @@ public final class BrowserStartupImpl implements BrowserStartup {
         //  修复 H6/H8：用状态根的 fullInit 作幂等判据（PlaywrightManager.frameworkState.isInitialized 在浏览器就绪前可能为 false，
         // 旧判据导致每次进入都重算 configId；static synchronized 已提供类级互斥，fullInit 再补可见性判据）。
         if (PlaywrightRuntime.instance().state.isFullInit() && TestContextHolder.get().get(PlaywrightManager.CURRENT_CONFIG_ID_KEY) != null) {
-            VerboseLogging.logInfoIfVerbose(logger, "Playwright environment already initialized with config: {}", TestContextHolder.get().get(PlaywrightManager.CURRENT_CONFIG_ID_KEY));
+            logger.debug("Playwright environment already initialized with config: {}", TestContextHolder.get().get(PlaywrightManager.CURRENT_CONFIG_ID_KEY));
             return;
         }
 
         String configId = generateConfigId();
-        VerboseLogging.logInfoIfVerbose(logger, "Initializing Playwright environment with config: {}", configId);
+        logger.debug("Initializing Playwright environment with config: {}", configId);
         // ⚠ 不在此时创建 Playwright 实例（Node.js 子进程）
         // 原因：浏览器可能尚未安装，提前创建会导致初次 launch 时找不到二进制
         // Playwright 实例延迟到 initializeBrowser() 中、浏览器就绪后再创建
         TestContextHolder.get().set(PlaywrightManager.CURRENT_CONFIG_ID_KEY,configId);
         PlaywrightRuntime.instance().state.markFullInit();
 
-        VerboseLogging.logInfoIfVerbose(logger, "Playwright environment initialized (Playwright/Browser deferred to first access)");
+        logger.debug("Playwright environment initialized (Playwright/Browser deferred to first access)");
     }
 
 }

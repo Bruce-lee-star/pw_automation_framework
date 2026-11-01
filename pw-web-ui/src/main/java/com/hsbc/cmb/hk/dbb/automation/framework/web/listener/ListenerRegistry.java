@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,19 +38,19 @@ public class ListenerRegistry {
      */
     public static synchronized void initialize(String basePackage) {
         if (initialized) {
-            VerboseLogging.logInfoIfVerbose(logger, "ListenerRegistry already initialized");
+            logger.debug("ListenerRegistry already initialized");
             return;
         }
 
-        VerboseLogging.logInfoIfVerbose(logger, "Initializing ListenerRegistry with base package: {}", basePackage);
-        VerboseLogging.logDebugIfVerbose(logger, "Starting listener registry initialization");
+        logger.debug("Initializing ListenerRegistry with base package: {}", basePackage);
+        logger.debug("Starting listener registry initialization");
 
         try {
             // 主发现路径：ServiceLoader 发现 FrameworkListener 实现（对齐 codegen SPI 做法，逐 provider 容错）
             discoverViaServiceLoader();
 
             Set<Class<?>> classes = scanPackage(basePackage);
-            VerboseLogging.logDebugIfVerbose(logger, "Scanned {} classes in package: {}", classes.size(), basePackage);
+            logger.debug("Scanned {} classes in package: {}", classes.size(), basePackage);
 
             int listenerCount = 0;
             for (Class<?> clazz : classes) {
@@ -71,8 +70,8 @@ public class ListenerRegistry {
             }
 
             initialized = true;
-            VerboseLogging.logInfoIfVerbose(logger, "ListenerRegistry initialized successfully. Scanned {} classes, registered {} scan listeners (SPI listeners logged separately)", classes.size(), listenerCount);
-            VerboseLogging.logDebugIfVerbose(logger, "Listener registry initialization completed");
+            logger.debug("ListenerRegistry initialized successfully. Scanned {} classes, registered {} scan listeners (SPI listeners logged separately)", classes.size(), listenerCount);
+            logger.debug("Listener registry initialization completed");
         } catch (Throwable e) {
             // 仅基础包解析等致命配置错误才整体失败；单类失败已在上面逐类跳过（根治 W-16 单点失败全盘失败）
             logger.error("Failed to initialize ListenerRegistry (base package: {})", basePackage, e);
@@ -90,7 +89,7 @@ public class ListenerRegistry {
             for (FrameworkListener listener : loader) {
                 try {
                     registerListener((Object) listener);
-                    VerboseLogging.logInfoIfVerbose(logger, "Registered SPI listener: {}", listener.getClass().getName());
+                    logger.debug("Registered SPI listener: {}", listener.getClass().getName());
                 } catch (Throwable t) {
                     logger.warn("Skipping SPI listener {} (continuing): {}", listener.getClass().getName(), t.getMessage());
                 }
@@ -218,7 +217,7 @@ public class ListenerRegistry {
         List<Class<? extends Annotation>> annotations = getOrCreateCachedAnnotations();
         for (Class<? extends Annotation> annotation : annotations) {
             if (clazz.isAnnotationPresent(annotation)) {
-                VerboseLogging.logDebugIfVerbose(logger, "{} is a listener (has {} annotation)", clazz.getName(), annotation.getName());
+                logger.debug("{} is a listener (has {} annotation)", clazz.getName(), annotation.getName());
                 return true;
             }
         }
@@ -230,7 +229,7 @@ public class ListenerRegistry {
                  iface.getPackage().getName().startsWith("net.thucydides.core.steps") ||
                  iface.getPackage().getName().startsWith("net.thucydides.core.annotations") ||
                  iface.getName().equals("io.cucumber.plugin.EventListener"))) {
-                VerboseLogging.logDebugIfVerbose(logger, "{} is a listener (implements: {})", clazz.getName(), iface.getName());
+                logger.debug("{} is a listener (implements: {})", clazz.getName(), iface.getName());
                 return true;
             }
         }
@@ -242,11 +241,11 @@ public class ListenerRegistry {
                 if ("net.thucydides.core.annotations.Listen".equals(annotation.getName()))  {continue;} 
                 try {
                     if (method.isAnnotationPresent(annotation)) {
-                        VerboseLogging.logDebugIfVerbose(logger, "{} is a listener (has {} on method)", clazz.getName(), annotation.getName());
+                        logger.debug("{} is a listener (has {} on method)", clazz.getName(), annotation.getName());
                         return true;
                     }
                 } catch (Exception ignored) {
-                    VerboseLogging.logDebugIfVerbose(logger, "Skipping annotation check on method: {}", method.getName());
+                    logger.debug("Skipping annotation check on method: {}", method.getName());
                 }
             }
         }
@@ -297,7 +296,7 @@ public class ListenerRegistry {
      */
     public static synchronized void registerListener(Class<?> listenerClass) {
         if (listenerClasses.contains(listenerClass)) {
-            VerboseLogging.logDebugIfVerbose(logger, "Listener class already registered: {}", listenerClass.getName());
+            logger.debug("Listener class already registered: {}", listenerClass.getName());
             return;
         }
 
@@ -317,7 +316,7 @@ public class ListenerRegistry {
             registeredListeners.add(listener);
             listenerClasses.add(listenerClass);
             
-            VerboseLogging.logInfoIfVerbose(logger, "Registered listener: {}", listenerClass.getName());
+            logger.debug("Registered listener: {}", listenerClass.getName());
         } catch (IllegalAccessException e) {
             try {
                 java.lang.reflect.Constructor<?>[] constructors = listenerClass.getDeclaredConstructors();
@@ -329,7 +328,7 @@ public class ListenerRegistry {
                 Object listener = constructor.newInstance();
                 registeredListeners.add(listener);
                 listenerClasses.add(listenerClass);
-                VerboseLogging.logInfoIfVerbose(logger, "Registered listener (after setting accessible): {}", listenerClass.getName());
+                logger.debug("Registered listener (after setting accessible): {}", listenerClass.getName());
             } catch (Exception ex) {
                 logger.error("Failed to instantiate listener after setting accessible: {}", listenerClass.getName(), ex);
             }
@@ -346,14 +345,14 @@ public class ListenerRegistry {
     public static synchronized void registerListener(Object listener) {
         Class<?> listenerClass = listener.getClass();
         if (registeredListeners.contains(listener)) {
-            VerboseLogging.logDebugIfVerbose(logger, "Listener already registered: {}", listenerClass.getName());
+            logger.debug("Listener already registered: {}", listenerClass.getName());
             return;
         }
 
         registeredListeners.add(listener);
         listenerClasses.add(listenerClass);
         
-        VerboseLogging.logInfoIfVerbose(logger, "Registered listener: {}", listenerClass.getName());
+        logger.debug("Registered listener: {}", listenerClass.getName());
     }
 
     /**
@@ -378,13 +377,13 @@ public class ListenerRegistry {
      * 清理监听器注册表
      */
     public static synchronized void cleanup() {
-        VerboseLogging.logInfoIfVerbose(logger, "Cleaning up ListenerRegistry");
-        VerboseLogging.logDebugIfVerbose(logger, "Starting listener registry cleanup");
+        logger.debug("Cleaning up ListenerRegistry");
+        logger.debug("Starting listener registry cleanup");
         registeredListeners.clear();
         listenerClasses.clear();
         initialized = false;
-        VerboseLogging.logDebugIfVerbose(logger, "Listener registry cleanup completed");
-        VerboseLogging.logInfoIfVerbose(logger, "ListenerRegistry cleaned up");
+        logger.debug("Listener registry cleanup completed");
+        logger.debug("ListenerRegistry cleaned up");
     }
 
     /**
@@ -432,7 +431,7 @@ public class ListenerRegistry {
             }
         }
 
-        VerboseLogging.logDebugIfVerbose(logger, "Scanned {} classes, found {} listener classes in package prefix: {}", 
+        logger.debug("Scanned {} classes, found {} listener classes in package prefix: {}",
             allClasses.size(), listenerClasses.size(), packagePrefix);
         return listenerClasses;
     }
@@ -535,7 +534,7 @@ public class ListenerRegistry {
             }} 
         }
 
-        VerboseLogging.logDebugIfVerbose(logger, "Found {} packages containing '{}' under '{}'", packages.size(), packageContains, packagePrefix);
+        logger.debug("Found {} packages containing '{}' under '{}'", packages.size(), packageContains, packagePrefix);
         return packages;
     }
     
@@ -564,7 +563,7 @@ public class ListenerRegistry {
                 String currentPackage = basePackage + "." + file.getName();
                 if (file.getName().contains(packageContains)) {
                     packages.add(currentPackage);
-                    VerboseLogging.logDebugIfVerbose(logger, "Found listener package: {}", currentPackage);
+                    logger.debug("Found listener package: {}", currentPackage);
                 }
                 packages.addAll(findPackagesContaining(file, currentPackage, packageContains));
             }
@@ -602,7 +601,7 @@ public class ListenerRegistry {
                     if (lastPart.contains(packageContains) && !foundPackages.contains(packageName)) {
                         foundPackages.add(packageName);
                         packages.add(packageName);
-                        VerboseLogging.logDebugIfVerbose(logger, "Found listener package in JAR: {}", packageName);
+                        logger.debug("Found listener package in JAR: {}", packageName);
                     }
                 }
             }

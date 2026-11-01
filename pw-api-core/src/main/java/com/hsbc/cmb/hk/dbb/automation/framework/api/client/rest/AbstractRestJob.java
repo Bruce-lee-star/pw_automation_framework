@@ -3,7 +3,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.api.client.rest;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.config.ConfigProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.config.ApiFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.security.SecurityAudit;
-import com.hsbc.cmb.hk.dbb.automation.framework.api.utility.EnvironmentUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.core.entity.Entity;
 import com.hsbc.cmb.hk.dbb.automation.framework.api.domain.enums.ConfigKeys;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
@@ -78,7 +77,7 @@ public abstract class AbstractRestJob {
         RestAssured.config = RestAssured.config().sslConfig(sslConfig);
 
         if (relax) {
-            String environment = EnvironmentUtils.currentEnvironment().getEnvironmentName();
+            String environment = ConfigReader.getProperty("env");
             SecurityAudit.recordRelaxedTls(environment, ApiFrameworkConfig.HTTP_SSL_RELAX_VALIDATION.key());
             if (SecurityAudit.isProductionEnvironment(environment)) {
                 throw new IllegalStateException(

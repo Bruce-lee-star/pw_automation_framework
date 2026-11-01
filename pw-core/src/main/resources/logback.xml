@@ -73,8 +73,8 @@
     <logger name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.scan"
             level="${pw.codegen.log:-WARN}"/>
 
-    <!-- 项目代码日志级别：root 默认 INFO；VerboseLogging 会按 serenity.logging(VERBOSE→DEBUG / TRACE→TRACE) 在运行时提升至对应级别 -->
-    <root level="INFO">
+    <!-- root 日志级别由 logging.root.level 设置（支持 TRACE / DEBUG / INFO / WARN / ERROR / OFF）。 -->
+    <root level="${logging.root.level:-INFO}">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
     </root>

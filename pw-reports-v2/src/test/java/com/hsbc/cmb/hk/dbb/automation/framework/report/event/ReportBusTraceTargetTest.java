@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -91,7 +92,7 @@ class ReportBusTraceTargetTest {
     }
 
     @Test
-    @DisplayName("bridge.traceTarget()/videoTarget() 在用例活动期解析到 per-case（彻底去兜底：不返回 null）")
+    @DisplayName("bridge 仅在当前线程有上下文时解析目标；异步调用须显式传 outcomeId")
     void bridgeTraceTargetResolvesPerCaseWhenActive() throws Exception {
         Path dir = Files.createTempDirectory("pw-bridge-target");
         ReportBus bus = new ReportBus(PwReportsConfig.builder().enabled(true).outputDir(dir).build());
@@ -101,12 +102,39 @@ class ReportBusTraceTargetTest {
             ReportingBridgeImpl bridge = new ReportingBridgeImpl();
             bus.startCase("c1", "feature", "scenario", List.of("t"), "feature.feature");
 
-            //  收尾线程（CloseGuard worker）即便无 ThreadLocal 句柄，也应凭活动用例 id 解析到 per-case，
-            //  而非返回 null 落到全局 traces/ 再搬——这正是彻底去兜底要消除的副本逻辑。
             assertThat(bridge.traceTarget()).isEqualTo(dir.resolve("c1").resolve("trace.zip"));
             assertThat(bridge.videoTarget()).isEqualTo(dir.resolve("c1").resolve("records"));
+            assertThat(CompletableFuture.supplyAsync(() -> List.of(
+                    bridge.traceTarget() == null,
+                    bridge.videoTarget() == null,
+                    bridge.currentOutcomeId() == null,
+                    bus.activeStepId() == null,
+                    bus.activeOutcomeId() == null)).join())
+                    .containsOnly(true);
+            assertThat(bridge.traceTargetByOutcomeId("c1")).isEqualTo(dir.resolve("c1").resolve("trace.zip"));
         } finally {
             ReportBus.installDefault(previous);
         }
+    }
+
+    @Test
+    @DisplayName("NOOP 句柄不会把异步产物挂到另一个活动用例，并计入未归属指标")
+    void noopArtifactDoesNotUseAnotherCasesGlobalSnapshot() throws Exception {
+        Path dir = Files.createTempDirectory("pw-unattributed-artifacts");
+        ReportBus bus = new ReportBus(PwReportsConfig.builder().enabled(true).outputDir(dir).build());
+        bus.startCase("c1", "feature", "scenario", List.of("t"), "feature.feature");
+        Path trace = Files.createTempFile("pw-unattributed", ".zip");
+        Path video = Files.createTempFile("pw-unattributed", ".webm");
+
+        CompletableFuture.runAsync(() -> {
+            bus.attachTrace(StepHandle.NOOP, trace);
+            bus.attachVideo(StepHandle.NOOP, video);
+        }).join();
+
+        assertThat(bus.unattributedArtifactCount()).isEqualTo(2);
+        assertThat(Files.exists(trace)).isTrue();
+        assertThat(Files.exists(video)).isTrue();
+        assertThat(Files.exists(dir.resolve("c1").resolve("trace.zip"))).isFalse();
+        assertThat(Files.exists(dir.resolve("c1").resolve("records").resolve(video.getFileName()))).isFalse();
     }
 }

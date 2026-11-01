@@ -246,7 +246,7 @@ public final class AggregateBuilder {
                 ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.defaultValue());
         if (name == null || name.isBlank()) {
             // 兼容旧桥接：早期实现直接把项目名塞进该系统属性
-            name = System.getProperty("framework.project.name");
+            name = ConfigReader.getProperty(ConfigRegistry.LEGACY_FRAMEWORK_PROJECT_NAME.key());
         }
         //  <b>未配置 → Test Report</b>：不再拿框架自带的默认值冒充"用户配的名字"
         //  （2026-10-22 用户要求：只显示配置的，没配置就显示 Test Report）。

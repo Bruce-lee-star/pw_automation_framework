@@ -37,12 +37,17 @@ public final class RouteEvidenceRegistry {
 
     /** 命中处上报（任意线程）；无实现/实现异常一律静默。 */
     public static void record(String operation, String url, String detail) {
+        record(operation, url, detail, null);
+    }
+
+    /** 命中处携带请求上下文上报，便于实现通过 context binding 精确解析异步归属。 */
+    public static void record(String operation, String url, String detail, Object requestContext) {
         RouteEvidenceSink current = sink;
         if (current == null) {
             return;
         }
         try {
-            current.record(operation, url, detail);
+            current.record(operation, url, detail, requestContext);
         } catch (RuntimeException e) {
             LOGGER.debug("[Route] evidence record skipped (non-fatal): {}", e.toString());
         }

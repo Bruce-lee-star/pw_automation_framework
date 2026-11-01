@@ -5,14 +5,9 @@ import java.util.Locale;
 /**
  * 框架自有开关的<b>确定性</b>解析门面 —— D2-1 附带治理。
  *
- * <p><b>背景：两个实测踩到的坑（修复记录，勿回退）</b>
+ * <p><b>设计约束</b>
  * <ol>
- *   <li><b>键名必须与业务 / 上游配置隔离</b>：曾在 core 引入裸键
- *       {@code api.traffic.log.enabled}，结果 {@code System.getProperty} 与
- *       {@code System.getenv} 均为 {@code null} 的情况下，经 {@link ConfigReader}
- *       竟解析出 {@code true}；而 {@code api.something.else.enabled} 与加前缀的
- *       {@code framework.api.traffic.log.enabled} 都正确回落默认值。
- *       ⇒ 框架自有开关<b>一律加 {@link #PREFIX}</b>，避免撞车。</li>
+ *   <li><b>键名必须与业务 / 上游配置隔离</b>：框架自有开关<b>一律加 {@link #PREFIX}</b>，避免撞车。</li>
  *   <li><b>SPI 合并源会缓存属性快照，导致开关不可预期</b>：实测
  *       {@code setProperty(k,"true")} 之后再 {@code clearProperty(k)}，
  *       {@link ConfigReader} 的 框架 SPI 源<b>仍返回旧值 "true"</b>。

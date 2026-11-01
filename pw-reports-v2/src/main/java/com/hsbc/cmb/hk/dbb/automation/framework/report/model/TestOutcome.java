@@ -23,7 +23,7 @@ public final class TestOutcome {
     /** 契约版本，当前 1（DR-3：additive-only，分歧走主版本双写）。 */
     private int reportVersion = 1;
 
-    /** 唯一 id：slug(feature) + "-" + line + "-" + slug(scenario)，冲突加 -2/-3 后缀。 */
+    /** 唯一 id：秒级时间戳 + 用例身份的 SHA-256 hex 摘要，冲突加 -2/-3 后缀。 */
     private String outcomeId;
 
     private String name;

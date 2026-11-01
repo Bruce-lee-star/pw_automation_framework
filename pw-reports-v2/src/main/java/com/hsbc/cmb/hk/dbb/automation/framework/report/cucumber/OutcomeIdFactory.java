@@ -1,26 +1,59 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HexFormat;
 import java.util.Locale;
 
 /**
- * outcomeId 构造——{@code slug(feature)-line-slug(scenario)}（R7）。
+ * outcomeId 构造——{@code yyyyMMdd-HHmmss-<SHA-256 hex>}。
  *
  * <p>唯一性：冲突（scenario outline 同名示例、重试插件重发 TestCaseStarted）由
  * {@code ReportBus.startCase} 追加 {@code -2/-3} 后缀解决；本类只负责 base id。
  *
- * <p>slug 规则（对齐 Serenity 命名习惯）：小写、非字母数字折叠为单个 {@code -}、
- * 去首尾 {@code -}、限长 60（防文件名过长/路径长度问题）。
+ * <p>对齐 Serenity 默认报告文件名策略：以完整用例身份生成 SHA-256 十六进制摘要，
+ * 避免长名称和文件系统特殊字符影响产物路径。
  */
 public final class OutcomeIdFactory {
 
     private static final int MAX_SLUG_LEN = 60;
+    private static final DateTimeFormatter DIRECTORY_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT);
 
     private OutcomeIdFactory() {
     }
 
     /** @param featureUri feature 文件 URI（{@code file:///.../login.feature} 或相对路径均可） */
     public static String baseId(String featureUri, int line, String scenarioName) {
-        return slug(featureBaseName(featureUri)) + "-" + line + "-" + slug(scenarioName);
+        String identity = featureBaseName(featureUri) + ":" + line + ":" + scenarioName;
+        return timestampedId(identity);
+    }
+
+    static String baseId(String featureUri, int line, String scenarioName, ZonedDateTime timestamp) {
+        String identity = featureBaseName(featureUri) + ":" + line + ":" + scenarioName;
+        return timestampedId(identity, timestamp);
+    }
+
+    /** Prefix the SHA-256 hex digest of a case identity with the local time to seconds. */
+    public static String timestampedId(String rawId) {
+        return timestampedId(rawId, ZonedDateTime.now().format(DIRECTORY_TIMESTAMP));
+    }
+
+    static String timestampedId(String rawId, ZonedDateTime timestamp) {
+        return timestampedId(rawId, timestamp.format(DIRECTORY_TIMESTAMP));
+    }
+
+    private static String timestampedId(String rawId, String timestamp) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(rawId.getBytes(StandardCharsets.UTF_8));
+            return timestamp + "-" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the Java runtime", e);
+        }
     }
 
     /** feature 文件名去目录与扩展名（{@code login.feature} → {@code login}）。 */

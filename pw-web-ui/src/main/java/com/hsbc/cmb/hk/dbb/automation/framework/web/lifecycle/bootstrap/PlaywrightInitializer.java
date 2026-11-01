@@ -5,7 +5,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.config.ProxyConfig
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.InitializationException;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,14 +76,14 @@ public class PlaywrightInitializer {
             browserPath = DEFAULT_PLAYWRIGHT_BROWSER_PATH;
         }
         System.setProperty("PLAYWRIGHT_BROWSERS_PATH", browserPath);
-        VerboseLogging.logInfoIfVerbose(logger, "[static init], PLAYWRIGHT_BROWSERS_PATH set to: {}", browserPath);
+        logger.debug("[static init], PLAYWRIGHT_BROWSERS_PATH set to: {}", browserPath);
 
         String driverTmp = FrameworkConfigManager.getString(WebFrameworkConfig.PLAYWRIGHT_DRIVER_TMPDIR);
         if (driverTmp == null || driverTmp.trim().isEmpty()) {
             driverTmp = DEFAULT_PLAYWRIGHT_DRIVER_PATH;
         }
         System.setProperty("playwright.driver.tmpdir", driverTmp);
-        VerboseLogging.logInfoIfVerbose(logger, "[static init], playwright.driver.tmpdir set to: {}", driverTmp);
+        logger.debug("[static init], playwright.driver.tmpdir set to: {}", driverTmp);
 
         Path cachePath = null;
         try {
@@ -125,7 +124,7 @@ public class PlaywrightInitializer {
     private static void cleanupPlaywrightTempDirs(String tempDir) {
         try {
             Path tempPath = Paths.get(tempDir);
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Starting cleanup of old playwright temp directories in projector system temp directories: {}", tempPath);
+            logger.debug("[Static Init] Starting cleanup of old playwright temp directories in projector system temp directories: {}", tempPath);
 
             // 查找所有 playwright-java-* 目录
             List<Path> playwrightTempDirs = new ArrayList<>();
@@ -138,11 +137,11 @@ public class PlaywrightInitializer {
             }
 
             if (playwrightTempDirs.isEmpty()) {
-                VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Found 0 playwright-java temp directories in project");
+                logger.debug("[Static Init] Found 0 playwright-java temp directories in project");
                 return;
             }
 
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Found {} playwright-java temp directories in project", playwrightTempDirs.size());
+            logger.debug("[Static Init] Found {} playwright-java temp directories in project", playwrightTempDirs.size());
 
             int cleanedCount = 0;
             int failedCount = 0;
@@ -156,21 +155,21 @@ public class PlaywrightInitializer {
                     cleanedCount++;
                 } catch (Exception e) {
                     failedCount++;
-                    VerboseLogging.logDebugIfVerbose(logger, "Failed to cleanup playwright temp dir: {} - {}", dir.getFileName(), e.getMessage());
+                    logger.debug("Failed to cleanup playwright temp dir: {} - {}", dir.getFileName(), e.getMessage());
                 }
             }
 
             // 只在有成功清理的目录时才输出详细信息
             if (cleanedCount > 0) {
                 long sizeMB = totalSize / (1024 * 1024);
-                VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Project cleanup completed: {} directories removed ({} failed), total {} MB freed",
+                logger.debug("[Static Init] Project cleanup completed: {} directories removed ({} failed), total {} MB freed",
                         cleanedCount, failedCount, sizeMB);
             } else  {if (failedCount > 0) {
-                VerboseLogging.logInfoIfVerbose(logger, "[Static Init] All project directories locked or inaccessible ({} failed), skipping cleanup", failedCount);
+                logger.debug("[Static Init] All project directories locked or inaccessible ({} failed), skipping cleanup", failedCount);
             }} 
 
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to cleanup playwright temp directories in project: {}", e.getMessage());
+            logger.warn("[Static Init] Failed to cleanup playwright temp directories in project: {}", e.getMessage());
         }
     }
 
@@ -192,9 +191,9 @@ public class PlaywrightInitializer {
                         String errorMsg = e.getMessage();
                         if (errorMsg != null && errorMsg.contains("AccessDeniedException")) {
                             // 对于文件锁定问题，使用DEBUG级别而不是WARN
-                            VerboseLogging.logDebugIfVerbose(logger, "File locked, skipping deletion: {}", child.getFileName());
+                            logger.debug("File locked, skipping deletion: {}", child.getFileName());
                         } else {
-                            VerboseLogging.logWarnIfVerbose(logger, "Failed to delete child path: {} - {}", child.getFileName(), errorMsg);
+                            logger.warn("Failed to delete child path: {} - {}", child.getFileName(), errorMsg);
                         }
                     }
                 });
@@ -206,9 +205,9 @@ public class PlaywrightInitializer {
             Files.deleteIfExists(path);
         } catch (AccessDeniedException e) {
             // 文件被锁定，这是预期行为（例如node.exe仍在运行）
-            VerboseLogging.logDebugIfVerbose(logger, "File locked, cannot delete: {}", path.getFileName());
+            logger.debug("File locked, cannot delete: {}", path.getFileName());
         } catch (IOException e) {
-            VerboseLogging.logDebugIfVerbose(logger, "Failed to delete path: {} - {}", path.getFileName(), e.getMessage());
+            logger.debug("Failed to delete path: {} - {}", path.getFileName(), e.getMessage());
         }
     }
 
@@ -266,8 +265,7 @@ public class PlaywrightInitializer {
 
             // channel 场景仅对 chromium 有效：使用系统本地 Chrome/Edge
             if (isChannelBased(channel) && "chromium".equalsIgnoreCase(browserType)) {
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "[Static Init] Channel={} configured for chromium, using system browser (no browser download needed)",
+                logger.debug("[Static Init] Channel={} configured for chromium, using system browser (no browser download needed)",
                         channel);
                 // 系统浏览器不下载，但录视频仍需 Playwright ffmpeg
                 if (videoEnabled) {
@@ -278,22 +276,20 @@ public class PlaywrightInitializer {
 
             boolean browsersInstalled = checkBrowsersInstalled(cachePath);
             if (!browsersInstalled) {
-                VerboseLogging.logInfoIfVerbose(logger, "[Static Init] {} browser not found in cache, downloading...", browserType);
+                logger.debug("[Static Init] {} browser not found in cache, downloading...", browserType);
                 installBrowsers(cachePath);   // 内含 ffmpeg
                 // 下载后验证二进制文件确实存在且可执行
                 if (!checkBrowsersInstalled(cachePath)) {
-                    VerboseLogging.logWarnIfVerbose(logger,
-                        "[Static Init] Browser download completed but verification failed for {} at {}", browserType, cachePath);
+                    logger.warn("[Static Init] Browser download completed but verification failed for {} at {}", browserType, cachePath);
                     return false;
                 }
-                VerboseLogging.logInfoIfVerbose(logger,
-                    "[Static Init] Browser {} downloaded and verified successfully", browserType);
+                logger.debug("[Static Init] Browser {} downloaded and verified successfully", browserType);
                 if (videoEnabled) {
                     ensureFfmpegInstalled(cachePath);
                 }
                 return true;
             } else {
-                VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Playwright {} browser already installed in: {}", browserType, cachePath);
+                logger.debug("[Static Init] Playwright {} browser already installed in: {}", browserType, cachePath);
                 // 浏览器在，但 ffmpeg 可能缺失（旧缓存 / channel 历史），视频开启时补校验
                 if (videoEnabled) {
                     ensureFfmpegInstalled(cachePath);
@@ -301,7 +297,7 @@ public class PlaywrightInitializer {
                 return false;
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to check browsers installation", e);
+            logger.warn("[Static Init] Failed to check browsers installation", e);
             return false;
         }
     }
@@ -324,15 +320,14 @@ public class PlaywrightInitializer {
 
             // channel 仅对 chromium 有效，使用系统本地浏览器
             if (isChannelBased(channel) && "chromium".equalsIgnoreCase(browserType)) {
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "[Static Init] Channel={} configured for chromium, using system browser (not managed by Playwright cache)", channel);
+                logger.debug("[Static Init] Channel={} configured for chromium, using system browser (not managed by Playwright cache)", channel);
                 return true;
             }
 
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Checking if {} browser is installed...", browserType);
+            logger.debug("[Static Init] Checking if {} browser is installed...", browserType);
 
             if (!Files.exists(cachePath)) {
-                VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Cache path does not exist: {}", cachePath);
+                logger.debug("[Static Init] Cache path does not exist: {}", cachePath);
                 return false;
             }
 
@@ -347,15 +342,15 @@ public class PlaywrightInitializer {
                             String dirName = p.getFileName().toString();
                             boolean isMatch = matchKeywords.stream()
                                     .anyMatch(keyword -> dirName.contains(keyword));
-                            VerboseLogging.logDebugIfVerbose(logger, "[Static Init] Checking directory: {} -> match: {}", dirName, isMatch);
+                            logger.debug("[Static Init] Checking directory: {} -> match: {}", dirName, isMatch);
                             return isMatch;
                         });
             }
 
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Browser {} installed: {}", browserType, browserInstalled);
+            logger.debug("[Static Init] Browser {} installed: {}", browserType, browserInstalled);
             return browserInstalled;
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to check browsers installation", e);
+            logger.warn("[Static Init] Failed to check browsers installation", e);
             return false;
         }
     }
@@ -394,8 +389,7 @@ public class PlaywrightInitializer {
      */
     private static void installBrowsers(Path cachePath) {
         String browserType = PlaywrightManager.config().getBrowserType();
-        VerboseLogging.logInfoIfVerbose(logger,
-                "[Static Init] Downloading Playwright {} browser (with ffmpeg) to: {}", browserType, cachePath);
+        logger.debug("[Static Init] Downloading Playwright {} browser (with ffmpeg) to: {}", browserType, cachePath);
         runPlaywrightCliInstall(cachePath, browserType, "ffmpeg");
     }
 
@@ -407,17 +401,15 @@ public class PlaywrightInitializer {
      */
     private static void ensureFfmpegInstalled(Path cachePath) {
         if (isFfmpegInstalled(cachePath)) {
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] ffmpeg already installed in: {}", cachePath);
+            logger.debug("[Static Init] ffmpeg already installed in: {}", cachePath);
             return;
         }
-        VerboseLogging.logInfoIfVerbose(logger,
-                "[Static Init] ffmpeg not found (required for video recording), downloading to: {}", cachePath);
+        logger.debug("[Static Init] ffmpeg not found (required for video recording), downloading to: {}", cachePath);
         int exit = runPlaywrightCliInstall(cachePath, "ffmpeg");
         if (exit == 0 && isFfmpegInstalled(cachePath)) {
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] ffmpeg installed and verified successfully");
+            logger.debug("[Static Init] ffmpeg installed and verified successfully");
         } else {
-            VerboseLogging.logWarnIfVerbose(logger,
-                    "[Static Init] ffmpeg installation/verification failed at {}. Video recording will fail with "
+            logger.warn("[Static Init] ffmpeg installation/verification failed at {}. Video recording will fail with "
                             + "'Executable doesn't exist'. Pre-install once via: "
                             + "mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args=\"install ffmpeg\"",
                     cachePath);
@@ -443,7 +435,7 @@ public class PlaywrightInitializer {
                     .filter(p -> p.getFileName().toString().startsWith("ffmpeg-"))
                     .anyMatch(p -> Files.exists(p.resolve(exeName)));
         } catch (IOException e) {
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to check ffmpeg installation", e);
+            logger.warn("[Static Init] Failed to check ffmpeg installation", e);
             return false;
         }
     }
@@ -480,7 +472,7 @@ public class PlaywrightInitializer {
                     createRestrictedDir(driverTmpPath);
                 }
             } catch (IOException e) {
-                VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to create driver tmp dir: {}", driverTmpPath);
+                logger.warn("[Static Init] Failed to create driver tmp dir: {}", driverTmpPath);
             }
             String os = System.getProperty("os.name", "").toLowerCase();
             if (os.contains("win")) {
@@ -489,7 +481,7 @@ public class PlaywrightInitializer {
             } else {
                 env.put("TMPDIR", driverTmpPath.toString());
             }
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Node.js temp directory set to: {}", driverTmpPath);
+            logger.debug("[Static Init] Node.js temp directory set to: {}", driverTmpPath);
 
             // ── 2. 注入代理 HTTP_PROXY / HTTPS_PROXY（含 URL 编码的认证信息）──
             injectDownloadProxy(env);
@@ -497,7 +489,7 @@ public class PlaywrightInitializer {
             pb.redirectErrorStream(true);
             pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
 
-            VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Starting Playwright CLI install {} -> {}",
+            logger.debug("[Static Init] Starting Playwright CLI install {} -> {}",
                     List.of(targets), cachePath);
             Process process = pb.start();
 
@@ -509,10 +501,9 @@ public class PlaywrightInitializer {
             try {
                 int exitCode = waitForDownloadProcess(process, String.join(",", targets));
                 if (exitCode == 0) {
-                    VerboseLogging.logInfoIfVerbose(logger, "[Static Init] Playwright install {} succeeded", List.of(targets));
+                    logger.debug("[Static Init] Playwright install {} succeeded", List.of(targets));
                 } else {
-                    VerboseLogging.logWarnIfVerbose(logger,
-                            "[Static Init] Playwright install {} failed with exit code: {}", List.of(targets), exitCode);
+                    logger.warn("[Static Init] Playwright install {} failed with exit code: {}", List.of(targets), exitCode);
                 }
                 return exitCode;
             } finally {
@@ -524,7 +515,7 @@ public class PlaywrightInitializer {
                 }
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "[Static Init] Failed to run Playwright CLI install " + List.of(targets), e);
+            logger.warn("[Static Init] Failed to run Playwright CLI install " + List.of(targets), e);
             return -1;
         }
     }
@@ -538,8 +529,7 @@ public class PlaywrightInitializer {
     private static void injectDownloadProxy(Map<String, String> env) {
         boolean downloadProxyEnabled = FrameworkConfigManager.getBoolean(WebFrameworkConfig.PLAYWRIGHT_DOWNLOAD_PROXY_ENABLED);
         if (!downloadProxyEnabled) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[Static Init] Download proxy disabled (playwright.download.proxy.enabled=false)");
+            logger.debug("[Static Init] Download proxy disabled (playwright.download.proxy.enabled=false)");
             return;
         }
 
@@ -548,19 +538,16 @@ public class PlaywrightInitializer {
 
         if (!isBlank(httpProxy)) {
             env.put("HTTP_PROXY", httpProxy);
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "[Static Init] HTTP_PROXY set: {}", ProxyConfigResolver.sanitizeProxyUrlForLog(httpProxy));
+            logger.debug("[Static Init] HTTP_PROXY set: {}", ProxyConfigResolver.sanitizeProxyUrlForLog(httpProxy));
         }
 
         if (!isBlank(httpsProxy)) {
             env.put("HTTPS_PROXY", httpsProxy);
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "[Static Init] HTTPS_PROXY set: {}", ProxyConfigResolver.sanitizeProxyUrlForLog(httpsProxy));
+            logger.debug("[Static Init] HTTPS_PROXY set: {}", ProxyConfigResolver.sanitizeProxyUrlForLog(httpsProxy));
         }
 
         if (isBlank(httpProxy) && isBlank(httpsProxy)) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[Static Init] No download proxy configured — direct connection will be used");
+            logger.debug("[Static Init] No download proxy configured — direct connection will be used");
         }
     }
 

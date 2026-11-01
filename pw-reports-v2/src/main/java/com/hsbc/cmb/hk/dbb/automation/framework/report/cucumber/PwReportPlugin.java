@@ -44,7 +44,8 @@ import java.util.List;
  *   <li>hook（{@link HookTestStep}）不入步骤树；{@code @Before} 失败 → 用例级根因，
  *       {@code @After}（含 step 级 hook）失败 → 用例级 warning 证据；</li>
  *   <li>Status 全枚举映射（{@link StatusMapper}），AMBIGUOUS → FAILURE + 步骤附注；</li>
- *   <li>outcomeId = {@code slug(feature)-line-slug(scenario)}，冲突后缀由总线负责；</li>
+ *   <li>outcomeId = {@code yyyyMMdd-HHmmss-<SHA-256 hex(case identity)>}；
+ *       冲突后缀由总线负责；</li>
  *   <li>步骤句柄走线程本地栈——嵌套 @Step 在 glue 执行期间由 dispatcher 经总线
  *       CURRENT 管理，与本栈互不干扰（本栈只对 Cucumber 级步骤 push/pop）。</li>
  * </ul>

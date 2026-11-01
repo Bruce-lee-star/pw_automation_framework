@@ -31,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -286,9 +287,19 @@ class PluginEventChainTest {
         };
     }
 
-    private TestOutcome read(String id) throws Exception {
-        return JsonWriter.mapper().readValue(
-                dir.resolve(id).resolve(id + ".json").toFile(), TestOutcome.class);
+    private TestOutcome read(String caseName) throws Exception {
+        try (var directories = Files.list(dir)) {
+            for (Path caseDir : directories.filter(Files::isDirectory).toList()) {
+                Path report = caseDir.resolve(caseDir.getFileName() + ".json");
+                if (Files.exists(report)) {
+                    TestOutcome outcome = JsonWriter.mapper().readValue(report.toFile(), TestOutcome.class);
+                    if (caseName.equals(outcome.getName())) {
+                        return outcome;
+                    }
+                }
+            }
+        }
+        throw new AssertionError("Missing case report for " + caseName);
     }
 
     // --------------------------------------------------------------------- tests
@@ -307,7 +318,7 @@ class PluginEventChainTest {
         finishCase(Status.PASSED, null, 130);
         finishRun();
 
-        TestOutcome o = read("login-12-user-logs-in");
+        TestOutcome o = read("user logs in");
         assertThat(o.getResult()).isEqualTo(TestResult.SUCCESS);
         assertThat(o.getDuration()).isEqualTo(130);
         assertThat(o.getTags()).containsExactly("@smoke", "@auth");
@@ -340,7 +351,7 @@ class PluginEventChainTest {
         finishCase(Status.PASSED, null, 6);
         finishRun();
 
-        TestOutcome o = read("login-3-with-hooks");
+        TestOutcome o = read("with hooks");
         assertThat(o.getTestSteps()).as("只有 pickle 步骤").hasSize(1);
         assertThat(o.getTestSteps().get(0).getDescription()).isEqualTo("Given a precondition");
     }
@@ -354,7 +365,7 @@ class PluginEventChainTest {
         finishCase(Status.FAILED, new IllegalStateException("browser not started"), 1);
         finishRun();
 
-        TestOutcome o = read("login-7-before-fails");
+        TestOutcome o = read("before fails");
         assertThat(o.getResult()).isEqualTo(TestResult.FAILURE);
         assertThat(o.getTestFailureCause()).as("@Before 失败必须留下用例级根因").isNotNull();
         assertThat(o.getTestFailureCause().getMessage()).contains("browser not started");
@@ -372,7 +383,7 @@ class PluginEventChainTest {
         finishCase(Status.PASSED, null, 6);
         finishRun();
 
-        TestOutcome o = read("login-9-after-fails");
+        TestOutcome o = read("after fails");
         assertThat(o.getResult()).isEqualTo(TestResult.SUCCESS);
         assertThat(o.getEvidence()).as("@After 失败降级为用例级 warning 证据").anyMatch(l -> l.contains("WARNING") && l.contains("teardown blew up"));
     }
@@ -387,7 +398,7 @@ class PluginEventChainTest {
         finishCase(Status.FAILED, null, 2);
         finishRun();
 
-        TestOutcome o = read("login-15-ambiguous-step");
+        TestOutcome o = read("ambiguous step");
         assertThat(o.getResult()).isEqualTo(TestResult.FAILURE);
         TestStep s = o.getTestSteps().get(0);
         assertThat(s.getResult()).isEqualTo(TestResult.FAILURE);
@@ -404,7 +415,7 @@ class PluginEventChainTest {
         finishCase(Status.SKIPPED, null, 0);
         finishRun();
 
-        TestOutcome o = read("login-20-skipped-step");
+        TestOutcome o = read("skipped step");
         assertThat(o.getResult()).isEqualTo(TestResult.SKIPPED);
         assertThat(o.getTestSteps()).as("跳过也要可见，否则报告看不出为何没跑").hasSize(1);
         assertThat(o.getTestSteps().get(0).getResult()).isEqualTo(TestResult.SKIPPED);
@@ -424,7 +435,7 @@ class PluginEventChainTest {
         finishCase(Status.PASSED, null, 1);
         finishRun();
 
-        TestOutcome o = read("login-22-unused-step");
+        TestOutcome o = read("unused step");
         assertThat(o.getResult()).isEqualTo(TestResult.SUCCESS);
         assertThat(o.getTestSteps()).hasSize(2);
         assertThat(o.getTestSteps().get(1).getResult())
@@ -442,7 +453,7 @@ class PluginEventChainTest {
         finishCase(Status.FAILED, new AssertionError("expected 100 but was 80"), 5);
         finishRun();
 
-        TestOutcome o = read("login-30-bad-step");
+        TestOutcome o = read("bad step");
         assertThat(o.getResult()).isEqualTo(TestResult.FAILURE);
         assertThat(o.getTestFailureCause()).isNotNull();
         assertThat(o.getTestSteps().get(0).getResult()).isEqualTo(TestResult.FAILURE);
@@ -465,10 +476,10 @@ class PluginEventChainTest {
 
         finishRun();
 
-        assertThat(read("a-5-first-case").getTestSteps()).hasSize(1);
-        assertThat(read("b-8-second-case").getTestSteps()).hasSize(1);
-        assertThat(read("a-5-first-case").getUserStory().getDisplayName()).isEqualTo("a");
-        assertThat(read("b-8-second-case").getUserStory().getDisplayName()).isEqualTo("b");
+        assertThat(read("first case").getTestSteps()).hasSize(1);
+        assertThat(read("second case").getTestSteps()).hasSize(1);
+        assertThat(read("first case").getUserStory().getDisplayName()).isEqualTo("a");
+        assertThat(read("second case").getUserStory().getDisplayName()).isEqualTo("b");
     }
 
     @Test
@@ -481,13 +492,12 @@ class PluginEventChainTest {
         finishCase(Status.PASSED, null, 1);
         finishRun();
 
-        assertThat(dir.resolve("a-5-same-name").resolve("a-5-same-name.json")).exists();
-        assertThat(dir.resolve("a-5-same-name-2").resolve("a-5-same-name-2.json")).as("冲突走 -2 后缀").exists();
+        assertThat(caseDirectoriesFor("same name")).hasSize(2);
     }
 
     @Test
     @DisplayName("run 结束后 index.html 与 summary 均已落盘")
-    void runFinishWritesIndexAndSummary() {
+    void runFinishWritesIndexAndSummary() throws Exception {
         startRun();
         startCase("file:features/login.feature", 12, "indexed", List.of());
         finishCase(Status.PASSED, null, 4);
@@ -495,7 +505,7 @@ class PluginEventChainTest {
 
         assertThat(dir.resolve("index.html")).exists();
         assertThat(dir.resolve("serenity-summary.json")).exists();
-        assertThat(dir.resolve("login-12-indexed").resolve("login-12-indexed.html")).exists();
+        assertCaseReportExists("indexed", ".html");
     }
 
     @Test
@@ -507,7 +517,31 @@ class PluginEventChainTest {
         finishRun();
         finishRun();   // 某些 runner 下可能重复派发
 
-        assertThat(dir.resolve("login-12-twice").resolve("login-12-twice.json")).exists();
-        assertThat(read("login-12-twice")).isNotNull();
+        assertCaseReportExists("twice");
+        assertThat(read("twice")).isNotNull();
+    }
+
+    private List<Path> caseDirectoriesFor(String caseName) throws Exception {
+        List<Path> matches = new ArrayList<>();
+        try (var directories = Files.list(dir)) {
+            for (Path caseDir : directories.filter(Files::isDirectory).toList()) {
+                Path report = caseDir.resolve(caseDir.getFileName() + ".json");
+                if (Files.exists(report)
+                        && caseName.equals(JsonWriter.mapper()
+                                .readValue(report.toFile(), TestOutcome.class).getName())) {
+                    matches.add(caseDir);
+                }
+            }
+        }
+        return matches;
+    }
+
+    private void assertCaseReportExists(String caseName) throws Exception {
+        assertCaseReportExists(caseName, ".json");
+    }
+
+    private void assertCaseReportExists(String caseName, String extension) throws Exception {
+        assertThat(caseDirectoriesFor(caseName)).anySatisfy(caseDir ->
+                assertThat(caseDir.resolve(caseDir.getFileName() + extension)).exists());
     }
 }

@@ -10,7 +10,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.factory.PageObjectFacto
 import com.hsbc.cmb.hk.dbb.automation.framework.web.session.SessionManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.logging.LogContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycle;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
@@ -76,9 +75,9 @@ public class PlaywrightLifecycleBridge {
      * 又会让下一个场景误继承上一个场景的自定义配置。故直接删除该死分支。
      */
     static void resetCustomContextOptions() {
-        VerboseLogging.logInfoIfVerbose(logger, "Resetting custom context options for next scenario...");
+        logger.debug("Resetting custom context options for next scenario...");
         cleanupThreadLocals(true);
-        VerboseLogging.logInfoIfVerbose(logger, "Custom context options reset completed");
+        logger.debug("Custom context options reset completed");
     }
 
     /**
@@ -86,10 +85,10 @@ public class PlaywrightLifecycleBridge {
      * 已销毁后调用，仅清理线程级配置标志与 PAGE_KEY；方法名保留旧档位命名以兼容调用方）。
      */
     static void resetCustomContextOptionsForScenarioMode() {
-        VerboseLogging.logInfoIfVerbose(logger, "Resetting custom context options (context already closed, rebuilding next case)...");
+        logger.debug("Resetting custom context options (context already closed, rebuilding next case)...");
         cleanupThreadLocals(false);
         TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
-        VerboseLogging.logInfoIfVerbose(logger, "Custom context options reset completed");
+        logger.debug("Custom context options reset completed");
     }
 
     // ==================== Context + Page 重建 ====================
@@ -104,7 +103,7 @@ public class PlaywrightLifecycleBridge {
         TestContextHolder.get().set(PlaywrightManager.CONTEXT_KEY,context);
         Page page = PlaywrightContextManager.createPage(context);
         TestContextHolder.get().set(PlaywrightManager.PAGE_KEY,page);
-        VerboseLogging.logDebugIfVerbose(logger, "New Context and Page created");
+        logger.debug("New Context and Page created");
     }
 
     // ==================== Page 状态清理 ====================
@@ -141,15 +140,14 @@ public class PlaywrightLifecycleBridge {
         }
 
         try {
-            VerboseLogging.logInfoIfVerbose(logger, "Cleaning up page state (preserving all cookies)...");
+            logger.debug("Cleaning up page state (preserving all cookies)...");
 
             // 【加固】context 可能已因异常/503/浏览器关闭而失效：
             // 此时 context.pages()/newPage() 会抛 TargetClosedError，而这只是一种"清理期噪音"，
             // 既不影响测试结果判定，也容易误导成"浏览器崩溃"。故先探测存活，失效则直接跳过清理
             // （引用留空，后续 getContext()/getPage() 会自动重建），不打印冗长的 TargetClosedError。
             if (context != null && !isContextAlive(context)) {
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "Cleanup skipped: BrowserContext already closed/expired (page/context will be rebuilt on next use)");
+                logger.debug("Cleanup skipped: BrowserContext already closed/expired (page/context will be rebuilt on next use)");
                 TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
                 TestContextHolder.get().remove(PlaywrightManager.CONTEXT_KEY);
                 return;
@@ -161,8 +159,7 @@ public class PlaywrightLifecycleBridge {
                     List<Page> allPages = context.pages();
                     int pageCount = allPages.size();
                     if (pageCount > 1) {
-                        VerboseLogging.logInfoIfVerbose(logger,
-                                "Closing {} extra page(s) — keeping only main page", pageCount - 1);
+                        logger.debug("Closing {} extra page(s) — keeping only main page", pageCount - 1);
                         for (int i = pageCount - 1; i >= 1; i--) {
                             Page extraPage = allPages.get(i);
                             try {
@@ -170,12 +167,12 @@ public class PlaywrightLifecycleBridge {
                                     extraPage.close();
                                 }
                             } catch (Exception e) {
-                                VerboseLogging.logWarnIfVerbose(logger, "Failed to close extra page at index {}: {}", i, e.getMessage());
+                                logger.warn("Failed to close extra page at index {}: {}", i, e.getMessage());
                             }
                         }
                     }
                 } catch (Exception e) {
-                    VerboseLogging.logWarnIfVerbose(logger, "Error closing extra pages: {}", e.getMessage());
+                    logger.warn("Error closing extra pages: {}", e.getMessage());
                 }
             }
 
@@ -186,19 +183,18 @@ public class PlaywrightLifecycleBridge {
                     if (!allPages.isEmpty()) {
                         Page mainPage = allPages.get(0);
                         if (page != mainPage && !mainPage.isClosed()) {
-                            VerboseLogging.logInfoIfVerbose(logger, "Resetting page reference to main page");
+                            logger.debug("Resetting page reference to main page");
                             page = mainPage;
                             PlaywrightManager.setPage(mainPage);
                         }
                     } else {
-                        VerboseLogging.logInfoIfVerbose(logger, "No pages left, creating new Page");
+                        logger.debug("No pages left, creating new Page");
                         page = PlaywrightContextManager.createPage(context);
                         PlaywrightManager.setPage(page);
                     }
                 } catch (Exception e) {
                     // context 在两次探测之间恰好失效：不打印 TargetClosedError 噪音，静默跳过并留空引用。
-                    VerboseLogging.logWarnIfVerbose(logger,
-                            "Cleanup page reference failed (context likely closed), will rebuild on next use: {}", e.getClass().getSimpleName());
+                    logger.warn("Cleanup page reference failed (context likely closed), will rebuild on next use: {}", e.getClass().getSimpleName());
                     TestContextHolder.get().remove(PlaywrightManager.PAGE_KEY);
                     TestContextHolder.get().remove(PlaywrightManager.CONTEXT_KEY);
                     return;
@@ -213,18 +209,16 @@ public class PlaywrightLifecycleBridge {
                 boolean carriesSession = PlaywrightManager.customOptions().getStorageStatePath() != null
                         || PlaywrightManager.customOptions().getStorageState() != null;
                 if (carriesSession) {
-                    VerboseLogging.logInfoIfVerbose(logger,
-                            "Page storage preserved — localStorage/sessionStorage is part of the injected session");
+                    logger.debug("Page storage preserved — localStorage/sessionStorage is part of the injected session");
                 } else {
                     cleanupPageStorage(page);
                 }
             }
 
-            VerboseLogging.logInfoIfVerbose(logger, "Page state cleaned up (cookies preserved, extra tabs closed)");
+            logger.debug("Page state cleaned up (cookies preserved, extra tabs closed)");
         } catch (Exception e) {
             // 兜底：不打印 TargetClosedError 的冗长 JS 栈，仅输出异常类型，避免误导与噪音。
-            VerboseLogging.logWarnIfVerbose(logger,
-                    "Failed to cleanup page state ({}), will be rebuilt on next use",
+            logger.warn("Failed to cleanup page state ({}), will be rebuilt on next use",
                     e.getClass().getSimpleName());
         }
     }
@@ -258,7 +252,7 @@ public class PlaywrightLifecycleBridge {
                     + "} catch(e) {} "
                     + "}");
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(logger, "Failed to cleanup page storage: {}", e.getMessage());
+            logger.warn("Failed to cleanup page storage: {}", e.getMessage());
         }
     }
 
@@ -309,7 +303,7 @@ public class PlaywrightLifecycleBridge {
             //  context 仅在有值时传入（供实现侧定位）；无 Context 也必须能回答"信道级"结论
             return routeLifecycle.isConnectionUnresponsive(PlaywrightManager.currentContextForThread());
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "Unresponsive-connection probe skipped: {}", e.getMessage());
+            logger.debug("Unresponsive-connection probe skipped: {}", e.getMessage());
             return false;
         }
     }
@@ -350,7 +344,7 @@ public class PlaywrightLifecycleBridge {
      * Scenario 级别的初始化
      */
     public static void initializeForScenario() {
-        VerboseLogging.logDebugIfVerbose(logger, "Initializing for scenario...");
+        logger.debug("Initializing for scenario...");
         //  卡住诊断（2026-09-26）：用例一开始就武装看门狗 —— 用例超过采样间隔即打印线程现场。
         //  健康用例远短于 60s，故正常情况下零输出；出现输出即"该用例确实跑久了"。
         HangWatchdog.onScenarioStart(LogContext.currentScenarioId());
@@ -377,8 +371,7 @@ public class PlaywrightLifecycleBridge {
         PageObjectFactory.clearAll();
         PlaywrightManager.closePage();
         PlaywrightManager.closeContext();
-        VerboseLogging.logDebugIfVerbose(logger,
-                "Scenario initialization completed (Context will rebuild on demand)");
+        logger.debug("Scenario initialization completed (Context will rebuild on demand)");
     }
 
     /**
@@ -400,7 +393,7 @@ public class PlaywrightLifecycleBridge {
      * @param scenarioFailed 本用例是否失败；仅影响承载登录态时 Page 的取舍（保留 Page 以避免复用坏 Page），不改变 Context 归属判定
      */
     public static void cleanupForScenario(boolean scenarioFailed) {
-        VerboseLogging.logDebugIfVerbose(logger, "Cleaning up for scenario...");
+        logger.debug("Cleaning up for scenario...");
         // 路由命中证据 → 框架 报告：内核在 Playwright 事件线程（route 调用线程）只入队（那些线程直接写报告会丢），
         // 真正的写入必须发生在测试主线程 —— 本方法即场景收尾的主线程钩子。无 SPI 实现 / 非 框架 环境
         // 均静默降级（见 RouteEvidenceSink）；队列为空时是零成本空操作。
@@ -424,8 +417,7 @@ public class PlaywrightLifecycleBridge {
         boolean scenarioClosedContext = false;
 
         //  2026-09-30 收口：统一为每 case 重建并销毁 Context（scenario-scoped），不再区分 feature/credential 档。
-        VerboseLogging.logDebugIfVerbose(logger,
-                "Scenario-scoped Context - closing for fresh rebuild");
+        logger.debug("Scenario-scoped Context - closing for fresh rebuild");
         //  2026-10-16：移除关闭前的 context.cookies() 迟到事件吸收探测（见下方说明）——
         //  它会在 context.close() 前追加 settle + 同步协议往返，关闭/信道脏时纯等待 + TargetClosed 噪音。
         PlaywrightManager.closePage();
@@ -485,7 +477,7 @@ public class PlaywrightLifecycleBridge {
                 }
             });
         } catch (Exception e) {
-            VerboseLogging.logDebugIfVerbose(logger, "Failed to clean download dir {}: {}",
+            logger.debug("Failed to clean download dir {}: {}",
                     dir, e.getMessage());
         }
     }
@@ -518,8 +510,7 @@ public class PlaywrightLifecycleBridge {
      * 故本方法即跨 feature 的兜底收尾（关 Context+Page、回收残留、清当前会话 key、关本线程 Browser）。
      */
     public static void cleanupForFeature() {
-        VerboseLogging.logInfoIfVerbose(logger,
-                "Cleaning up for feature - closing Context (different feature requires fresh Context)...");
+        logger.debug("Cleaning up for feature - closing Context (different feature requires fresh Context)...");
         PlaywrightManager.closePage();
         PlaywrightManager.closeContext();
         //  窗口堆积修复：兜底回收残留 Context
@@ -529,8 +520,7 @@ public class PlaywrightLifecycleBridge {
         // 仅并发执行器模式按 playwright.browser.close.after.concurrent.task 开关及时关闭；
         // 浏览器进程最终由套件收尾（JVM shutdown hook → cleanupAll）统一回收。
         closeBrowserForCurrentThreadIfApplicable();
-        VerboseLogging.logInfoIfVerbose(logger,
-                "Feature cleanup completed — Context+Page+Session cleared for next feature rebuild");
+        logger.debug("Feature cleanup completed — Context+Page+Session cleared for next feature rebuild");
     }
 
     /**

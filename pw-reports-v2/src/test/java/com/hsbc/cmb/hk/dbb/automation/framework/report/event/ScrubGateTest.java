@@ -71,6 +71,19 @@ class ScrubGateTest {
         }
     }
 
+    @Test
+    @DisplayName("报告总线写入证据前统一脱敏，不保留原始 token")
+    void reportBusScrubsEvidenceBeforePersistence() {
+        ReportBus bus = new ReportBus(PwReportsConfig.builder().enabled(true).build());
+        StepHandle handle = bus.startCase("scrub-case", "feature", "scenario", List.of(), "feature.feature");
+
+        bus.attachEvidence(handle, "GET https://api.example.test/items?token=raw-secret-value&page=1");
+
+        String persisted = String.join("\n", bus.outcomeSnapshots().get(0).getEvidence());
+        assertThat(persisted).contains("token=***").contains("page=1");
+        assertThat(persisted).doesNotContain("raw-secret-value");
+    }
+
     @Nested
     @DisplayName("敏感头")
     class Headers {

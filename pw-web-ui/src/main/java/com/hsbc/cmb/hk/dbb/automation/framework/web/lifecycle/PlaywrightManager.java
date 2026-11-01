@@ -14,7 +14,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.media.PlaywrightSc
 import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkState;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.core.RuntimeProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.microsoft.playwright.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -370,8 +369,7 @@ public class PlaywrightManager {
                 tmp = Files.createTempFile("pw-storage-", ".json");
                 Files.writeString(tmp, storageStateJson, StandardCharsets.UTF_8);
                 ctx.setStorageState(tmp);
-                VerboseLogging.logInfoIfVerbose(logger,
-                        "Applied storageState in-place to live context (no context rebuild)");
+                logger.debug("Applied storageState in-place to live context (no context rebuild)");
             } catch (IOException e) {
                 throw new RuntimeException("[Session] Failed to apply storageState to live context", e);
             } finally {
@@ -379,7 +377,7 @@ public class PlaywrightManager {
                     try {
                         Files.deleteIfExists(tmp);
                     } catch (IOException ignore) {
-                        VerboseLogging.logDebugIfVerbose(logger, "Temp storageState file not deleted: {}", tmp);
+                        logger.debug("Temp storageState file not deleted: {}", tmp);
                     }
                 }
             }
@@ -390,8 +388,7 @@ public class PlaywrightManager {
             // 否则后续 getContext() 新建 Context 时不会注入 storageState，导致「本地有有效缓存却仍走完整登录」
             // （master 分支「首次登录不加载 session 文件」的等价缺陷）。此时本就无存活 Context，谈不上「重建」。
             customOptions().setStorageState(storageStateJson);
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "StorageState set (context not alive) — will apply on next getContext() creation");
+            logger.debug("StorageState set (context not alive) — will apply on next getContext() creation");
         }
     }
 
@@ -407,8 +404,7 @@ public class PlaywrightManager {
         if (ctxAlive) {
             closeCurrentPageIfAny();
             ctx.setStorageState(storageStatePath);
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "Applied storageState (path) in-place to live context (no context rebuild): {}", storageStatePath);
+            logger.debug("Applied storageState (path) in-place to live context (no context rebuild): {}", storageStatePath);
             // 仅就地换会话：不置 flag，避免后续 getContext() 误判需重建（抵消轻量化收益）
             customOptions().setStorageStatePathWithoutRebuild(storageStatePath);
         } else {
@@ -416,8 +412,7 @@ public class PlaywrightManager {
             // 否则后续 getContext() 新建 Context 时不会注入 storageState，导致「本地有有效缓存却仍走完整登录」
             // （master 分支「首次登录不加载 session 文件」的等价缺陷）。此时本就无存活 Context，谈不上「重建」。
             customOptions().setStorageStatePath(storageStatePath);
-            VerboseLogging.logInfoIfVerbose(logger,
-                    "StorageState path set (context not alive) — will apply on next getContext() creation: {}",
+            logger.debug("StorageState path set (context not alive) — will apply on next getContext() creation: {}",
                     storageStatePath);
         }
     }
@@ -430,10 +425,10 @@ public class PlaywrightManager {
         Page page = TestContextHolder.get().get(PAGE_KEY);
         if (page != null && !page.isClosed()) {
             try {
-                VerboseLogging.logInfoIfVerbose(logger, "Closing current page for in-place session switch");
+                logger.debug("Closing current page for in-place session switch");
                 page.close();
             } catch (Exception e) {
-                VerboseLogging.logWarnIfVerbose(logger, "Failed to close page on session switch: {}", e.getMessage());
+                logger.warn("Failed to close page on session switch: {}", e.getMessage());
             }
         }
         TestContextHolder.get().remove(PAGE_KEY);

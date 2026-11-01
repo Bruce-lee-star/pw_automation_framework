@@ -14,7 +14,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 
 /**
@@ -225,7 +224,7 @@ public final class BrowserRegistryImpl implements BrowserRegistry {
             if (oldPlaywright != null) {
                 try {
                     oldPlaywright.close();
-                    VerboseLogging.logInfoIfVerbose(logger, "[getBrowser] Closed old Playwright for config: {}", currentConfig);
+                    logger.debug("[getBrowser] Closed old Playwright for config: {}", currentConfig);
                 } catch (Exception e) {
                     logger.warn("[getBrowser] Error closing old Playwright: {}", e.getMessage());
                 }

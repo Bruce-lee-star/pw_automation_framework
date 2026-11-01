@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.recording;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.FrameworkRecordingConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridgeRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ConfigurationException;
 import org.slf4j.Logger;
@@ -28,10 +28,6 @@ public final class Recorder {
     /** per-page 框架 测试数据存储；仅在录制开启（{@link #isEnabled()}）时写入（成功路径零开销）。 */
     private final Map<String, Object> recordingTestData = new HashMap<>();
 
-    private static boolean isVerboseLogging() {
-        return VerboseLogging.isVerboseEnabled();
-    }
-
     // ==================== Reusable Interceptors ====================
 
     /**
@@ -40,9 +36,7 @@ public final class Recorder {
      */
     public void record(String action, Object detail, Runnable operation) {
         ReportingBridgeRegistry.get().flushPendingApiOperations();
-        if (isVerboseLogging()) {
-            logger.info("[Recorder] {}", action);
-        }
+        logger.debug("[Recorder] {}", action);
         addRecordingTestData(action, detail != null ? detail : "executed");
         operation.run();
     }
@@ -73,8 +67,7 @@ public final class Recorder {
      * 添加测试数据到本地存储（这些数据会进 框架 报告，属<b>行为</b>而非日志）。
      * 仅在<b>录制开启</b>时写入 HashMap，成功路径零开销。
      *
-     * <p>2026-09-28：门控从"日志详细度"改为 {@link #isEnabled()}（录制语义）—— 否则业务把
-     * {@code framework.verbose.logging} 关掉会连带丢掉报告里的 per-page 元素/校验数据（静默回归）。</p>
+     * <p>报告录制开关与日志级别独立，关闭 DEBUG 不影响写入报告。</p>
      */
     public void addRecordingTestData(String key, Object value) {
         if (!isEnabled()) {
@@ -82,7 +75,7 @@ public final class Recorder {
         }
         try {
             recordingTestData.put(key, value);
-            VerboseLogging.logDebugIfVerbose(logger, "Added 框架 test data: {} = {}", key, value);
+            logger.debug("Added 框架 test data: {} = {}", key, value);
         } catch (Exception e) {
             logger.error("Failed to add 框架 test data: {} = {}", key, value, e);
             throw new ConfigurationException("Failed to add 框架 test data: " + key + " = " + value, e);
@@ -107,25 +100,21 @@ public final class Recorder {
     /**
      * 录制开关（零开销，D4）：reporting 关闭时返回 false。
      *
-     * <p><b>2026-09-28 与日志门控解耦</b>：日志详细度改由 {@code framework.verbose.logging} 决定后，
-     * 录制<b>必须</b>继续沿用历史语义（{@code serenity.logging} 是否 VERBOSE/TRACE），否则业务把
-     * verbose 关掉会连带丢掉 框架 报告里的动作录制（静默回归；既有 5 个录制相关单测也依赖该语义）。
-     * 详见 {@link VerboseLogging#isRecordingEnabled()}。</p>
+     * <p>优先使用 {@code framework.recording.enabled}；未显式配置时，为兼容旧项目回退到
+     * {@code framework.logging=VERBOSE|TRACE}。</p>
      */
     public static boolean isEnabled() {
-        return VerboseLogging.isRecordingEnabled();
+        return FrameworkRecordingConfig.isEnabled();
     }
 
     /**
-     * Layer A 原生操作录制：刷新 Route Handler 产生的待报告 API 数据 + verbose 日志；
+     * Layer A 原生操作录制：刷新 Route Handler 产生的待报告 API 数据 + DEBUG 诊断日志；
      * 不写入 per-page 测试数据（per-page 测试数据归属 {@code BasePage}，Phase 4 前保留）。
      * 业务语义异常由调用方透传（本方法不捕获）。
      */
     public static void recordNative(String action, Object detail, Runnable operation) {
         ReportingBridgeRegistry.get().flushPendingApiOperations();
-        if (isVerboseLogging()) {
-            logger.info("[Recorder][native] {}", action);
-        }
+        logger.debug("[Recorder][native] {}", action);
         if (operation != null) {
             operation.run();
         }

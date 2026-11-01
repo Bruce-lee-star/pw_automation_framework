@@ -136,10 +136,18 @@ target/site/serenity/
 ├── email-report.html               # 邮件用单页自包含报告
 ├── serenity-summary.json           # 汇总 JSON
 ├── serenity-summary.csv            # 汇总 CSV
-├── <outcomeId>.html                # per-case 展示页
-├── <outcomeId>.json                # per-case 真相源（镜像 Serenity schema）
+├── <yyyyMMdd-HHmmss-sha256>/       # 每个用例独立目录（基础 ID 固定 80 字符）
+│   ├── <outcomeId>.html            # per-case 展示页
+│   ├── <outcomeId>.json            # per-case 真相源（镜像 Serenity schema）
+│   ├── screenshots/
+│   ├── trace.zip
+│   └── records/
 └── assets/report.css               # 静态资产
 ```
+
+用例目录以前缀本地时间 `yyyyMMdd-HHmmss`（精确到秒）及用例身份的 SHA-256 十六进制摘要命名，
+与 Serenity 默认压缩报告文件名的命名方式一致。Cucumber 身份包含 feature、行号和场景名；
+摘要用于路径，不可反向解码，完整用例名仍保存在 JSON 和 HTML 报告中。
 
 - **JSON 是真相源**：`CaseFinished` 即实时落盘（CI 超时被杀不丢已完成用例）；
   HTML 在 `RunFinished` 统一渲染，单项失败隔离（失败降级最小页，不影响其余
@@ -171,7 +179,7 @@ mvn clean verify          # 全量：137 个测试（含 11 类门禁）
 | 迁移 | `ConsistencyGateTest` | 双跑四一致门禁（coverage/result/step-tree/summary） |
 | 接缝 | `NetworkEvidenceBridgeTest` | 网络证据入步骤证据 + token 脱敏 |
 | 接缝 | `QueuedNetworkEvidenceBridgeTest` | 跨线程归位 / 队列溢出丢最旧 / 无场景静默降级 / 并发入队不丢 |
-| 稳定 | `OutcomeIdTest` | outcomeId 确定性、slug 规则、冲突后缀 |
+| 稳定 | `OutcomeIdTest` | SHA-256 outcomeId、slug helper、冲突后缀 |
 | 事件链 | `PluginEventChainTest` | **插件入口端到端**：hook 不入树、@Before 失败→用例根因、@After 失败→用例级 warning（不翻结论）、AMBIGUOUS→FAILURE+附注、SKIPPED 入树而 UNUSED 不留幽灵步、场景间句柄/stack 不串台、finishRun 幂等 |
 | 配置 | `ConfigParseTest` | 4 项决策默认值 / 冗余开关由值推导 / `limits` 档位解析与非法整体回退 / 旧键忽略不报错 |
 | 拦截缺口 | `UnproxyableStepWarningTest` | final/static/private `@Step` 的 warn 清单（final 与 static/private 分开措辞、父类链扫描） |

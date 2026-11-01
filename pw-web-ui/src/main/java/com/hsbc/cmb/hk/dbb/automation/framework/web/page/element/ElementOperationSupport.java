@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.element;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementNotFoundException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
@@ -146,26 +145,31 @@ final class ElementOperationSupport {
             // 重试后仍逻辑失败（返回 false / null）
             throw buildRetryException(locatorFn, selector, page, operation, testName,
                     new ElementOperationException(operation, selector,
-                            "Action returned false after nav settle (logical failure)", null));
+                            "Action returned false after nav settle (logical failure)", null), 1);
         } catch (PlaywrightException e2) {
-            throw buildRetryException(locatorFn, selector, page, operation, testName, e2);
+            throw buildRetryException(locatorFn, selector, page, operation, testName, e2, 1);
         } catch (RuntimeException e2) {
             // 非 Playwright（P1-8 对齐：重试失败也包诊断，与 executeWithRetry 首 catch 一致）
-            throw buildRetryException(locatorFn, selector, page, operation, testName, e2);
+            throw buildRetryException(locatorFn, selector, page, operation, testName, e2, 1);
         }
     }
 
     /** 构造与原 executeWithRetry 失败路径一致的「诊断异常」（含 DOM 诊断 + 截图 + 详细错误信息）。 */
     private static RuntimeException buildRetryException(Supplier<Locator> locatorFn, String selector,
             BasePage page, String operation, String testName, RuntimeException lastEx) {
+        return buildRetryException(locatorFn, selector, page, operation, testName, lastEx, 0);
+    }
+
+    private static RuntimeException buildRetryException(Supplier<Locator> locatorFn, String selector,
+            BasePage page, String operation, String testName, RuntimeException lastEx, int retryCount) {
         ElementDiagnosticsCollector diagnostics = new ElementDiagnosticsCollector(
                 locatorFn.get(), selector, page.getPageRaw(), page.getCurrentFrame());
         ElementOperationException.DiagnosticInfo info = diagnostics.collect();
-        info.retryCount(1);
+        info.retryCount(retryCount);
 
         String elementState = determineElementState(info);
         String customMessage = buildDetailedErrorMessage(operation, lastEx, diagnostics,
-                0, elementState, selector);
+                retryCount, elementState, selector);
 
         ElementOperationException ex = ElementOperationException.builder()
             .selector(selector)
@@ -223,8 +227,7 @@ final class ElementOperationSupport {
         }
         long waitedMs = PageInteractionMonitor.awaitQuiet(pw);
         if (waitedMs > 0) {
-            VerboseLogging.logDebugIfVerbose(logger,
-                    "[churn] waited {}ms for the page to settle before '{}'", waitedMs, operation);
+            logger.debug("[churn] waited {}ms for the page to settle before '{}'", waitedMs, operation);
         }
     }
 

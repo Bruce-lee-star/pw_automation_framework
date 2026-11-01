@@ -4,7 +4,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ConfigurationExce
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.base.ManagedPageAware;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.recording.RecordingPageProxy;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -299,7 +298,7 @@ public class PageObjectFactory {
     public static void setConfig(CreationConfig config) {
         if (config != null) {
             currentConfig = config;
-            VerboseLogging.logInfoIfVerbose(logger, "PageObjectFactory configuration updated: {}", config.getLifecycleStrategy());
+            logger.debug("PageObjectFactory configuration updated: {}", config.getLifecycleStrategy());
         }
     }
     
@@ -308,7 +307,7 @@ public class PageObjectFactory {
      */
     public static void resetConfig() {
         currentConfig = DEFAULT_CONFIG;
-        VerboseLogging.logInfoIfVerbose(logger, "PageObjectFactory configuration reset to default");
+        logger.debug("PageObjectFactory configuration reset to default");
     }
 
     /**
@@ -559,7 +558,7 @@ public class PageObjectFactory {
             return;
         }
         
-        VerboseLogging.logInfoIfVerbose(logger, "Warming up {} PageObject instances", pageClasses.length);
+        logger.debug("Warming up {} PageObject instances", pageClasses.length);
         
         for (Class<?> pageClass : pageClasses) {
             try {
@@ -570,7 +569,7 @@ public class PageObjectFactory {
             }
         }
         
-        VerboseLogging.logInfoIfVerbose(logger, "PageObject warm-up completed. Total instances: {}", getInstanceCount());
+        logger.debug("PageObject warm-up completed. Total instances: {}", getInstanceCount());
     }
     
     /**
@@ -637,8 +636,7 @@ public class PageObjectFactory {
         });
         CURRENT_REQUEST_SCOPE_KEY.remove(); // 清理本线程的请求作用域键残留（P1-12）
 
-        VerboseLogging.logInfoIfVerbose(logger,
-                "Cleared all PageObject instances: {} singletons, {} thread-isolated (across {} thread context(s)), {} request-scoped",
+        logger.debug("Cleared all PageObject instances: {} singletons, {} thread-isolated (across {} thread context(s)), {} request-scoped",
                 singletonCount, threadCount.get(), TestContextHolder.activeContextCount(), requestCount);
     }
     
@@ -743,7 +741,7 @@ public class PageObjectFactory {
         accessCount.clear();
         totalCreations.set(0);
         totalAccess.set(0);
-        VerboseLogging.logInfoIfVerbose(logger, "PageObjectFactory statistics reset");
+        logger.debug("PageObjectFactory statistics reset");
     }
 }
 

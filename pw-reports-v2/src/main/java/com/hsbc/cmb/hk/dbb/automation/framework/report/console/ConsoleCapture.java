@@ -204,7 +204,9 @@ public final class ConsoleCapture {
     /** tee PrintStream：autoflush，底层为 {@link InterceptingOutputStream}。 */
     private static final class TeePrintStream extends PrintStream {
         TeePrintStream(PrintStream delegate, boolean isError) {
-            super(new InterceptingOutputStream(delegate, isError), true);
+            // 显式以 UTF-8 编码：与 flushLine() 的 UTF-8 解码保持一致，
+            // 否则在 Windows（平台默认 GBK）下被捕获的 System.out/err 文本会乱码。
+            super(new InterceptingOutputStream(delegate, isError), true, StandardCharsets.UTF_8);
         }
     }
 }

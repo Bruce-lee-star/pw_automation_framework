@@ -1,6 +1,5 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.VerboseLogging;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.TimeoutException;
@@ -272,8 +271,7 @@ public final class PageLifecycleCoordinator {
                 info.attachToReport();
             }
         } catch (Exception | LinkageError e) {
-            VerboseLogging.logWarnIfVerbose(log,
-                    "[download] attachToReport switch unavailable, skipping auto-attach: {}", e.toString());
+            log.warn("[download] attachToReport switch unavailable, skipping auto-attach: {}", e.toString());
         }
     }
 
@@ -322,14 +320,13 @@ public final class PageLifecycleCoordinator {
         List<Page> pages = bp.context.pages();
 
         if (pages.isEmpty()) {
-            VerboseLogging.logWarnIfVerbose(log, "No pages available in context");
+            log.warn("No pages available in context");
             bp.page = null;
             return;
         }
 
         if (pages.size() <= 1) {
-            VerboseLogging.logWarnIfVerbose(log,
-                    "Only one page available (size={}), skipping close to avoid losing the last page", pages.size());
+            log.warn("Only one page available (size={}), skipping close to avoid losing the last page", pages.size());
             Page onlyPage = pages.get(0);
             if (bp.page != onlyPage) {
                 bp.setPageReference(onlyPage);
@@ -351,18 +348,15 @@ public final class PageLifecycleCoordinator {
                 });
                 bp.page.close();
             } else {
-                VerboseLogging.logDebugIfVerbose(log,
-                        "Current page reference is null or already closed, skip close()");
+                log.debug("Current page reference is null or already closed, skip close()");
             }
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(log,
-                    "Exception while closing current page: {}", e.getMessage());
+            log.warn("Exception while closing current page: {}", e.getMessage());
         }
 
         List<Page> updatedPages = bp.context.pages();
         if (updatedPages.isEmpty()) {
-            VerboseLogging.logWarnIfVerbose(log,
-                    "No pages available after closing current page, page reference will be null");
+            log.warn("No pages available after closing current page, page reference will be null");
             bp.page = null;
             return;
         }
@@ -382,8 +376,7 @@ public final class PageLifecycleCoordinator {
         bp.ensureContextValid();
         List<Page> pages = bp.context.pages();
         if (pages.size() <= 1) {
-            VerboseLogging.logInfoIfVerbose(log,
-                    "closeOtherPages skipped: page count={}, nothing to close", pages.size());
+            log.debug("closeOtherPages skipped: page count={}, nothing to close", pages.size());
             return;
         }
 
@@ -401,12 +394,10 @@ public final class PageLifecycleCoordinator {
                     p.close();
                 }
             } catch (Exception e) {
-                VerboseLogging.logWarnIfVerbose(log,
-                        "Exception while closing other page: {}", e.getMessage());
+                log.warn("Exception while closing other page: {}", e.getMessage());
             }
         }
-        VerboseLogging.logInfoIfVerbose(log,
-                "closeOtherPages done: closed {} other pages, current page retained",
+        log.debug("closeOtherPages done: closed {} other pages, current page retained",
                 pages.size() - 1);
     }
 
@@ -418,8 +409,7 @@ public final class PageLifecycleCoordinator {
             }
         } catch (Exception e) {
             if (e instanceof TimeoutException)  {throw (TimeoutException) e;} 
-            VerboseLogging.logWarnIfVerbose(log,
-                    "isClosed() check failed, page may already be gone: {}", e.getMessage());
+            log.warn("isClosed() check failed, page may already be gone: {}", e.getMessage());
             throw new TimeoutException("New page is no longer available (closed/destroyed)");
         }
         bp.setPageReference(newPage);
@@ -434,7 +424,7 @@ public final class PageLifecycleCoordinator {
         try {
             log.info("Switch to page: url={}, title={}", bp.getPageRaw().url(), bp.getPageRaw().title());
         } catch (Exception e) {
-            VerboseLogging.logWarnIfVerbose(log, "Unable to log new page info (url/title): {}", e.getMessage());
+            log.warn("Unable to log new page info (url/title): {}", e.getMessage());
         }
     }
 }
