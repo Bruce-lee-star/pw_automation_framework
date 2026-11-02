@@ -96,11 +96,11 @@
 
 <!-- ===================== hero ===================== -->
 <header class="hero">
-  <p class="kicker">PW_Automation_Framework · DEV-V5 · 架构设计文档</p>
+  <p class="kicker">PW_Automation_Framework · DEV-V6 · 架构设计文档</p>
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v1.7（新增 §3.1 全系统技术架构；v1.5–v1.6 覆盖 LLM 资产生产流程与治理）</b></span>
+    <span>版本：<b>v2.2（新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
     <span>日期：<b>2026-11-02</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
@@ -231,7 +231,8 @@
     <tr><td><b>协议/领域层</b></td><td>契约与 schema：原语集、StepPlan、SnapshotTree、资产 schema、需求上下文</td><td>pw-core</td><td>新增 BrowserCommandChannel 契约、Asset schema、RequirementContext；复用现有 StepPlan / 配置层序</td></tr>
     <tr><td><b>执行/引擎层</b></td><td>浏览器驱动与基础设施：原语实现、拦截、会话、并发闸门、监控</td><td>pw-web-ui</td><td>新增原语实现；复用 Route（拦截/收敛）、SessionStore、ConcurrencyGate、MonitorSink、BrowserStartupImpl</td></tr>
     <tr><td><b>资产层</b></td><td>测试资产存储、状态机、版本化、需求映射索引、度量</td><td>pw-core</td><td>新增 AssetRepository、AssetStateMachine、AssetIndex；复用 Report trace 落点</td></tr>
-    <tr><td><b>分析/智能层（可选）</b></td><td>LLM 页面理解、需求解析、候选验证；SPI 接入，不进运行时</td><td>pw-core（契约）/ 可选适配包</td><td>SPI：RequirementSource、PageUnderstandingEngine、AssetValidator；实现独立打包、依赖可排除</td></tr>
+    <tr><td><b>多语言（NLS）</b></td><td>文案与资产解耦：可见文本→key 反查（分析期）、key→当轮语言文案（执行期），与 codegen 共用同一份 nls json</td><td>pw-core（<code>agent/nls</code>）</td><td>已落地 NlsText / NlsCatalog / JsonNlsCatalog；LocatorSpec.nameKey、PlaywrightChannel、LinkageGraphVerifier、RuleBasedUnderstandingEngine 均可注入（§4.7）</td></tr>
+    <tr><td><b>分析/智能层（可选）</b></td><td>LLM 页面理解、需求解析、候选验证；SPI 接入，不进运行时</td><td><b>pw-agent-analysis（契约+确定性参考实现）</b> / 可选 LLM 适配包</td><td>SPI：RequirementSource、PageObservationProvider、PageUnderstandingEngine、AssetValidator；无 LLM 的 RuleBasedUnderstandingEngine / DeterministicAssetValidator / AssetPipelineOrchestrator 已落地；LLM/Playwright 适配器独立打包、依赖可排除</td></tr>
     <tr><td><b>横切·安全合规</b></td><td>策略网关（R1–R9）、脱敏、执行权约束、审计</td><td>pw-core + pw-web-ui</td><td>复用 ConfigReader、Report 审计；新增策略网关与脱敏过滤器</td></tr>
     <tr><td><b>横切·可观测配置</b></td><td>trace/metrics、配置层序、日志（UTF-8）</td><td>pw-core</td><td>复用 ErrorClassifier、Report、ConfigReader/ConfigRegistry；日志统一 UTF-8（见框架评审）</td></tr>
   </table>
@@ -259,7 +260,7 @@
       <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">VerificationReport</span><h4>pass / fail / flaky</h4><p>回写 AssetRepository：置信度 / 稳定性（N 次命中率）→ 驱动 §4.6 量化度量</p></div>
     </div>
   </div>
-  <p>验证失败 → 资产回 <code>pending_review</code> 或标 <code>incomplete</code>，转人工；验证 flaky（跨多次不稳定）→ 自动降为需重验。验证复用 RouteTestBed 隔离靶场（R4/R8）、BrowserCommandChannel 执行底座、SnapshotTree 感知，<b>不产生 LLM 调用</b>。</p>
+  <p>验证失败 → 资产回 <code>pending_review</code> 或标 <code>incomplete</code>，转人工；验证 flaky（跨多次不稳定）→ 自动降为需重验。验证复用 RouteTestBed 隔离靶场（R4/R8）、BrowserCommandChannel 执行底座、SnapshotTree 感知，<b>不产生 LLM 调用</b>。<b>AssetVerifier 的最小可用实现 <code>LinkageGraphVerifier</code> 已落地于 pw-core（见 §3.1.3.1）</b>，其编排即本节描述的"采集→执行→断言→稳定性统计"闭环。</p>
 
   <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
   <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
@@ -288,11 +289,140 @@ interface PageUnderstandingEngine {
 }
 interface AssetValidator { ValidationReport validate(AssetDraftBundle b); } // 确定性校验（§4.4 梯队）
 interface AssetVerifier {                                              // 资产→真实浏览器驱动验证（非 LLM）
-    VerificationReport verify(AssetBundle assets, VerificationScope scope); // 经 BrowserCommandChannel 执行资产操作/联动序列
+    VerificationReport verify(LinkageGraph graph, VerificationScope scope); // 先落地联动图谱验证（最小可用）；AssetBundle 泛化为后续扩展
 }
 // VerificationReport: { status: PASS|FAIL|FLAKY, evidence(trace), stability(N次命中率) }
 //   → 回写 AssetRepository 置信度/稳定性；FAIL→pending_review，FLAKY→需重验</code></pre>
   <p>约定：pw-core 定义全部契约与默认实现骨架；pw-web-ui 提供浏览器侧实现（原语、快照、观测）；LLM/需求源实现以<b>可选适配包</b>独立打包、依赖可排除，确保核心与回归链路<b>零 LLM 依赖</b>（R6）。</p>
+
+  <h4 id="s3131">3.1.3.1 已落地骨架 · pw-core 契约与值类型</h4>
+  <p>本节 §3.1.3 的契约已落地为可编译骨架，位于 <code>pw-core</code> 包 <code>com.hsbc.cmb.hk.dbb.automation.framework.agent</code>（下分 <code>channel/</code>、<code>asset/</code>、<code>harness/</code>），<b>不含任何浏览器依赖、零 LLM 调用</b>（R6）。已通过 <code>mvn -pl pw-core compile</code>（exit 0）。本包只定义契约与编排实现；<code>BrowserCommandChannel</code> 与 <code>IsolationHarness</code> 的 Playwright 真实现已落在 <code>pw-web-ui</code>（见 §3.1.3.2），验证驱动由此可在不触浏览器的前提下先行编译与单测。</p>
+  <table class="map-table">
+    <tr><th style="width:46%">文件</th><th>角色（对应设计）</th></tr>
+    <tr><td><code>agent/channel/BrowserCommandChannel.java</code></td><td>受限原语执行契约（§4.1；R2 无 evaluate）</td></tr>
+    <tr><td><code>agent/channel/Command.java</code></td><td>类型化命令 + ActionType 原语集（NAVIGATE/CLICK/FILL/SELECT/CHECK/UNCHECK/WAIT/ASSERT_VISIBLE/ASSERT_TEXT）+ 便捷工厂</td></tr>
+    <tr><td><code>agent/channel/CommandResult.java</code></td><td>执行结果（success / snapshot / message）</td></tr>
+    <tr><td><code>agent/channel/Snapshot.java</code></td><td>有界 a11y 快照值类型（白名单字段，R1/R7）</td></tr>
+    <tr><td><code>agent/asset/ElementRef.java</code></td><td>元素引用（定位器候选梯队②/③ + 语义角色，§4.6①）</td></tr>
+    <tr><td><code>agent/asset/LinkageGraph.java</code></td><td>联动图谱 schema（LinkageRule / ExpectedChange / ChangeKind）+ 回链 requirementId（§4.6③）</td></tr>
+    <tr><td><code>agent/asset/VerificationScope.java</code></td><td>验证范围（targetUrl + repeat，repeat 用于稳定性统计）</td></tr>
+    <tr><td><code>agent/asset/VerificationReport.java</code></td><td>报告（Status PASS/FAIL/FLAKY + stability + items + evidence(R9)）</td></tr>
+    <tr><td><code>agent/asset/AssetVerifier.java</code></td><td>验证驱动契约（消费 LinkageGraph → 真实浏览器验证，非 LLM）</td></tr>
+    <tr><td><code>agent/asset/LinkageGraphVerifier.java</code></td><td><b>最小可用实现</b>：acquire 靶场通道 → 执行触发 → 按快照断言 ExpectedChange → 跨 repeat 统计稳定性</td></tr>
+    <tr><td><code>agent/harness/IsolationHarness.java</code></td><td>隔离靶场 SPI（acquire/release，R4/R8；真正实现由 pw-web-ui 基于 RouteTestBed 提供）</td></tr>
+  </table>
+  <p>关键骨架（与 §3.1.3 契约一致，已落地）：</p>
+  <pre><code>// 执行底座（channel，契约 + 值类型，不依赖浏览器）
+public interface BrowserCommandChannel {           // §4.1 受限原语契约（R2：无 evaluate）
+    Snapshot snapshot();
+    CommandResult execute(Command command);
+    default List&lt;CommandResult&gt; executeAll(List&lt;Command&gt; cs) { ... }   // 批量（联动序列）
+}
+public final class Command {                        // 类型化命令 + 原语集
+    public enum ActionType { NAVIGATE, CLICK, FILL, SELECT, CHECK,
+                             UNCHECK, WAIT, ASSERT_VISIBLE, ASSERT_TEXT }  // 收敛为企业级契约
+    private final ActionType action; private final String targetRef;
+    private final Map&lt;String,String&gt; params;
+    public static Command navigate(String url), click(ref), fill(ref,v),
+                              select(ref,opt), assertVisible(ref);
+}
+public final class CommandResult { boolean success(); Snapshot snapshot(); String message(); }
+public final class Snapshot {                        // 有界 a11y 快照（R1/R7 白名单字段）
+    ElementState byRef(String ref);                  // 联动断言主入口
+    static final class ElementState { ref, role, name, visible, enabled, text(脱敏); }
+}
+
+// 资产层（asset）
+public final class ElementRef { String refId; List&lt;String&gt; locatorCandidates; String semanticRole; } // §4.6①
+public final class LinkageGraph {                    // §4.6③ 联动图谱（回链需求）
+    String requirementId();
+    List&lt;LinkageRule&gt; rules();                        // trigger + triggerAction + triggerValue + expectations
+    static final class LinkageRule {
+        ElementRef trigger; ActionType triggerAction;
+        String triggerValue;                          // FILL 的值 / SELECT 的选项（CLICK 等留空）
+        List&lt;ExpectedChange&gt; expectations;
+    }
+    static final class ExpectedChange { ElementRef target; ChangeKind kind;
+        enum ChangeKind { APPEAR, DISAPPEAR, ENABLE, DISABLE, TEXT_CHANGED, REQUIRED } }
+}
+public final class VerificationScope { String targetUrl; int repeat; }     // 重复=稳定性统计
+public final class VerificationReport {               // 回写置信度/稳定性（§4.6 量化）
+    enum Status { PASS, FAIL, FLAKY }
+    double stability(); List&lt;VerificationItem&gt; items(); String evidence(); // trace(R9)
+}
+public interface AssetVerifier {                     // 验证驱动契约（非 LLM）
+    VerificationReport verify(LinkageGraph graph, VerificationScope scope);
+}
+public final class LinkageGraphVerifier implements AssetVerifier {  // 最小可用实现
+    public LinkageGraphVerifier(IsolationHarness harness) { ... }
+    // verify(): acquire → 对每条规则 execute(trigger) → 按快照断言 ExpectedChange
+    //          → 跨 repeat 次统计 stability → 产出 PASS/FAIL/FLAKY + 证据
+}
+
+// 隔离靶场（harness，SPI）
+public interface IsolationHarness {                  // §3.1.2.1 / R4 / R8
+    BrowserCommandChannel acquire(String targetUrl);
+    void release(BrowserCommandChannel channel);
+}</code></pre>
+  <div class="note info"><b>设计契约与代码的一致性：</b>文档 §3.1.3 的 <code>AssetVerifier.verify(AssetBundle, VerificationScope)</code> 已收敛为最小可用形态 <code>verify(LinkageGraph, VerificationScope)</code>——当前优先打通"联动图谱→靶场执行并断言"这一最关键路径；<code>AssetBundle</code> 泛化（同时验证元素清单/行为模型）作为后续扩展，不阻塞本阶段。其余契约（BrowserCommandChannel / Snapshot / IsolationHarness / AssetRepository 状态机）与代码一致。</div>
+  <div class="note warn"><b>最小实现的约定（与生产的差异，避免误读）：</b>① <b><code>ElementRef.refId</code> 是业务/需求语义稳定 id（资产级主键），与运行期定位解耦</b>；运行期定位由 <code>locatorCandidates</code>（<code>LocatorSpec</code>）按 <b>Role-First 梯队</b>承载，<b>第一梯队即 role（<code>getByRole(role,{name})</code>）</b>——这正是 Playwright 最稳健、官方首推的定位方式，也是 Playwright MCP 的无障碍树驱动思路。快照索引键与命令目标统一采用该 role 定位符的 canonical 串，天然与 CSS 解耦、抗 DOM 重构。生产系统沿用同一模型，仅增加 testid/id/text/css 回退与"候选逐级校验唯一性"。② <code>LinkageGraphVerifier</code> 在<b>每轮重复前重新导航到目标页</b>，确保各轮独立可重复（避免上一轮触发造成的状态残留），这是"稳定性统计"正确性的前提。③ <code>REQUIRED</code> 在断言里暂以 <code>enabled</code> 近似，真实实现须校验必填属性。</div>
+
+  <h4 id="s3132">3.1.3.2 已落地实现 · pw-web-ui 浏览器绑定与端到端示例</h4>
+  <p>§3.1.3.1 的契约已由 <code>pw-web-ui</code> 提供 Playwright 真实现，位于包 <code>com.hsbc.cmb.hk.dbb.automation.framework.web.agent</code>。该实现<b>不复用</b>生产浏览器管理（<code>BrowserStartupImpl</code> / <code>PlaywrightRuntime</code>），而是在独立 Playwright 实例中按需启动 chromium，从而与回归环境逻辑隔离（R4/R8 "分析/重放仅在靶场"）。已通过 <code>mvn -pl pw-web-ui -am test -Dtest='LinkageGraphVerifier*'</code>（4/4 通过，含 1 个真实浏览器端到端示例）。</p>
+  <table class="map-table">
+    <tr><th style="width:46%">文件</th><th>角色</th></tr>
+    <tr><td><code>web/agent/PlaywrightChannel.java</code></td><td><code>BrowserCommandChannel</code> 的 Playwright 实现：把类型化命令翻译为 Playwright 原语（CLICK/FILL/SELECT/CHECK/…）；<b>定位翻译遵循 Role-First 梯队</b>（ROLE→<code>getByRole(role,{name})</code>、TEST_ID→<code>getByTestId</code>、ID→<code>#id</code>…）；快照来自 <b>ARIA 快照</b>（<code>page.ariaSnapshot()</code>，与 Playwright MCP 同源），解析出 <code>role+name</code> 生成 <code>LocatorSpec</code> 索引键，禁用态以 <code>[disabled]</code> 标注，<b>不暴露 evaluate/run_code_unsafe 入口</b>（R2）</td></tr>
+    <tr><td><code>web/agent/RouteTestBedHarness.java</code></td><td><code>IsolationHarness</code> 的 Playwright 实现（设计中的 RouteTestBed 隔离靶场）：惰性创建 Playwright、每 <code>acquire</code> 新建独立 BrowserContext+Page 并导航到 targetUrl、<code>release</code> 关闭通道、全部释放后关闭 Playwright（防 Node 子进程泄漏）</td></tr>
+  </table>
+  <p>端到端示例（验证驱动闭环的最小可运行证明）：</p>
+  <pre><code>// 测试素材（fixture，Role-First）：勾选 checkbox[name="I agree to the terms"] → textbox[name="Reason"] 启用(ENABLE)
+//                              accountType(combobox,"Account type") 选 corporate → purpose(textbox,"Purpose") 出现(APPEAR)
+LocatorSpec agree   = LocatorSpec.role("checkbox", "I agree to the terms");
+LocatorSpec reason  = LocatorSpec.role("textbox",  "Reason");
+LocatorSpec account = LocatorSpec.role("combobox", "Account type");
+LocatorSpec purpose = LocatorSpec.role("textbox",  "Purpose");
+LinkageGraph graph = new LinkageGraph("REQ-SAMPLE-1", List.of(
+    new LinkageRule(new ElementRef("agree",  List.of(agree),  "agree checkbox"), CLICK,
+                    List.of(new ExpectedChange(new ElementRef("reason", List.of(reason), "reason input"), ENABLE, null))),
+    new LinkageRule(new ElementRef("accountType", List.of(account), "account type select"), SELECT, "corporate",
+                    List.of(new ExpectedChange(new ElementRef("purpose", List.of(purpose), "purpose input"), APPEAR, null)))));
+
+RouteTestBedHarness harness = new RouteTestBedHarness();
+VerificationReport report = new LinkageGraphVerifier(harness)
+        .verify(graph, new VerificationScope(fixtureUrl, 2));   // 重复 2 次 → 稳定性 1.0 → PASS
+
+// 全部零 LLM 调用（R6）：分析期产资产，验证/执行期只跑确定性原语。</code></pre>
+  <div class="note ok"><b>验证价值：</b>该闭环证明"LLM 产出的联动图谱"可被直接驱动浏览器执行并断言——联动是否成立、在重复运行中是否稳定，皆由确定性执行给出量化结论（status + stability），并回写资产置信度（§4.6 量化验收）。这把"能驱动代码验证"从概念落成了可运行、可度量、可跳过的工程实践。</div>
+
+  <h4 id="s3133">3.1.3.3 已落地 · pw-agent-analysis 可选分析适配模块（§4.6 路径 B）</h4>
+  <p>新增 Maven 模块 <code>pw-agent-analysis</code>（groupId 与根一致），<b>依赖 pw-core，零浏览器依赖、零强制 LLM 依赖</b>：仅定义分析期 SPI 契约 + 提供<b>无 LLM 的确定性参考实现</b>（作为韧性降级路径），LLM/浏览器客户端不进本模块与核心运行时（R6）。路径 B（资产生产）的完整流水线由此可在不触浏览器、不调模型的前提下先行编译、单测、跑通。</p>
+  <table class="map-table">
+    <tr><th style="width:46%">文件（pw-agent-analysis）</th><th>角色（对应设计）</th></tr>
+    <tr><td><code>analysis/requirement/RequirementSource.java</code></td><td>SPI：需求解析（Cucumber Feature / 文档 → RequirementContext）；契约</td></tr>
+    <tr><td><code>analysis/requirement/RequirementContext.java</code> · <code>RequirementEntry.java</code> · <code>RequirementId.java</code></td><td>结构化需求模型 + 关键词映射（元素→需求溯源）</td></tr>
+    <tr><td><code>analysis/requirement/StaticRequirementSource.java</code></td><td>静态/人工需求源（确定性，降级路径）</td></tr>
+    <tr><td><code>analysis/observation/PageObservationProvider.java</code></td><td>SPI：脱敏观测采集（真实现在 pw-web-ui，基于 ARIA 快照）</td></tr>
+    <tr><td><code>analysis/observation/PageObservation.java</code> · <code>ObservedElement.java</code></td><td>只读、白名单字段观测包（R1/R7）</td></tr>
+    <tr><td><code>analysis/observation/ManualPageObservationProvider.java</code></td><td>人工/录制观测（确定性，降级路径）</td></tr>
+    <tr><td><code>analysis/engine/PageUnderstandingEngine.java</code></td><td>SPI：需求+观测 → 三类资产草稿（§4.6 ①/②/③）</td></tr>
+    <tr><td><code>analysis/engine/ElementInventory.java</code> · <code>BehaviorModel.java</code> · <code>AssetDraftBundle.java</code></td><td>三类资产模型 + 聚合草稿包（含 Provenance 溯源）</td></tr>
+    <tr><td><code>analysis/engine/RuleBasedUnderstandingEngine.java</code></td><td><b>无 LLM</b>参考实现：按角色/关键词推断元素清单与行为模型；联动图谱留空（需 LLM 前后差分或靶场验证）；可注入 <code>NlsCatalog</code>，把观测文案反查为 key 作为资产主键与首选定位符（§4.7）</td></tr>
+    <tr><td><code>analysis/validation/AssetValidator.java</code> · <code>ValidationReport.java</code></td><td>SPI + 报告：确定性校验（§4.6 ④）</td></tr>
+    <tr><td><code>analysis/validation/DeterministicAssetValidator.java</code></td><td>定位候选完整性/唯一性 + 联动目标存在性；ERROR→失败关闭，WARNING（缺需求映射 / 多语言下用字面文案定位）不阻断</td></tr>
+    <tr><td><code>analysis/pipeline/AssetPipelineOrchestrator.java</code></td><td>流水线编排：需求→观测→理解→校验→落库；<b>仅产 DRAFT</b>，校验失败抛 PipelineValidationException（失败关闭，R6/§4.4 铁律）</td></tr>
+  </table>
+  <p>资产层（§3.1.1 设计归属 pw-core，纯领域、零浏览器/零 LLM）随本次一并落地于 <code>pw-core/agent/asset/</code>：<code>AssetId</code> · <code>AssetState</code>（DRAFT→PENDING_REVIEW→APPROVED→ACTIVE→DEPRECATED）· <code>AssetType</code> · <code>Provenance</code> · <code>AssetDraft</code> · <code>StoredAsset</code> · <code>AssetStateMachine</code>（合法迁移表）· <code>AssetRepository</code>（接口）· <code>InMemoryAssetRepository</code>（实现）。资产以 JSON 序列化存储，使 pw-core 资产层与分析域模型解耦。</p>
+  <p><b>多语言（NLS）随本次落地</b>：<code>pw-core/agent/nls/</code> — <code>NlsText</code>（可见文本归一化 / 模板正则）· <code>NlsCatalog</code>（契约）· <code>JsonNlsCatalog</code>（两级 nls json、多文件按序合并、正/反索引缓存）。分析期把可访问名反查为 key 作为资产主键，执行期把 key 解析为当轮语言文案，使<b>同一份资产跨语言复用</b>（§4.7）。</p>
+  <p>流水线最小可运行证明（端到端单测，零浏览器零 LLM）：</p>
+  <pre><code>// 注入确定性 SPI（韧性降级路径），亦可替换为 LLM 引擎 / Playwright 观测
+AssetPipelineOrchestrator o = new AssetPipelineOrchestrator(
+        new StaticRequirementSource(ctx), new ManualPageObservationProvider(obs),
+        new RuleBasedUnderstandingEngine(), new DeterministicAssetValidator(),
+        new InMemoryAssetRepository());
+PipelineResult r = o.run("transfer.feature", "p-transfer");  // 产出 3 个 DRAFT 资产（ELEMENT_INVENTORY/BEHAVIOR_MODEL/LINKAGE_GRAPH）
+assert r.savedIds().size() == 3;                            // 全部 state=DRAFT（AI 永不自动可信，R6）
+// 校验失败（如重复定位符）→ PipelineValidationException → 失败关闭，不落库可信资产</code></pre>
+  <div class="note warn"><b>模块边界与未来扩展：</b>LLM 实现（<code>PageUnderstandingEngine</code> 的 LLM 适配器）与 Playwright 观测实现（<code>PageObservationProvider</code> 的 Playwright 适配器，基于 §3.1.3.2 的 ARIA 快照）均为<b>可选适配包</b>，独立打包、依赖可排除，绝不进入 pw-core/pw-web-ui 运行时（R6）。本模块当前以确定性实现打通全链路，LLM 仅作为可插拔生产者，其客户端与凭据不污染核心。</div>
 
   <h4>3.1.4 资产仓库与存储设计</h4>
   <ul>
@@ -392,6 +522,8 @@ Node ::= {
     <tr><td><b>脱敏</b></td><td>默认不向 LLM 发送任意页面内容。快照生成、模型请求、异常、URL、网络摘要和 trace 共用集中脱敏/字段白名单；未知敏感级别按敏感处理。凭据由独立 secret provider 按引用注入执行器，原文不进入 StepPlan。</td></tr>
     <tr><td><b>快照指纹</b></td><td>语义摘要仅用于比较诊断，不作幂等证明、身份认证或跳过动作的依据；指纹应按数据分类避免包含敏感内容，并记录算法版本。</td></tr>
   </table>
+  <div class="note info"><b>实现映射（v2.0）：</b>落地代码中的 <code>Snapshot</code> 由 <code>page.ariaSnapshot()</code> 解析生成，节点 <code>ref</code> 即 <code>LocatorSpec</code> 的 canonical 串（role 优先，如 <code>role=checkbox;name=I agree to the terms</code>）。这与 MCP 的"ref 仅本次快照有效、禁止用于代码生成"不同：本框架把<b>稳定、语义化的 role 定位符</b>作为资产级索引键，使业务资产与易变 CSS 解耦，同时保持只读、数据最小化（R1/R7）。隐藏元素（如 <code>display:none</code>）不进入 ARIA 树，天然支撑 APPEAR/DISAPPEAR 断言；禁用态以 <code>[disabled]</code> 标注驱动 ENABLE/DISABLE 断言。</div>
+  <div class="note warn"><b>多语言注意：</b>快照里的 <code>accessibleName</code> 是<b>当轮语言</b>的渲染结果，因此快照 canonical 只能是字面文案（如 <code>role=checkbox;name=我同意条款</code>）。资产要跨语言复用，索引键不能直接用这个 canonical，而应先用 NLS key 解析成当轮文案再查（见 §4.7）——否则"某语言下全部查不到"，且报错完全指不到语言问题。</div>
 
   <h3 id="s43">4.3 意图翻译与 StepPlan</h3>
   <p>三源归一为版本化、受 schema 约束的 <b>StepPlan</b>；schema 是输入验证的一层，不是完整的安全边界。每种 ActionType 使用独立参数结构和约束：例如 <code>navigate</code> 不要求 locator，<code>snapshot</code> 不要求 expect；有副作用动作须声明执行策略、超时和允许的业务后果。未知字段默认拒绝，未知 ActionType、非法参数和越权 origin 均拒绝。</p>
@@ -490,6 +622,71 @@ steps:
     <li><b>供应商治理（R9/§8.1）</b>：模型供应商须满足数据驻留、训练/留存条款、成本配额；模型不可用时不得影响既有回归链路。</li>
   </ul>
   <div class="note warn"><b>分析期约束：</b>① 输入须最小化并脱敏（R1/R7）——页面与需求文本默认不发送正文/原始快照全文，仅发送白名单字段（角色、可访问名、结构属性、脱敏后的文本），需求样例中的真实账号/金额/PII 须遮蔽；② LLM 不持有浏览器执行权（R6），禁止用 evaluate/run_code_unsafe 辅助分析；③ 敏感字段（凭据、个人数据、token）按未知即敏感处理，不得进入模型上下文；④ 分析在隔离靶场执行（R4/R8）。</div>
+
+  <h3 id="s47">4.7 多语言（NLS）与跨语言资产稳定性</h3>
+
+  <p><b>问题本质：</b>被测页面是多语言的，同一元素在 en / zh / … 下<b>可访问名不同</b>。若把文案写进资产
+  （{@code role=checkbox;name=I agree to the terms}），切语言即全部定位失败——这不是"偶发不稳定"，而是
+  <b>资产在设计上绑死了一种语言</b>。codegen 早已规避此问题（生成 {@code role=checkbox[name=Nls.t("link.agree")]}
+  而不是文案），Agent 资产必须沿用<b>同一约定</b>，否则两套资产无法共享同一份 nls 资源。</p>
+
+  <div class="note ok"><b>约定（与 codegen 完全一致，不新增第二套规范）：</b>① nls 文件是
+  <b>两级结构</b> {@code { "en": { "key": "value" }, "zh": { … } }}，语言 Key 取自第一层；
+  ② <b>资产只存 key</b>，运行期按当前语言解析成文案；③ 匹配前把 nls 值<b>归一化为可见文本</b>
+  （剥 {@code <b>/<img>}、解码 {@code &nbsp;}、折叠空白），因为页面上只有渲染后的文本；
+  ④ 含模板变量（{@code {{user}}}）的值<b>不能</b>按相等匹配，只能编译成正则。以上四条在
+  {@code pw-core agent.nls} 中一次性收口，codegen 与 Agent 共用同一实现（{@code NLSUtils.visibleText} 已委托）。</div>
+
+  <p><b>双向流转（分析期 name→key，执行期 key→name）：</b></p>
+  <table>
+    <tr><th style="width:16%">阶段</th><th style="width:34%">输入 → 输出</th><th>实现</th></tr>
+    <tr><td>分析期（B）</td><td>当前语言的可访问名 {@code "我同意条款"} → key {@code link.agree}</td>
+        <td>{@code NlsCatalog.keyOf(...)} 反查：精确 → 归一化 → 模板正则 → 子串兜底（带长度护栏，避免容器聚合文案误命中）</td></tr>
+    <tr><td>资产落库</td><td>key → 资产主键 + 首选定位符</td>
+        <td>{@code ElementRef.refId = "checkbox:link.agree"}；候选 0 = {@code LocatorSpec.roleOfKey(role, key)}；字面文案候选降为回退</td></tr>
+    <tr><td>执行期（A/C）</td><td>key → 当前语言文案 → {@code getByRole(role,{name})}</td>
+        <td>{@code PlaywrightChannel} 解析 key；模板值改用 {@code setName(Pattern)}</td></tr>
+    <tr><td>验证期</td><td>资产的 key 定位符 → 本轮快照的 canonical</td>
+        <td>{@code LinkageGraphVerifier} 先 {@code localize(catalog)} 再查快照，三级回退（本地化 → 原 canonical → role+正则）</td></tr>
+    <tr><td>断言</td><td>期望文案也用 key</td>
+        <td>{@code ExpectedChange.textChanged(target, "html.title")}：断言侧解析 key 后比较，模板值走正则</td></tr>
+  </table>
+
+  <pre><code>// ① 绑定 nls（同一份 json 也是 codegen/page object 用的那份）
+NlsCatalog nls = JsonNlsCatalog.ofLanguage("zh", "nls/login.nls.json");   // 或 of(...)：取切换语言后的当前值
+
+// ② 分析期：观测到的是"用户名"，落库的资产是 key
+new RuleBasedUnderstandingEngine(nls).analyze(requirement, observation);
+//   → ElementRef.refId = "textbox:login.username"（跨语言不变）
+//   → primaryLocator = role=textbox;nameKey=login.username
+
+// ③ 执行/验证期：同一份资产，任意语言都成立
+new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
+        .verify(keyedGraph, new VerificationScope(url + "?lang=zh", 2));   // en 下同样 PASS</code></pre>
+
+  <table>
+    <tr><th style="width:38%">已落地文件</th><th>职责</th></tr>
+    <tr><td><code>pw-core agent/nls/NlsText.java</code></td><td>可见文本归一化（剥标签/解实体/折叠空白）+ 模板值编正则；纯函数，codegen 与 Agent 共用</td></tr>
+    <tr><td><code>pw-core agent/nls/NlsCatalog.java</code></td><td>契约：{@code language() / hasKey / value / visibleText / keyOf / keys}，零浏览器零 LLM</td></tr>
+    <tr><td><code>pw-core agent/nls/JsonNlsCatalog.java</code></td><td>两级 json 解析、多文件按序合并（先到先得）、classpath + 文件系统、按语言缓存正/反索引；<b>语言未设置即报错</b>，不静默退化为字面文案</td></tr>
+    <tr><td><code>pw-core channel/LocatorSpec.java</code></td><td>新增 {@code nameKey} 形态与 {@code roleOfKey(...)}、{@code localize(catalog)}；canonical 仍可无损往返（{@code role=checkbox;nameKey=link.agree}）</td></tr>
+    <tr><td><code>pw-core asset/LinkageGraphVerifier.java</code></td><td>验证前把 key 本地化；TEXT_CHANGED 支持 key 断言；模板值按 role+正则匹配快照</td></tr>
+    <tr><td><code>pw-web-ui web/agent/PlaywrightChannel.java</code></td><td>ROLE 定位：key → 当前语言文案 / 模板 → {@code Pattern}；{@code RouteTestBedHarness} 注入同一 catalog</td></tr>
+    <tr><td><code>pw-agent-analysis engine/RuleBasedUnderstandingEngine.java</code></td><td>元素自带 key 优先，否则反查；资产主键与首选定位符用 key</td></tr>
+    <tr><td><code>pw-agent-analysis validation/DeterministicAssetValidator.java</code></td><td>多语言下"用字面文案定位"→ WARNING（能反查到 key 却没用 key，切语言必失效）</td></tr>
+  </table>
+
+  <div class="note warn"><b>为什么"语言未设置"必须报错而不是降级：</b>静默降级会退化成"用字面文案定位"，
+  在多语言下表现为<b>只有某种语言全挂</b>，且失败信息完全指不到 NLS——这是最难定位的一类缺陷。
+  因此 {@code JsonNlsCatalog} 在语言缺失时立刻抛出可操作异常（与 {@code NLSUtils.get} 的强制约定一致）。</div>
+
+  <div class="note ok"><b>验收证据（已跑通）：</b>同一份只含 key 的联动资产，在 {@code ?lang=en} 与 {@code ?lang=zh}
+  的同一页面下经隔离靶场验证<b>均 PASS（stability=1.0）</b>；另有确定性逻辑测试证明 key 被正确本地化为
+  当轮 canonical，且 en/zh 观测到不同文案时产出<b>同一个 refId 与同一个首选定位符</b>。</div>
+
+  <div class="note warn"><b>与企业级约束的关系：</b>nls 是<b>界面文案资源</b>，不含业务数据，纳入 R1/R7 白名单无冲突；
+  但反查索引只保存"可见文案 → key"，<b>不得</b>把值里的业务字段（如带客户名的模板值）写进资产——模板值一律
+  以 key 形式表达，运行期再结合真实值做正则匹配，避免 PII 随资产扩散。</div>
 </section>
 
 <!-- ===================== 5 安全红线 ===================== -->
@@ -600,7 +797,7 @@ steps:
     <li>[ ] 需求来源适配：复用框架已有 Cucumber Feature（Given/When/Then 即需求载体）或导入需求/验收文档作为分析上下文</li>
     <li>[ ] pw-codegen：资产草案 → Page Object/StepPlan/联动断言草案落库管线；经候选验证器 + 人工审批</li>
     <li>[ ] 联动图谱差分提取（操作前/后快照对比）；联动断言对应需求业务规则，可作为录制骨架补充</li>
-    <li>[ ] pw-core：技术架构落地（§3.1）——定义 BrowserCommandChannel / AssetRepository / AssetStateMachine / 分析层 SPI 契约（RequirementSource / PageObservationProvider / PageUnderstandingEngine / AssetValidator / <b>AssetVerifier 资产验证驱动</b>）；明确各组件 Maven 模块归属与可选适配包边界；资产本体 JSON + 元数据索引存储</li>
+    <li>[ ] pw-core：技术架构落地（§3.1）——<b>Agent 包契约 + pw-web-ui 浏览器绑定已落地（§3.1.3.1 / §3.1.3.2）</b>：pw-core 定义 BrowserCommandChannel / Command / Snapshot / AssetVerifier / LinkageGraphVerifier / IsolationHarness 契约与编排；pw-web-ui 实现 PlaywrightChannel + RouteTestBedHarness，并附端到端示例（LinkageGraphVerifier* 测试真实浏览器 4/4 通过）。剩余：AssetRepository / AssetStateMachine 状态机 与 分析层 SPI 契约（RequirementSource / PageObservationProvider / PageUnderstandingEngine / AssetValidator）；明确各组件 Maven 模块归属与可选适配包边界；资产本体 JSON + 元数据索引存储</li>
   </ul>
   <h3>P2 稳定代码生成</h3>
   <ul>
@@ -677,7 +874,7 @@ steps:
 </section>
 
 <footer>
-  本文档为 pw_automation_framework（DEV-V5）Agent Driver 架构设计稿 v1.7（2026-11-02）：方向有条件通过，P0 实现前须完成威胁建模、项目 API/生命周期核验和验收设计。MCP 基线仅作为参考实现，核验对象为 @playwright/mcp 0.0.83 及其对应发布目录中的 coreBundle；具体实现细节须在采用前按锁定的制品版本/校验值复核，不视为本项目规范或安全证明。当前项目适配以仓库实际 Maven artifactId 和 JUnit4/Cucumber Runner 为准。v1.7 新增 §3.1「全系统技术架构分解」，覆盖技术分层与模块归属、端到端三条路径、核心 SPI 契约、资产仓库存储、现有资产集成映射、红线贯穿与非功能设计；v1.6 新增 §4.6「LLM 页面理解与测试资产生成」及 P1.5 阶段。
+  本文档为 pw_automation_framework（DEV-V5）Agent Driver 架构设计稿 v1.9（2026-11-02）：方向有条件通过，P0 实现前须完成威胁建模、项目 API/生命周期核验和验收设计。MCP 基线仅作为参考实现，核验对象为 @playwright/mcp 0.0.83 及其对应发布目录中的 coreBundle；具体实现细节须在采用前按锁定的制品版本/校验值复核，不视为本项目规范或安全证明。当前项目适配以仓库实际 Maven artifactId 和 JUnit4/Cucumber Runner 为准。v1.9 在 v1.8（pw-core Agent 包骨架）基础上，新增 §3.1.3.2「pw-web-ui 浏览器绑定与端到端示例」：PlaywrightChannel（BrowserCommandChannel 的 Playwright 实现）+ RouteTestBedHarness（IsolationHarness 的隔离靶场实现），并附 LinkageGraphVerifier* 端到端测试（真实浏览器 4/4 通过）；v1.8 落地 §3.1.3.1 契约骨架；v1.7 新增 §3.1 全系统技术架构分解；v1.6 新增 §4.6「LLM 页面理解与测试资产生成」及 P1.5 阶段。v2.0（2026-11-02 续）将定位策略重构为 Role-First：新增浏览器无关的 LocatorSpec（梯队 ROLE/TEST_ID/ID/TEXT/CSS），快照改为 Playwright ARIA 快照（ariaSnapshot()）驱动并以 role+name 生成定位符索引键，Command 与 ElementRef 改为携带定位符（不再以 CSS 选择器作 ref），端到端测试 4/4 仍通过。
 </footer>
 
 </div>

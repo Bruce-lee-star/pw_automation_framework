@@ -1,0 +1,10 @@
+{
+  "en": {
+    "login.username": "Username",
+    "login.submit": "Log on"
+  },
+  "zh": {
+    "login.username": "用户名",
+    "login.submit": "登录"
+  }
+}

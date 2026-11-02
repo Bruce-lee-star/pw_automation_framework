@@ -13,6 +13,7 @@
 
     <modules>
         <module>pw-core</module>
+        <module>pw-agent-analysis</module>
         <module>pw-reports</module>
         <module>pw-api-core</module>
         <module>pw-web-ui</module>

@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.utils;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.utils.JsonUtils;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsText;
 import com.fasterxml.jackson.core.type.TypeReference;
 
 import org.slf4j.Logger;
@@ -258,8 +259,9 @@ public final class NLSUtils {
      * 故拾取反查 / 运行时定位都应基于可见文本，而非原始字符串，否则必然匹配不上。
      */
     public static String visibleText(String value) {
-        if (value == null)  {return "";} 
-        return stripHtmlAndNormalize(value).trim();
+        // 归一化语义已下沉到 pw-core 的 NlsText（Agent 契约层同样需要，且不能反向依赖 web）：
+        // 单一实现，避免"codegen 拾取"与"Agent 资产/定位"对同一 nls 值看到不同文本形态。
+        return NlsText.visibleText(value);
     }
 
     /** 归一化 + 剥 HTML + 解码实体（不 trim，供 {@link #templateRegexSource} 复用，保持历史行为一致）。 */

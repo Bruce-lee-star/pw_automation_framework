@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Linkage NLS fixture</title>
+</head>
+<body>
+  <h1 data-en="Account opening" data-zh="开户申请">Account opening</h1>
+
+  <!-- 勾选框：文案随语言变化，但 NLS key（link.agree）不变 -->
+  <input type="checkbox" id="agree" data-en="I agree to the terms" data-zh="我同意条款">
+  <label for="agree" data-en="I agree to the terms" data-zh="我同意条款">I agree to the terms</label>
+
+  <label for="reason" data-en="Reason" data-zh="原因">Reason</label>
+  <input id="reason" type="text" disabled>
+
+  <script>
+    // 通过 ?lang=en|zh 切换页面语言：模拟"同一页面在多种语言下渲染"的真实现场。
+    (function () {
+      var lang = new URLSearchParams(window.location.search).get('lang') || 'en';
+      document.querySelectorAll('[data-en]').forEach(function (el) {
+        var value = el.getAttribute('data-' + lang);
+        if (value === null) { return; }
+        if (el.tagName === 'INPUT') {
+          el.setAttribute('aria-label', value);   // 表单控件的可访问名走 aria-label
+        } else {
+          el.textContent = value;
+        }
+      });
+      var agree = document.getElementById('agree');
+      var reason = document.getElementById('reason');
+      agree.addEventListener('change', function () {
+        reason.disabled = !agree.checked;          // 联动：勾选后才可填原因
+      });
+    })();
+  </script>
+</body>
+</html>
