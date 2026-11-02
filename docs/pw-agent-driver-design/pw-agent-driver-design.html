@@ -98,10 +98,10 @@
 <header class="hero">
   <p class="kicker">PW_Automation_Framework · DEV-V5 · 架构设计文档</p>
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
-  <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条企业级流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，吸收其「非安全边界」教训，在本框架内做成<b>快照即真相、确定性执行、AI 只提候选、生成代码后运行时无 LLM</b>的闭环。</p>
+  <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v1.4 设计稿（已按 0.0.83 coreBundle 真实现核验 + §10 项目级适配含红线守门矩阵）</b></span>
-    <span>日期：<b>2026-11-01</b></span>
+    <span>版本：<b>v1.5 评审修订稿（条件通过方向；P0 实现前须完成安全与验收设计）</b></span>
+    <span>日期：<b>2026-11-02</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
   </div>
@@ -126,13 +126,13 @@
   <p>目标：用户以<b>业务流程</b>（自然语言 / 录制骨架 / DSL）描述要做什么，框架指挥浏览器逐步执行、自动发现并验证元素定位器、生成<b>可提交、可回归、可维护</b>的 Step 业务代码（Feature + Glue + Page Object）。</p>
   <table>
     <tr><th style="width:34%">原则</th><th>含义与判定标准</th></tr>
-    <tr><td><b>P1 · 快照即真相</b></td><td>浏览器状态只来自运行时 a11y 快照（role/name/ref + 候选 selector），禁止凭模型记忆或 CSS 猜测写定位器。每一步「先观察、后动作、再回读」。</td></tr>
-    <tr><td><b>P2 · 确定性执行</b></td><td>LLM 只产出「受 schema 约束的意图与候选」，执行由确定性 StepDriver + 原语通道承担。同一 StepPlan 在 CI 重复运行结果一致（幂等可重放）。</td></tr>
+    <tr><td><b>P1 · 证据驱动观察</b></td><td>浏览器状态以运行时可访问性/DOM 证据为依据；ref 仅作短期句柄，不能作为持久定位器。每一步「先观察、后动作、再回读」；快照不是对页面真实状态的完整证明。</td></tr>
+    <tr><td><b>P2 · 可重复决策</b></td><td>LLM 只产出受 schema 约束的意图与候选；执行由确定性 StepDriver 承担。在固定版本、受控数据和相同外部条件下，决策及记录应可比较；不承诺浏览器/业务结果必然一致。重试按动作语义约束，非幂等写操作不得自动重放。</td></tr>
     <tr><td><b>P3 · AI 与运行时分离</b></td><td>生成 Step 代码落库后，<b>回归运行时零 LLM 依赖</b>（借鉴 MCP 官方理念：committed tests are the durable artifact）。LLM 只存在于「设计期/生成期」。</td></tr>
-    <tr><td><b>P4 · 最小权限与真边界</b></td><td>MCP 官方明示「不是安全边界」；本设计把边界做实：原语分级（读/写/高危）、凭据不进 AI 通道、无自由代码执行、上下文隔离、来源白名单。</td></tr>
-    <tr><td><b>P5 · 全链路可观测</b></td><td>每步带 trace（步骤 id、快照指纹、定位器来源、耗时、结果），失败即收敛（复用 F1），产物可回放、可审计。</td></tr>
+    <tr><td><b>P4 · 最小权限与纵深防御</b></td><td>MCP 官方明示「不是安全边界」；本设计采用数据最小化、原语分级、凭据隔离、上下文隔离及网络出站策略。应用层 allow-list 不是网络安全边界，须由受控网络/代理策略兜底。</td></tr>
+    <tr><td><b>P5 · 全链路可观测</b></td><td>每步记录最小必要 trace（步骤 id、策略版本、耗时、结果及脱敏摘要）；失败即停止并提供最小现场。仅在隔离靶场支持受控重放，审计记录本身不可直接重执行。</td></tr>
   </table>
-  <div class="note info"><b>与「生成稳定代码」的关系：</b>稳定性来自三条链路 —— ① 定位器经 <b>DOM 唯一性断言 + 灰度回注</b>后才成为代码里的常量；② 生成物<b>编译 + 冒烟执行</b>双验证后才落库；③ 生成代码内嵌 trace 注释（来源、验证时间、指纹），可追溯。</div>
+  <div class="note info"><b>与「生成可维护代码」的关系：</b>候选定位器须经过语义与业务期望校验、人工/受控审批后才能进入生成流程；生成物经<b>格式/静态检查、编译、隔离靶场测试和代码评审</b>后才合并。指纹和 trace 是辅助证据，不证明定位器唯一、正确或长期稳定。</div>
 </section>
 
 <!-- ===================== 2 MCP 参照解剖 ===================== -->
@@ -141,18 +141,18 @@
   <p><b>一手来源</b>：本地源码目录 <code>D:\IdeaProject\playwright-mcp-0.0.83</code>（npm 发布包形态，Apache-2.0）——<code>config.d.ts</code>（官方 Config 权威签名）、<code>README.md</code>（update-readme.js 自动生成的<b>全量工具清单</b>，含 0.0.83 新增 caps 分组）、<code>SECURITY.md</code>。架构说明：0.0.83 起 MCP 工具实现已并入 <code>playwright-core</code> 的 <code>coreBundle</code>（<code>index.js</code> → <code>tools.createConnection</code>），<code>roll.js</code> 显示真源码位于 <code>playwright/packages/playwright-core/src/tools/mcp/</code>。<b>实现级核验（v1.2 新增）</b>：已在发布目录 <code>npm install</code> 取得 <code>playwright-core@1.64.0-alpha-1790635538000</code> 的 <code>lib/coreBundle.js</code>（3.57MB，内含 MCP 全部工具实现，源码路径注释可见 <code>src/tools/mcp/index.ts / backend/utils.ts / recorder.ts / config.ts</code> 与 <code>packages/isomorphic/codegen/language.ts</code>），下表事实逐条对照该 bundle。下表「强化」即我们比 MCP 更企业级的地方。</p>
   <table class="map-table">
     <tr><th style="width:26%">MCP 机制（源码事实 @0.0.83）</th><th style="width:26%">借鉴</th><th>本设计强化</th></tr>
-    <tr><td><b>a11y 快照驱动</b>：<code>browser_snapshot</code> 返回可达性树，支持 <code>target</code>（子树）、<code>depth</code>（深度限制）、<code>boxes</code>（viewport 坐标 <code>[box=x,y,w,h]</code>，默认关）；官方明示「基于截图不能做动作，用 snapshot」</td><td>同构 <b>SnapshotTree</b>：scope（viewport/全页/子树）+ 深度限制</td><td>节点<b>同时注入候选 selector</b>（ref 仅供当轮交互；selector 供落库），附 DOM 唯一性指纹</td></tr>
-    <tr><td><b>ref 生命周期</b>：target 参数「Exact target element reference from the page snapshot, or a unique element selector」；ref 只在单快照内有效</td><td>同规则：交互只用当轮 ref，代码永不提交 ref</td><td>「ref → locator」做成<b>强制流程</b>：<code>browser_generate_locator</code>（testing caps，元素→测试定位器）即 MCP 自带的转换原语，我们将其固化为 CandidateValidator 必经环节</td></tr>
-    <tr><td><b>闭环循环</b>：Snapshot → Interact(target=ref) → Re-snapshot；动作后 <b>settle 500ms</b>（timeouts.settle）。<b>实现细节（coreBundle 实测）</b>：<code>waitForCompletion</code>（backend/utils.ts）在动作后 <code>waitForTimeout(settleMs)</code>，同时监听 request 事件；若期间触发 <b>navigation request</b> 则继续等导航完成（<code>Promise.race</code>，5s 兜底），再补一次 settle</td><td>StepDriver 每步走完整闭环；Verify 阶段<b>对齐该语义</b>：动作后「静默窗口 + 导航感知」而非固定 sleep</td><td>增加<b>期望态校验</b>（expect 条件，对齐 testing caps 的 <code>browser_verify_element_visible/verify_text_visible/verify_value</code>），失败即收敛并产出最小失败现场</td></tr>
-    <tr><td><b>原语工具集（0.0.83 全量 30+ 工具）</b>：core 组含 click/type/fill_form/select_option/hover/press_key/navigate/evaluate/find/drag/drop/wait_for/emulate_media/file_upload/dialog/console/network/resize/run_code_unsafe；caps 分组：tabs / install / network（route+offline）/ storage（cookie+local/session storage+storage-state）/ pdf / vision（坐标鼠标）/ devtools（录制/trace/video/annotate）/ testing（generate_locator+verify_*）/ config（get_config）</td><td>同构 <b>BrowserCommandChannel</b> 原语集，按 caps 语义分组</td><td>每个原语声明<b>幂等性 + 权限级 + 失败语义</b>；写原语默认需授权；能力开关按组进 ConfigRegistry（对齐 <code>browser_get_config</code>：MCP 也做 CLI+env+config 文件三层合并，与我们 ConfigReader 层序同构）</td></tr>
-    <tr><td><b>录制骨架</b>：<code>browser_start_recording / browser_stop_recording</code>（devtools caps，录用户手动操作→Playwright 代码）；<code>codegen</code> 配置支持 typescript/python/<b>java</b>/csharp 语言目标。<b>实现细节（coreBundle 实测）</b>：语言生成器集合 <code>languageSet()</code>（isomorphic/codegen/languages.ts）含 JS/Python/Java/C# 生成器；<code>SDKLanguage = tEnum(["javascript","python","java","csharp"])</code>；<b>Java 生成器提供两模式</b>：Library（id=<code>java</code>）与 <b>JUnit（id=<code>java-junit</code>）</b>；Java locator 输出形态为 <code>getByRole(AriaRole.BUTTON, new GetByRoleOptions().setName("..."))</code>、filter 用 <code>new FilterOptions().setHasText(...)</code></td><td>录制→代码链路直接采用；Java 两模式（Library/JUnit）作为生成层模板基线</td><td>录制输出对接到我们 <b>Codegen 录制套件</b>，语言目标固定 java（对齐 JUnit 模式语义，天然匹配框架 JUnit5）；产物升级为三层（Feature/Glue/PO），MCP 只产单文件代码</td></tr>
-    <tr><td><b>browser_run_code_unsafe</b>：任意 Playwright 代码，官方描述「executes arbitrary JavaScript in the Playwright server process and is RCE-equivalent」</td><td>默认<b>禁用</b>；仅本地调试模式可开</td><td>开启需双开关（config + JVM 属性），每次调用留审计日志（调用者/脚本摘要/时长）</td></tr>
-    <tr><td><b>官方声明「不是安全边界」</b>：README 原文 —— <code>--allowed-origins</code> 「does not serve as a security boundary and <b>does not affect redirects</b>」；<code>secrets</code> 注释「a convenience and not a security feature」；<code>allowUnrestrictedFileAccess</code> 注释「not a secure boundary」</td><td>不照搬该声明</td><td>本设计把安全做成<b>真边界</b>（见 §5）：allowed-origins → 我们加 <b>redirect 链终点评验</b>；secrets 明文替换 → 我们做<b>脱敏通道</b>（不进 AI 上下文）；文件访问 → 归入红线管控</td></tr>
-    <tr><td><b>隔离/持久 profile</b>：persistent 为默认（headed，profile 按 workspace-hash 自动分目录、单实例互斥——并发 client 需 --isolated 或独立 user-data-dir）；isolated 每会话 fresh，登录态靠 <code>--storage-state</code> / contextOptions 注入；<code>idle-timeout</code> headless 默认 1h、headed 永不</td><td>会话策略沿用</td><td>策略按流程声明（ConfigReader 键），默认 isolated + 显式 storage-state；并发沿用 ConcurrencyGate 分区语义</td></tr>
-    <tr><td><b>上下文注入点</b>：<code>createConnection(config, contextGetter)</code> —— 外部可注入 BrowserContext 提供者。<b>实现细节（coreBundle 实测）</b>：有 <code>contextGetter</code> 时包装为 <code>SimpleBrowser(await contextGetter())</code>，该 class 的 <code>newContext()</code> 直接 <b>throw（"Creating a new context is not supported"）</b>——外部 context 为单实例只读注入；无注入时走 <code>createBrowserWithInfo</code>（persistent 默认 / isolated 每会话 fresh）</td><td>企业集成点直接采用；对外部 context 只读注入语义与我们的会话所有权一致</td><td>对应我们 <b>BrowserStartupImpl / SessionStore</b> 作为 context 提供者注入 StepDriver，登录态/环境隔离复用现有会话设施；注入后禁止 context 新建（同 SimpleBrowser 语义）</td></tr>
-    <tr><td><b>探索用 MCP、回归用提交的测试</b>（committed tests are the durable artifact, make the agent optional at regression runtime）</td><td>核心理念直接采用</td><td>生成物落库后 CI 运行<b>零 LLM/零 agent</b>；LLM 仅在生成期出现</td></tr>
+    <tr><td><b>a11y 快照驱动</b>：<code>browser_snapshot</code> 返回可访问性观测，支持 target/depth/boxes 等参数</td><td>参考 SnapshotTree 的范围与深度控制</td><td>协议需自定义节点/字节/时限上限和截断语义；候选 locator 与摘要不是上游快照自动提供的事实，也不代表唯一性证明</td></tr>
+    <tr><td><b>ref 生命周期</b>：上游支持将快照 ref 或 selector 作为 target；具体 ref 有效性依赖快照和页面状态</td><td>参考“短期句柄，不持久化”的规则</td><td>本项目需自行绑定 context/page/frame/snapshotVersion 并在状态变化后拒绝旧 ref；不把 MCP locator 工具描述成验证保证</td></tr>
+    <tr><td><b>动作后等待</b>：上游实现含 settle 与导航等待逻辑；具体行为受版本、动作和超时配置影响</td><td>观察 → 动作 → 按条件等待 → 验证</td><td>使用 Playwright 条件等待和明确 deadline；不照搬固定 500ms 静默窗，也不以固定 sleep 代替业务断言</td></tr>
+    <tr><td><b>工具原语与能力分组</b>：上游提供浏览器交互、网络、storage、testing 等多类能力；不同工具具有不同副作用和权限要求</td><td>参考能力分组与工具契约</td><td>仅纳入明确需要的最小原语；逐一声明副作用、业务风险、权限、超时和可否重试。ConfigReader 层级相似不代表安全策略等价</td></tr>
+    <tr><td><b>录制/代码生成</b>：上游提供多语言录制/代码生成功能，包括 Java 生成模式</td><td>只参考用户体验和输出形态</td><td>是否生成 Java/JUnit 代码由本项目当前 JUnit4/Cucumber Runner、模板和维护要求决定；须单独验证兼容性</td></tr>
+    <tr><td><b>任意代码执行</b>：上游提供高风险代码执行工具，并明确提示风险</td><td>不将其纳入本产品原语</td><td>产品面不暴露通用 evaluate/run-code 能力；需要诊断时提供受限类型化接口</td></tr>
+    <tr><td><b>安全声明</b>：上游文档说明部分配置不是安全边界</td><td>不将上游工具配置视为安全控制</td><td>本方案仍须采用应用策略、身份授权、运行隔离和企业网络出口控制；单独的 redirect 校验不是充分安全边界</td></tr>
+    <tr><td><b>会话策略</b>：上游支持 persistent/isolated 等不同配置选项</td><td>借鉴显式选择隔离策略</td><td>本项目须明确 context/page 所有权、登录态注入、并发与清理语义；不能假设 ConcurrencyGate 自动提供浏览器隔离</td></tr>
+    <tr><td><b>上下文注入点</b>：上游支持注入既有 BrowserContext</td><td>把注入作为可评估的集成方式</td><td>具体是否适合本项目，须核验 BrowserStartupImpl/SessionStore 生命周期后决定，不直接移植上游语义</td></tr>
+    <tr><td><b>探索用 Agent、回归用提交的测试</b>（提交的测试可在回归期脱离 Agent）</td><td>参考设计理念</td><td>目标是生成/批准后 CI 零 LLM；需通过构建与运行测试证明，不能由架构声明替代验证</td></tr>
   </table>
-  <div class="note amber"><b>结论：</b>0.0.83 证明「快照驱动 + 观察-动作-回读 + 工具原语化 + 录制→代码」是让 AI 稳定操作浏览器的正确范式；它把安全声明为边界外（allowed-origins 不防 redirect、secrets 非安全特性、run_code_unsafe RCE 等价）。我们取它的<b>协议与工具思想</b>，补上企业级要的<b>验证、权限、回注、可观测</b>四件套。</div>
+  <div class="note amber"><b>结论：</b>上游实现提供了可借鉴的快照、工具原语和录制体验，但并不能证明本方案的正确性、稳定性或安全性。这里仅把它作为设计参考；本项目的协议、策略、能力范围和运行器须按自身 API、威胁模型与验收数据确定。</div>
 </section>
 
 <!-- ===================== 3 总体架构 ===================== -->
@@ -178,8 +178,8 @@
       <div class="arrow">→</div>
       <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
         <span class="tag new">新增</span><h4>③ 感知层 SnapshotTree</h4>
-        <p>a11y 快照协议：role/name/ref + <b>候选 selector</b> + DOM 唯一性指纹</p>
-        <p>定位器四梯队：录制 → 语义(RoleElementPicker) → 结构(SelectorStability) → AI 兜底</p>
+        <p>有界 a11y 观测：role/name/ref；selector 建议与指纹仅为待验证的辅助信息</p>
+        <p>候选来源可评估为：录制 → 语义 → 稳定属性 →（经审批的）AI 建议；不自动兜底执行</p>
       </div>
       <div class="arrow">→</div>
       <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
@@ -190,8 +190,8 @@
       <div class="arrow">→</div>
       <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
         <span class="tag new">新增</span><h4>⑤ 校验回注层</h4>
-        <p>定位器生命周期：提出 → 唯一性断言 → 灰度 → 落库回注</p>
-        <p>每步 trace（指纹/来源/耗时）→ 可重放、可审计、可回退</p>
+        <p>候选生命周期：提出 → 语义/业务验证与审批 → 受控验证 → 版本化回注</p>
+        <p>每步最小必要 trace（策略/来源/耗时）→ 可审计；仅隔离靶场支持受控重放</p>
       </div>
     </div>
   </div>
@@ -204,7 +204,7 @@
       </div>
       <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;">
         <span class="tag asset">现有</span><h4>定位器/稳定性</h4>
-        <p>RoleElementPicker（语义）· SelectorStability（Radix 等结构修正）· Entity/APIResources（配置键）</p>
+        <p>RoleElement/RoleLocatorFactory · pw-codegen 中 SelectorStability/CodegenFacts（跨模块需定义接口）</p>
       </div>
       <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;">
         <span class="tag asset">现有</span><h4>执行基础设施</h4>
@@ -215,10 +215,10 @@
         <p>ConfigReader/ConfigRegistry（统一层序）· ErrorClassifier · 自研 Report（trace 落点）· ApiCapture</p>
       </div>
     </div>
-    <div class="flow-note">复用面说明：指挥层几乎不新建浏览器能力——导航/会话/拦截/监控都是现有资产；新增的是「原语通道协议、快照协议、意图翻译、候选验证、代码生成」五个薄层。</div>
+    <div class="flow-note">复用面说明：优先评估现有导航、会话、拦截和监控能力；完成 API、生命周期与隔离核验后再复用。预计新增原语通道、快照协议、意图翻译、候选验证和代码生成层。</div>
   </div>
 
-  <div class="note ok"><b>运行时分离（P3 落地形态）：</b>设计期（LLM 在线：意图翻译 + 候选提出）与回归期（<b>纯 JVM 运行</b>：StepPlan 已固化为 Feature/Glue/PO 代码，直接跑 <code>mvn test</code>）严格分离。LLM 端点、模型、开关全部走 ConfigReader 键，支持本地 Ollama / 云端 API 可插拔。</div>
+  <div class="note ok"><b>运行时分离（P3 目标形态）：</b>设计期（可选 LLM：意图翻译 + 候选提出）与回归期（<b>纯 JVM 运行</b>：已评审的 StepPlan 固化为 Feature/Glue/PO 代码，直接跑 <code>mvn test</code>）分离。若引入 LLM，供应商、数据驻留、留存条款和凭据管理须经审查；仅将非敏感配置接入 ConfigReader，模型不可用不得影响既有回归链路。</div>
 </section>
 
 <!-- ===================== 4 核心机制 ===================== -->
@@ -227,83 +227,97 @@
 
   <h3 id="s41">4.1 BrowserCommandChannel —— 原语集（对齐 MCP 工具集，补企业级契约）</h3>
   <table>
-    <tr><th style="width:20%">原语</th><th style="width:24%">参数要点</th><th style="width:16%">权限级</th><th style="width:22%">幂等/失败语义</th><th>对应 MCP</th></tr>
-    <tr><td><code>navigate</code></td><td>url / waitUntil / 来源白名单校验</td><td>读</td><td>幂等（同 URL 可重放）；失败→会话恢复或重建</td><td>browser_navigate</td></tr>
-    <tr><td><code>snapshot</code></td><td>scope（viewport/全页/子树）/ maxDepth / 脱敏开关</td><td>读</td><td>只读无副作用；返回 SnapshotTree + 指纹</td><td>browser_snapshot / browser_find</td></tr>
-    <tr><td><code>click / hover</code></td><td>target=当轮 ref 或候选 selector / 动作前可见性等待</td><td>写</td><td>非幂等（点击有副作用）→ 动作前快照 diff 校验；超时→失败即收敛</td><td>browser_click / browser_hover</td></tr>
-    <tr><td><code>type / fill / select</code></td><td>值 / 是否敏感（密码类走脱敏通道，不进 AI 上下文）</td><td>写</td><td>fill 幂等；type 追加不幂等（按需）；敏感值仅存内存一次</td><td>browser_type / fill_form / select_option</td></tr>
-    <tr><td><code>press_key</code></td><td>key 组合（Enter/Tab/Escape…）</td><td>写</td><td>按声明场景使用；用于绕过鼠标的键盘路径</td><td>browser_press_key</td></tr>
+    <tr><th style="width:20%">原语</th><th style="width:24%">参数要点</th><th style="width:16%">权限级</th><th style="width:22%">重试/失败语义</th><th>对应 MCP</th></tr>
+    <tr><td><code>navigate</code></td><td>url / waitUntil / policy id；应用层校验 + 网络层出站策略</td><td>有副作用</td><td>不自动重试；仅在确认尚未到达目标且策略允许时可由调用方显式恢复</td><td>browser_navigate</td></tr>
+    <tr><td><code>snapshot</code></td><td>scope / maxDepth / maxNodes / maxBytes / deadline；默认脱敏</td><td>只读</td><td>有资源上限与截断标记；返回版本化 SnapshotTree + 观测摘要，摘要不是事实证明</td><td>browser_snapshot / browser_find</td></tr>
+    <tr><td><code>click / hover</code></td><td>target=本次快照 ref 或类型化 locator；动作前验证页面/Frame/快照版本</td><td>通常有副作用</td><td>click 不盲目重试；对可能提交/删除/转账等操作单独授权；hover 可按策略重试</td><td>browser_click / browser_hover</td></tr>
+    <tr><td><code>type / fill / select</code></td><td>值引用（secret id 或非敏感参数）/ 分类标签；敏感原文不进入计划</td><td>写</td><td>仅在可证明目标字段和操作语义时允许重试；不得用通用“幂等”标签推断可重放</td><td>browser_type / fill_form / select_option</td></tr>
+    <tr><td><code>press_key</code></td><td>有限枚举 key；禁止任意按键序列绕过策略</td><td>通常有副作用</td><td>按键可能提交表单/触发导航，不自动重试；按业务后果授权</td><td>browser_press_key</td></tr>
     <tr><td><code>assert_state</code></td><td>expect 表达式（url/可见/文本/计数）</td><td>读</td><td>纯断言；失败→当前步收敛并记录最小现场</td><td>asserts（caps=testing）</td></tr>
     <tr><td><code>route_mock / network</code></td><td>url 模式 / 响应体；console 与请求读取</td><td>写/读</td><td>mock 按会话生命周期绑定，收尾必须撤销（防泄漏）</td><td>mock / network / console</td></tr>
     <tr><td><code>tab_manage / dialog</code></td><td>新建/切换/关闭；accept/dismiss</td><td>写</td><td>跨 tab 操作须回到单一会话语义（与 Route 线程收敛一致）</td><td>tabs / dialogs</td></tr>
-    <tr><td><code>storage_state</code></td><td>保存/恢复 Cookie 与 localStorage</td><td>写</td><td>默认 isolated；显式 storage-state 才持久（防跨场景泄漏）</td><td>storage</td></tr>
-    <tr><td><code>run_code_unsafe</code></td><td>任意 Playwright/JS 脚本</td><td>高危</td><td><b>默认禁用</b>；仅本地调试双开关开启；每次调用审计日志</td><td>browser_run_code_unsafe</td></tr>
+    <tr><td><code>storage_state</code></td><td>受策略控制的保存/恢复；引用由凭据/会话提供者管理</td><td>敏感管理操作</td><td>默认禁止导出；恢复需显式声明、隔离测试环境及审计；不得进入模型上下文或普通 trace</td><td>storage</td></tr>
+    <tr><td><code>evaluate / run_code_unsafe</code></td><td>任意页面/进程代码执行</td><td>不提供</td><td><b>不进入产品原语集</b>；调试能力通过范围受限、类型化的只读接口提供</td><td>browser_evaluate / browser_run_code_unsafe</td></tr>
   </table>
-  <div class="note warn"><b>权限门禁：</b>写/高危原语默认需授权点（人工确认或流程声明的 allow-list）；与现有 InteractionManager / 按需确认模式同构。所有原语调用计入 <b>AgentTrace</b>（原语、参数摘要、耗时、结果、指纹），汇入自研 Report。</div>
+  <div class="note warn"><b>权限门禁：</b>按业务后果和数据分类制定策略，而非把所有 click/type 都等同为高危。CI 由受版本控制的策略授权受限测试操作；生产敏感操作需独立审批。授权必须绑定已批准计划摘要、目标 origin、参数范围、执行身份和有效期；页面提供的 role/name 仅用于展示，不构成授权证据。所有调用按数据分类记录最小必要 AgentTrace。</div>
 
   <div class="note info"><b>0.0.83 全量工具 → 本框架原语映射（源码级对齐）：</b>
   <table class="map-table">
     <tr><th style="width:34%">@playwright/mcp 0.0.83 工具（caps 组）</th><th>本框架对应/启发</th></tr>
     <tr><td><code>browser_navigate / navigate_back / tabs</code>（core/tabs）</td><td><code>navigate / tab_manage</code> 原语；back/forward 并入 tab_manage</td></tr>
     <tr><td><code>browser_snapshot</code>（target/depth/boxes）、<code>browser_find</code>（快照内 text/regex 检索，带路径上下文）</td><td><b>SnapshotTree.snapshot(scope,depth,boxes)</b> + <b>snapshot_find</b> 检索子原语（比全量快照省）</td></tr>
-    <tr><td><code>browser_click/hover/drag/drop</code>（element 人读描述用于权限 + target=ref|selector）</td><td><code>click / hover / drag</code> 原语；<b>element 人读描述 → 授权提示文案</b>（对齐现有按需确认）</td></tr>
+    <tr><td><code>browser_click/hover/drag/drop</code>（element 描述供人理解 + target=ref|selector）</td><td><code>click / hover / drag</code> 原语；元素描述只作可读提示，不是身份或授权依据</td></tr>
     <tr><td><code>browser_type</code>（text/submit/<b>slowly</b>）、<code>browser_fill_form</code>、<code>browser_select_option</code>、<code>browser_press_key</code></td><td><code>type / fill / select / press_key</code> 原语；<b>slowly 参数</b>（逐字触发 key handler）保留</td></tr>
     <tr><td><code>browser_wait_for</code>（time≤30s / text / textGone）</td><td><code>assert_state</code> 的等待语义 + 显式 <code>wait_for</code> 原语（time/text/textGone）</td></tr>
     <tr><td><code>browser_network_request(s)</code>、<code>browser_console_messages</code>、<code>browser_emulate_media</code>、<code>browser_resize</code>、<code>browser_file_upload</code>、<code>browser_handle_dialog</code>（core）</td><td><code>network / console / emulate_media / resize / file_upload / dialog</code> 原语</td></tr>
     <tr><td><code>browser_route / unroute / route_list / network_state_set</code>（network caps）</td><td><code>route_mock / unroute / route_list / network_state</code> 原语（对齐 pw-route 拦截语义）</td></tr>
-    <tr><td><code>browser_storage_state / set_storage_state</code>、<code>browser_cookie_* / localstorage_* / sessionstorage_*</code>（storage caps）</td><td><code>storage_state</code> 原语（默认 isolated；显式 save/restore，restore 先清后恢复）</td></tr>
-    <tr><td><code>browser_generate_locator</code>（testing caps：元素→测试定位器；<b>实现为 <code>defineTabTool({type:"readOnly"})</code>，返回 Playwright locator 供测试使用</b>）</td><td><b>CandidateValidator 的 ref→selector 强制转换</b>（0.0.83 同款原语固化为必经环节）</td></tr>
+    <tr><td><code>browser_storage_state / set_storage_state</code>、<code>browser_cookie_* / localstorage_* / sessionstorage_*</code>（storage caps）</td><td>评估是否需要受策略控制的 <code>storage_state</code>；若实现 save/restore，须限定隔离环境、明确授权和审计，不将上游行为直接视作本项目契约</td></tr>
+    <tr><td><code>browser_generate_locator</code>（testing caps：根据观测生成测试定位器建议）</td><td>可参考为候选来源；生成结果仍须按本项目语义、业务断言和审批策略验证，不视为可信定位器或强制转换保证</td></tr>
     <tr><td><code>browser_verify_element_visible / verify_text_visible / verify_value / verify_list_visible</code>（testing caps，role+accessibleName）</td><td><code>assert_state</code> 的期望类型集（element_visible / text_visible / value / list）</td></tr>
-    <tr><td><code>browser_start_recording / stop_recording</code>（devtools caps）+ <code>codegen</code> 语言（typescript/python/<b>java</b>/csharp；<b>实现含 JavaLanguageGenerator：Library id=java / JUnit id=java-junit 两模式，locator 输出 <code>getByRole(AriaRole.X, new GetByRoleOptions().setName(...))</code></b>）</td><td>Codegen 录制骨架（语言目标固定 <b>java</b>，对齐 JUnit 模式）→ 三层产物</td></tr>
+    <tr><td><code>browser_start_recording / stop_recording</code>（devtools caps）+ <code>codegen</code> 多语言生成能力</td><td>录制骨架可作为输入；语言与测试框架输出须按本项目当前 JUnit4/Cucumber Runner 及维护需求另行确定</td></tr>
     <tr><td><code>browser_take_screenshot / pdf_save</code>（core/pdf，screenshot 明示不可做动作）</td><td><code>screenshot / pdf_save</code> 原语（证据与产物用途，不参与定位决策）</td></tr>
-    <tr><td><code>browser_get_config</code>（config caps：CLI+env+config 文件三层合并后的最终值）</td><td>ConfigReader 层序同构（SYSTEM_PROPERTY→ENVIRONMENT→CONFIG_FILE→DEFAULT）；<b>debug_config 查询原语</b></td></tr>
-    <tr><td><code>browser_evaluate / run_code_unsafe</code>（core，RCE-equivalent）</td><td><code>evaluate</code>（读）与 <code>run_code_unsafe</code>（高危、默认禁用）分置</td></tr>
+    <tr><td><code>browser_get_config</code>（config caps：查询配置）</td><td>可参考诊断体验；若提供配置诊断，只允许白名单键并对凭据/敏感值脱敏，不暴露任意配置值</td></tr>
+    <tr><td><code>browser_evaluate / run_code_unsafe</code>（任意代码执行能力）</td><td>不提供通用代码执行原语；确需观测的能力通过受限、类型化 API 实现</td></tr>
     <tr><td>vision caps（mouse_click_xy 等坐标鼠标）、annotate/highlight、trace/video（devtools）</td><td>P4 可选挂载（坐标交互仅无 DOM 目标时；trace/video 进可观测）</td></tr>
   </table></div>
 
   <h3 id="s42">4.2 SnapshotTree —— 快照协议</h3>
-  <p>每次快照返回一棵 a11y 语义树；交互节点同时携带：<b>ref</b>（当轮唯一、DOM 变化即失效）、<b>候选 selector</b>（role/name/text/结构，供验证与落库）、<b>唯一性指纹</b>（当前 DOM 下唯一命中的哈希证明）。</p>
-  <pre><code>SnapshotTree ::= Node*
-Node ::= { ref: "e12", role: "button", name: "新建订单",
-           candidates: [getByRole('button',{name:'新建订单'}),
-                        getByText('新建订单'), ...],
-           fingerprint: sha256(unique-match-evidence),
-           children: Node* }</code></pre>
+  <p>每次快照返回有版本和资源边界的可访问性/DOM 观测结果。它是一个时间点的观测，不是页面完整真相。节点 ref 绑定到 context、page、frame 和 snapshotVersion；页面或 Frame 变化、动作导致 DOM 更新后必须重新快照。跨域 Frame、Shadow DOM、虚拟列表及不可访问节点须有明确的“不支持/部分观测”状态，不能静默猜测。</p>
+  <pre><code>SnapshotEnvelope ::= {
+  schemaVersion, contextId, pageId, frameId, snapshotVersion,
+  capturedAt, truncated, nodeCount, byteCount, nodes: Node*
+}
+Node ::= {
+  ref: "e12", role: "button", accessibleName: "新建订单",
+  locatorCandidates: [{ kind: "role", role: "button", name: "新建订单" }],
+  sensitivity: "PUBLIC|REDACTED|UNKNOWN", children: Node*
+}</code></pre>
   <table>
     <tr><th style="width:22%">机制</th><th>规则</th></tr>
     <tr><td><b>ref 生命周期</b></td><td>ref 仅在本次快照内有效；动作后必须 Re-snapshot 拿新 ref。代码生成永不使用 ref（同 MCP 官方规则：ref 是观察句柄，不是测试选择器）。</td></tr>
-    <tr><td><b>候选 selector 注入</b></td><td>从 RoleElementPicker（语义）/ SelectorStability（结构修正）/ CodegenFacts（历史候选）三源合成候选集，按 CodegenScorer 打分排序。</td></tr>
-    <tr><td><b>视口与触底</b></td><td>默认视口内快照；需要全页/子树时显式 scope。懒加载区域由 StepDriver 显式滚动步补齐（对齐浏览器「先观察后动作」）。</td></tr>
-    <tr><td><b>脱敏</b></td><td>输入框 value 与密码类内容默认打码（<code>••••</code>）；敏感步骤由 IntentEngine 声明 SensitiveStep，快照与 trace 均不落原文。</td></tr>
-    <tr><td><b>快照指纹</b></td><td>每步快照取语义哈希 → 幂等判定（同状态重复执行跳过）+ 失败现场比对（与期望态 diff 出最小差异）。</td></tr>
+    <tr><td><b>候选定位器</b></td><td>协议只返回类型化候选描述，不返回可直接拼接执行/生成代码的任意 selector 字符串；由受信任的实现解析、转义并验证。</td></tr>
+    <tr><td><b>视口与边界</b></td><td>默认限制视口、深度、节点数、字节数和生成时限；全页/子树须显式请求。超限返回截断标志和原因，不得误报为完整快照。</td></tr>
+    <tr><td><b>脱敏</b></td><td>默认不向 LLM 发送任意页面内容。快照生成、模型请求、异常、URL、网络摘要和 trace 共用集中脱敏/字段白名单；未知敏感级别按敏感处理。凭据由独立 secret provider 按引用注入执行器，原文不进入 StepPlan。</td></tr>
+    <tr><td><b>快照指纹</b></td><td>语义摘要仅用于比较诊断，不作幂等证明、身份认证或跳过动作的依据；指纹应按数据分类避免包含敏感内容，并记录算法版本。</td></tr>
   </table>
 
   <h3 id="s43">4.3 意图翻译与 StepPlan</h3>
-  <p>三源归一为受 schema 约束的 <b>StepPlan</b>；schema 即幻觉防护网（未知 ActionType / 缺 Target / 缺 Expect 直接拒绝）。</p>
+  <p>三源归一为版本化、受 schema 约束的 <b>StepPlan</b>；schema 是输入验证的一层，不是完整的安全边界。每种 ActionType 使用独立参数结构和约束：例如 <code>navigate</code> 不要求 locator，<code>snapshot</code> 不要求 expect；有副作用动作须声明执行策略、超时和允许的业务后果。未知字段默认拒绝，未知 ActionType、非法参数和越权 origin 均拒绝。</p>
   <table>
     <tr><th style="width:18%">意图源</th><th style="width:44%">机制</th><th>适用</th></tr>
     <tr><td><b>录制骨架</b><span class="tag asset">现有</span></td><td>Codegen 录制一次业务流程 → 结构化动作序列作为确定性骨架；LLM 只做「补全泛化」（变量参数、断言、异常分支）。</td><td>核心回归路径（确定性最高，首选）</td></tr>
     <tr><td><b>自然语言</b><span class="tag new">新增</span></td><td>LLM 翻译「登录→进入订单管理→新建订单」→ StepPlan；输出经 schema 校验 + 可执行性预检（首步 navigate 是否可达）后放行。</td><td>探索新路径 / 一次性场景</td></tr>
     <tr><td><b>结构化 DSL</b><span class="tag new">新增</span></td><td>YAML/JSON 步骤声明（action/target/params/expect），逐条校验后直接执行；零 LLM 依赖。</td><td>稳定流程的显式表达 / CI 注入</td></tr>
   </table>
-  <div class="note info"><b>StepPlan schema（示例）：</b><pre><code>step:
-  id: S1
-  action: click            # navigate|snapshot|click|type|fill|select|press_key|assert_state|mock|tab
-  target: { ref: e12, candidate: "getByRole('button',{name:'新建订单'})" }
-  params: { value: null, key: null, option: null }
-  expect: { type: url_contains, value: "/order/new", timeoutMs: 8000 }
-  sensitive: false
-  trace: { source: RECORDING|LLM|DSL, planId, fingerprint }</code></pre></div>
+  <div class="note info"><b>StepPlan schema（示例，按动作类型区分）：</b><pre><code>schemaVersion: 1
+planId: "approved-plan-id"
+steps:
+  - stepId: S1
+    action: click
+    target:
+      ref: "e12"             # 仅当前 snapshotVersion 有效
+      locator:
+        kind: role
+        role: button
+        accessibleName: "新建订单"
+    expect:
+      kind: url_contains
+      value: "/order/new"
+      timeoutMs: 8000
+    retryPolicy: NEVER       # 由动作类型/业务后果约束
+    approvalPolicy: "policy-id"
+# 执行身份、来源、批准人、时间戳、traceId 等由可信执行器注入，
+# 不接受 LLM/DSL 提供者自行声明；secret 仅以 secretRef 表达。</code></pre></div>
 
   <h3 id="s44">4.4 定位器四梯队与生命周期</h3>
   <table>
     <tr><th style="width:16%">梯队</th><th style="width:30%">来源</th><th style="width:26%">验证方式</th><th>产出</th></tr>
-    <tr><td>① 录制</td><td>Codegen 录制已产定位器（RoleElement/两步拾取）</td><td>直接可信 + 每次运行回归校验</td><td>稳定常量</td></tr>
-    <tr><td>② 语义</td><td>RoleElementPicker 按 role/name 解析</td><td>DOM 唯一性断言（单节点命中）</td><td>候选 selector</td></tr>
-    <tr><td>③ 结构</td><td>SelectorStability 修正（Radix 夹心、动态属性等）</td><td>结构指纹 + 唯一性断言</td><td>候选 selector</td></tr>
-    <tr><td>④ AI 兜底</td><td>LLM 读快照+可达性树提出候选</td><td><b>必须</b>过唯一性断言；人工/录制回注确认后才落库（灰度比例开关）</td><td>候选 → 回注为稳定常量</td></tr>
+    <tr><td>① 录制</td><td>现有 Codegen 录制产生的 locator/RoleElement 信息</td><td>仍需运行时检查唯一性、可见性、可操作性及业务期望</td><td>经过验证的候选，不自动视为永久稳定</td></tr>
+    <tr><td>② 语义</td><td>role / accessible name 等语义化描述</td><td>命中数量 + 目标语义 + 操作前置条件与执行后业务断言</td><td>类型化候选描述</td></tr>
+    <tr><td>③ 结构</td><td>经审查的结构属性/应用测试标识</td><td>稳定性证据、版本/页面上下文及业务断言；避免依赖易变 DOM 结构</td><td>类型化候选描述</td></tr>
+    <tr><td>④ AI 建议</td><td>LLM 基于最小化、脱敏后的观测提出候选</td><td><b>必须</b>经确定性验证、业务断言和人工/受控审批；不得仅凭唯一命中或重复次数自动成为可信定位器</td><td>未验证建议；批准后才可用于生成</td></tr>
   </table>
-  <div class="note warn"><b>AI 候选铁律：</b>AI 产出的一律视为「未验证候选」。候选进库必须满足三条件 —— ① DOM 唯一性断言通过；② 冒烟步骤执行成功 ≥N 次（默认 3）；③ trace 记录提出者与验证证据。任何一条不满足即回退上一梯队。</div>
+  <div class="note warn"><b>AI 候选铁律：</b>AI 产出的一律视为「未验证建议」。入库前需验证命中数、目标语义、可见/可操作状态、业务前置/后置断言和受控审批；重复冒烟次数仅作辅助证据，不构成正确性证明。无法确认目标时必须停止并交由人工处理，不得自动回退到可能命中其他元素的定位器。</div>
 
   <h3 id="s45">4.5 稳定代码生成（三层产物）</h3>
   <p>生成物与代码仓同构，生成后立即进入与手写代码相同的评审/编译/运行管线：</p>
@@ -318,21 +332,21 @@ Node ::= { ref: "e12", role: "button", name: "新建订单",
 
 <!-- ===================== 5 安全红线 ===================== -->
 <section id="s5">
-  <h2>5. 安全红线（借鉴 MCP 教训，做成真边界）</h2>
-  <p>MCP 官方明确：<b>它不是安全边界</b>（allowed-origins 不防 redirect、secrets 非安全特性、run_code_unsafe 是 RCE）。本设计的立场相反：<b>安全红线由框架本身强制</b>，每条红线有对应的实现对策与验证手段。</p>
+  <h2>5. 安全目标与控制（纵深防御，不把应用策略称为安全边界）</h2>
+  <p>MCP 官方明确：<b>它不是安全边界</b>（allowed-origins 不防 redirect、secrets 非安全特性、run_code_unsafe 是 RCE）。本方案采用纵深防御；框架策略只能约束自身动作，不能替代网络出口控制、身份与权限治理或隔离运行环境。</p>
   <table>
     <tr><th style="width:30%">红线（不可违反）</th><th>设计对策</th></tr>
-    <tr><td><b>R1 · 凭据与敏感值不进 AI 通道</b></td><td>敏感步骤（SensitiveStep）的取值经脱敏通道注入：LLM 上下文只见 <code>••••</code>；type/fill 的敏感值仅存内存一次、用完即弃；快照与 trace 不落原文；storage_state 文件不进 AI 上下文。<b>（依据：</b>MCP 的 <code>secrets</code> 是明文替换，官方注释明示「a convenience and not a security feature」——我们不用该机制，改做真脱敏通道<b>）</b>。</td></tr>
-    <tr><td><b>R2 · 无自由代码执行</b></td><td><code>run_code_unsafe</code> 默认禁用；开启需 config 键 + JVM 属性双开关（对齐 v2.23.5 收敛层序），且仅限本地调试；每次调用落审计日志（调用者、脚本摘要、时长）。</td></tr>
-    <tr><td><b>R3 · 来源白名单是真边界</b></td><td>navigate 前校验目标 origin ∈ 流程声明的 allow-list；<b>同时校验 redirect 链最终落点</b>——README 0.0.83 官方原文：<code>--allowed-origins</code> 「does not serve as a security boundary and <b>does not affect redirects</b>」，我们正是补上 MCP 缺失的 redirect 校验；blocked-origins 优先于 allowed-origins。</td></tr>
-    <tr><td><b>R4 · 上下文隔离</b></td><td>默认 isolated context（每流程 fresh，Cookie/localStorage 零残留）；持久登录必须显式声明 storage-state 键；并发场景沿用 ConcurrencyGate 分区语义。</td></tr>
-    <tr><td><b>R5 · 写/高危原语授权门禁</b></td><td>click/type/submit 等写原语与高危原语默认经授权点（人工确认或流程 allow-list，对齐现有按需确认模式）；授权记录进 trace。<b>（依据：</b>MCP 的 <code>elementSchema</code> 官方定义即「Human-readable element description used to obtain permission to interact with the element」——它的授权姿势是让 client 基于人读描述确认，我们将其升级为框架级强制授权点<b>）</b>。</td></tr>
+    <tr><td><b>R1 · 凭据与敏感值最小暴露</b></td><td>默认不向 LLM 发送页面正文/任意快照。由集中数据策略对白名单字段进行裁剪和脱敏；未知字段按敏感处理。覆盖 URL、DOM/accessibility、错误、网络摘要、截图及 trace。凭据由独立 secret provider 按引用注入执行器；StepPlan 只允许 secretRef，不能包含原文。禁止宣称 Java 字符串可被可靠“用完即清除”。</td></tr>
+    <tr><td><b>R2 · 不提供通用代码执行</b></td><td>产品原语集中不提供 <code>evaluate</code>、<code>run_code_unsafe</code> 或可注入脚本的接口。需要诊断的功能以范围受限、类型化的只读 API 实现；不得以双开关代替隔离或将任意代码执行作为受支持能力。</td></tr>
+    <tr><td><b>R3 · 网络出站纵深控制</b></td><td>框架在每个请求及每一跳重定向上执行协议/origin 策略，并覆盖子资源、iframe、弹窗、表单及下载；拒绝未批准目的地。应用层校验不是安全边界，企业部署必须由代理/防火墙或隔离网络限制出站；测试 DNS/IP 解析和重绑定风险，避免仅凭 URL 字符串放行。</td></tr>
+    <tr><td><b>R4 · 上下文隔离</b></td><td>在隔离靶场默认使用独立 context；登录态持久化须显式声明并通过 secret provider 管理。定义 browser/context/page 所有权、串行化和清理验证；ConcurrencyGate 不等同于浏览器隔离。</td></tr>
+    <tr><td><b>R5 · 按业务后果授权</b></td><td>依据业务后果、数据分类和目标环境分类策略，而不是将每次 click/type 都视为同级高危。CI 只允许受版本控制的测试策略与专用账号；敏感业务操作需独立人工审批。审批绑定计划摘要、目标 origin、参数范围、执行身份和有效期；页面提供的 role/name 仅是展示信息，不是授权凭据。</td></tr>
     <tr><td><b>R6 · AI 无执行权</b></td><td>AI 输出仅两类：受 schema 约束的 StepPlan、未验证候选 selector。两者都过确定性校验层（§4.3/§4.4）后才生效；AI 永远不能直接调用浏览器原语。</td></tr>
-    <tr><td><b>R7 · 快照脱敏</b></td><td>输入框 value、密码、token 类节点默认打码；脱敏开关可由步骤级或流程级声明覆盖（默认开）。</td></tr>
+    <tr><td><b>R7 · 快照脱敏</b></td><td>采用字段白名单和集中脱敏；密码、token、个人数据、URL 参数、页面正文、异常与网络内容均纳入策略。调用方不得通过步骤级开关关闭安全默认值；敏感级别未知时拒绝发送或按敏感数据处理。</td></tr>
     <tr><td><b>R8 · Mock 与数据不泄漏</b></td><td>route_mock 与会话生命周期绑定，收尾强制撤销（沿用 Route 收敛语义）；测试数据走最小权限账号/靶场（对齐 RouteTestBed 模式），不碰生产凭据。</td></tr>
-    <tr><td><b>R9 · 全量审计</b></td><td>每原语/每步/每次 LLM 调用计 AgentTrace：原语、参数摘要（敏感字段打码）、来源、耗时、结果、快照指纹；汇入自研 Report，可导出可回放。</td></tr>
+    <tr><td><b>R9 · 最小化审计</b></td><td>对每步/每次模型调用记录必要元数据：可信执行器生成的 traceId、计划摘要、身份、策略/审批版本、耗时和结果。参数只记经分类的摘要，不保存 secret、原始页面内容或不必要的完整快照。定义访问控制、保留期限、导出审计和删除流程；审计记录不等于可安全重执行的回放脚本。</td></tr>
   </table>
-  <div class="note warn"><b>红线验收标准：</b>每条红线有单元测试/架构测试（ArchUnit 级）守护——例如「AI 候选未过验证器不得进回注库」「敏感键在 trace 中出现即测试失败」，防止后续迭代回退。</div>
+  <div class="note warn"><b>红线验收标准：</b>每条红线都有单元/集成/架构测试及运行策略证明；例如敏感 canary 不得出现在模型请求、日志、报告或导出物，未批准请求（含重定向/子资源）必须被阻断。ArchUnit 只能检查结构依赖，不能单独证明运行时安全策略有效。</div>
 </section>
 
 <!-- ===================== 6 落地映射 ===================== -->
@@ -340,30 +354,30 @@ Node ::= { ref: "e12", role: "button", name: "新建订单",
   <h2>6. 落地映射（新组件 vs 现有资产）</h2>
   <table>
     <tr><th style="width:24%">新组件</th><th style="width:22%">归属模块</th><th>复用/衔接现有资产</th></tr>
-    <tr><td><b>IntentEngine / StepPlan</b>（模型 + schema + 三源翻译 SPI）</td><td>pw-core（协议层，纯模型无副作用）</td><td>ConfigRegistry 键；ErrorClassifier 失败分类</td></tr>
-    <tr><td><b>StepDriver</b>（步骤执行闭环 + 幂等/收敛）</td><td>pw-web-ui</td><td>Route（拦截/F1 收敛）、SessionStore、BrowserStartupImpl、MonitorSink、ConcurrencyGate</td></tr>
-    <tr><td><b>BrowserCommandChannel</b>（原语集 + 权限门禁）</td><td>pw-web-ui</td><td>RoleElementPicker（语义定位）、现有交互等待原语</td></tr>
-    <tr><td><b>SnapshotTree</b>（快照协议 + 指纹 + 脱敏）</td><td>pw-web-ui</td><td>RoleElementPicker / SelectorStability / CodegenFacts（候选合成）</td></tr>
-    <tr><td><b>CandidateValidator + 回注库</b></td><td>pw-codegen-v3</td><td>CodegenScorer（打分）、CodegenPanelManager（录制骨架入口）</td></tr>
-    <tr><td><b>CodeGen 三层产物</b>（Feature/Glue/PO 模板生成）</td><td>pw-codegen-v3</td><td>CodegenFacts、既有代码模板；生成后走 checkstyle + 冒烟</td></tr>
-    <tr><td><b>AgentTrace / 审计</b></td><td>pw-reports-v2</td><td>自研 Report（失败分类/聚合榜）、ApiCapture</td></tr>
-    <tr><td><b>LLM 网关 SPI</b>（Ollama/云端可插拔）</td><td>pw-core</td><td>ConfigReader 键（端点/模型/开关/灰度比例）；本地 Ollama 或云端 API 同接口</td></tr>
-    <tr><td><b>CodeGen 语言目标 / 录制入口</b></td><td>pw-codegen-v3</td><td>对齐 0.0.83 <code>codegen: java</code> 语言目标与 start_recording 录制→代码链路；产出三层（Feature/Glue/PO），优于 MCP 单文件代码</td></tr>
-    <tr><td><b>BrowserContext 提供者注入</b></td><td>pw-web-ui</td><td>对齐 0.0.83 <code>createConnection(config, contextGetter)</code>：以 BrowserStartupImpl / SessionStore 作为 contextGetter 等价物注入 StepDriver</td></tr>
-    <tr><td><b>debug_config 查询</b></td><td>pw-core</td><td>对齐 <code>browser_get_config</code>（CLI+env+file 三层合并）；ConfigReader 已同构（SYSTEM_PROPERTY→ENVIRONMENT→CONFIG_FILE→DEFAULT），补查询原语即可</td></tr>
+    <tr><td><b>IntentEngine / StepPlan</b>（模型 + schema + 翻译 SPI）</td><td>pw-core（协议层，纯模型无副作用）</td><td>只承载跨模块稳定协议；LLM 客户端/凭据管理不放核心层</td></tr>
+    <tr><td><b>StepDriver</b>（步骤执行闭环 + 动作策略）</td><td>pw-web-ui</td><td>Route（拦截/F1 收敛）、SessionStore、BrowserStartupImpl、MonitorSink、ConcurrencyGate；需先验证真实生命周期和线程约束</td></tr>
+    <tr><td><b>BrowserCommandChannel</b>（受限原语 + 策略门禁）</td><td>pw-web-ui</td><td>现有 <code>RoleElement</code>、<code>RoleLocatorFactory</code>、<code>LocatorFactory</code> 及交互等待原语；不假设存在名为 RoleElementPicker 的 Java 类</td></tr>
+    <tr><td><b>SnapshotTree</b>（快照协议 + 摘要 + 脱敏）</td><td>pw-web-ui</td><td>先评估 Playwright Java 与现有 locator/role 封装能提供的观测能力；<code>SelectorStability</code>/<code>CodegenFacts</code> 是 pw-codegen 实现，跨模块复用需通过接口而非直接依赖</td></tr>
+    <tr><td><b>CandidateValidator + 候选审批/版本库</b></td><td>pw-codegen</td><td>CodegenScorer、CodegenPanelManager；候选不因打分或单次唯一命中自动批准</td></tr>
+    <tr><td><b>CodeGen 三层产物</b>（Feature/Glue/PO 模板生成）</td><td>pw-codegen</td><td>CodegenFacts、既有代码模板；适配当前 runner 后走 Checkstyle、编译、隔离测试和评审</td></tr>
+    <tr><td><b>AgentTrace / 审计</b></td><td>pw-reports</td><td>现有自研 Report；按数据分类新增访问、保留和导出治理</td></tr>
+    <tr><td><b>LLM 网关 SPI</b>（Ollama/云端可插拔）</td><td>可选适配模块（不放 pw-core）</td><td>pw-core 只定义稳定的请求/响应协议；网络客户端、供应商配置和 secret 注入由适配层提供，凭据不得放入普通 ConfigReader 值或日志</td></tr>
+    <tr><td><b>CodeGen 语言目标 / 录制入口</b></td><td>pw-codegen</td><td>将上游 Java codegen 作为参考；先核实本项目 Cucumber/JUnit4 runner 和生成模板，再决定语言/runner 产物</td></tr>
+    <tr><td><b>BrowserContext 提供者注入</b></td><td>pw-web-ui</td><td>评估 BrowserStartupImpl / SessionStore 的真实所有权、关闭和线程模型后定义注入契约，不直接复制上游 contextGetter 语义</td></tr>
+    <tr><td><b>安全配置诊断</b></td><td>pw-core（如确有需求）</td><td>只暴露经白名单筛选、脱敏的非秘密配置状态；禁止实现可枚举全部配置或读取凭据的 debug 原语</td></tr>
   </table>
-  <div class="note info"><b>模块依赖检查：</b>pw-web-ui 已依赖 pw-core；pw-codegen-v3 经 pw-web-ui 传递依赖 pw-core；pw-reports-v2 已依赖 pw-core —— 与 v2.23.5 收敛结论一致，<b>无 pom 改动</b>。新增协议接口放 pw-core 即全模块可见。</div>
+  <div class="note info"><b>模块依赖检查（按当前仓库核对）：</b>实际 Maven artifact/module 名称是 <code>pw-core</code>、<code>pw-web-ui</code>、<code>pw-codegen</code>、<code>pw-reports</code>；“pw-codegen-v3”“pw-reports-v2”是设计代号/描述名，不是当前 artifactId。当前 pw-codegen 经 pw-web-ui 依赖 pw-core，pw-reports 也依赖 pw-core；新增依赖前应先确认 API 所有权、模块边界与依赖方向，避免把浏览器实现或 LLM 客户端放入核心协议层。</div>
 </section>
 
 <!-- ===================== 7 路线图 ===================== -->
 <section id="s7">
   <h2>7. 分阶段路线图（每阶段可独立交付、独立验收）</h2>
   <ul class="road">
-    <li><b>P0 · 确定性执行底座</b>（无 AI）—— SnapshotTree 快照协议 + BrowserCommandChannel 原语集 + StepDriver 执行闭环 + DSL 直执行 + AgentTrace 骨架。<br/><b>验收：</b>用 DSL 写「登录→进入订单→新建」能在靶场（RouteTestBed）完整跑通；失败即收敛；trace 完整可回放。</li>
-    <li><b>P1 · 意图翻译</b>—— IntentEngine 三源归一：录制骨架结构化 → StepPlan；LLM 翻译（自然语言 → StepPlan，schema 校验 + 预检）；LLM 网关 SPI（Ollama/云端）。<br/><b>验收：</b>同一流程从「自然语言」和「录制骨架」两条通道产出等价 StepPlan；非法 schema 100% 被拒。</li>
+    <li><b>P0 · 受限确定性垂直切片</b>（无 AI）—— 先实现版本化 DSL、少量白名单原语（snapshot/assert_state 及无副作用演示操作）、策略校验和最小审计；只在隔离靶场运行。确认快照能力/资源上限后，再逐步开放写操作。<br/><b>验收：</b>确定测试数据和浏览器版本下，受限流程结果可比较；失败即停止并提供脱敏诊断。Trace 只供审计，不直接重放真实写操作。</li>
+    <li><b>P1 · 意图翻译</b>—— 先结构化录制骨架 → StepPlan；完成数据最小化、网络出口和模型供应商审查后，再评估自然语言 → StepPlan 与 LLM 网关适配层。<br/><b>验收：</b>相同规范化输入可比较出等价计划；非法 schema、越权 Action、未知字段和不批准 origin 均被拒绝。</li>
     <li><b>P2 · 稳定代码生成</b>—— 三层产物模板（Feature/Glue/PO+方法）+ 编译 + 冒烟 + 落库；产物内嵌 trace javadoc。<br/><b>验收：</b>生成的工程过 checkstyle、冒烟 1 遍绿、落库后 <code>mvn test</code> 零 LLM 运行。</li>
-    <li><b>P3 · 定位器回注闭环</b>—— CandidateValidator（DOM 唯一性断言）+ 四梯队统一 + 回注库 + 灰度开关（AI 候选按比例上线）。<br/><b>验收：</b>AI 候选满足三条件才进库；漂移时自动回退上一梯队；回注库可审计。</li>
-    <li><b>P4 · 治理与企业化</b>—— 权限门禁 UI/审计报表、R1-R9 红线 ArchUnit 测试、CI 集成（生成期与回归期分离）、灰度指标。<br/><b>验收：</b>红线测试全绿；CI 无 LLM；审计报表可导出。</li>
+    <li><b>P3 · 定位器治理</b>—— CandidateValidator（目标语义/唯一性/可操作性/业务断言）+ 候选审批和版本化回注。<br/><b>验收：</b>候选有来源与验证证据；无法确认时失败关闭并转人工，不自动回退到可能错误的目标。</li>
+    <li><b>P4 · 治理与企业化</b>—— 策略/审批、运行时安全测试、审计保留与导出治理、CI 集成（生成期与回归期分离）及非功能指标。<br/><b>验收：</b>安全集成测试全绿；回归 CI 无 LLM；审计访问受控且可按期限删除；满足已批准的性能/并发/恢复目标。</li>
   </ul>
 </section>
 
@@ -373,12 +387,22 @@ Node ::= { ref: "e12", role: "button", name: "新建订单",
   <table>
     <tr><th style="width:24%">风险</th><th style="width:38%">场景</th><th>缓解</th></tr>
     <tr><td><b>LLM 幻觉</b></td><td>自然语言翻译出不存在步骤/定位器</td><td>StepPlan schema 硬校验 + 候选必须过验证器 + 录制骨架优先策略</td></tr>
-    <tr><td><b>定位器漂移</b></td><td>前端改版导致 selector 失效</td><td>四梯队回退 + 快照指纹 diff + 灰度比例 + 失败即收敛产出最小现场</td></tr>
-    <tr><td><b>敏感泄漏</b></td><td>凭据/密码进 LLM 上下文或 trace</td><td>R1/R7 脱敏通道 + 红线 ArchUnit 测试守护</td></tr>
+    <tr><td><b>定位器漂移</b></td><td>前端改版导致候选不再指向预期业务目标</td><td>重新验证目标语义与业务断言；无法确认则失败关闭并转人工，不根据指纹/排序自动回退到其他元素</td></tr>
+    <tr><td><b>敏感泄漏</b></td><td>凭据/个人数据从页面、URL、异常、网络或截图进入 LLM 上下文/trace</td><td>默认最小化数据白名单 + 集中脱敏 + canary 集成测试 + secret provider 隔离；ArchUnit 不作为运行时安全证明</td></tr>
     <tr><td><b>生成代码质量</b></td><td>生成物与手写代码规范不一致</td><td>与手写同管线：checkstyle + 编译 + 冒烟 + 评审；trace javadoc 可溯源</td></tr>
     <tr><td><b>依赖与性能</b></td><td>新层导致框架膨胀/每步快照过重</td><td>薄层设计复用现有资产；快照按 scope 按需、原语合并、触底显式</td></tr>
-    <tr><td><b>并发安全</b></td><td>多流程并发共享浏览器会话</td><td>沿 ConcurrencyGate 分区语义 + 上下文隔离（R4）+ 会话按流程独立</td></tr>
+    <tr><td><b>并发安全</b></td><td>多流程共享 browser/context/page 或竞争操作同一会话</td><td>定义 context/page 所有权和串行化边界；按执行身份隔离会话；使用并发压力测试验证，不假设 ConcurrencyGate 自动保证浏览器隔离</td></tr>
     <tr><td><b>AI 依赖运行时</b></td><td>回归依赖 LLM 在线</td><td>P3 运行时分离：生成物落库后 CI 零 LLM；LLM 网关仅生成期启用（键开关）</td></tr>
+  </table>
+  <h3>8.1 非功能验收（P0 前确定阈值与测量方式）</h3>
+  <p>不得以“高性能/可扩展/企业级”作为未量化验收。项目负责人应根据靶场基线和 CI 资源，为以下指标确定阈值、采样窗口和失败动作；未定阈值前只做基线测量，不宣称达标。</p>
+  <table>
+    <tr><th>维度</th><th>必须定义与验证</th></tr>
+    <tr><td>延迟与资源</td><td>快照/动作/端到端步骤的 p50/p95 上限，快照最大节点数/字节数/生成耗时，单执行内存与浏览器资源上限</td></tr>
+    <tr><td>并发与隔离</td><td>单 browser/context/page 的并发所有权、最大并发执行数、排队/超时策略、跨任务数据隔离压力测试</td></tr>
+    <tr><td>可靠性与恢复</td><td>浏览器崩溃、超时、取消和网络中断的收敛行为；写操作是否已提交不确定时必须停止并人工核对</td></tr>
+    <tr><td>可观测与隐私</td><td>审计字段完整率、敏感 canary 泄漏为零、日志/报告保留期限、审计查询和删除验证</td></tr>
+    <tr><td>模型供应商</td><td>可用性/超时/成本配额、地区与数据驻留、训练/留存条款、故障降级；模型不可用时不得阻塞既有回归链路</td></tr>
   </table>
 </section>
 
@@ -387,41 +411,40 @@ Node ::= { ref: "e12", role: "button", name: "新建订单",
   <h2>9. 任务清单（可执行 Checklist）</h2>
   <h3>P0 确定性执行底座</h3>
   <ul>
-    <li>[ ] pw-core：StepPlan/Step schema 模型 + 校验器（未知 ActionType/缺 Target/缺 Expect 拒绝）</li>
-    <li>[ ] pw-web-ui：SnapshotTree 快照协议（a11y 树、ref 生命周期、候选注入、指纹、脱敏）</li>
-    <li>[ ] pw-web-ui：BrowserCommandChannel 原语集（navigate/snapshot/click/type/fill/select/press_key/assert_state…含幂等与失败语义声明）</li>
-    <li>[ ] pw-web-ui：StepDriver 执行闭环（Observe→Act→Verify→Next）+ F1 收敛对接</li>
-    <li>[ ] pw-route：route_mock 生命周期绑定与收尾撤销钩子</li>
-    <li>[ ] pw-reports-v2：AgentTrace 骨架（原语/参数摘要/耗时/结果/指纹 → 汇入 Report）</li>
-    <li>[ ] DSL 直执行：YAML 步骤文件 → StepPlan → 跑通 RouteTestBed 登录→订单→新建</li>
+    <li>[ ] pw-core：版本化 StepPlan/按 ActionType 区分的 schema；严格拒绝未知字段、越权动作和非法参数</li>
+    <li>[ ] pw-web-ui：SnapshotTree 协议（context/page/frame/version 绑定；深度/节点/字节/时限上限；明确截断和不支持状态）</li>
+    <li>[ ] pw-web-ui：只实现经威胁建模批准的最小原语；逐动作定义副作用、超时、失败和重试策略，不将所有操作视为幂等</li>
+    <li>[ ] pw-web-ui：StepDriver 执行闭环；先处理页面/Frame 生命周期与并发所有权，再接入现有失败收敛</li>
+    <li>[ ] pw-route/部署层：请求和每跳重定向策略；企业网络出口由代理/防火墙兜底</li>
+    <li>[ ] pw-reports：AgentTrace 最小审计字段、敏感字段过滤、访问控制和保留期限</li>
+    <li>[ ] 隔离靶场 DSL 测试：验证正向路径、策略拒绝、超时、非幂等操作不重试及敏感数据不泄漏</li>
   </ul>
   <h3>P1 意图翻译</h3>
   <ul>
     <li>[ ] pw-core：IntentTranslator SPI + 规则引擎（录制骨架结构化 → StepPlan）</li>
-    <li>[ ] pw-core：LLM 网关 SPI（Ollama/云端同接口；ConfigReader 键驱动）</li>
-    <li>[ ] pw-codegen-v3：录制产物 → 结构化骨架转换器（复用 CodegenFacts）</li>
-    <li>[ ] 自然语言 → StepPlan 翻译 + schema 校验 + 可执行性预检</li>
-    <li>[ ] 等价性测试：录制骨架 vs 自然语言产出同一流程的 StepPlan 对齐</li>
+    <li>[ ] 在可选适配层实现 LLM 网关；模型供应商、数据处理与网络审查通过后再启用</li>
+    <li>[ ] pw-codegen：录制产物 → 结构化骨架转换器（确认跨模块 API 边界后复用 CodegenFacts）</li>
+    <li>[ ] 对最小化上下文生成 StepPlan 建议 + schema/策略/可执行性校验；AI 无直接浏览器调用能力</li>
+    <li>[ ] 等价性测试：对同一规范化输入比较录制骨架与模型建议，不以自然语言输出作为唯一验收真值</li>
   </ul>
   <h3>P2 稳定代码生成</h3>
   <ul>
-    <li>[ ] pw-codegen-v3：三层产物模板（Feature / Glue / Page Object+方法）</li>
+    <li>[ ] pw-codegen：三层产物模板（Feature / Glue / Page Object+方法），遵循当前 JUnit4/Cucumber Runner 约束，或先单独批准运行器迁移</li>
     <li>[ ] 生成 → checkstyle → 编译 → 冒烟 1 遍 → 落库 的管线命令</li>
     <li>[ ] 生成物 trace javadoc（来源/指纹/验证时间）</li>
     <li>[ ] 落库后 <code>mvn test</code> 零 LLM 运行验证</li>
   </ul>
   <h3>P3 定位器回注闭环</h3>
   <ul>
-    <li>[ ] pw-codegen-v3：CandidateValidator（DOM 唯一性断言：单节点命中证明）</li>
-    <li>[ ] 回注库（定位器常量 + trace：提出者/验证证据/灰度状态）</li>
-    <li>[ ] 四梯队统一解析（录制→语义→结构→AI 兜底）与自动回退</li>
-    <li>[ ] 灰度开关（AI 候选比例上线，ConfigReader 键）</li>
+    <li>[ ] pw-codegen：CandidateValidator（目标语义、唯一性、可见/可操作状态、业务断言）</li>
+    <li>[ ] 版本化候选库（来源/证据/审批者/目标应用版本/失效状态）；不自动把候选升级为生产定位器</li>
+    <li>[ ] 确认失败即停止，不自动回退到可能命中其他元素的候选</li>
   </ul>
   <h3>P4 治理与企业化</h3>
   <ul>
-    <li>[ ] R1-R9 红线 ArchUnit 测试（凭据脱敏、AI 候选门禁、run_code_unsafe 双开关…）</li>
-    <li>[ ] 权限门禁（写/高危原语授权点 + 审计记录）</li>
-    <li>[ ] 审计报表（AgentTrace 导出/回放，接入自研 Report）</li>
+    <li>[ ] R1-R9 分层测试（单元、集成、安全测试）；ArchUnit 仅检查结构约束</li>
+    <li>[ ] 按业务后果授权，审批与计划摘要、origin、身份、参数范围和有效期绑定</li>
+    <li>[ ] 审计报表（脱敏导出、访问审计、保留/删除策略；回放仅限隔离靶场）</li>
     <li>[ ] CI 集成：生成期（LLM）与回归期（无 LLM）流水线分离</li>
   </ul>
 </section>
@@ -429,56 +452,57 @@ Node ::= { ref: "e12", role: "button", name: "新建订单",
 <!-- ===================== 10 项目适配 ===================== -->
 <section id="s10">
   <h2>10. 适配到 pw_automation_framework（项目级落地）</h2>
-  <div class="note info"><b>本节把 §6 映射与 §7 路线图固化为可执行决策</b>：每条适配都有明确落点模块、接口载体、复用资产与验收命令；首期（P0）跑通「DSL 直执行 → 靶场」最小闭环后再逐步扩展。</div>
+  <div class="note info"><b>本节是待验证的项目适配建议，不是已确认的实现承诺</b>：P0 进入开发前须完成现有 API/生命周期核验、威胁建模和验收测试设计。</div>
 
-  <h3>10.1 适配决策定稿（五条，取代“启发/对齐”措辞）</h3>
+  <h3>10.1 适配决策（以下项目约束须在 P0 设计评审中确认）</h3>
   <table class="map-table">
     <tr><th style="width:18%">决策点</th><th style="width:42%">0.0.83 源码事实</th><th>我们项目的适配方式</th></tr>
-    <tr><td><b>D1 · 语言目标</b></td><td><code>codegen: java</code> 实现为 <code>JavaLanguageGenerator</code>：Library（id=java）/ JUnit（id=java-junit）两模式；locator 输出 <code>getByRole(AriaRole.X, new GetByRoleOptions().setName(...))</code></td><td>生成层固定对齐 <b>JUnit 模式</b>（id=java-junit）——框架 Playwright 1.62+ Java API 原生即 <code>AriaRole</code> + <code>GetByRoleOptions</code> 风格，模板零翻译直接采用；产物仍三层（Feature/Glue/PO），MCP 单文件输出只作参考</td></tr>
-    <tr><td><b>D2 · ref 生命周期</b></td><td>ref 只在当轮快照内有效；<code>browser_generate_locator</code>（testing caps）实现为 <code>defineTabTool({type:"readOnly"})</code>，把元素转成测试用 locator</td><td>交互只用当轮 ref，代码永不提交 ref；<b>CandidateValidator 强制 ref→selector 必经环节</b>（对齐 generate_locator 语义），selector 由 RoleElementPicker/SelectorStability 生成并过 DOM 唯一性断言</td></tr>
-    <tr><td><b>D3 · settle 语义</b></td><td><code>waitForCompletion</code>：动作后 <code>waitForTimeout(500ms)</code> + 监听 request；若触发 navigation request 继续等导航完成（5s race）再补 settle</td><td>StepDriver Verify 阶段 = <b>静默窗口（默认 500ms，ConfigReader 键可配）+ 导航感知</b>（<code>waitForURL</code> / 请求监听组合 + 超时兜底），不固定 sleep</td></tr>
-    <tr><td><b>D4 · 上下文注入</b></td><td><code>createConnection(config, contextGetter)</code>：注入时包装 <code>SimpleBrowser(contextGetter())</code>，其 <code>newContext()</code> 直接 throw（单 context 只读注入）</td><td><b>BrowserStartupImpl / SessionStore 作为 contextGetter 等价物注入 StepDriver</b>；注入后禁止新建 context（同 SimpleBrowser 语义，与现有 initializeBrowser 只建一次的收尾语义一致）</td></tr>
-    <tr><td><b>D5 · 授权门禁</b></td><td><code>elementSchema.element</code> 官方定义「Human-readable element description used to obtain permission to interact with the element」——授权基于人读描述</td><td>R5 落地：写/高危原语的<b>操作描述文案直接取自语义定位候选</b>（role+name），在交互确认弹窗展示并记入 AgentTrace；与现有按需确认模式同构</td></tr>
+    <tr><td><b>D1 · 语言/运行器</b></td><td><code>codegen: java</code> 提供 Library 与 JUnit 生成模式；这是上游工具能力，不代表本项目已采用对应 runner</td><td>当前框架 <code>pw-web-ui</code> 的 <code>CucumberWithPw</code> 基于 JUnit4；生成物须先兼容现状。若迁移 JUnit Platform/JUnit5，应作为单独项目决策并完成兼容性验证，不宣称当前“天然匹配 JUnit5”。</td></tr>
+    <tr><td><b>D2 · ref 生命周期</b></td><td>ref 只在当轮快照内有效；MCP 的 locator 工具仅作为设计参考</td><td>交互只用绑定到当前 context/page/frame/snapshotVersion 的 ref；持久代码存类型化 locator 描述。实际 locator 生成/验证能力须基于本项目现有 <code>RoleElement</code>/<code>RoleLocatorFactory</code> 等 API 设计，不假设存在 <code>RoleElementPicker</code>。</td></tr>
+    <tr><td><b>D3 · settle 语义</b></td><td><code>waitForCompletion</code> 含动作后 settle 与导航等待；时序受上游版本、动作和配置影响</td><td>StepDriver Verify 阶段按动作类型等待明确的页面/网络条件与 deadline，再执行业务断言；不规定通用静默窗口，不以固定 sleep 代替断言</td></tr>
+    <tr><td><b>D4 · 上下文注入</b></td><td>上游支持注入既有 BrowserContext；具体生命周期语义属于其实现细节</td><td>先核实本项目 BrowserStartupImpl、SessionStore 的所有权、关闭时序和线程约束，再定义 StepDriver 注入接口；禁止根据上游实现推断当前框架只创建一次 context。</td></tr>
+    <tr><td><b>D5 · 授权门禁</b></td><td>上游工具的元素描述可用于客户端权限提示，但描述文本不是可信身份或业务授权</td><td>授权由可信策略引擎基于执行身份、目标环境、批准计划和业务后果决定；role/name 只用于人类可读提示，不参与授权判定。</td></tr>
   </table>
 
   <h3>10.2 每模块适配动作</h3>
   <table class="map-table">
     <tr><th style="width:16%">模块</th><th style="width:34%">本轮要新增/改造</th><th>对接现有资产与首版范围</th></tr>
-    <tr><td><b>pw-core</b>（协议层）</td><td>StepPlan/Step schema 模型 + 校验器；IntentTranslator SPI；LLM 网关 SPI；<code>mcp.*</code> 配置域（ConfigRegistry 新键：settle 窗口/快照脱敏开关/授权模式/AI 灰度）；debug_config 查询原语</td><td>ConfigReader（SYSTEM_PROPERTY→ENVIRONMENT→CONFIG_FILE→DEFAULT 同构 0.0.83 三层合并）、ErrorClassifier；纯模型无副作用，全模块可见（无 pom 改动）</td></tr>
-    <tr><td><b>pw-web-ui</b>（执行层）</td><td>SnapshotTree 快照协议（a11y 树/ref 生命周期/候选注入/指纹/脱敏）；BrowserCommandChannel 实现 + 权限门禁；StepDriver 执行闭环；授权点弹窗</td><td>RoleElementPicker（语义定位底座）、Route（拦截/F1 收敛）、SessionStore、BrowserStartupImpl、MonitorSink、ConcurrencyGate；首版原语：navigate/snapshot/click/type/assert_state</td></tr>
-    <tr><td><b>pw-codegen-v3</b>（生成层）</td><td>录制骨架 → StepPlan 转换器；三层产物模板（locator 对齐 D1 JUnit 模式）；CandidateValidator + 回注库</td><td>CodegenPanelManager（录制入口）、CodegenFacts、CodegenScorer（打分）；生成后走 checkstyle + 编译 + 冒烟三连</td></tr>
-    <tr><td><b>pw-route</b>（网络层）</td><td>route_mock 生命周期绑定与收尾撤销钩子；<b>redirect 链终点评验</b>（补 MCP 缺失：allowed-origins 不覆盖 redirect）</td><td>现有 Route 收敛语义、F1 失败即收敛、F5 DELAY 预取物化</td></tr>
-    <tr><td><b>pw-api-core</b>（API 层）</td><td>assert_state 的 API 断言复用；storage_state 对齐</td><td>ApiCapture（采集/断言）、BodyStore</td></tr>
-    <tr><td><b>pw-reports-v2</b>（观测层）</td><td>AgentTrace 报表区块（原语/参数摘要/耗时/结果/快照指纹/授权记录，敏感字段打码）</td><td>自研 Report（失败分类/聚合榜）、MonitorFailureReportSink</td></tr>
+    <tr><td><b>pw-core</b>（协议层）</td><td>StepPlan/按 ActionType 区分的 schema 与策略契约；IntentTranslator SPI；不承载 LLM 网络客户端或 secret provider</td><td>核验 ConfigReader/ErrorClassifier API 后再复用；仅放跨模块稳定协议，不暴露秘密或任意配置值的 debug 查询</td></tr>
+    <tr><td><b>pw-web-ui</b>（执行层）</td><td>有界 SnapshotTree 协议；受限 BrowserCommandChannel；StepDriver 执行闭环与策略校验</td><td>核实 RoleElement/RoleLocatorFactory、Route、SessionStore、BrowserStartupImpl 和 ConcurrencyGate 的实际契约；首版只在隔离靶场开放批准原语</td></tr>
+    <tr><td><b>pw-codegen</b>（生成层）</td><td>录制骨架 → StepPlan 转换器；三层产物模板；CandidateValidator + 候选审批/版本化</td><td>CodegenPanelManager、CodegenFacts、CodegenScorer；确认 API 和模块边界后复用，并适配当前 JUnit4/Cucumber Runner</td></tr>
+    <tr><td><b>pw-route / 部署网络层</b></td><td>mock 生命周期与逐请求/逐跳重定向策略；企业出站控制由代理/防火墙保障</td><td>评估现有 Route 对子资源/导航的覆盖能力；不能将应用层路由视作网络出口安全边界</td></tr>
+    <tr><td><b>pw-api-core</b>（API 层）</td><td>仅在需求明确时复用 API 断言；storage_state 不进入 AI 上下文</td><td>核验 ApiCapture/BodyStore 的权限、生命周期和敏感数据处理后决定是否复用</td></tr>
+    <tr><td><b>pw-reports</b>（观测层）</td><td>AgentTrace 最小审计字段（策略版本/动作类别/耗时/结果/审批引用；不保留原始敏感值）</td><td>评估现有 Report 与 MonitorFailureReportSink；另定义访问控制、保留期限、导出审计和删除流程</td></tr>
   </table>
 
   <h3>10.3 首期落地（P0 最小闭环，无 AI）</h3>
   <ul class="road">
-    <li><b>文件级范围</b>：pw-core 新增 <code>StepPlan.java / Step.java</code>（POJO + 严格校验：未知 ActionType/缺 Target/缺 Expect 拒绝）；pw-web-ui 新增 <code>SnapshotTree.java / BrowserCommandChannel.java / StepDriver.java</code>；pw-codegen-v3 复用 CodegenPanelManager 录制入口产出 DSL 骨架。</li>
-    <li><b>闭环目标</b>：DSL 直执行「登录 → 进入订单 → 新建」在靶场（RouteTestBed）完整跑通，失败即收敛，trace 完整。</li>
-    <li><b>验收命令</b>（Windows CMD 可复制）：</li>
+    <li><b>范围门槛</b>：先完成威胁建模和协议评审。P0 只在隔离靶场测试快照、有限 DSL 与失败策略；首版不连接生产身份、不发送页面内容给 LLM、不实现通用代码执行或真实业务提交。</li>
+    <li><b>闭环目标</b>：结构化 DSL 在固定靶场数据上执行批准的低风险流程；记录可审计、敏感 canary 不泄漏、失败停止。真实写操作不得因 trace 重放而二次提交。</li>
+    <li><b>验收命令模板</b>（新增专用 JUnit4 acceptance test 后执行；不得跳过 Checkstyle）：</li>
   </ul>
-  <pre><code>mvn -f D:\IdeaProject\pw_automation_framework\pom.xml clean test "-Dcheckstyle.skip=true" "-Dcucumber.filter.tags=@agent-driver"</code></pre>
-  <div class="note warn"><b>回退路径</b>：任何一期不过验收 → 保留 DSL 直执行（零 AI）作为降级通道；LLM 网关、AI 兜底定位全部走 SPI，可拔插不回退框架本体。</div>
+  <pre><code>mvn -pl pw-web-ui -am -Dtest=AgentDriverDslAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=true test</code></pre>
+  <p>验收报告必须证明目标 acceptance test 实际执行且通过（非零测试数），并覆盖拒绝路径；将命令适配当前 Maven reactor/Surefire 配置后接入 CI 必需检查。</p>
+  <div class="note warn"><b>回退路径</b>：任何一期不过验收即关闭新执行入口并保留现有框架行为；DSL 仅在隔离环境作为受限工具运行。LLM/候选建议经独立审批启用，不作为故障时自动回退路径。</div>
 
   <h3>10.4 红线落地守门矩阵（§5 R1–R9 → 模块/环节/门禁测试）</h3>
   <div class="note warn"><b>适配硬约束：</b>每一期交付必须同时交付对应红线门禁测试（红线测试不过 = 本期不验收）；R1/R2/R3 属「不引入即不违约」类，新增组件一旦触碰即须先落门禁。</div>
   <table class="map-table">
     <tr><th style="width:12%">红线</th><th style="width:26%">落点模块/守门环节</th><th style="width:34%">实现对策落点</th><th>门禁测试（不可跳过）</th></tr>
-    <tr><td><b>R1</b></td><td>pw-core 脱敏通道（IntentTranslator 入 LLM 前）；pw-reports-v2（trace 写入前）</td><td>SensitiveStep 脱敏注入；type/fill 敏感值一次性内存、用完即弃；storage_state 不进 AI 上下文</td><td>敏感键出现在 LLM 请求载荷 / trace 文本 → 单测失败</td></tr>
-    <tr><td><b>R2</b></td><td>pw-core config 双开关；pw-web-ui BrowserCommandChannel 分发</td><td>run_code_unsafe 默认禁用；需 config 键 + JVM 属性双开关（沿用 v2.23.5 收敛层序）</td><td>未开双开关调用即抛错；开启后每次调用必落审计（调用者/摘要/时长）</td></tr>
-    <tr><td><b>R3</b></td><td>pw-web-ui navigate 校验；pw-route redirect 链终点评验</td><td>origin ∈ 流程 allow-list；redirect 链最终落点同检（补 MCP 缺失）；blocked 优先于 allowed</td><td>靶场加 redirect 端点：allow-list 内页面 302 至外部 → navigate 失败（RouteTestBed 用例）</td></tr>
-    <tr><td><b>R4</b></td><td>pw-web-ui SessionStore / initializeBrowser 会话创建点</td><td>默认 isolated context；持久登录必须显式声明 storage-state 键；ConcurrencyGate 分区</td><td>两流程 context 间 cookie/localStorage 零残留测试</td></tr>
-    <tr><td><b>R5</b></td><td>pw-web-ui BrowserCommandChannel 门禁 + 授权点弹窗</td><td>写/高危原语默认经授权点（人工确认或流程 allow-list）；操作描述取自语义候选 role+name</td><td>未授权写原语调用即失败；授权记录必进 AgentTrace</td></tr>
-    <tr><td><b>R6</b></td><td>pw-core StepPlan schema 校验；pw-codegen-v3 CandidateValidator</td><td>AI 输出仅两类：受 schema 约束的 StepPlan、未验证候选 selector；AI 永远不能直接调浏览器原语</td><td>AI 候选未过验证器不得进回注库（ArchUnit/单测）</td></tr>
-    <tr><td><b>R7</b></td><td>pw-web-ui SnapshotTree 快照生成点</td><td>输入框 value/密码/token 默认打码；步骤级/流程级声明可覆盖（默认开）</td><td>密码/token 节点原文不出现在快照文本测试</td></tr>
+    <tr><td><b>R1</b></td><td>LLM 请求边界、浏览器数据采集、异常/日志/报告导出</td><td>字段白名单 + 集中脱敏；未知字段按敏感处理；secret provider 与 StepPlan/LLM 分离</td><td>敏感 canary 经页面、URL、异常、网络和截图路径均不得出现在模型请求、日志、报告或导出物</td></tr>
+    <tr><td><b>R2</b></td><td>pw-web-ui BrowserCommandChannel API 面</td><td>不提供任意 evaluate/run_code_unsafe；只允许审查通过的类型化只读接口</td><td>API/架构测试确认执行器无通用脚本入口；注入脚本/未知动作请求被拒绝</td></tr>
+    <tr><td><b>R3</b></td><td>pw-web-ui 请求策略 + pw-route 能力评估 + 部署代理/防火墙</td><td>逐请求及逐跳重定向校验；覆盖子资源、iframe、弹窗、下载；企业出站由网络层兜底</td><td>靶场验证未批准的重定向、子资源和下载均被阻断；生产网络控制另行验证</td></tr>
+    <tr><td><b>R4</b></td><td>pw-web-ui SessionStore / initializeBrowser 会话创建点</td><td>先定义 context/page 所有权、登录态注入与清理边界；持久登录显式声明并受控管理，ConcurrencyGate 不作为隔离证明</td><td>在明确的隔离靶场配置下验证 context 不共享 Cookie/localStorage，收尾清理结果可观测；不宣称跨进程/持久化环境绝对零残留</td></tr>
+    <tr><td><b>R5</b></td><td>策略引擎/身份与审批系统；pw-web-ui 执行动作前</td><td>授权绑定计划摘要、origin、参数范围、执行身份和有效期；UI 文案不参与授权判定</td><td>篡改计划、身份、参数范围或过期授权均拒绝；未授权动作不能被执行</td></tr>
+    <tr><td><b>R6</b></td><td>pw-core schema/策略校验；pw-codegen 候选验证与审批流程</td><td>AI 只产不可信建议；执行器独立校验权限与动作，AI 无浏览器工具调用能力</td><td>未知字段/越权动作/未审批候选全部拒绝；运行时集成测试验证，而非仅依赖 ArchUnit</td></tr>
+    <tr><td><b>R7</b></td><td>快照、模型请求、错误、网络、日志和报告的共享数据策略</td><td>默认最小化字段白名单；敏感级别未知时拒绝发送或按敏感处理；不可按步骤关闭安全默认值</td><td>跨数据出口的 canary 泄漏测试通过</td></tr>
     <tr><td><b>R8</b></td><td>pw-route route_mock 生命周期绑定与收尾撤销钩子</td><td>mock 与会话同生命周期；沿用 Route 收敛语义（F1 失败即收敛）</td><td>会话收尾后 mock 未撤销即泄漏 → 测试失败</td></tr>
-    <tr><td><b>R9</b></td><td>pw-reports-v2 AgentTrace 写入点</td><td>每原语/每步/每次 LLM 调用计 trace（敏感字段打码）→ 汇入自研 Report</td><td>任一原语/LLM 调用缺 trace 记录 → 测试失败</td></tr>
+    <tr><td><b>R9</b></td><td>pw-reports AgentTrace 写入、导出与存储</td><td>最小必要元数据；访问控制、保留/删除策略；审计日志不是可重执行脚本</td><td>越权访问/过期数据/未审计导出测试失败；禁止保存原始 secret</td></tr>
   </table>
 </section>
 
 <footer>
-  本文档为 pw_automation_framework（DEV-V5）架构设计稿 v1.4 · 基线 v2.23.5 (f9c8df90) · 参照源码：<code>D:\IdeaProject\playwright-mcp-0.0.83</code>（@playwright/mcp 0.0.83，Apache-2.0；config.d.ts / README 工具清单 / SECURITY.md + 本地 <code>npm install</code> 所得 <code>playwright-core@1.64.0-alpha-1790635538000/lib/coreBundle.js</code> 实现级核验，真源码路径 <code>packages/playwright-core/src/tools/mcp/</code>；§10 含项目级适配决策、验收命令与 R1–R9 红线落地守门矩阵）。红线与组件命名待评审后定稿。
+  本文档为 pw_automation_framework（DEV-V5）Agent Driver 架构设计稿 v1.5（2026-11-02）：方向有条件通过，P0 实现前须完成威胁建模、项目 API/生命周期核验和验收设计。MCP 基线仅作为参考实现，核验对象为 @playwright/mcp 0.0.83 及其对应发布目录中的 coreBundle；具体实现细节须在采用前按锁定的制品版本/校验值复核，不视为本项目规范或安全证明。当前项目适配以仓库实际 Maven artifactId 和 JUnit4/Cucumber Runner 为准。
 </footer>
 
 </div>

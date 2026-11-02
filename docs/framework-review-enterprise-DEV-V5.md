@@ -24,7 +24,7 @@
 ### 1.1 现状（实测依赖方向）
 依赖方向：`pw-reports-v2`、`pw-api-core`、`pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports-v2`；`pw-codegen-v3` → `pw-web-ui`。根 POM 提供统一依赖管理。
 
-- 原先继承 `pw-framework-bom` 的框架模块现直接继承根 POM；根 POM 的 `dependencyManagement` 统一管理其依赖版本，不构成运行时模块依赖边。独立维护的 `pw-reports` 保留自身 POM 与版本管理。
+- 框架模块直接继承根 POM；根 POM 的 `dependencyManagement` 统一管理其依赖版本，不构成运行时模块依赖边。独立维护的 `pw-reports` 保留自身 POM 与版本管理。
 - `pw-route` → `pw-core`；`pw-codegen-v3` → `pw-web-ui`，不构成循环依赖。
 - 桥接接口（如 `ReportingBridge`）+ ServiceLoader 用于解耦运行时扩展，不构成当前模块间循环依赖。
 
