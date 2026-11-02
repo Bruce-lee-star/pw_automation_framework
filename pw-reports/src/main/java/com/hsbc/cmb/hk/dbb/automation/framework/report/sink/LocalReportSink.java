@@ -52,6 +52,9 @@ public final class LocalReportSink implements ReportSink {
 
     private final PwReportsConfig config;
     private final Set<String> writtenIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> printedLinks = ConcurrentHashMap.newKeySet();
+    /** 本次运行是否仅单 case（用于决定打印逐条 case 链接还是聚合报告链接）。 */
+    private volatile boolean singleCaseRun;
     private final java.util.concurrent.atomic.AtomicInteger errors =
             new java.util.concurrent.atomic.AtomicInteger();
     /** 渲染线程名序号（仅用于可观测性，线程安全）。 */
@@ -73,6 +76,7 @@ public final class LocalReportSink implements ReportSink {
         //  第二轮相同 outcomeId 被判"已写"而跳过 per-case JSON 真相源，且 errors 变成累计值。
         //  整场开始即清，保证每轮产物从零开始。
         writtenIds.clear();
+        printedLinks.clear();
         errors.set(0);
     }
 
@@ -145,7 +149,17 @@ public final class LocalReportSink implements ReportSink {
         tasks.add(Executors.callable(() -> runRender("static assets", false,
                 () -> { StaticAssets.copyAssets(dir()); return null; })));
 
+        boolean single = outcomes.size() <= 1;
+        singleCaseRun = single;
         renderInParallel(tasks);
+
+        //  2026-11-02 用户需求：单 case 调试已在 renderOutcomeSafe 逐条打印该 case 链接；
+        //  整跑（多 case）则在此统一打印聚合报告入口 index.html 与邮件报告 email-report.html，
+        //  CI/托管环境经 pw.report.base.url 绝对化为 http(s) 链接，本地回退 file://。
+        if (!single) {
+            log.info("Index report: {}", reportLink("index.html"));
+            log.info("Email report: {}", reportLink("email-report.html"));
+        }
 
         if (errors.get() > 0) {
             log.warn("LocalReportSink completed with {} error(s); JSON preserved where written", errors.get());
@@ -155,6 +169,14 @@ public final class LocalReportSink implements ReportSink {
     private void renderOutcomeSafe(TestOutcome o) {
         runRender("per-case HTML " + o.getOutcomeId(), false,
                 () -> { HtmlRenderer.renderOutcome(dir(), o); return null; });
+        //  2026-11-02 用户需求：单 case 调试时，该 case 的 HTML 渲染完成后立即打印其可点击报告链接；
+        //  仅本地单 case 运行打印（整跑改打聚合报告链接，见 finishAll），不扫磁盘历史，同一 outcomeId 只打一次。
+        if (singleCaseRun) {
+            String id = o.getOutcomeId();
+            if (id != null && printedLinks.add(id)) {
+                log.info("Case report: {}", reportLink(id + "/" + id + ".html"));
+            }
+        }
     }
 
     /** 单步隔离渲染：异常不向外传播，失败计入 {@link #errors}（severe=true 时升级为 error 级日志）。 */
@@ -220,6 +242,19 @@ public final class LocalReportSink implements ReportSink {
             }
         }
         return 300L;
+    }
+
+    /**
+     * 报告文件的可点击链接：CI/托管环境（配置了 {@code pw.report.base.url} / {@code PW_REPORT_BASE_URL}）
+     * 经基准 URL 绝对化为 http(s) 链接；本地未配置则回退 {@code file://}。
+     * 与 {@code HtmlRenderer.cssHref()} 同款约定：baseUrl 已规范为以 {@code /} 结尾。
+     */
+    private String reportLink(String relativePath) {
+        String base = PwReportsConfig.baseUrl();
+        if (base != null && !base.isEmpty()) {
+            return base + relativePath;
+        }
+        return dir().resolve(relativePath).toUri().toString();
     }
 
     private Path dir() {
