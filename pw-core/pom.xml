@@ -6,9 +6,9 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>pw-framework-bom</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
-        <relativePath>../pw-framework-bom/pom.xml</relativePath>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>pw-core</artifactId>
@@ -17,8 +17,17 @@
 
     <dependencies>
         <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-core</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -31,7 +40,6 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

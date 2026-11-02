@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      坐标说明（重要）：
+      框架主工程 pw_automation_framework 内**已存在** artifactId=pw-reports 的模块
+      （包 com.hsbc.cmb.hk.dbb.automation.framework.common.reporting，封装 Serenity.recordReportData
+      + SummaryReportGenerator(ftlh) + 监控失败报告）。若本模块沿用同名坐标会 Maven 冲突并
+      语义覆盖，因此独立命名为 pw-reports-v2 与其并存，落地时两个模块同时存在、互不覆盖。
+
+      groupId 沿用主工程（com.hsbc.cmb.dbb.hk.automation）；version 独立编号。
+    -->
+    <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+    <artifactId>pw-reports</artifactId>
+    <version>1.0.1</version>
+    <packaging>jar</packaging>
+    <name>pw-reports-v2</name>
+    <description>Self-built Serenity-compatible BDD reporting (v2, artifact renamed to coexist with the
+        framework's existing pw-reports reporting wrapper): Cucumber events -> thread-safe ReportBus ->
+        ScrubGate -> JSON/HTML output. Zero serenity-* dependencies.</description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Pin dependency versions independently for this standalone reporting module. -->
+        <cucumber.version>7.34.9</cucumber.version>
+        <jackson.version>2.22.1</jackson.version>
+        <freemarker.version>2.3.34</freemarker.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <byte-buddy.version>1.17.8</byte-buddy.version>
+        <junit-jupiter.version>5.14.1</junit-jupiter.version>
+        <assertj.version>3.27.7</assertj.version>
+
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
+    </properties>
+
+    <dependencies>
+        <!-- Cucumber 事件 SPI（最小 JAR，仅事件接口 + 插件契约） -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-plugin</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        <!-- ObjectFactory SPI（@Steps 注入路径） + TestCase/PickleStepTestStep 等运行时类型 -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-core</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+
+        <!-- per-case JSON 序列化 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>2.22</version>
+        </dependency>
+
+        <!-- HTML 模板渲染（自有 .ftl，视觉对齐 serenity，资产不来自任何 serenity JAR） -->
+        <dependency>
+            <groupId>org.freemarker</groupId>
+            <artifactId>freemarker</artifactId>
+            <version>${freemarker.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+
+        <!-- @Step 拦截：运行时子类代理（免 javaagent） -->
+        <dependency>
+            <groupId>net.bytebuddy</groupId>
+            <artifactId>byte-buddy</artifactId>
+            <version>${byte-buddy.version}</version>
+        </dependency>
+
+        <!-- 报告桥 SPI 接口（framework.common.reporting.ReportingBridge），仅取接口类；
+             排除 jackson/logback 传递以免与 v2 钉死的版本触发 RequireUpperBoundDeps -->
+        <dependency>
+            <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+            <artifactId>pw-core</artifactId>
+            <version>1.0.1</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-databind</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- 测试 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven-surefire-plugin.version}</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

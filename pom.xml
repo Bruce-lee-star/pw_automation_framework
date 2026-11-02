@@ -13,12 +13,11 @@
 
     <modules>
         <module>pw-core</module>
-        <module>pw-reports-v2</module>
+        <module>pw-reports</module>
         <module>pw-api-core</module>
         <module>pw-web-ui</module>
         <module>pw-codegen</module>
         <module>pw-route</module>
-        <module>pw-framework-bom</module>
     </modules>
 
     <properties>
@@ -31,14 +30,12 @@
         <gson.version>2.14.0</gson.version>
         <json.path.version>2.9.0</json.path.version>
         <cucumber.version>7.34.9</cucumber.version>
-        <json.version>20240303</json.version>
         <freemarker.version>2.3.34</freemarker.version>
         <summary.report.phase>post-integration-test</summary.report.phase>
         <logback.version>1.5.34</logback.version>
         <jackson.version>2.22.1</jackson.version>
         <json-smart.version>2.5.2</json-smart.version>
         <plexus.archiver.version>4.14.0</plexus.archiver.version>
-        <selenium.version>4.23.1</selenium.version>
         <mockito.version>4.5.1</mockito.version>
         <h2.version>2.2.224</h2.version>
         <flyway.version>9.22.3</flyway.version>
@@ -53,14 +50,158 @@
         <spotbugs.version>4.9.8</spotbugs.version>
         <cve.gate.skip>false</cve.gate.skip>
         <cve.gate.executable>pwsh</cve.gate.executable>
-        <tags>not @skip</tags>
-        <rerunFailingTestsCount>1</rerunFailingTestsCount>
         <skipTests>false</skipTests>
         <forkedProcessTimeoutInSeconds>1800</forkedProcessTimeoutInSeconds>
-        <env/>
-        <env.code/>
-        <base.url/>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.rest-assured</groupId>
+                <artifactId>rest-assured</artifactId>
+                <version>5.5.6</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>3.19.0</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-core</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.freemarker</groupId>
+                <artifactId>freemarker</artifactId>
+                <version>${freemarker.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.jayway.jsonpath</groupId>
+                <artifactId>json-path</artifactId>
+                <version>${json.path.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.microsoft.playwright</groupId>
+                <artifactId>playwright</artifactId>
+                <version>${playwright.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit</artifactId>
+                <version>1.3.0</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.hamcrest</groupId>
+                <artifactId>hamcrest</artifactId>
+                <version>2.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.assertj</groupId>
+                <artifactId>assertj-core</artifactId>
+                <version>3.27.7</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.typesafe</groupId>
+                <artifactId>config</artifactId>
+                <version>${typesafe.config.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.code.gson</groupId>
+                <artifactId>gson</artifactId>
+                <version>${gson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+                <version>2.22</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.networknt</groupId>
+                <artifactId>json-schema-validator</artifactId>
+                <version>1.5.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>2.0.17</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy</artifactId>
+                <version>1.17.8</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.5.0-jre</version>
+            </dependency>
+            <!-- 必须保留：调和 guava(2.41.0) 与 gson(2.48.0) 对 error_prone_annotations 的传递版本，否则 RequireUpperBoundDeps 失败。 -->
+            <dependency>
+                <groupId>com.google.errorprone</groupId>
+                <artifactId>error_prone_annotations</artifactId>
+                <version>2.48.0</version>
+            </dependency>
+            <dependency>
+                <groupId>io.cucumber</groupId>
+                <artifactId>cucumber-core</artifactId>
+                <version>${cucumber.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.cucumber</groupId>
+                <artifactId>cucumber-plugin</artifactId>
+                <version>${cucumber.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.cucumber</groupId>
+                <artifactId>cucumber-java</artifactId>
+                <version>${cucumber.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.cucumber</groupId>
+                <artifactId>cucumber-junit</artifactId>
+                <version>${cucumber.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.cucumber</groupId>
+                <artifactId>datatable</artifactId>
+                <version>${cucumber.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+                <artifactId>pw-reports</artifactId>
+                <version>1.0.1</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <plugins>

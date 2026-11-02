@@ -1,0 +1,149 @@
+{
+  "src": "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\pw-agent-driver-design.html",
+  "url": "file:///C:/Users/12745/Doubao/chats/2026-09-26/new-chat/pw-agent-driver-design/pw-agent-driver-design.html",
+  "outdir": "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots",
+  "include": [
+    "lint",
+    "screenshots",
+    "structure"
+  ],
+  "shots": {
+    "desktop": {
+      "slices": [
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_desktop_p1of3.jpg",
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_desktop_p2of3.jpg",
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_desktop_p3of3.jpg"
+      ],
+      "sliceHint": "按顺序 Read slices 里的各分片。",
+      "truncated": false,
+      "structure": {
+        "title": "pw Agent Driver 企业级设计 —— 浏览器指挥与 Step 代码生成",
+        "firstH1": "pw Agent Driver —— 浏览器指挥与 Step 代码生成",
+        "viewport": {
+          "w": 1422,
+          "h": 748
+        },
+        "fullpage": {
+          "w": 1422,
+          "h": 11675
+        },
+        "counts": {
+          "section": 10,
+          "h1": 1,
+          "h2": 10,
+          "img": 0,
+          "canvas": 0,
+          "svg": 0,
+          "links": 10,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "reportSource": "cdp"
+    },
+    "mobile": {
+      "slices": [
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p1of5.jpg",
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p2of5.jpg",
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p3of5.jpg",
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p4of5.jpg",
+        "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p5of5.jpg"
+      ],
+      "sliceHint": "按顺序 Read slices 里的各分片。",
+      "truncated": false,
+      "structure": {
+        "title": "pw Agent Driver 企业级设计 —— 浏览器指挥与 Step 代码生成",
+        "firstH1": "pw Agent Driver —— 浏览器指挥与 Step 代码生成",
+        "viewport": {
+          "w": 500,
+          "h": 692
+        },
+        "fullpage": {
+          "w": 514,
+          "h": 13391
+        },
+        "counts": {
+          "section": 10,
+          "h1": 1,
+          "h2": 10,
+          "img": 0,
+          "canvas": 0,
+          "svg": 0,
+          "links": 10,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "reportSource": "cdp"
+    }
+  },
+  "engine": "chrome_cli",
+  "chromiumExec": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "engineDegraded": true,
+  "engineDegradedReason": "playwright 未装",
+  "elapsedSec": 13.47,
+  "schemaVersion": 2,
+  "status": "pass",
+  "engineInfo": {
+    "name": "chrome_cli",
+    "degraded": true,
+    "degradedReasons": [
+      "playwright 未装"
+    ]
+  },
+  "input": {
+    "original": "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\pw-agent-driver-design.html",
+    "resolvedPath": "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\pw-agent-driver-design.html",
+    "baseUrl": "file:///C:/Users/12745/Doubao/chats/2026-09-26/new-chat/pw-agent-driver-design/pw-agent-driver-design.html",
+    "protocol": "file",
+    "cwd": "D:\\IdeaProject\\pw_automation_framework",
+    "mediaMode": {
+      "reducedMotion": true
+    }
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "viewport": "desktop",
+        "tiles": [
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_desktop_p1of3.jpg",
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_desktop_p2of3.jpg",
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_desktop_p3of3.jpg"
+        ],
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      },
+      {
+        "viewport": "mobile",
+        "tiles": [
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p1of5.jpg",
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p2of5.jpg",
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p3of5.jpg",
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p4of5.jpg",
+          "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\pw-agent-driver-design_mobile_p5of5.jpg"
+        ],
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      }
+    ]
+  },
+  "summary": {
+    "blocker": 0,
+    "error": 0,
+    "warning": 0,
+    "info": 0
+  },
+  "findings": [],
+  "prioritizedActions": [],
+  "reportPath": "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat\\pw-agent-driver-design\\_shots\\report.json"
+}

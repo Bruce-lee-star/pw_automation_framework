@@ -34,7 +34,7 @@ superseded_by: null
 | 项 | 内容 |
 |---|---|
 | 被谁依赖 | `pw-web-ui` / `pw-api-core` / `pw-route` / `pw-reports-v2` / `pw-codegen`（间接） |
-| 依赖谁 | 无框架内依赖（仅 `pw-framework-bom`） |
+| 依赖谁 | 无框架内依赖（依赖版本由根 POM 管理） |
 | 包名 | `com.hsbc.cmb.hk.dbb.automation.framework.{common,core}` |
 | 分层约束 | ArchUnit 守卫 `core` 不得依赖任何业务域包 |
 

@@ -6,9 +6,9 @@
 
     <parent>
         <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-        <artifactId>pw-framework-bom</artifactId>
+        <artifactId>pw_automation_framework</artifactId>
         <version>1.0.1</version>
-        <relativePath>../pw-framework-bom/pom.xml</relativePath>
+        <relativePath>../pom.xml</relativePath>
     </parent>
 
     <artifactId>pw-web-ui</artifactId>
@@ -25,8 +25,21 @@
              替代原 pw-reports（Serenity 适配器）。 -->
         <dependency>
             <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-            <artifactId>pw-reports-v2</artifactId>
+            <artifactId>pw-reports</artifactId>
             <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
         </dependency>
 
         <!-- Guava LoadingCache backs SessionManager's concurrent metadata cache. The version is managed by the root POM. -->
@@ -45,10 +58,6 @@
 
         <!-- Declare external libraries used directly by this module instead of relying on transitive dependencies. -->
         <dependency>
-            <groupId>com.jayway.jsonpath</groupId>
-            <artifactId>json-path</artifactId>
-        </dependency>
-        <dependency>
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
         </dependency>
@@ -57,12 +66,6 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
-        <!-- Serenity's public API exposes Selenium support types; declare this dependency to satisfy compilation. -->
-        <dependency>
-            <groupId>org.seleniumhq.selenium</groupId>
-            <artifactId>selenium-support</artifactId>
-        </dependency>
-
         <!-- JUnit 4，与 runner 体系统一（原先的 JUnit5 套件收尾设施 SuiteTeardownListener /
              junit-platform-launcher 已随之移除）。
              scope=provided 而非 test：src/main 的 CucumberWithPw 是 JUnit Runner，编译期需要
@@ -78,27 +81,27 @@
             <artifactId>archunit</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-core</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Mockito supports unit tests for PageWaits, PageNavigation, BasePage, and related Web classes. -->
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- Serenity test initialization needs Selenium driver classes; test scope keeps them out of runtime consumers. -->
-        <dependency>
-            <groupId>org.seleniumhq.selenium</groupId>
-            <artifactId>selenium-java</artifactId>
-            <version>${selenium.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <!-- Cucumber dependencies are explicit because framework glue uses cucumber-java and DataTable,
-             while Serenity runtime integration and tests need cucumber-core. Versions are managed by the root POM. -->
+        <!-- Cucumber glue and event listeners use the Java, DataTable, and plugin APIs directly. -->
         <dependency>
             <groupId>io.cucumber</groupId>
-            <artifactId>cucumber-core</artifactId>
+            <artifactId>cucumber-plugin</artifactId>
         </dependency>
         <dependency>
             <groupId>io.cucumber</groupId>

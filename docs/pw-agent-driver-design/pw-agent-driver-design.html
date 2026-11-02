@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pw Agent Driver 企业级设计 —— 浏览器指挥与 Step 代码生成</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f2437'/%3E%3Cpath d='M7 20l6-8 4 5 3-4 5 7' stroke='%237fd4c0' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='25' cy='11' r='2.6' fill='%237fd4c0'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --ink:#1f2a36; --sub:#5a6b7b; --line:#dfe6ec; --bg:#f6f8fa;
+    --accent:#0e6f6f; --accent-soft:#e6f3f2; --blue:#2b6cb0;
+    --warn:#b3261e; --warn-soft:#fdf0ef; --ok:#1f883d; --ok-soft:#e7f5ec;
+    --amber:#8a5b00; --amber-soft:#fdf6e3;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    font-size:15px;line-height:1.65;}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 80px;}
+  /* ---------- hero ---------- */
+  .hero{background:#0f2437;color:#eaf2f8;border-radius:14px;padding:28px 30px;margin-bottom:26px;}
+  .hero .kicker{font-size:13px;letter-spacing:.08em;color:#7fd4c0;margin:0 0 8px;}
+  .hero h1{font-size:26px;line-height:1.3;margin:0 0 10px;}
+  .hero p{font-size:14.5px;color:#c2d4e2;margin:0 0 14px;max-width:880px;}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:#9fb6c7;}
+  .meta b{color:#eaf2f8;font-weight:600;}
+  /* ---------- nav ---------- */
+  .toc{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.96);
+    border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:22px;
+    display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;}
+  .toc a{color:var(--blue);text-decoration:none;white-space:nowrap;}
+  .toc a:hover{text-decoration:underline;}
+  /* ---------- sections ---------- */
+  section{margin-bottom:34px;}
+  h2{font-size:20px;margin:0 0 14px;padding-bottom:8px;border-bottom:2px solid var(--accent);}
+  h3{font-size:16.5px;margin:22px 0 10px;}
+  h4{font-size:15px;margin:16px 0 8px;}
+  p{margin:8px 0;}
+  ul,ol{margin:8px 0;padding-left:22px;}
+  li{margin:4px 0;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0;background:#fff;}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;}
+  th{background:#eef3f7;font-weight:600;white-space:nowrap;}
+  tr:nth-child(even) td{background:#fafcfd;}
+  code{font-family:Consolas,"JetBrains Mono",monospace;font-size:12.5px;
+    background:#eef2f5;border:1px solid #dde5ec;border-radius:4px;padding:1px 5px;}
+  pre{background:#0f2437;color:#dbe8f2;border-radius:8px;padding:14px 16px;
+    overflow-x:auto;font-size:12.5px;line-height:1.55;}
+  pre code{background:none;border:none;color:inherit;padding:0;font-size:12.5px;}
+  .note{border-radius:8px;padding:12px 14px;margin:12px 0;font-size:13.5px;}
+  .note.ok{background:var(--ok-soft);border:1px solid #bfe3cb;}
+  .note.warn{background:var(--warn-soft);border:1px solid #f0c4c0;}
+  .note.info{background:var(--accent-soft);border:1px solid #b9dedc;}
+  .note.amber{background:var(--amber-soft);border:1px solid #ead9a8;}
+  table.map-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;}
+  table.map-table th,table.map-table td{white-space:nowrap;}
+  .note b{display:inline-block;margin-bottom:2px;}
+  .tag{display:inline-block;font-size:11.5px;font-weight:600;border-radius:4px;
+    padding:1px 7px;margin-right:6px;vertical-align:1px;}
+  .tag.new{background:#0e6f6f;color:#fff;}
+  .tag.asset{background:#2b6cb0;color:#fff;}
+  .tag.red{background:var(--warn);color:#fff;}
+  .tag.gray{background:#5a6b7b;color:#fff;}
+  /* ---------- architecture diagram ---------- */
+  .arch{border:1px solid var(--line);border-radius:12px;background:#fff;padding:18px;margin:14px 0;}
+  .arch .lane{display:flex;gap:10px;align-items:stretch;}
+  .arch .box{flex:1 1 0;min-width:0;border-radius:9px;padding:10px 12px;font-size:13px;}
+  .arch .box h4{margin:0 0 6px;font-size:14px;}
+  .arch .box p{margin:4px 0;font-size:12.5px;color:var(--sub);}
+  .arch .arrow{flex:0 0 auto;align-self:center;font-size:18px;color:var(--accent);font-weight:700;}
+  .arch .lane-label{font-size:12px;font-weight:700;letter-spacing:.05em;color:#fff;border-radius:6px;
+    padding:4px 10px;margin-bottom:8px;display:inline-block;}
+  .flow-note{margin-top:10px;font-size:12.5px;color:var(--sub);}
+  @media (max-width:760px){
+    .arch .lane{flex-direction:column;}
+    .arch .arrow{transform:rotate(90deg);align-self:center;}
+    table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    th,td{white-space:nowrap;}
+  }
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr;}}
+  .card{border:1px solid var(--line);border-radius:10px;background:#fff;padding:14px 16px;}
+  .card h4{margin:0 0 8px;}
+  .road{list-style:none;padding:0;margin:0;}
+  .road li{border-left:3px solid var(--accent);padding:8px 0 8px 16px;margin:6px 0;
+    background:#fff;border-radius:0 8px 8px 0;border-top:1px solid var(--line);
+    border-right:1px solid var(--line);border-bottom:1px solid var(--line);font-size:13.5px;}
+  .road li b{color:var(--accent);}
+  footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--sub);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ===================== hero ===================== -->
+<header class="hero">
+  <p class="kicker">PW_Automation_Framework · DEV-V5 · 架构设计文档</p>
+  <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
+  <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条企业级流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，吸收其「非安全边界」教训，在本框架内做成<b>快照即真相、确定性执行、AI 只提候选、生成代码后运行时无 LLM</b>的闭环。</p>
+  <div class="meta">
+    <span>版本：<b>v1.4 设计稿（已按 0.0.83 coreBundle 真实现核验 + §10 项目级适配含红线守门矩阵）</b></span>
+    <span>日期：<b>2026-11-01</b></span>
+    <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
+    <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#s1">1 原则</a>
+  <a href="#s2">2 MCP 参照解剖</a>
+  <a href="#s3">3 总体架构</a>
+  <a href="#s4">4 核心机制</a>
+  <a href="#s5">5 安全红线</a>
+  <a href="#s6">6 落地映射</a>
+  <a href="#s7">7 路线图</a>
+  <a href="#s8">8 风险</a>
+  <a href="#s9">9 任务清单</a>
+  <a href="#s10">10 项目适配</a>
+</nav>
+
+<!-- ===================== 1 原则 ===================== -->
+<section id="s1">
+  <h2>1. 设计目标与五条企业级原则</h2>
+  <p>目标：用户以<b>业务流程</b>（自然语言 / 录制骨架 / DSL）描述要做什么，框架指挥浏览器逐步执行、自动发现并验证元素定位器、生成<b>可提交、可回归、可维护</b>的 Step 业务代码（Feature + Glue + Page Object）。</p>
+  <table>
+    <tr><th style="width:34%">原则</th><th>含义与判定标准</th></tr>
+    <tr><td><b>P1 · 快照即真相</b></td><td>浏览器状态只来自运行时 a11y 快照（role/name/ref + 候选 selector），禁止凭模型记忆或 CSS 猜测写定位器。每一步「先观察、后动作、再回读」。</td></tr>
+    <tr><td><b>P2 · 确定性执行</b></td><td>LLM 只产出「受 schema 约束的意图与候选」，执行由确定性 StepDriver + 原语通道承担。同一 StepPlan 在 CI 重复运行结果一致（幂等可重放）。</td></tr>
+    <tr><td><b>P3 · AI 与运行时分离</b></td><td>生成 Step 代码落库后，<b>回归运行时零 LLM 依赖</b>（借鉴 MCP 官方理念：committed tests are the durable artifact）。LLM 只存在于「设计期/生成期」。</td></tr>
+    <tr><td><b>P4 · 最小权限与真边界</b></td><td>MCP 官方明示「不是安全边界」；本设计把边界做实：原语分级（读/写/高危）、凭据不进 AI 通道、无自由代码执行、上下文隔离、来源白名单。</td></tr>
+    <tr><td><b>P5 · 全链路可观测</b></td><td>每步带 trace（步骤 id、快照指纹、定位器来源、耗时、结果），失败即收敛（复用 F1），产物可回放、可审计。</td></tr>
+  </table>
+  <div class="note info"><b>与「生成稳定代码」的关系：</b>稳定性来自三条链路 —— ① 定位器经 <b>DOM 唯一性断言 + 灰度回注</b>后才成为代码里的常量；② 生成物<b>编译 + 冒烟执行</b>双验证后才落库；③ 生成代码内嵌 trace 注释（来源、验证时间、指纹），可追溯。</div>
+</section>
+
+<!-- ===================== 2 MCP 参照解剖 ===================== -->
+<section id="s2">
+  <h2>2. 参照基线：Playwright MCP 0.0.83 源码解剖</h2>
+  <p><b>一手来源</b>：本地源码目录 <code>D:\IdeaProject\playwright-mcp-0.0.83</code>（npm 发布包形态，Apache-2.0）——<code>config.d.ts</code>（官方 Config 权威签名）、<code>README.md</code>（update-readme.js 自动生成的<b>全量工具清单</b>，含 0.0.83 新增 caps 分组）、<code>SECURITY.md</code>。架构说明：0.0.83 起 MCP 工具实现已并入 <code>playwright-core</code> 的 <code>coreBundle</code>（<code>index.js</code> → <code>tools.createConnection</code>），<code>roll.js</code> 显示真源码位于 <code>playwright/packages/playwright-core/src/tools/mcp/</code>。<b>实现级核验（v1.2 新增）</b>：已在发布目录 <code>npm install</code> 取得 <code>playwright-core@1.64.0-alpha-1790635538000</code> 的 <code>lib/coreBundle.js</code>（3.57MB，内含 MCP 全部工具实现，源码路径注释可见 <code>src/tools/mcp/index.ts / backend/utils.ts / recorder.ts / config.ts</code> 与 <code>packages/isomorphic/codegen/language.ts</code>），下表事实逐条对照该 bundle。下表「强化」即我们比 MCP 更企业级的地方。</p>
+  <table class="map-table">
+    <tr><th style="width:26%">MCP 机制（源码事实 @0.0.83）</th><th style="width:26%">借鉴</th><th>本设计强化</th></tr>
+    <tr><td><b>a11y 快照驱动</b>：<code>browser_snapshot</code> 返回可达性树，支持 <code>target</code>（子树）、<code>depth</code>（深度限制）、<code>boxes</code>（viewport 坐标 <code>[box=x,y,w,h]</code>，默认关）；官方明示「基于截图不能做动作，用 snapshot」</td><td>同构 <b>SnapshotTree</b>：scope（viewport/全页/子树）+ 深度限制</td><td>节点<b>同时注入候选 selector</b>（ref 仅供当轮交互；selector 供落库），附 DOM 唯一性指纹</td></tr>
+    <tr><td><b>ref 生命周期</b>：target 参数「Exact target element reference from the page snapshot, or a unique element selector」；ref 只在单快照内有效</td><td>同规则：交互只用当轮 ref，代码永不提交 ref</td><td>「ref → locator」做成<b>强制流程</b>：<code>browser_generate_locator</code>（testing caps，元素→测试定位器）即 MCP 自带的转换原语，我们将其固化为 CandidateValidator 必经环节</td></tr>
+    <tr><td><b>闭环循环</b>：Snapshot → Interact(target=ref) → Re-snapshot；动作后 <b>settle 500ms</b>（timeouts.settle）。<b>实现细节（coreBundle 实测）</b>：<code>waitForCompletion</code>（backend/utils.ts）在动作后 <code>waitForTimeout(settleMs)</code>，同时监听 request 事件；若期间触发 <b>navigation request</b> 则继续等导航完成（<code>Promise.race</code>，5s 兜底），再补一次 settle</td><td>StepDriver 每步走完整闭环；Verify 阶段<b>对齐该语义</b>：动作后「静默窗口 + 导航感知」而非固定 sleep</td><td>增加<b>期望态校验</b>（expect 条件，对齐 testing caps 的 <code>browser_verify_element_visible/verify_text_visible/verify_value</code>），失败即收敛并产出最小失败现场</td></tr>
+    <tr><td><b>原语工具集（0.0.83 全量 30+ 工具）</b>：core 组含 click/type/fill_form/select_option/hover/press_key/navigate/evaluate/find/drag/drop/wait_for/emulate_media/file_upload/dialog/console/network/resize/run_code_unsafe；caps 分组：tabs / install / network（route+offline）/ storage（cookie+local/session storage+storage-state）/ pdf / vision（坐标鼠标）/ devtools（录制/trace/video/annotate）/ testing（generate_locator+verify_*）/ config（get_config）</td><td>同构 <b>BrowserCommandChannel</b> 原语集，按 caps 语义分组</td><td>每个原语声明<b>幂等性 + 权限级 + 失败语义</b>；写原语默认需授权；能力开关按组进 ConfigRegistry（对齐 <code>browser_get_config</code>：MCP 也做 CLI+env+config 文件三层合并，与我们 ConfigReader 层序同构）</td></tr>
+    <tr><td><b>录制骨架</b>：<code>browser_start_recording / browser_stop_recording</code>（devtools caps，录用户手动操作→Playwright 代码）；<code>codegen</code> 配置支持 typescript/python/<b>java</b>/csharp 语言目标。<b>实现细节（coreBundle 实测）</b>：语言生成器集合 <code>languageSet()</code>（isomorphic/codegen/languages.ts）含 JS/Python/Java/C# 生成器；<code>SDKLanguage = tEnum(["javascript","python","java","csharp"])</code>；<b>Java 生成器提供两模式</b>：Library（id=<code>java</code>）与 <b>JUnit（id=<code>java-junit</code>）</b>；Java locator 输出形态为 <code>getByRole(AriaRole.BUTTON, new GetByRoleOptions().setName("..."))</code>、filter 用 <code>new FilterOptions().setHasText(...)</code></td><td>录制→代码链路直接采用；Java 两模式（Library/JUnit）作为生成层模板基线</td><td>录制输出对接到我们 <b>Codegen 录制套件</b>，语言目标固定 java（对齐 JUnit 模式语义，天然匹配框架 JUnit5）；产物升级为三层（Feature/Glue/PO），MCP 只产单文件代码</td></tr>
+    <tr><td><b>browser_run_code_unsafe</b>：任意 Playwright 代码，官方描述「executes arbitrary JavaScript in the Playwright server process and is RCE-equivalent」</td><td>默认<b>禁用</b>；仅本地调试模式可开</td><td>开启需双开关（config + JVM 属性），每次调用留审计日志（调用者/脚本摘要/时长）</td></tr>
+    <tr><td><b>官方声明「不是安全边界」</b>：README 原文 —— <code>--allowed-origins</code> 「does not serve as a security boundary and <b>does not affect redirects</b>」；<code>secrets</code> 注释「a convenience and not a security feature」；<code>allowUnrestrictedFileAccess</code> 注释「not a secure boundary」</td><td>不照搬该声明</td><td>本设计把安全做成<b>真边界</b>（见 §5）：allowed-origins → 我们加 <b>redirect 链终点评验</b>；secrets 明文替换 → 我们做<b>脱敏通道</b>（不进 AI 上下文）；文件访问 → 归入红线管控</td></tr>
+    <tr><td><b>隔离/持久 profile</b>：persistent 为默认（headed，profile 按 workspace-hash 自动分目录、单实例互斥——并发 client 需 --isolated 或独立 user-data-dir）；isolated 每会话 fresh，登录态靠 <code>--storage-state</code> / contextOptions 注入；<code>idle-timeout</code> headless 默认 1h、headed 永不</td><td>会话策略沿用</td><td>策略按流程声明（ConfigReader 键），默认 isolated + 显式 storage-state；并发沿用 ConcurrencyGate 分区语义</td></tr>
+    <tr><td><b>上下文注入点</b>：<code>createConnection(config, contextGetter)</code> —— 外部可注入 BrowserContext 提供者。<b>实现细节（coreBundle 实测）</b>：有 <code>contextGetter</code> 时包装为 <code>SimpleBrowser(await contextGetter())</code>，该 class 的 <code>newContext()</code> 直接 <b>throw（"Creating a new context is not supported"）</b>——外部 context 为单实例只读注入；无注入时走 <code>createBrowserWithInfo</code>（persistent 默认 / isolated 每会话 fresh）</td><td>企业集成点直接采用；对外部 context 只读注入语义与我们的会话所有权一致</td><td>对应我们 <b>BrowserStartupImpl / SessionStore</b> 作为 context 提供者注入 StepDriver，登录态/环境隔离复用现有会话设施；注入后禁止 context 新建（同 SimpleBrowser 语义）</td></tr>
+    <tr><td><b>探索用 MCP、回归用提交的测试</b>（committed tests are the durable artifact, make the agent optional at regression runtime）</td><td>核心理念直接采用</td><td>生成物落库后 CI 运行<b>零 LLM/零 agent</b>；LLM 仅在生成期出现</td></tr>
+  </table>
+  <div class="note amber"><b>结论：</b>0.0.83 证明「快照驱动 + 观察-动作-回读 + 工具原语化 + 录制→代码」是让 AI 稳定操作浏览器的正确范式；它把安全声明为边界外（allowed-origins 不防 redirect、secrets 非安全特性、run_code_unsafe RCE 等价）。我们取它的<b>协议与工具思想</b>，补上企业级要的<b>验证、权限、回注、可观测</b>四件套。</div>
+</section>
+
+<!-- ===================== 3 总体架构 ===================== -->
+<section id="s3">
+  <h2>3. 总体架构</h2>
+  <p>五层流水线：<b>意图层 → 指挥层 → 感知层 → 生成层 → 校验回注层</b>。绿色块=新增组件，蓝色块=复用现有资产，红色块=边界/门禁。</p>
+
+  <div class="arch">
+    <div class="lane">
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
+        <span class="tag new">新增</span><h4>① 意图层 IntentEngine</h4>
+        <p>输入三源：录制骨架（Codegen 先导）/ 自然语言（LLM 翻译）/ DSL（结构化声明）</p>
+        <p>产出 <b>StepPlan</b>：有序步骤清单（ActionType + Target + Params + Expect）</p>
+        <p>幻觉防护：步骤 schema 校验 + 每步可执行性预检</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
+        <span class="tag new">新增</span><h4>② 指挥层 StepDriver</h4>
+        <p>逐步骤执行闭环：Observe → Act → Verify → Next</p>
+        <p>经 <b>BrowserCommandChannel</b> 原语集驱动浏览器（导航/点击/输入/断言…）</p>
+        <p>复用 Route 拦截、Session 会话、Monitor 监控、F1 失败即收敛</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
+        <span class="tag new">新增</span><h4>③ 感知层 SnapshotTree</h4>
+        <p>a11y 快照协议：role/name/ref + <b>候选 selector</b> + DOM 唯一性指纹</p>
+        <p>定位器四梯队：录制 → 语义(RoleElementPicker) → 结构(SelectorStability) → AI 兜底</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
+        <span class="tag new">新增</span><h4>④ 生成层 CodeGen</h4>
+        <p>StepPlan + 已验证定位器 → 三层产物：Feature / Glue step / Page Object+方法</p>
+        <p>模板化生成 + 编译 + 冒烟执行双验证；产物内嵌 trace 注释</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
+        <span class="tag new">新增</span><h4>⑤ 校验回注层</h4>
+        <p>定位器生命周期：提出 → 唯一性断言 → 灰度 → 落库回注</p>
+        <p>每步 trace（指纹/来源/耗时）→ 可重放、可审计、可回退</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="arch">
+    <div class="lane">
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;">
+        <span class="tag asset">现有</span><h4>Codegen 录制套件</h4>
+        <p>CodegenPanelManager · 两步拾取 · CodegenFacts · CodegenScorer —— 提供录制骨架与候选评分底座</p>
+      </div>
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;">
+        <span class="tag asset">现有</span><h4>定位器/稳定性</h4>
+        <p>RoleElementPicker（语义）· SelectorStability（Radix 等结构修正）· Entity/APIResources（配置键）</p>
+      </div>
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;">
+        <span class="tag asset">现有</span><h4>执行基础设施</h4>
+        <p>Route（拦截/收敛）· SessionStore · BrowserStartupImpl · MonitorSink · ConcurrencyGate</p>
+      </div>
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;">
+        <span class="tag asset">现有</span><h4>配置与观测</h4>
+        <p>ConfigReader/ConfigRegistry（统一层序）· ErrorClassifier · 自研 Report（trace 落点）· ApiCapture</p>
+      </div>
+    </div>
+    <div class="flow-note">复用面说明：指挥层几乎不新建浏览器能力——导航/会话/拦截/监控都是现有资产；新增的是「原语通道协议、快照协议、意图翻译、候选验证、代码生成」五个薄层。</div>
+  </div>
+
+  <div class="note ok"><b>运行时分离（P3 落地形态）：</b>设计期（LLM 在线：意图翻译 + 候选提出）与回归期（<b>纯 JVM 运行</b>：StepPlan 已固化为 Feature/Glue/PO 代码，直接跑 <code>mvn test</code>）严格分离。LLM 端点、模型、开关全部走 ConfigReader 键，支持本地 Ollama / 云端 API 可插拔。</div>
+</section>
+
+<!-- ===================== 4 核心机制 ===================== -->
+<section id="s4">
+  <h2>4. 核心机制</h2>
+
+  <h3 id="s41">4.1 BrowserCommandChannel —— 原语集（对齐 MCP 工具集，补企业级契约）</h3>
+  <table>
+    <tr><th style="width:20%">原语</th><th style="width:24%">参数要点</th><th style="width:16%">权限级</th><th style="width:22%">幂等/失败语义</th><th>对应 MCP</th></tr>
+    <tr><td><code>navigate</code></td><td>url / waitUntil / 来源白名单校验</td><td>读</td><td>幂等（同 URL 可重放）；失败→会话恢复或重建</td><td>browser_navigate</td></tr>
+    <tr><td><code>snapshot</code></td><td>scope（viewport/全页/子树）/ maxDepth / 脱敏开关</td><td>读</td><td>只读无副作用；返回 SnapshotTree + 指纹</td><td>browser_snapshot / browser_find</td></tr>
+    <tr><td><code>click / hover</code></td><td>target=当轮 ref 或候选 selector / 动作前可见性等待</td><td>写</td><td>非幂等（点击有副作用）→ 动作前快照 diff 校验；超时→失败即收敛</td><td>browser_click / browser_hover</td></tr>
+    <tr><td><code>type / fill / select</code></td><td>值 / 是否敏感（密码类走脱敏通道，不进 AI 上下文）</td><td>写</td><td>fill 幂等；type 追加不幂等（按需）；敏感值仅存内存一次</td><td>browser_type / fill_form / select_option</td></tr>
+    <tr><td><code>press_key</code></td><td>key 组合（Enter/Tab/Escape…）</td><td>写</td><td>按声明场景使用；用于绕过鼠标的键盘路径</td><td>browser_press_key</td></tr>
+    <tr><td><code>assert_state</code></td><td>expect 表达式（url/可见/文本/计数）</td><td>读</td><td>纯断言；失败→当前步收敛并记录最小现场</td><td>asserts（caps=testing）</td></tr>
+    <tr><td><code>route_mock / network</code></td><td>url 模式 / 响应体；console 与请求读取</td><td>写/读</td><td>mock 按会话生命周期绑定，收尾必须撤销（防泄漏）</td><td>mock / network / console</td></tr>
+    <tr><td><code>tab_manage / dialog</code></td><td>新建/切换/关闭；accept/dismiss</td><td>写</td><td>跨 tab 操作须回到单一会话语义（与 Route 线程收敛一致）</td><td>tabs / dialogs</td></tr>
+    <tr><td><code>storage_state</code></td><td>保存/恢复 Cookie 与 localStorage</td><td>写</td><td>默认 isolated；显式 storage-state 才持久（防跨场景泄漏）</td><td>storage</td></tr>
+    <tr><td><code>run_code_unsafe</code></td><td>任意 Playwright/JS 脚本</td><td>高危</td><td><b>默认禁用</b>；仅本地调试双开关开启；每次调用审计日志</td><td>browser_run_code_unsafe</td></tr>
+  </table>
+  <div class="note warn"><b>权限门禁：</b>写/高危原语默认需授权点（人工确认或流程声明的 allow-list）；与现有 InteractionManager / 按需确认模式同构。所有原语调用计入 <b>AgentTrace</b>（原语、参数摘要、耗时、结果、指纹），汇入自研 Report。</div>
+
+  <div class="note info"><b>0.0.83 全量工具 → 本框架原语映射（源码级对齐）：</b>
+  <table class="map-table">
+    <tr><th style="width:34%">@playwright/mcp 0.0.83 工具（caps 组）</th><th>本框架对应/启发</th></tr>
+    <tr><td><code>browser_navigate / navigate_back / tabs</code>（core/tabs）</td><td><code>navigate / tab_manage</code> 原语；back/forward 并入 tab_manage</td></tr>
+    <tr><td><code>browser_snapshot</code>（target/depth/boxes）、<code>browser_find</code>（快照内 text/regex 检索，带路径上下文）</td><td><b>SnapshotTree.snapshot(scope,depth,boxes)</b> + <b>snapshot_find</b> 检索子原语（比全量快照省）</td></tr>
+    <tr><td><code>browser_click/hover/drag/drop</code>（element 人读描述用于权限 + target=ref|selector）</td><td><code>click / hover / drag</code> 原语；<b>element 人读描述 → 授权提示文案</b>（对齐现有按需确认）</td></tr>
+    <tr><td><code>browser_type</code>（text/submit/<b>slowly</b>）、<code>browser_fill_form</code>、<code>browser_select_option</code>、<code>browser_press_key</code></td><td><code>type / fill / select / press_key</code> 原语；<b>slowly 参数</b>（逐字触发 key handler）保留</td></tr>
+    <tr><td><code>browser_wait_for</code>（time≤30s / text / textGone）</td><td><code>assert_state</code> 的等待语义 + 显式 <code>wait_for</code> 原语（time/text/textGone）</td></tr>
+    <tr><td><code>browser_network_request(s)</code>、<code>browser_console_messages</code>、<code>browser_emulate_media</code>、<code>browser_resize</code>、<code>browser_file_upload</code>、<code>browser_handle_dialog</code>（core）</td><td><code>network / console / emulate_media / resize / file_upload / dialog</code> 原语</td></tr>
+    <tr><td><code>browser_route / unroute / route_list / network_state_set</code>（network caps）</td><td><code>route_mock / unroute / route_list / network_state</code> 原语（对齐 pw-route 拦截语义）</td></tr>
+    <tr><td><code>browser_storage_state / set_storage_state</code>、<code>browser_cookie_* / localstorage_* / sessionstorage_*</code>（storage caps）</td><td><code>storage_state</code> 原语（默认 isolated；显式 save/restore，restore 先清后恢复）</td></tr>
+    <tr><td><code>browser_generate_locator</code>（testing caps：元素→测试定位器；<b>实现为 <code>defineTabTool({type:"readOnly"})</code>，返回 Playwright locator 供测试使用</b>）</td><td><b>CandidateValidator 的 ref→selector 强制转换</b>（0.0.83 同款原语固化为必经环节）</td></tr>
+    <tr><td><code>browser_verify_element_visible / verify_text_visible / verify_value / verify_list_visible</code>（testing caps，role+accessibleName）</td><td><code>assert_state</code> 的期望类型集（element_visible / text_visible / value / list）</td></tr>
+    <tr><td><code>browser_start_recording / stop_recording</code>（devtools caps）+ <code>codegen</code> 语言（typescript/python/<b>java</b>/csharp；<b>实现含 JavaLanguageGenerator：Library id=java / JUnit id=java-junit 两模式，locator 输出 <code>getByRole(AriaRole.X, new GetByRoleOptions().setName(...))</code></b>）</td><td>Codegen 录制骨架（语言目标固定 <b>java</b>，对齐 JUnit 模式）→ 三层产物</td></tr>
+    <tr><td><code>browser_take_screenshot / pdf_save</code>（core/pdf，screenshot 明示不可做动作）</td><td><code>screenshot / pdf_save</code> 原语（证据与产物用途，不参与定位决策）</td></tr>
+    <tr><td><code>browser_get_config</code>（config caps：CLI+env+config 文件三层合并后的最终值）</td><td>ConfigReader 层序同构（SYSTEM_PROPERTY→ENVIRONMENT→CONFIG_FILE→DEFAULT）；<b>debug_config 查询原语</b></td></tr>
+    <tr><td><code>browser_evaluate / run_code_unsafe</code>（core，RCE-equivalent）</td><td><code>evaluate</code>（读）与 <code>run_code_unsafe</code>（高危、默认禁用）分置</td></tr>
+    <tr><td>vision caps（mouse_click_xy 等坐标鼠标）、annotate/highlight、trace/video（devtools）</td><td>P4 可选挂载（坐标交互仅无 DOM 目标时；trace/video 进可观测）</td></tr>
+  </table></div>
+
+  <h3 id="s42">4.2 SnapshotTree —— 快照协议</h3>
+  <p>每次快照返回一棵 a11y 语义树；交互节点同时携带：<b>ref</b>（当轮唯一、DOM 变化即失效）、<b>候选 selector</b>（role/name/text/结构，供验证与落库）、<b>唯一性指纹</b>（当前 DOM 下唯一命中的哈希证明）。</p>
+  <pre><code>SnapshotTree ::= Node*
+Node ::= { ref: "e12", role: "button", name: "新建订单",
+           candidates: [getByRole('button',{name:'新建订单'}),
+                        getByText('新建订单'), ...],
+           fingerprint: sha256(unique-match-evidence),
+           children: Node* }</code></pre>
+  <table>
+    <tr><th style="width:22%">机制</th><th>规则</th></tr>
+    <tr><td><b>ref 生命周期</b></td><td>ref 仅在本次快照内有效；动作后必须 Re-snapshot 拿新 ref。代码生成永不使用 ref（同 MCP 官方规则：ref 是观察句柄，不是测试选择器）。</td></tr>
+    <tr><td><b>候选 selector 注入</b></td><td>从 RoleElementPicker（语义）/ SelectorStability（结构修正）/ CodegenFacts（历史候选）三源合成候选集，按 CodegenScorer 打分排序。</td></tr>
+    <tr><td><b>视口与触底</b></td><td>默认视口内快照；需要全页/子树时显式 scope。懒加载区域由 StepDriver 显式滚动步补齐（对齐浏览器「先观察后动作」）。</td></tr>
+    <tr><td><b>脱敏</b></td><td>输入框 value 与密码类内容默认打码（<code>••••</code>）；敏感步骤由 IntentEngine 声明 SensitiveStep，快照与 trace 均不落原文。</td></tr>
+    <tr><td><b>快照指纹</b></td><td>每步快照取语义哈希 → 幂等判定（同状态重复执行跳过）+ 失败现场比对（与期望态 diff 出最小差异）。</td></tr>
+  </table>
+
+  <h3 id="s43">4.3 意图翻译与 StepPlan</h3>
+  <p>三源归一为受 schema 约束的 <b>StepPlan</b>；schema 即幻觉防护网（未知 ActionType / 缺 Target / 缺 Expect 直接拒绝）。</p>
+  <table>
+    <tr><th style="width:18%">意图源</th><th style="width:44%">机制</th><th>适用</th></tr>
+    <tr><td><b>录制骨架</b><span class="tag asset">现有</span></td><td>Codegen 录制一次业务流程 → 结构化动作序列作为确定性骨架；LLM 只做「补全泛化」（变量参数、断言、异常分支）。</td><td>核心回归路径（确定性最高，首选）</td></tr>
+    <tr><td><b>自然语言</b><span class="tag new">新增</span></td><td>LLM 翻译「登录→进入订单管理→新建订单」→ StepPlan；输出经 schema 校验 + 可执行性预检（首步 navigate 是否可达）后放行。</td><td>探索新路径 / 一次性场景</td></tr>
+    <tr><td><b>结构化 DSL</b><span class="tag new">新增</span></td><td>YAML/JSON 步骤声明（action/target/params/expect），逐条校验后直接执行；零 LLM 依赖。</td><td>稳定流程的显式表达 / CI 注入</td></tr>
+  </table>
+  <div class="note info"><b>StepPlan schema（示例）：</b><pre><code>step:
+  id: S1
+  action: click            # navigate|snapshot|click|type|fill|select|press_key|assert_state|mock|tab
+  target: { ref: e12, candidate: "getByRole('button',{name:'新建订单'})" }
+  params: { value: null, key: null, option: null }
+  expect: { type: url_contains, value: "/order/new", timeoutMs: 8000 }
+  sensitive: false
+  trace: { source: RECORDING|LLM|DSL, planId, fingerprint }</code></pre></div>
+
+  <h3 id="s44">4.4 定位器四梯队与生命周期</h3>
+  <table>
+    <tr><th style="width:16%">梯队</th><th style="width:30%">来源</th><th style="width:26%">验证方式</th><th>产出</th></tr>
+    <tr><td>① 录制</td><td>Codegen 录制已产定位器（RoleElement/两步拾取）</td><td>直接可信 + 每次运行回归校验</td><td>稳定常量</td></tr>
+    <tr><td>② 语义</td><td>RoleElementPicker 按 role/name 解析</td><td>DOM 唯一性断言（单节点命中）</td><td>候选 selector</td></tr>
+    <tr><td>③ 结构</td><td>SelectorStability 修正（Radix 夹心、动态属性等）</td><td>结构指纹 + 唯一性断言</td><td>候选 selector</td></tr>
+    <tr><td>④ AI 兜底</td><td>LLM 读快照+可达性树提出候选</td><td><b>必须</b>过唯一性断言；人工/录制回注确认后才落库（灰度比例开关）</td><td>候选 → 回注为稳定常量</td></tr>
+  </table>
+  <div class="note warn"><b>AI 候选铁律：</b>AI 产出的一律视为「未验证候选」。候选进库必须满足三条件 —— ① DOM 唯一性断言通过；② 冒烟步骤执行成功 ≥N 次（默认 3）；③ trace 记录提出者与验证证据。任何一条不满足即回退上一梯队。</div>
+
+  <h3 id="s45">4.5 稳定代码生成（三层产物）</h3>
+  <p>生成物与代码仓同构，生成后立即进入与手写代码相同的评审/编译/运行管线：</p>
+  <table>
+    <tr><th style="width:22%">产物</th><th>内容</th><th>稳定性保障</th></tr>
+    <tr><td><b>Feature</b></td><td>业务语言场景（Given/When/Then），来源于 StepPlan 的业务化改写</td><td>人工可读、可评审</td></tr>
+    <tr><td><b>Glue step</b></td><td>@Given/@When/@Then 方法，仅做参数解包 + 调 Page Object</td><td>无定位器逻辑（单一职责）</td></tr>
+    <tr><td><b>Page Object + 业务方法</b></td><td>定位器常量（已验证回注）+ 业务方法（登录/新建订单…）</td><td>定位器全部来自回注库；方法带 trace javadoc（来源/指纹/验证时间）</td></tr>
+  </table>
+  <p>验证管线：<b>模板生成 → 编译（checkstyle 同规）→ 冒烟执行（生成场景跑 1 遍）→ 落库</b>。落库后即普通代码，回归运行时零 LLM（P3）。</p>
+</section>
+
+<!-- ===================== 5 安全红线 ===================== -->
+<section id="s5">
+  <h2>5. 安全红线（借鉴 MCP 教训，做成真边界）</h2>
+  <p>MCP 官方明确：<b>它不是安全边界</b>（allowed-origins 不防 redirect、secrets 非安全特性、run_code_unsafe 是 RCE）。本设计的立场相反：<b>安全红线由框架本身强制</b>，每条红线有对应的实现对策与验证手段。</p>
+  <table>
+    <tr><th style="width:30%">红线（不可违反）</th><th>设计对策</th></tr>
+    <tr><td><b>R1 · 凭据与敏感值不进 AI 通道</b></td><td>敏感步骤（SensitiveStep）的取值经脱敏通道注入：LLM 上下文只见 <code>••••</code>；type/fill 的敏感值仅存内存一次、用完即弃；快照与 trace 不落原文；storage_state 文件不进 AI 上下文。<b>（依据：</b>MCP 的 <code>secrets</code> 是明文替换，官方注释明示「a convenience and not a security feature」——我们不用该机制，改做真脱敏通道<b>）</b>。</td></tr>
+    <tr><td><b>R2 · 无自由代码执行</b></td><td><code>run_code_unsafe</code> 默认禁用；开启需 config 键 + JVM 属性双开关（对齐 v2.23.5 收敛层序），且仅限本地调试；每次调用落审计日志（调用者、脚本摘要、时长）。</td></tr>
+    <tr><td><b>R3 · 来源白名单是真边界</b></td><td>navigate 前校验目标 origin ∈ 流程声明的 allow-list；<b>同时校验 redirect 链最终落点</b>——README 0.0.83 官方原文：<code>--allowed-origins</code> 「does not serve as a security boundary and <b>does not affect redirects</b>」，我们正是补上 MCP 缺失的 redirect 校验；blocked-origins 优先于 allowed-origins。</td></tr>
+    <tr><td><b>R4 · 上下文隔离</b></td><td>默认 isolated context（每流程 fresh，Cookie/localStorage 零残留）；持久登录必须显式声明 storage-state 键；并发场景沿用 ConcurrencyGate 分区语义。</td></tr>
+    <tr><td><b>R5 · 写/高危原语授权门禁</b></td><td>click/type/submit 等写原语与高危原语默认经授权点（人工确认或流程 allow-list，对齐现有按需确认模式）；授权记录进 trace。<b>（依据：</b>MCP 的 <code>elementSchema</code> 官方定义即「Human-readable element description used to obtain permission to interact with the element」——它的授权姿势是让 client 基于人读描述确认，我们将其升级为框架级强制授权点<b>）</b>。</td></tr>
+    <tr><td><b>R6 · AI 无执行权</b></td><td>AI 输出仅两类：受 schema 约束的 StepPlan、未验证候选 selector。两者都过确定性校验层（§4.3/§4.4）后才生效；AI 永远不能直接调用浏览器原语。</td></tr>
+    <tr><td><b>R7 · 快照脱敏</b></td><td>输入框 value、密码、token 类节点默认打码；脱敏开关可由步骤级或流程级声明覆盖（默认开）。</td></tr>
+    <tr><td><b>R8 · Mock 与数据不泄漏</b></td><td>route_mock 与会话生命周期绑定，收尾强制撤销（沿用 Route 收敛语义）；测试数据走最小权限账号/靶场（对齐 RouteTestBed 模式），不碰生产凭据。</td></tr>
+    <tr><td><b>R9 · 全量审计</b></td><td>每原语/每步/每次 LLM 调用计 AgentTrace：原语、参数摘要（敏感字段打码）、来源、耗时、结果、快照指纹；汇入自研 Report，可导出可回放。</td></tr>
+  </table>
+  <div class="note warn"><b>红线验收标准：</b>每条红线有单元测试/架构测试（ArchUnit 级）守护——例如「AI 候选未过验证器不得进回注库」「敏感键在 trace 中出现即测试失败」，防止后续迭代回退。</div>
+</section>
+
+<!-- ===================== 6 落地映射 ===================== -->
+<section id="s6">
+  <h2>6. 落地映射（新组件 vs 现有资产）</h2>
+  <table>
+    <tr><th style="width:24%">新组件</th><th style="width:22%">归属模块</th><th>复用/衔接现有资产</th></tr>
+    <tr><td><b>IntentEngine / StepPlan</b>（模型 + schema + 三源翻译 SPI）</td><td>pw-core（协议层，纯模型无副作用）</td><td>ConfigRegistry 键；ErrorClassifier 失败分类</td></tr>
+    <tr><td><b>StepDriver</b>（步骤执行闭环 + 幂等/收敛）</td><td>pw-web-ui</td><td>Route（拦截/F1 收敛）、SessionStore、BrowserStartupImpl、MonitorSink、ConcurrencyGate</td></tr>
+    <tr><td><b>BrowserCommandChannel</b>（原语集 + 权限门禁）</td><td>pw-web-ui</td><td>RoleElementPicker（语义定位）、现有交互等待原语</td></tr>
+    <tr><td><b>SnapshotTree</b>（快照协议 + 指纹 + 脱敏）</td><td>pw-web-ui</td><td>RoleElementPicker / SelectorStability / CodegenFacts（候选合成）</td></tr>
+    <tr><td><b>CandidateValidator + 回注库</b></td><td>pw-codegen-v3</td><td>CodegenScorer（打分）、CodegenPanelManager（录制骨架入口）</td></tr>
+    <tr><td><b>CodeGen 三层产物</b>（Feature/Glue/PO 模板生成）</td><td>pw-codegen-v3</td><td>CodegenFacts、既有代码模板；生成后走 checkstyle + 冒烟</td></tr>
+    <tr><td><b>AgentTrace / 审计</b></td><td>pw-reports-v2</td><td>自研 Report（失败分类/聚合榜）、ApiCapture</td></tr>
+    <tr><td><b>LLM 网关 SPI</b>（Ollama/云端可插拔）</td><td>pw-core</td><td>ConfigReader 键（端点/模型/开关/灰度比例）；本地 Ollama 或云端 API 同接口</td></tr>
+    <tr><td><b>CodeGen 语言目标 / 录制入口</b></td><td>pw-codegen-v3</td><td>对齐 0.0.83 <code>codegen: java</code> 语言目标与 start_recording 录制→代码链路；产出三层（Feature/Glue/PO），优于 MCP 单文件代码</td></tr>
+    <tr><td><b>BrowserContext 提供者注入</b></td><td>pw-web-ui</td><td>对齐 0.0.83 <code>createConnection(config, contextGetter)</code>：以 BrowserStartupImpl / SessionStore 作为 contextGetter 等价物注入 StepDriver</td></tr>
+    <tr><td><b>debug_config 查询</b></td><td>pw-core</td><td>对齐 <code>browser_get_config</code>（CLI+env+file 三层合并）；ConfigReader 已同构（SYSTEM_PROPERTY→ENVIRONMENT→CONFIG_FILE→DEFAULT），补查询原语即可</td></tr>
+  </table>
+  <div class="note info"><b>模块依赖检查：</b>pw-web-ui 已依赖 pw-core；pw-codegen-v3 经 pw-web-ui 传递依赖 pw-core；pw-reports-v2 已依赖 pw-core —— 与 v2.23.5 收敛结论一致，<b>无 pom 改动</b>。新增协议接口放 pw-core 即全模块可见。</div>
+</section>
+
+<!-- ===================== 7 路线图 ===================== -->
+<section id="s7">
+  <h2>7. 分阶段路线图（每阶段可独立交付、独立验收）</h2>
+  <ul class="road">
+    <li><b>P0 · 确定性执行底座</b>（无 AI）—— SnapshotTree 快照协议 + BrowserCommandChannel 原语集 + StepDriver 执行闭环 + DSL 直执行 + AgentTrace 骨架。<br/><b>验收：</b>用 DSL 写「登录→进入订单→新建」能在靶场（RouteTestBed）完整跑通；失败即收敛；trace 完整可回放。</li>
+    <li><b>P1 · 意图翻译</b>—— IntentEngine 三源归一：录制骨架结构化 → StepPlan；LLM 翻译（自然语言 → StepPlan，schema 校验 + 预检）；LLM 网关 SPI（Ollama/云端）。<br/><b>验收：</b>同一流程从「自然语言」和「录制骨架」两条通道产出等价 StepPlan；非法 schema 100% 被拒。</li>
+    <li><b>P2 · 稳定代码生成</b>—— 三层产物模板（Feature/Glue/PO+方法）+ 编译 + 冒烟 + 落库；产物内嵌 trace javadoc。<br/><b>验收：</b>生成的工程过 checkstyle、冒烟 1 遍绿、落库后 <code>mvn test</code> 零 LLM 运行。</li>
+    <li><b>P3 · 定位器回注闭环</b>—— CandidateValidator（DOM 唯一性断言）+ 四梯队统一 + 回注库 + 灰度开关（AI 候选按比例上线）。<br/><b>验收：</b>AI 候选满足三条件才进库；漂移时自动回退上一梯队；回注库可审计。</li>
+    <li><b>P4 · 治理与企业化</b>—— 权限门禁 UI/审计报表、R1-R9 红线 ArchUnit 测试、CI 集成（生成期与回归期分离）、灰度指标。<br/><b>验收：</b>红线测试全绿；CI 无 LLM；审计报表可导出。</li>
+  </ul>
+</section>
+
+<!-- ===================== 8 风险 ===================== -->
+<section id="s8">
+  <h2>8. 风险与缓解</h2>
+  <table>
+    <tr><th style="width:24%">风险</th><th style="width:38%">场景</th><th>缓解</th></tr>
+    <tr><td><b>LLM 幻觉</b></td><td>自然语言翻译出不存在步骤/定位器</td><td>StepPlan schema 硬校验 + 候选必须过验证器 + 录制骨架优先策略</td></tr>
+    <tr><td><b>定位器漂移</b></td><td>前端改版导致 selector 失效</td><td>四梯队回退 + 快照指纹 diff + 灰度比例 + 失败即收敛产出最小现场</td></tr>
+    <tr><td><b>敏感泄漏</b></td><td>凭据/密码进 LLM 上下文或 trace</td><td>R1/R7 脱敏通道 + 红线 ArchUnit 测试守护</td></tr>
+    <tr><td><b>生成代码质量</b></td><td>生成物与手写代码规范不一致</td><td>与手写同管线：checkstyle + 编译 + 冒烟 + 评审；trace javadoc 可溯源</td></tr>
+    <tr><td><b>依赖与性能</b></td><td>新层导致框架膨胀/每步快照过重</td><td>薄层设计复用现有资产；快照按 scope 按需、原语合并、触底显式</td></tr>
+    <tr><td><b>并发安全</b></td><td>多流程并发共享浏览器会话</td><td>沿 ConcurrencyGate 分区语义 + 上下文隔离（R4）+ 会话按流程独立</td></tr>
+    <tr><td><b>AI 依赖运行时</b></td><td>回归依赖 LLM 在线</td><td>P3 运行时分离：生成物落库后 CI 零 LLM；LLM 网关仅生成期启用（键开关）</td></tr>
+  </table>
+</section>
+
+<!-- ===================== 9 任务清单 ===================== -->
+<section id="s9">
+  <h2>9. 任务清单（可执行 Checklist）</h2>
+  <h3>P0 确定性执行底座</h3>
+  <ul>
+    <li>[ ] pw-core：StepPlan/Step schema 模型 + 校验器（未知 ActionType/缺 Target/缺 Expect 拒绝）</li>
+    <li>[ ] pw-web-ui：SnapshotTree 快照协议（a11y 树、ref 生命周期、候选注入、指纹、脱敏）</li>
+    <li>[ ] pw-web-ui：BrowserCommandChannel 原语集（navigate/snapshot/click/type/fill/select/press_key/assert_state…含幂等与失败语义声明）</li>
+    <li>[ ] pw-web-ui：StepDriver 执行闭环（Observe→Act→Verify→Next）+ F1 收敛对接</li>
+    <li>[ ] pw-route：route_mock 生命周期绑定与收尾撤销钩子</li>
+    <li>[ ] pw-reports-v2：AgentTrace 骨架（原语/参数摘要/耗时/结果/指纹 → 汇入 Report）</li>
+    <li>[ ] DSL 直执行：YAML 步骤文件 → StepPlan → 跑通 RouteTestBed 登录→订单→新建</li>
+  </ul>
+  <h3>P1 意图翻译</h3>
+  <ul>
+    <li>[ ] pw-core：IntentTranslator SPI + 规则引擎（录制骨架结构化 → StepPlan）</li>
+    <li>[ ] pw-core：LLM 网关 SPI（Ollama/云端同接口；ConfigReader 键驱动）</li>
+    <li>[ ] pw-codegen-v3：录制产物 → 结构化骨架转换器（复用 CodegenFacts）</li>
+    <li>[ ] 自然语言 → StepPlan 翻译 + schema 校验 + 可执行性预检</li>
+    <li>[ ] 等价性测试：录制骨架 vs 自然语言产出同一流程的 StepPlan 对齐</li>
+  </ul>
+  <h3>P2 稳定代码生成</h3>
+  <ul>
+    <li>[ ] pw-codegen-v3：三层产物模板（Feature / Glue / Page Object+方法）</li>
+    <li>[ ] 生成 → checkstyle → 编译 → 冒烟 1 遍 → 落库 的管线命令</li>
+    <li>[ ] 生成物 trace javadoc（来源/指纹/验证时间）</li>
+    <li>[ ] 落库后 <code>mvn test</code> 零 LLM 运行验证</li>
+  </ul>
+  <h3>P3 定位器回注闭环</h3>
+  <ul>
+    <li>[ ] pw-codegen-v3：CandidateValidator（DOM 唯一性断言：单节点命中证明）</li>
+    <li>[ ] 回注库（定位器常量 + trace：提出者/验证证据/灰度状态）</li>
+    <li>[ ] 四梯队统一解析（录制→语义→结构→AI 兜底）与自动回退</li>
+    <li>[ ] 灰度开关（AI 候选比例上线，ConfigReader 键）</li>
+  </ul>
+  <h3>P4 治理与企业化</h3>
+  <ul>
+    <li>[ ] R1-R9 红线 ArchUnit 测试（凭据脱敏、AI 候选门禁、run_code_unsafe 双开关…）</li>
+    <li>[ ] 权限门禁（写/高危原语授权点 + 审计记录）</li>
+    <li>[ ] 审计报表（AgentTrace 导出/回放，接入自研 Report）</li>
+    <li>[ ] CI 集成：生成期（LLM）与回归期（无 LLM）流水线分离</li>
+  </ul>
+</section>
+
+<!-- ===================== 10 项目适配 ===================== -->
+<section id="s10">
+  <h2>10. 适配到 pw_automation_framework（项目级落地）</h2>
+  <div class="note info"><b>本节把 §6 映射与 §7 路线图固化为可执行决策</b>：每条适配都有明确落点模块、接口载体、复用资产与验收命令；首期（P0）跑通「DSL 直执行 → 靶场」最小闭环后再逐步扩展。</div>
+
+  <h3>10.1 适配决策定稿（五条，取代“启发/对齐”措辞）</h3>
+  <table class="map-table">
+    <tr><th style="width:18%">决策点</th><th style="width:42%">0.0.83 源码事实</th><th>我们项目的适配方式</th></tr>
+    <tr><td><b>D1 · 语言目标</b></td><td><code>codegen: java</code> 实现为 <code>JavaLanguageGenerator</code>：Library（id=java）/ JUnit（id=java-junit）两模式；locator 输出 <code>getByRole(AriaRole.X, new GetByRoleOptions().setName(...))</code></td><td>生成层固定对齐 <b>JUnit 模式</b>（id=java-junit）——框架 Playwright 1.62+ Java API 原生即 <code>AriaRole</code> + <code>GetByRoleOptions</code> 风格，模板零翻译直接采用；产物仍三层（Feature/Glue/PO），MCP 单文件输出只作参考</td></tr>
+    <tr><td><b>D2 · ref 生命周期</b></td><td>ref 只在当轮快照内有效；<code>browser_generate_locator</code>（testing caps）实现为 <code>defineTabTool({type:"readOnly"})</code>，把元素转成测试用 locator</td><td>交互只用当轮 ref，代码永不提交 ref；<b>CandidateValidator 强制 ref→selector 必经环节</b>（对齐 generate_locator 语义），selector 由 RoleElementPicker/SelectorStability 生成并过 DOM 唯一性断言</td></tr>
+    <tr><td><b>D3 · settle 语义</b></td><td><code>waitForCompletion</code>：动作后 <code>waitForTimeout(500ms)</code> + 监听 request；若触发 navigation request 继续等导航完成（5s race）再补 settle</td><td>StepDriver Verify 阶段 = <b>静默窗口（默认 500ms，ConfigReader 键可配）+ 导航感知</b>（<code>waitForURL</code> / 请求监听组合 + 超时兜底），不固定 sleep</td></tr>
+    <tr><td><b>D4 · 上下文注入</b></td><td><code>createConnection(config, contextGetter)</code>：注入时包装 <code>SimpleBrowser(contextGetter())</code>，其 <code>newContext()</code> 直接 throw（单 context 只读注入）</td><td><b>BrowserStartupImpl / SessionStore 作为 contextGetter 等价物注入 StepDriver</b>；注入后禁止新建 context（同 SimpleBrowser 语义，与现有 initializeBrowser 只建一次的收尾语义一致）</td></tr>
+    <tr><td><b>D5 · 授权门禁</b></td><td><code>elementSchema.element</code> 官方定义「Human-readable element description used to obtain permission to interact with the element」——授权基于人读描述</td><td>R5 落地：写/高危原语的<b>操作描述文案直接取自语义定位候选</b>（role+name），在交互确认弹窗展示并记入 AgentTrace；与现有按需确认模式同构</td></tr>
+  </table>
+
+  <h3>10.2 每模块适配动作</h3>
+  <table class="map-table">
+    <tr><th style="width:16%">模块</th><th style="width:34%">本轮要新增/改造</th><th>对接现有资产与首版范围</th></tr>
+    <tr><td><b>pw-core</b>（协议层）</td><td>StepPlan/Step schema 模型 + 校验器；IntentTranslator SPI；LLM 网关 SPI；<code>mcp.*</code> 配置域（ConfigRegistry 新键：settle 窗口/快照脱敏开关/授权模式/AI 灰度）；debug_config 查询原语</td><td>ConfigReader（SYSTEM_PROPERTY→ENVIRONMENT→CONFIG_FILE→DEFAULT 同构 0.0.83 三层合并）、ErrorClassifier；纯模型无副作用，全模块可见（无 pom 改动）</td></tr>
+    <tr><td><b>pw-web-ui</b>（执行层）</td><td>SnapshotTree 快照协议（a11y 树/ref 生命周期/候选注入/指纹/脱敏）；BrowserCommandChannel 实现 + 权限门禁；StepDriver 执行闭环；授权点弹窗</td><td>RoleElementPicker（语义定位底座）、Route（拦截/F1 收敛）、SessionStore、BrowserStartupImpl、MonitorSink、ConcurrencyGate；首版原语：navigate/snapshot/click/type/assert_state</td></tr>
+    <tr><td><b>pw-codegen-v3</b>（生成层）</td><td>录制骨架 → StepPlan 转换器；三层产物模板（locator 对齐 D1 JUnit 模式）；CandidateValidator + 回注库</td><td>CodegenPanelManager（录制入口）、CodegenFacts、CodegenScorer（打分）；生成后走 checkstyle + 编译 + 冒烟三连</td></tr>
+    <tr><td><b>pw-route</b>（网络层）</td><td>route_mock 生命周期绑定与收尾撤销钩子；<b>redirect 链终点评验</b>（补 MCP 缺失：allowed-origins 不覆盖 redirect）</td><td>现有 Route 收敛语义、F1 失败即收敛、F5 DELAY 预取物化</td></tr>
+    <tr><td><b>pw-api-core</b>（API 层）</td><td>assert_state 的 API 断言复用；storage_state 对齐</td><td>ApiCapture（采集/断言）、BodyStore</td></tr>
+    <tr><td><b>pw-reports-v2</b>（观测层）</td><td>AgentTrace 报表区块（原语/参数摘要/耗时/结果/快照指纹/授权记录，敏感字段打码）</td><td>自研 Report（失败分类/聚合榜）、MonitorFailureReportSink</td></tr>
+  </table>
+
+  <h3>10.3 首期落地（P0 最小闭环，无 AI）</h3>
+  <ul class="road">
+    <li><b>文件级范围</b>：pw-core 新增 <code>StepPlan.java / Step.java</code>（POJO + 严格校验：未知 ActionType/缺 Target/缺 Expect 拒绝）；pw-web-ui 新增 <code>SnapshotTree.java / BrowserCommandChannel.java / StepDriver.java</code>；pw-codegen-v3 复用 CodegenPanelManager 录制入口产出 DSL 骨架。</li>
+    <li><b>闭环目标</b>：DSL 直执行「登录 → 进入订单 → 新建」在靶场（RouteTestBed）完整跑通，失败即收敛，trace 完整。</li>
+    <li><b>验收命令</b>（Windows CMD 可复制）：</li>
+  </ul>
+  <pre><code>mvn -f D:\IdeaProject\pw_automation_framework\pom.xml clean test "-Dcheckstyle.skip=true" "-Dcucumber.filter.tags=@agent-driver"</code></pre>
+  <div class="note warn"><b>回退路径</b>：任何一期不过验收 → 保留 DSL 直执行（零 AI）作为降级通道；LLM 网关、AI 兜底定位全部走 SPI，可拔插不回退框架本体。</div>
+
+  <h3>10.4 红线落地守门矩阵（§5 R1–R9 → 模块/环节/门禁测试）</h3>
+  <div class="note warn"><b>适配硬约束：</b>每一期交付必须同时交付对应红线门禁测试（红线测试不过 = 本期不验收）；R1/R2/R3 属「不引入即不违约」类，新增组件一旦触碰即须先落门禁。</div>
+  <table class="map-table">
+    <tr><th style="width:12%">红线</th><th style="width:26%">落点模块/守门环节</th><th style="width:34%">实现对策落点</th><th>门禁测试（不可跳过）</th></tr>
+    <tr><td><b>R1</b></td><td>pw-core 脱敏通道（IntentTranslator 入 LLM 前）；pw-reports-v2（trace 写入前）</td><td>SensitiveStep 脱敏注入；type/fill 敏感值一次性内存、用完即弃；storage_state 不进 AI 上下文</td><td>敏感键出现在 LLM 请求载荷 / trace 文本 → 单测失败</td></tr>
+    <tr><td><b>R2</b></td><td>pw-core config 双开关；pw-web-ui BrowserCommandChannel 分发</td><td>run_code_unsafe 默认禁用；需 config 键 + JVM 属性双开关（沿用 v2.23.5 收敛层序）</td><td>未开双开关调用即抛错；开启后每次调用必落审计（调用者/摘要/时长）</td></tr>
+    <tr><td><b>R3</b></td><td>pw-web-ui navigate 校验；pw-route redirect 链终点评验</td><td>origin ∈ 流程 allow-list；redirect 链最终落点同检（补 MCP 缺失）；blocked 优先于 allowed</td><td>靶场加 redirect 端点：allow-list 内页面 302 至外部 → navigate 失败（RouteTestBed 用例）</td></tr>
+    <tr><td><b>R4</b></td><td>pw-web-ui SessionStore / initializeBrowser 会话创建点</td><td>默认 isolated context；持久登录必须显式声明 storage-state 键；ConcurrencyGate 分区</td><td>两流程 context 间 cookie/localStorage 零残留测试</td></tr>
+    <tr><td><b>R5</b></td><td>pw-web-ui BrowserCommandChannel 门禁 + 授权点弹窗</td><td>写/高危原语默认经授权点（人工确认或流程 allow-list）；操作描述取自语义候选 role+name</td><td>未授权写原语调用即失败；授权记录必进 AgentTrace</td></tr>
+    <tr><td><b>R6</b></td><td>pw-core StepPlan schema 校验；pw-codegen-v3 CandidateValidator</td><td>AI 输出仅两类：受 schema 约束的 StepPlan、未验证候选 selector；AI 永远不能直接调浏览器原语</td><td>AI 候选未过验证器不得进回注库（ArchUnit/单测）</td></tr>
+    <tr><td><b>R7</b></td><td>pw-web-ui SnapshotTree 快照生成点</td><td>输入框 value/密码/token 默认打码；步骤级/流程级声明可覆盖（默认开）</td><td>密码/token 节点原文不出现在快照文本测试</td></tr>
+    <tr><td><b>R8</b></td><td>pw-route route_mock 生命周期绑定与收尾撤销钩子</td><td>mock 与会话同生命周期；沿用 Route 收敛语义（F1 失败即收敛）</td><td>会话收尾后 mock 未撤销即泄漏 → 测试失败</td></tr>
+    <tr><td><b>R9</b></td><td>pw-reports-v2 AgentTrace 写入点</td><td>每原语/每步/每次 LLM 调用计 trace（敏感字段打码）→ 汇入自研 Report</td><td>任一原语/LLM 调用缺 trace 记录 → 测试失败</td></tr>
+  </table>
+</section>
+
+<footer>
+  本文档为 pw_automation_framework（DEV-V5）架构设计稿 v1.4 · 基线 v2.23.5 (f9c8df90) · 参照源码：<code>D:\IdeaProject\playwright-mcp-0.0.83</code>（@playwright/mcp 0.0.83，Apache-2.0；config.d.ts / README 工具清单 / SECURITY.md + 本地 <code>npm install</code> 所得 <code>playwright-core@1.64.0-alpha-1790635538000/lib/coreBundle.js</code> 实现级核验，真源码路径 <code>packages/playwright-core/src/tools/mcp/</code>；§10 含项目级适配决策、验收命令与 R1–R9 红线落地守门矩阵）。红线与组件命名待评审后定稿。
+</footer>
+
+</div>
+</body>
+</html>
