@@ -39,13 +39,13 @@ import static org.mockito.Mockito.when;
 public class RouteDslLegacyCompatTest {
 
     private BrowserContext ctx;
-    private RouteRuntime runtime;
 
     private BrowserContext mockContext() {
         ctx = mock(BrowserContext.class);
         when(ctx.route(anyString(), any(), any())).thenReturn(mock(AutoCloseable.class));
         org.mockito.Mockito.doAnswer(inv -> null).when(ctx).onClose(any());
-        runtime = RouteEngine.runtimeOf(ctx);
+        // 确保该 context 的 Route 运行时已就绪（runtimeOf 副作用：computeIfAbsent 创建 runtime）。
+        RouteEngine.runtimeOf(ctx);
         return ctx;
     }
 

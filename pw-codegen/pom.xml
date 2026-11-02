@@ -53,7 +53,7 @@
             <artifactId>logback-classic</artifactId>
         </dependency>
 
-        <!-- 模板统一：与框架报告侧（pw-reports-v2）共用 FreeMarker 引擎生成产物 -->
+        <!-- 模板统一：与框架报告侧（pw-reports）共用 FreeMarker 引擎生成产物 -->
         <dependency>
             <groupId>org.freemarker</groupId>
             <artifactId>freemarker</artifactId>
@@ -63,6 +63,14 @@
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <scope>test</scope>
+        </dependency>
+
+        <!-- SpotBugs 抑制注解：仅编译期用于标注经评审确认属有意单例等模式，不进入运行期 classpath -->
+        <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-annotations</artifactId>
+            <version>4.9.8</version>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 </project>

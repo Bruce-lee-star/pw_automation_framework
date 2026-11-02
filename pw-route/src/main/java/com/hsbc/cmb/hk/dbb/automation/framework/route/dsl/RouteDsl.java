@@ -10,6 +10,8 @@ import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -152,6 +154,7 @@ public final class RouteDsl {
     }
 
     /** 绑定的上下文（对齐现有 RouteDsl.getContext()）。 */
+    @SuppressFBWarnings("EI_EXPOSE_REP")
     public Object getContext() {
         return context;
     }
@@ -737,11 +740,15 @@ public final class RouteDsl {
          * collect-only MONITOR 语义（老版：type=MONITOR 但未调 monitor() 时自动启用监控能力位）。
          * 仅累积不注册，由根 start()/register() 统一提交。
          */
+        @SuppressFBWarnings("EI_EXPOSE_REP")
         public RouteDsl done() {
             pending.add(newBuilder(RouteCapability.MONITOR).build());
             return RouteDsl.this;
         }
     }
+
+    // 注：CapabilityDsl.done() 返回 RouteDsl.this 是级联 DSL 的固有契约（回到父构建器），
+    // 该内部表示暴露属有意设计，故显式抑制 EI_EXPOSE_REP。
 
     /**
      * 匹配条件基类 —— 对 MONITOR / MOCK / MODIFY_REQUEST 统一生效。
@@ -916,6 +923,7 @@ public final class RouteDsl {
          * {@code start()} 统一提交。规则校验（如 MOCK intercept 与静态 body 互斥）
          * 在 done() 即 fail-fast，早于注册暴露配置错误。
          */
+        @SuppressFBWarnings("EI_EXPOSE_REP")
         public RouteDsl done() {
             RouteDsl.this.pending.add(b.build());
             return RouteDsl.this;

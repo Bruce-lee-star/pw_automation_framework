@@ -5,6 +5,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceSink;
 import org.junit.Test;
 
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -23,7 +24,8 @@ public class RouteEvidenceSinkSpiTest {
     public void spiResolvesToExistingImplementation() {
         RouteEvidenceSink sink = RouteEvidenceRegistry.get();
         assertNotNull("RouteEvidenceSink SPI 未解析到实现（检查 META-INF/services 指向的类是否存在）", sink);
-        assertTrue("SPI 应解析到 lifecycle.bridge.RouteEvidenceSink，实际=" + sink.getClass().getName(),
-                sink instanceof com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.RouteEvidenceSink);
+        assertEquals("SPI 应解析到 lifecycle.bridge.RouteEvidenceSink",
+                "com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.RouteEvidenceSink",
+                sink.getClass().getName());
     }
 }

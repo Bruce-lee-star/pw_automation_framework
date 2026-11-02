@@ -40,7 +40,7 @@
 | `route` | 网络拦截层：`RouteDsl` 声明式 **monitor / mock / modify / delay**，并发安全分发、按目的撤销与响应采集 |
 | `test-automation` | 测试工程：features、step definitions、`CucumberTestRunnerIT`；聚合全部框架模块 |
 
-依赖方向：`pw-reports-v2` / `pw-api-core` / `pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports-v2`；`pw-codegen-v3` → `pw-web-ui`；`test-automation` 聚合。
+依赖方向：`pw-reports` / `pw-api-core` / `pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports`；`pw-codegen-v3` → `pw-web-ui`；`test-automation` 聚合。
 分层与依赖规则由 ArchUnit 守卫（`test-automation` 的 `ArchitectureTest` / `LayeringArchTest`）。
 
 ## 快速开始

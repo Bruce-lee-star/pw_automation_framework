@@ -5,6 +5,8 @@ import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -57,6 +59,7 @@ public final class RouteSession implements AutoCloseable {
      * 取会话内的 DSL 入口；其 {@code register()}/{@code start()} 返回的句柄会被会话自动收集。
      * 业务层可（也应）忽略返回值，由会话统一在 {@link #close()} 时注销。
      */
+    @SuppressFBWarnings("EI_EXPOSE_REP")
     public RouteDsl on() {
         return dsl;
     }

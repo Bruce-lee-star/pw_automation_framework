@@ -1,31 +1,31 @@
 ---
 id: DOC-MOD-REPORTS-0001
-title: pw-reports-v2 模块说明
+title: pw-reports 模块说明
 type: module
 status: active
 owner: team-automation
 created: 2026-10-22
 updated: 2026-10-22
-applies_to: pw-reports-v2
+applies_to: pw-reports
 tags: [module, reporting, serenity]
 supersedes: []
 superseded_by: null
 ---
 
-# pw-reports-v2
+# pw-reports
 
 自建 Serenity 兼容报告模块。**零 `serenity-*` 依赖**，镜像 Serenity 4.3.4 的
 JSON schema 与报告形态（DR-1）。步骤注解为框架自有 `@Step`/`@Steps`
 （`…report.annotation`，无供应商锁定），存量业务代码把 import 切到框架注解即可迁入。
 
-- 坐标：`com.hsbc.cmb.dbb.hk.automation:pw-reports-v2:1.0.1`
+- 坐标：`com.hsbc.cmb.dbb.hk.automation:pw-reports:1.0.1`
 - Java 21 · Cucumber 7.x · Jackson · FreeMarker · ByteBuddy · SLF4J
 - 产物目录：`target/site/serenity/`（与 Serenity 一致，历史趋势沿用同一约定）
 
 > **为什么叫 v2**：主工程 `pw_automation_framework` 内**已存在** `artifactId=pw-reports`
 > 的模块（包 `…framework.common.reporting`，封装 `Serenity.recordReportData` +
 > `SummaryReportGenerator`(ftlh) + 监控失败报告）。两者职责不同（本模块是**替代实现**，
-> 那个是**Serenity 调用封装**），故本模块独立命名为 `pw-reports-v2` 并存，不覆盖、不冲突。
+> 那个是**Serenity 调用封装**），故本模块独立命名为 `pw-reports` 并存，不覆盖、不冲突。
 > 迁移完成后两者可共存（老报告仍能生成），确认无回退需求后再决定是否下线旧模块。
 
 ## 1. 接入（Maven）
@@ -33,7 +33,7 @@ JSON schema 与报告形态（DR-1）。步骤注解为框架自有 `@Step`/`@St
 ```xml
 <dependency>
     <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
-    <artifactId>pw-reports-v2</artifactId>
+    <artifactId>pw-reports</artifactId>
     <version>1.0.1</version>
 </dependency>
 ```
@@ -278,14 +278,14 @@ bridge.flush(handle);
 6. schema 演进约定：只加字段不删不改（additive-only），破坏性变更升
    `reportVersion` 并保留旧版读取。
 7. **迁移未完成项**（需动框架目录 `pw_automation_framework`，本模块不含）：
-   - `RouteEvidenceSink` 的 pw-reports-v2 实现注册（接线点已就位，签名同
+   - `RouteEvidenceSink` 的 pw-reports 实现注册（接线点已就位，签名同
      `QueuedNetworkEvidenceBridge.record(String,String,String)`，见 §7.2）；
    - ObjectFactory SPI coexistence 三步过渡 + 卸 serenity-cucumber 依赖；
    - Serenity 基线产物采集与真实双跑——**必须在消费方执行**：框架仓库零 `.feature`
      文件、无 Cucumber 入口（它是框架库不是 runner 工程），双跑门禁需消费方路径。
    模块侧接缝与门禁已备好（见 §7），待消费方给出路径即可跑 Phase 0 双跑。
-8. **工作区目录名仍为 `pw-reports/`**（artifactId 已是 `pw-reports-v2`）：目录重命名
-   被系统句柄占用未成功。落地到框架时模块目录请用 `pw-reports-v2/`，与既有
+8. **工作区目录名仍为 `pw-reports/`**（artifactId 已是 `pw-reports`）：目录重命名
+   被系统句柄占用未成功。落地到框架时模块目录请用 `pw-reports/`，与既有
    `pw-reports`（Serenity 调用封装）并存。
 
 ## 9. 边界与非目标

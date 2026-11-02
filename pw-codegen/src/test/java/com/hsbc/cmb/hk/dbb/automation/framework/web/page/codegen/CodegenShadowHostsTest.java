@@ -72,9 +72,9 @@ public class CodegenShadowHostsTest {
 
         assertEquals(List.of("#iframe"), map.get("framePath"));
         assertEquals("宿主链是自包含事实的一部分，必须随面板载荷输出", List.of("#h0"), map.get("shadowHosts"));
-        assertTrue("旧构造器（无宿主链）必须退化为空列表而非 null",
-                new CodegenEntry("x", "button", "Save", "ROLE", 100, "s", "#x", null, 0).toMap()
-                        .get("shadowHosts") instanceof List);
+        assertEquals("旧构造器（无宿主链）必须退化为空列表而非 null",
+                List.of(), new CodegenEntry("x", "button", "Save", "ROLE", 100, "s", "#x", null, 0).toMap()
+                        .get("shadowHosts"));
     }
 
     @Test

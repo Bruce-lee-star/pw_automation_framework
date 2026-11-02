@@ -64,5 +64,13 @@
             <artifactId>archunit</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- SpotBugs 抑制注解：仅编译期用于标注经评审确认属有意暴露（DSL/构建器返回内部句柄）的模式，不进入运行期 classpath -->
+        <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-annotations</artifactId>
+            <version>4.9.8</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 </project>

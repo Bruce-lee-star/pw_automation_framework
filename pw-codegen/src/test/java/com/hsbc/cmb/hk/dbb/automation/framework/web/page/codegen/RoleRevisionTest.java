@@ -7,6 +7,7 @@ import org.junit.Test;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -56,7 +57,8 @@ public class RoleRevisionTest {
 
     @Test
     public void revisionDoesNotMutateOriginal() {
-        RoleRevision.toCss(ROLE_ENTRY);
+        CodegenEntry revised = RoleRevision.toCss(ROLE_ENTRY);
+        assertNotNull("toCss 必须返回派生副本而非 null", revised);
 
         assertTrue("原条目必须是不可变记录，不能就地改策略",
                 LocatorStrategy.ROLE_WITH_NAME.equals(ROLE_ENTRY.strategy));

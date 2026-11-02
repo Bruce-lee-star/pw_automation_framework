@@ -262,7 +262,6 @@ public final class CodegenLauncher {
             private final NlsReverseLookup nlsRef;
             private final Object initLock = new Object();
             private volatile CodegenCdpSession session;
-            private volatile CdpLocatorCounter counter;
             private volatile CodegenCdpNodeExtractor extractor;
             // 拾取不再有 per-page 线程：所有页的拾取 / 解析任务统一提交到 startSession 作用域的共享单线程引擎
             // CodegenEngine（见 submitPick）；此处仅保留 per-page 的 CDP 会话 / 抽取器数据结构。
@@ -289,7 +288,6 @@ public final class CodegenLauncher {
                             CodegenCdpSession s = openCdpSessionWithRetry();
                             CdpLocatorCounter c = new CdpLocatorCounter(page, s);
                             CodegenCdpNodeExtractor ex = new CodegenCdpNodeExtractor(s, nlsRef, c);
-                            this.counter = c;
                             this.extractor = ex;
                             this.session = s;
                         }
@@ -1162,7 +1160,7 @@ public final class CodegenLauncher {
         }, 0, 500, java.util.concurrent.TimeUnit.MILLISECONDS);
 
         // 跟随弹窗 / 新标签页：新页自动挂载 CDP 会话（注入已由 context.addInitScript 覆盖），inspect 进行中则切换活动页
-        ctx.onPage(sessions::followNewPage);
+        ctx.onPage(p -> sessions.followNewPage(p));
 
         panel.setStatus("ready");
         log.info("[codegen] V3 Inspector session started; target={}", CodegenTarget.ofPage(real));
@@ -1175,7 +1173,7 @@ public final class CodegenLauncher {
             Thread.currentThread().interrupt();
         } finally {
             com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.HangWatchdog.resume();
-            if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception ignore) { } }
+            if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception e) { log.debug("[codegen] closeWatchdog 关闭失败（会话收尾，忽略）", e); } }
             sessions.closeAll();
             if (eventPump != null) eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
             regenExecutor.shutdownNow();                       // 停掉实时代码生成线程

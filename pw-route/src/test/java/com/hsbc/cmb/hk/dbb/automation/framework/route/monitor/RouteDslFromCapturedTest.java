@@ -170,7 +170,7 @@ public class RouteDslFromCapturedTest {
     @Test
     public void capturedJsonBodyCanBeAdjustedBeforeReplay() {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         byte[] raw = "{\"code\":0,\"name\":\"captured\"}".getBytes(StandardCharsets.UTF_8);
         CapturedBody body = BodyStore.of(raw, "application/json", 1024, 1024);
@@ -206,7 +206,7 @@ public class RouteDslFromCapturedTest {
     @Test
     public void capturedBinaryBodyKeepsItsBytesWhenAFieldReplacementIsRequested() {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         byte[] binary = new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x00, (byte) 0xFF, (byte) 0x90};
         CapturedBody carrier = BodyStore.of(binary, "image/png", 1024, 1024);

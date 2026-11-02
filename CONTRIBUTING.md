@@ -75,7 +75,7 @@ python3 tools/check_doc_standard.py --strict
 ### 分层依赖
 
 分层由 ArchUnit 守卫（`ArchitectureTest` / `LayeringArchTest` / `RouteArchitectureTest`）。
-依赖方向：`pw-reports-v2` / `pw-api-core` / `pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports-v2`；`pw-codegen-v3` → `pw-web-ui`。
+依赖方向：`pw-reports` / `pw-api-core` / `pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports`；`pw-codegen-v3` → `pw-web-ui`。
 **注意**：当前唯一 codegen 模块为 `pw-codegen-v3`，其通过 `pw-web-ui` 的 `RoleCodegenBridge` SPI 接入；V1/V2 已退役，不再添加实现或依赖。
 
 ## 5. 文档贡献
@@ -136,7 +136,7 @@ python3 tools/check_doc_standard.py --strict
 | `pw-api-core` | API/HTTP 层：Entity + Endpoint、请求执行、断言 |
 | `pw-route` | 网络拦截层：monitor / mock / modify / delay + 采集回放 |
 | `pw-codegen-v3` | 唯一受支持的元素拾取与代码生成模块（SPI 解耦） |
-| `pw-reports-v2` | 自建 Serenity 兼容报告 |
+| `pw-reports` | 自建 Serenity 兼容报告 |
 | `docs/` | 全部文档（见 [文档总索引](docs/README.md)） |
 | `tools/` | 运维与门禁脚本 |
 

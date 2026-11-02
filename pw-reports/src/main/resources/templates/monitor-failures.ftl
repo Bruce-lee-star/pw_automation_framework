@@ -66,7 +66,7 @@
         </div>
       </#list>
     </div>
-    <div class="footer">Report produced by pw-reports-v2</div>
+    <div class="footer">Report produced by pw-reports</div>
   </div>
 </div>
 </body>

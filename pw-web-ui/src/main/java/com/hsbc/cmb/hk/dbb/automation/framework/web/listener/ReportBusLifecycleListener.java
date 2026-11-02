@@ -37,8 +37,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
     private static final String GENERIC_BRIDGE_ENABLED = "pw.report.generic.bridge.enabled";
 
     /**
-     * pw-reports-v2 是否在 classpath（{@link ReportBus} 可加载）。本监听器经 SPI 常驻发现，
-     * 但 pw-reports-v2 可能缺席（默认构建只含旧 pw-reports，v2 仅在 {@code -Ppw-report-v2} 纳入）；
+     * pw-reports 是否在 classpath（{@link ReportBus} 可加载）。本监听器经 SPI 常驻发现；
      * 缺席时静默 no-op，避免每个生命周期回调抛 {@link NoClassDefFoundError} 污染日志（运行仍被保护）。
      */
     private static final boolean REPORT_BUS_PRESENT = probeReportBus();
@@ -60,7 +59,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
     @Override
     public void beforeScenario(String scenarioName) {
         if (!REPORT_BUS_PRESENT) {
-            return; // pw-reports-v2 缺席：静默 no-op
+            return; // pw-reports 缺席：静默 no-op
         }
         ReportBus bus = ReportBus.getDefault();
         if (!shouldDrive(bus)) {
@@ -76,7 +75,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
     @Override
     public void afterScenario(String scenarioName, boolean failed) {
         if (!REPORT_BUS_PRESENT) {
-            return; // pw-reports-v2 缺席：静默 no-op
+            return; // pw-reports 缺席：静默 no-op
         }
         ReportBus bus = ReportBus.getDefault();
         if (!shouldDrive(bus)) {
@@ -97,7 +96,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
     @Override
     public void beforeStep(String stepName) {
         if (!REPORT_BUS_PRESENT) {
-            return; // pw-reports-v2 缺席：静默 no-op
+            return; // pw-reports 缺席：静默 no-op
         }
         ReportBus bus = ReportBus.getDefault();
         if (!shouldDrive(bus)) {
@@ -110,7 +109,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
     @Override
     public void afterStep(String stepName) {
         if (!REPORT_BUS_PRESENT) {
-            return; // pw-reports-v2 缺席：静默 no-op
+            return; // pw-reports 缺席：静默 no-op
         }
         ReportBus bus = ReportBus.getDefault();
         if (!shouldDrive(bus)) {
@@ -127,7 +126,7 @@ public final class ReportBusLifecycleListener implements FrameworkListener {
     @Override
     public void onFailure(String scenarioName, Throwable cause) {
         if (!REPORT_BUS_PRESENT) {
-            return; // pw-reports-v2 缺席：静默 no-op
+            return; // pw-reports 缺席：静默 no-op
         }
         ReportBus bus = ReportBus.getDefault();
         if (!shouldDrive(bus)) {

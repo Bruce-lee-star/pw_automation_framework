@@ -28,7 +28,7 @@ import java.util.Locale;
  *
  * <p><b>模式 A：新建手动 case</b>
  * <pre>
- * java -cp pw-reports-v2.jar ...ManualCaseRecorder \
+ * java -cp pw-reports.jar ...ManualCaseRecorder \
  *   --dir target/reports --feature "Login" --scenario "手动验证" \
  *   --result PASS --screenshot 1.png --note "人工验证"
  * </pre>

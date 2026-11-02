@@ -100,7 +100,7 @@
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v1.5 评审修订稿（条件通过方向；P0 实现前须完成安全与验收设计）</b></span>
+    <span>版本：<b>v1.7（新增 §3.1 全系统技术架构；v1.5–v1.6 覆盖 LLM 资产生产流程与治理）</b></span>
     <span>日期：<b>2026-11-02</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
@@ -219,6 +219,118 @@
   </div>
 
   <div class="note ok"><b>运行时分离（P3 目标形态）：</b>设计期（可选 LLM：意图翻译 + 候选提出）与回归期（<b>纯 JVM 运行</b>：已评审的 StepPlan 固化为 Feature/Glue/PO 代码，直接跑 <code>mvn test</code>）分离。若引入 LLM，供应商、数据驻留、留存条款和凭据管理须经审查；仅将非敏感配置接入 ConfigReader，模型不可用不得影响既有回归链路。</div>
+
+  <h3 id="s31">3.1 技术架构分解（可落地蓝图）</h3>
+  <p>§3 给出五层流水线的高层视图；本节落到<b>模块边界、组件职责、SPI 契约、数据流、存储与集成</b>，作为实现的直接依据。设计原则：新增逻辑集中在 <code>pw-core</code>（协议 / 领域 / 资产 / 编排）与 <code>pw-web-ui</code>（浏览器协议 / 观测）；LLM 与需求源通过 SPI 可选接入，<b>不污染核心与运行时</b>（R6）。</p>
+
+  <h4>3.1.1 技术分层与模块归属</h4>
+  <table>
+    <tr><th style="width:16%">层</th><th>职责</th><th>承载模块</th><th>关键组件（新增 / 复用）</th></tr>
+    <tr><td><b>接入层</b></td><td>触发与入口：Cucumber Runner、CLI、CI 触发、IDE 插件</td><td>pw-core / pw-web-ui / 测试工程</td><td>复用 JUnit4/Cucumber Runner；新增 CLI/CI 触发器（薄）</td></tr>
+    <tr><td><b>编排层</b></td><td>流程编排：意图→StepPlan、执行闭环、资产生产流水线、<b>资产验证驱动</b>（用资产直接驱动浏览器验证）</td><td>pw-core</td><td>新增 IntentEngine、StepDriver、AssetPipelineOrchestrator、<b>AssetVerifier</b></td></tr>
+    <tr><td><b>协议/领域层</b></td><td>契约与 schema：原语集、StepPlan、SnapshotTree、资产 schema、需求上下文</td><td>pw-core</td><td>新增 BrowserCommandChannel 契约、Asset schema、RequirementContext；复用现有 StepPlan / 配置层序</td></tr>
+    <tr><td><b>执行/引擎层</b></td><td>浏览器驱动与基础设施：原语实现、拦截、会话、并发闸门、监控</td><td>pw-web-ui</td><td>新增原语实现；复用 Route（拦截/收敛）、SessionStore、ConcurrencyGate、MonitorSink、BrowserStartupImpl</td></tr>
+    <tr><td><b>资产层</b></td><td>测试资产存储、状态机、版本化、需求映射索引、度量</td><td>pw-core</td><td>新增 AssetRepository、AssetStateMachine、AssetIndex；复用 Report trace 落点</td></tr>
+    <tr><td><b>分析/智能层（可选）</b></td><td>LLM 页面理解、需求解析、候选验证；SPI 接入，不进运行时</td><td>pw-core（契约）/ 可选适配包</td><td>SPI：RequirementSource、PageUnderstandingEngine、AssetValidator；实现独立打包、依赖可排除</td></tr>
+    <tr><td><b>横切·安全合规</b></td><td>策略网关（R1–R9）、脱敏、执行权约束、审计</td><td>pw-core + pw-web-ui</td><td>复用 ConfigReader、Report 审计；新增策略网关与脱敏过滤器</td></tr>
+    <tr><td><b>横切·可观测配置</b></td><td>trace/metrics、配置层序、日志（UTF-8）</td><td>pw-core</td><td>复用 ErrorClassifier、Report、ConfigReader/ConfigRegistry；日志统一 UTF-8（见框架评审）</td></tr>
+  </table>
+
+  <h4>3.1.2 端到端三条路径（数据流与时序）</h4>
+  <div class="arch">
+    <div class="lane">
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">路径 A 确定性执行</span><h4>录制 / DSL / Feature</h4><p>→ IntentEngine 产出 StepPlan → StepDriver 经 BrowserCommandChannel 驱动浏览器 → SnapshotTree 感知 → Verify</p><p><b>回归期零 LLM</b>，纯 JVM</p></div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;"><span class="tag new">路径 B 资产生产（分析期）</span><h4>需求 + 脱敏观测</h4><p>→ RequirementSource + PageObservationProvider → PageUnderstandingEngine（SPI, LLM）→ AssetDraft → AssetValidator → 人工审批 → AssetRepository(active)</p><p>不进运行时</p></div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">路径 C 资产消费</span><h4>active 资产</h4><p>→ CodeGen 三层产物（Feature/Glue/PO）→ mvn test 回归</p><p>与手写代码同管线</p></div>
+    </div>
+  </div>
+  <p>三条路径解耦：A 与 C 是回归期纯 JVM 主链路（稳定、可度量）；B 是分析期可选链路（产资产、不直接执行）。B 的产物仅在经审批落库（<code>active</code>）后才被 C 消费，<b>AI 永不进入 A/C 的运行时</b>（R6）。</p>
+
+  <h4>3.1.2.1 资产驱动验证闭环（路径 B → 验证 → 度量回写）</h4>
+  <p>资产不仅要能<b>生成</b>代码，更要能<b>驱动验证</b>：用已落库（<code>active</code> 或 <code>pending_review</code>）的资产——尤其是<b>联动图谱</b>与<b>行为模型</b>——在隔离靶场直接驱动浏览器执行资产定义的操作/联动序列，验证：① 元素清单的定位器真实命中（稳定性）；② 行为模型预期结果类别成立（如"提交→跳转"）；③ 联动图谱可复现（操作 A → 元素 B 状态变化）。这区别于路径 C（资产→CodeGen→完整工程→<code>mvn test</code> 回归），是<b>轻量、即时的前置验证门禁</b>，避免"生成了代码但联动断言根本不成立"。</p>
+  <div class="arch">
+    <div class="lane">
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">资产</span><h4>active / pending 资产</h4><p>ElementInventory / BehaviorModel / LinkageGraph</p></div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;"><span class="tag new">AssetVerifier</span><h4>驱动验证</h4><p>经 BrowserCommandChannel 在靶场执行操作/联动序列 → SnapshotTree 采集结果</p></div>
+      <div class="arrow">→</div>
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">VerificationReport</span><h4>pass / fail / flaky</h4><p>回写 AssetRepository：置信度 / 稳定性（N 次命中率）→ 驱动 §4.6 量化度量</p></div>
+    </div>
+  </div>
+  <p>验证失败 → 资产回 <code>pending_review</code> 或标 <code>incomplete</code>，转人工；验证 flaky（跨多次不稳定）→ 自动降为需重验。验证复用 RouteTestBed 隔离靶场（R4/R8）、BrowserCommandChannel 执行底座、SnapshotTree 感知，<b>不产生 LLM 调用</b>。</p>
+
+  <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
+  <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
+interface BrowserCommandChannel {            // 原语执行契约（§4.1）
+    Snapshot snapshot();                     // 感知
+    Result execute(Command cmd);             // 导航/点击/输入/断言… 每原语定义副作用/权限/超时/重试
+}
+interface StepPlan { /* ActionType + Target + Params + Expect 有序步骤；schema 校验 */ }
+interface SnapshotProvider { Snapshot capture(Page p, Scope s); }   // 复用 SnapshotTree(§4.2)
+
+// 资产层
+interface AssetRepository {
+    AssetId save(AssetDraft d, Provenance p);            // draft
+    Asset approve(AssetId id, Approver a);               // draft→approved（人工）
+    Asset activate(AssetId id);                          // approved→active
+    Asset deprecate(AssetId id, Reason r);               // 失效/重验
+    AssetBundle queryByRequirement(RequirementId rid);   // 需求映射检索
+}
+interface AssetStateMachine { State transition(AssetId id, Event e, Actor a); } // draft→pending_review→approved→active→deprecated
+
+// 分析/智能层（SPI，可选实现；pw-core 仅定义契约）
+interface RequirementSource { RequirementContext parse(Source s); }   // Cucumber Feature / 需求文档
+interface PageObservationProvider { PageObservation observe(Page p); }// 脱敏快照+网络摘要
+interface PageUnderstandingEngine {
+    AssetDraftBundle analyze(RequirementContext req, PageObservation obs); // → ElementInventory/BehaviorModel/LinkageGraph
+}
+interface AssetValidator { ValidationReport validate(AssetDraftBundle b); } // 确定性校验（§4.4 梯队）
+interface AssetVerifier {                                              // 资产→真实浏览器驱动验证（非 LLM）
+    VerificationReport verify(AssetBundle assets, VerificationScope scope); // 经 BrowserCommandChannel 执行资产操作/联动序列
+}
+// VerificationReport: { status: PASS|FAIL|FLAKY, evidence(trace), stability(N次命中率) }
+//   → 回写 AssetRepository 置信度/稳定性；FAIL→pending_review，FLAKY→需重验</code></pre>
+  <p>约定：pw-core 定义全部契约与默认实现骨架；pw-web-ui 提供浏览器侧实现（原语、快照、观测）；LLM/需求源实现以<b>可选适配包</b>独立打包、依赖可排除，确保核心与回归链路<b>零 LLM 依赖</b>（R6）。</p>
+
+  <h4>3.1.4 资产仓库与存储设计</h4>
+  <ul>
+    <li><b>资产本体</b>：结构化 JSON（ElementInventory / BehaviorModel / LinkageGraph / StepPlan 草案），与对应 Feature 置于<b>受版本控制的相邻目录</b>（纳入 Git），享受 code review、可追溯、可回滚。</li>
+    <li><b>元数据索引</b>：状态、版本、来源指纹（页面/需求版本）、LLM 供应商+模型版本、审批者、失效策略，存轻量索引（文件或 SQLite）；支撑按需求检索、覆盖度统计、漂移触发重验。</li>
+    <li><b>版本与溯源</b>：每次落库生成新版本并保留历史；页面/需求版本指纹变化触发关联资产回 <code>pending_review</code>（不自动沿用旧断言）。</li>
+  </ul>
+
+  <h4>3.1.5 与现有框架资产的集成映射</h4>
+  <table>
+    <tr><th style="width:26%">现有资产</th><th>在本架构中的复用角色</th></tr>
+    <tr><td>RouteTestBed（LEAK-REPORT / 收敛）</td><td>分析期 LLM 观测与受控重放的<b>隔离靶场底座</b>（R4/R8）</td></tr>
+    <tr><td>Route（拦截/收敛）+ SessionStore</td><td>执行期请求编排、失败即收敛（F1），路径 A 直接复用</td></tr>
+    <tr><td>SnapshotTree（§4.2）</td><td>感知层协议；LLM 观测的脱敏快照来源</td></tr>
+    <tr><td>StepPlan schema（pw-core）</td><td>意图层与资产落库的统一中间表示</td></tr>
+    <tr><td>Cucumber Feature / Runner</td><td>需求上下文载体（§4.6）+ 回归执行入口（路径 C）</td></tr>
+    <tr><td>ConfigReader / ConfigRegistry</td><td>非敏感配置层序；LLM 供应商配置仅经此接入</td></tr>
+    <tr><td>自研 Report（trace 落点）</td><td>执行/分析 trace 与审计（R9）落点</td></tr>
+  </table>
+
+  <h4>3.1.6 安全红线贯穿（指向 §5 / §10.4）</h4>
+  <table>
+    <tr><th style="width:14%">红线</th><th>落到组件</th><th>门禁</th></tr>
+    <tr><td>R1/R7 最小权限·数据最小化</td><td>PageObservationProvider（脱敏白名单）、RequirementSource（样例遮蔽）</td><td>脱敏过滤器单测；CI 断言无 secret/PII 出域</td></tr>
+    <tr><td>R2 无 evaluate/run_code_unsafe</td><td>BrowserCommandChannel 契约（仅类型化原语）</td><td>类型系统不暴露通用脚本入口 + CI 契约测试</td></tr>
+    <tr><td>R4/R8 隔离靶场</td><td>RouteTestBed 隔离底座；分析/重放仅在靶场</td><td>LEAK-REPORT + 靶场准入测试</td></tr>
+    <tr><td>R6 AI 无执行权</td><td>PageUnderstandingEngine 仅产 draft；不持有浏览器原语</td><td>分析链路不依赖 BrowserCommandChannel；运行期零 LLM</td></tr>
+    <tr><td>R9 审计不可重执行</td><td>AssetRepository 状态变更日志 + Report trace</td><td>审计日志完整性测试</td></tr>
+  </table>
+
+  <h4>3.1.7 非功能设计</h4>
+  <ul>
+    <li><b>隔离</b>：分析/受控重放仅在 RouteTestBed 隔离靶场（R4/R8），与回归环境逻辑分离。</li>
+    <li><b>韧性降级</b>：LLM/需求源不可用 → 路径 B 回退录制骨架/手写资产，<b>不阻塞</b>路径 A/C 的回归 CI（§4.6）。</li>
+    <li><b>幂等</b>：同页面 + 同需求版本的重复分析可幂等更新 draft，不产生重复 active 资产。</li>
+    <li><b>可观测/审计</b>：每次分析、每次资产状态变更记录来源指纹、模型版本、操作者（R9）；trace 经自研 Report 落点。</li>
+    <li><b>版本兼容</b>：资产 schema 演进须向后兼容；旧版资产可归档读取，新字段可选；破坏性变更走版本号 + 迁移。</li>
+  </ul>
 </section>
 
 <!-- ===================== 4 核心机制 ===================== -->
@@ -328,6 +440,56 @@ steps:
     <tr><td><b>Page Object + 业务方法</b></td><td>定位器常量（已验证回注）+ 业务方法（登录/新建订单…）</td><td>定位器全部来自回注库；方法带 trace javadoc（来源/指纹/验证时间）</td></tr>
   </table>
   <p>验证管线：<b>模板生成 → 编译（checkstyle 同规）→ 冒烟执行（生成场景跑 1 遍）→ 落库</b>。落库后即普通代码，回归运行时零 LLM（P3）。</p>
+
+  <h3 id="s46">4.6 LLM 页面理解与测试资产生成（分析期，非运行时）</h3>
+  <p>除「自然语言→StepPlan」外，另一个明确依赖 LLM 的环节是<b>页面理解</b>。与单纯"看页面"不同，本环节必须<b>结合需求上下文</b>才能产出有用的测试资产：脱离需求的元素清单只是一堆 DOM 节点，只有把页面元素 / 操作 / 联动<b>映射到需求条目与业务规则</b>，资产才可被评审、可追溯、可度量覆盖度。它只发生在<b>分析期 / 资产生成期</b>，<b>不进入运行时与回归期</b>——回归仍零 LLM（§7 P4）。此环节与 R6「AI 无执行权」不冲突：LLM 消费的是<b>只读、脱敏后的观测</b>（需求上下文 + a11y 快照 + 网络摘要 + 受限诊断），全程不持有浏览器原语调用能力。</p>
+  <table>
+    <tr><th style="width:20%">资产</th><th>定义</th><th>需求映射（须回链需求条目）</th><th>来源与约束</th></tr>
+    <tr><td><b>① 元素清单<br/>Element Inventory</b></td><td>页面可交互元素的角色、类型、稳定定位器候选（§4.4 梯队②/③）、可见文本、语义用途</td><td>每个元素标注对应的需求条目 / 业务字段（如"转账金额输入框 ← REQ-101 金额录入"）；区分主流程元素与辅助元素</td><td>来自 SnapshotTree（§4.2）；定位器候选走 §4.4 梯队④「AI 建议」铁律，必须验证后入库</td></tr>
+    <tr><td><b>② 操作行为模型<br/>Behavior Model</b></td><td>每个元素的合法操作（click/fill/select/check…）、预期结果类别（无副作用 / 导航 / 异步 / 校验）、前置与后置业务断言</td><td>操作对应需求里的业务步骤 / 验收标准（如"提交 → REQ-102 须返回成功且跳转结果页"）；断言须可对应验收点</td><td>LLM 基于快照 + 交互观测 + 需求上下文推断；属「未验证建议」，需确定性校验与人工审批</td></tr>
+    <tr><td><b>③ 联动图谱<br/>Linkage Graph</b></td><td>某元素操作后，哪些元素 / 区域发生状态变化（级联下拉、弹窗触发、禁用/启用、校验提示、列表刷新、金额计算等）</td><td>联动对应需求里的业务规则（如"选'对公'→ 用途字段出现且必填 ← REQ-103"）；每条联动标注规则来源</td><td>LLM 对比操作前/后快照差分 + 需求规则推断；是断言与场景编排的关键上游，避免人工逐条猜联动</td></tr>
+  </table>
+  <p><b>需求上下文来源：</b>需求文档 / 验收标准 / 用户提供的业务说明，或复用框架已有的 Cucumber Feature（Given/When/Then 即天然的需求载体）。需求文本作为 LLM 分析的上下文输入，同样须过白名单与脱敏（R1/R7）——需求样例中的真实账号、金额、PII 须遮蔽，不带入模型上下文。</p>
+  <p><b>需求溯源与覆盖度：</b>三类产物落库时均记录关联的需求 ID / 验收点，形成「需求条目 → 页面元素 / 操作断言 / 联动断言」的可追溯链路；可据此统计需求覆盖度（哪些需求已有对应测试资产、哪些联动规则未被断言覆盖），使资产不仅是"能跑的代码"，更是"可审计的需求落地证据"。</p>
+  <p><b>落库为测试资产：</b>三类产物（含需求映射）聚合成 <b>Page Object 草案 / StepPlan 草案 / 联动断言草案</b>，进入与手写代码相同的评审/编译/运行管线（§4.5）。AI 产出一律视为「未验证建议」，须经候选验证器（§4.4）+ 人工/受控审批后才升级为可信资产；无法确认时停止并转人工，不自动回退（§4.4 铁律）。</p>
+
+  <p><b>企业级资产生产流水线（可重复、可审计、可治理）：</b></p>
+  <table>
+    <tr><th style="width:18%">阶段</th><th style="width:30%">动作</th><th>产出 / 门禁</th></tr>
+    <tr><td>① 需求接入</td><td>解析需求上下文（Cucumber Feature / 需求文档），提取需求 ID、验收点、业务规则</td><td>结构化需求模型；需求缺失则资产标记 <code>incomplete</code>，不阻断后续</td></tr>
+    <tr><td>② 页面观测</td><td>在隔离靶场采集脱敏快照 / 网络摘要 / 受限诊断（白名单字段，R1/R7）</td><td>只读观测包；敏感字段已遮蔽</td></tr>
+    <tr><td>③ LLM 理解</td><td>模型基于「需求 + 观测」推断三类资产及需求映射</td><td>候选资产（状态 <code>draft</code>）；模型不可用则降级到录制/手写，不阻塞</td></tr>
+    <tr><td>④ 确定性校验</td><td>候选验证器（§4.4）：定位器唯一性/可见/可操作、业务断言可执行、联动可复现</td><td>校验报告；不通过则失败关闭转人工，不自动回退</td></tr>
+    <tr><td>⑤ 人工审批</td><td>指定角色（测试架构师 / 审批人）复核需求映射与断言正确性（R5 按业务后果授权）</td><td>状态 <code>approved</code>；审批记录入审计（R9）</td></tr>
+    <tr><td>⑥ 版本化落库</td><td>资产入中心仓库，带版本、来源指纹、需求版本、审批者、失效策略</td><td>状态 <code>active</code>；可检索、可复用、可回滚</td></tr>
+    <tr><td>⑦ 覆盖度度量</td><td>统计需求→资产覆盖度、联动规则断言覆盖、资产稳定性趋势</td><td>覆盖度报告；低于阈值触发补充分析</td></tr>
+  </table>
+
+  <p><b>资产治理与生命周期（资产是一等公民，非散落文件）：</b></p>
+  <ul>
+    <li><b>状态机</b>：<code>draft → pending_review → approved → active → deprecated</code>；任何状态变更记录操作者与时间（R9）。</li>
+    <li><b>版本与溯源</b>：每条资产记录生成版本、来源页面/需求版本指纹、LLM 供应商与模型版本、审批者；支持回滚到历史版本。</li>
+    <li><b>失效与重验</b>：需求变更或页面改版（定位器漂移，§8）触发关联资产进入 <code>pending_review</code>，须重验或废弃，不自动沿用旧断言。</li>
+    <li><b>可插拔 SPI</b>：需求解析器、页面理解引擎、资产仓库均为 SPI（pw-core 定义契约，可选适配层实现），便于替换 LLM 供应商或需求来源而不改主干（薄层复用既有资产）。</li>
+    <li><b>冲突仲裁</b>：多次分析或多人审批产生冲突资产时，以最新 <code>approved</code> 版本 + 需求版本为准，旧版本归档不删除。</li>
+  </ul>
+
+  <p><b>质量度量与量化验收（不得用「生成了即可」验收）：</b></p>
+  <ul>
+    <li><b>需求覆盖度</b>：已有对应资产的需求条目占比；目标阈值由项目在 P1.5 评审确定。</li>
+    <li><b>资产置信度 / 误报率</b>：人工审批驳回率、运行期定位器失效重试率；模型建议被驳回比例须低于上限。</li>
+    <li><b>稳定性</b>：定位器在 N 次回归中的命中率；低于阈值自动降为需重验。</li>
+    <li><b>审批通过率与时效</b>：审批队列积压、平均审批时长，避免人在回路成为瓶颈。</li>
+  </ul>
+
+  <p><b>人在回路、权限与降级：</b></p>
+  <ul>
+    <li><b>角色与权限（R5）</b>：需求方（提供/确认需求）、测试架构师（设计资产 schema）、QA（执行审批）、审批人（按业务后果授权高风险操作）；AI 永不自动落库为 <code>active</code>。</li>
+    <li><b>责任边界</b>：AI 仅产 <code>draft</code>；<code>approved/active</code> 的责任归属人工审批者，可追溯（R9）。</li>
+    <li><b>韧性降级</b>：LLM 不可用 → 流程回退到纯录制骨架 / 手写资产，不阻塞回归 CI；需求缺失 → 仅产出无需求映射的资产并标记 <code>incomplete</code>，供后续补映射。</li>
+    <li><b>供应商治理（R9/§8.1）</b>：模型供应商须满足数据驻留、训练/留存条款、成本配额；模型不可用时不得影响既有回归链路。</li>
+  </ul>
+  <div class="note warn"><b>分析期约束：</b>① 输入须最小化并脱敏（R1/R7）——页面与需求文本默认不发送正文/原始快照全文，仅发送白名单字段（角色、可访问名、结构属性、脱敏后的文本），需求样例中的真实账号/金额/PII 须遮蔽；② LLM 不持有浏览器执行权（R6），禁止用 evaluate/run_code_unsafe 辅助分析；③ 敏感字段（凭据、个人数据、token）按未知即敏感处理，不得进入模型上下文；④ 分析在隔离靶场执行（R4/R8）。</div>
 </section>
 
 <!-- ===================== 5 安全红线 ===================== -->
@@ -366,7 +528,7 @@ steps:
     <tr><td><b>BrowserContext 提供者注入</b></td><td>pw-web-ui</td><td>评估 BrowserStartupImpl / SessionStore 的真实所有权、关闭和线程模型后定义注入契约，不直接复制上游 contextGetter 语义</td></tr>
     <tr><td><b>安全配置诊断</b></td><td>pw-core（如确有需求）</td><td>只暴露经白名单筛选、脱敏的非秘密配置状态；禁止实现可枚举全部配置或读取凭据的 debug 原语</td></tr>
   </table>
-  <div class="note info"><b>模块依赖检查（按当前仓库核对）：</b>实际 Maven artifact/module 名称是 <code>pw-core</code>、<code>pw-web-ui</code>、<code>pw-codegen</code>、<code>pw-reports</code>；“pw-codegen-v3”“pw-reports-v2”是设计代号/描述名，不是当前 artifactId。当前 pw-codegen 经 pw-web-ui 依赖 pw-core，pw-reports 也依赖 pw-core；新增依赖前应先确认 API 所有权、模块边界与依赖方向，避免把浏览器实现或 LLM 客户端放入核心协议层。</div>
+  <div class="note info"><b>模块依赖检查（已按当前仓库核对）：</b>实际 Maven artifact/module 名称为 <code>pw-core</code>、<code>pw-web-ui</code>、<code>pw-codegen</code>、<code>pw-reports</code>、<code>pw-route</code>、<code>pw-api-core</code>；本设计引用的模块均对应上述真实 artifactId，不再使用 <code>pw-codegen-v3</code> 等附加代号。当前 pw-codegen 经 pw-web-ui 依赖 pw-core，pw-reports 也依赖 pw-core；新增依赖前应先确认 API 所有权、模块边界与依赖方向，避免把浏览器实现或 LLM 客户端放入核心协议层。</div>
 </section>
 
 <!-- ===================== 7 路线图 ===================== -->
@@ -375,7 +537,8 @@ steps:
   <ul class="road">
     <li><b>P0 · 受限确定性垂直切片</b>（无 AI）—— 先实现版本化 DSL、少量白名单原语（snapshot/assert_state 及无副作用演示操作）、策略校验和最小审计；只在隔离靶场运行。确认快照能力/资源上限后，再逐步开放写操作。<br/><b>验收：</b>确定测试数据和浏览器版本下，受限流程结果可比较；失败即停止并提供脱敏诊断。Trace 只供审计，不直接重放真实写操作。</li>
     <li><b>P1 · 意图翻译</b>—— 先结构化录制骨架 → StepPlan；完成数据最小化、网络出口和模型供应商审查后，再评估自然语言 → StepPlan 与 LLM 网关适配层。<br/><b>验收：</b>相同规范化输入可比较出等价计划；非法 schema、越权 Action、未知字段和不批准 origin 均被拒绝。</li>
-    <li><b>P2 · 稳定代码生成</b>—— 三层产物模板（Feature/Glue/PO+方法）+ 编译 + 冒烟 + 落库；产物内嵌 trace javadoc。<br/><b>验收：</b>生成的工程过 checkstyle、冒烟 1 遍绿、落库后 <code>mvn test</code> 零 LLM 运行。</li>
+    <li><b>P1.5 · 页面理解与测试资产生产</b>（分析期 LLM）—— 结合需求上下文（需求条目 / 验收标准 / 业务规则），用 LLM 对脱敏快照分析，产出带需求映射的元素清单、操作行为模型与联动图谱（§4.6），落库为 Page Object/StepPlan/联动断言草案，并支持需求→资产覆盖度；属资产生成期，不进入运行时。<br/><b>验收：</b>资产含需求映射与验证证据、经人工审批落库；输入脱敏（无 secret/PII 进模型）；分析产物不自动成为可信定位器（须过 §4.4 验证）；量化指标（需求覆盖度 / 误报率 / 定位器稳定性）须在 P1.5 评审确定阈值（参考 §4.6.3 / §8.1）；回归期不依赖此 LLM 链路。</li>
+    <li><b>P2 · 稳定代码生成</b>—— 三层产物模板（Feature/Glue/PO+方法）+ 编译 + 冒烟 + 落库；产物内嵌 trace javadoc；资产来源新增 §4.6 的页面理解产物。<br/><b>验收：</b>生成的工程过 checkstyle、冒烟 1 遍绿、落库后 <code>mvn test</code> 零 LLM 运行。</li>
     <li><b>P3 · 定位器治理</b>—— CandidateValidator（目标语义/唯一性/可操作性/业务断言）+ 候选审批和版本化回注。<br/><b>验收：</b>候选有来源与验证证据；无法确认时失败关闭并转人工，不自动回退到可能错误的目标。</li>
     <li><b>P4 · 治理与企业化</b>—— 策略/审批、运行时安全测试、审计保留与导出治理、CI 集成（生成期与回归期分离）及非功能指标。<br/><b>验收：</b>安全集成测试全绿；回归 CI 无 LLM；审计访问受控且可按期限删除；满足已批准的性能/并发/恢复目标。</li>
   </ul>
@@ -402,6 +565,7 @@ steps:
     <tr><td>并发与隔离</td><td>单 browser/context/page 的并发所有权、最大并发执行数、排队/超时策略、跨任务数据隔离压力测试</td></tr>
     <tr><td>可靠性与恢复</td><td>浏览器崩溃、超时、取消和网络中断的收敛行为；写操作是否已提交不确定时必须停止并人工核对</td></tr>
     <tr><td>可观测与隐私</td><td>审计字段完整率、敏感 canary 泄漏为零、日志/报告保留期限、审计查询和删除验证</td></tr>
+    <tr><td>资产质量</td><td>需求覆盖度阈值、资产误报率/审批驳回率上限、定位器稳定性（N 次回归命中率）、审批时效；低于阈值触发补充分析或废弃（参考 §4.6.3）</td></tr>
     <tr><td>模型供应商</td><td>可用性/超时/成本配额、地区与数据驻留、训练/留存条款、故障降级；模型不可用时不得阻塞既有回归链路</td></tr>
   </table>
 </section>
@@ -426,6 +590,17 @@ steps:
     <li>[ ] pw-codegen：录制产物 → 结构化骨架转换器（确认跨模块 API 边界后复用 CodegenFacts）</li>
     <li>[ ] 对最小化上下文生成 StepPlan 建议 + schema/策略/可执行性校验；AI 无直接浏览器调用能力</li>
     <li>[ ] 等价性测试：对同一规范化输入比较录制骨架与模型建议，不以自然语言输出作为唯一验收真值</li>
+  </ul>
+  <h3>P1.5 页面理解与资产生产</h3>
+  <ul>
+    <li>[ ] pw-core：页面理解资产 schema（ElementInventory / BehaviorModel / LinkageGraph），含「需求映射」字段（需求 ID / 验收点 / 业务规则引用）；统一「未验证建议→可信资产」审批状态机</li>
+    <li>[ ] pw-core：需求上下文模型与溯源——需求条目 / 验收点 / 业务规则的结构化表示；落库时记录需求关联，支持需求→资产覆盖度统计</li>
+    <li>[ ] pw-web-ui：脱敏快照/网络摘要导出为 LLM 分析输入（白名单字段，R1/R7）；分析期在隔离靶场执行（R4）</li>
+    <li>[ ] 可选适配层：LLM 网关消费「需求上下文 + 只读观测」，产出带需求映射的三类资产草案；需求文本须脱敏（R1/R7），LLM 不持有浏览器执行权（R6）</li>
+    <li>[ ] 需求来源适配：复用框架已有 Cucumber Feature（Given/When/Then 即需求载体）或导入需求/验收文档作为分析上下文</li>
+    <li>[ ] pw-codegen：资产草案 → Page Object/StepPlan/联动断言草案落库管线；经候选验证器 + 人工审批</li>
+    <li>[ ] 联动图谱差分提取（操作前/后快照对比）；联动断言对应需求业务规则，可作为录制骨架补充</li>
+    <li>[ ] pw-core：技术架构落地（§3.1）——定义 BrowserCommandChannel / AssetRepository / AssetStateMachine / 分析层 SPI 契约（RequirementSource / PageObservationProvider / PageUnderstandingEngine / AssetValidator / <b>AssetVerifier 资产验证驱动</b>）；明确各组件 Maven 模块归属与可选适配包边界；资产本体 JSON + 元数据索引存储</li>
   </ul>
   <h3>P2 稳定代码生成</h3>
   <ul>
@@ -490,7 +665,7 @@ steps:
   <table class="map-table">
     <tr><th style="width:12%">红线</th><th style="width:26%">落点模块/守门环节</th><th style="width:34%">实现对策落点</th><th>门禁测试（不可跳过）</th></tr>
     <tr><td><b>R1</b></td><td>LLM 请求边界、浏览器数据采集、异常/日志/报告导出</td><td>字段白名单 + 集中脱敏；未知字段按敏感处理；secret provider 与 StepPlan/LLM 分离</td><td>敏感 canary 经页面、URL、异常、网络和截图路径均不得出现在模型请求、日志、报告或导出物</td></tr>
-    <tr><td><b>R2</b></td><td>pw-web-ui BrowserCommandChannel API 面</td><td>不提供任意 evaluate/run_code_unsafe；只允许审查通过的类型化只读接口</td><td>API/架构测试确认执行器无通用脚本入口；注入脚本/未知动作请求被拒绝</td></tr>
+    <tr><td><b>R2</b></td><td>pw-web-ui BrowserCommandChannel API 面</td><td>不提供任意 evaluate/run_code_unsafe；只允许审查通过的类型化只读接口</td><td>R2 属「不引入即不违约」类：类型系统不暴露通用脚本入口（无 evaluate/run_code_unsafe 公共 API）；CI 架构/API 契约测试确认 BrowserCommandChannel 不存在该能力，且新增该能力会触发门禁拦截；未知动作/注入脚本请求在策略层被拒绝。ArchUnit 仅查结构依赖，不作为运行时安全证明。</td></tr>
     <tr><td><b>R3</b></td><td>pw-web-ui 请求策略 + pw-route 能力评估 + 部署代理/防火墙</td><td>逐请求及逐跳重定向校验；覆盖子资源、iframe、弹窗、下载；企业出站由网络层兜底</td><td>靶场验证未批准的重定向、子资源和下载均被阻断；生产网络控制另行验证</td></tr>
     <tr><td><b>R4</b></td><td>pw-web-ui SessionStore / initializeBrowser 会话创建点</td><td>先定义 context/page 所有权、登录态注入与清理边界；持久登录显式声明并受控管理，ConcurrencyGate 不作为隔离证明</td><td>在明确的隔离靶场配置下验证 context 不共享 Cookie/localStorage，收尾清理结果可观测；不宣称跨进程/持久化环境绝对零残留</td></tr>
     <tr><td><b>R5</b></td><td>策略引擎/身份与审批系统；pw-web-ui 执行动作前</td><td>授权绑定计划摘要、origin、参数范围、执行身份和有效期；UI 文案不参与授权判定</td><td>篡改计划、身份、参数范围或过期授权均拒绝；未授权动作不能被执行</td></tr>
@@ -502,7 +677,7 @@ steps:
 </section>
 
 <footer>
-  本文档为 pw_automation_framework（DEV-V5）Agent Driver 架构设计稿 v1.5（2026-11-02）：方向有条件通过，P0 实现前须完成威胁建模、项目 API/生命周期核验和验收设计。MCP 基线仅作为参考实现，核验对象为 @playwright/mcp 0.0.83 及其对应发布目录中的 coreBundle；具体实现细节须在采用前按锁定的制品版本/校验值复核，不视为本项目规范或安全证明。当前项目适配以仓库实际 Maven artifactId 和 JUnit4/Cucumber Runner 为准。
+  本文档为 pw_automation_framework（DEV-V5）Agent Driver 架构设计稿 v1.7（2026-11-02）：方向有条件通过，P0 实现前须完成威胁建模、项目 API/生命周期核验和验收设计。MCP 基线仅作为参考实现，核验对象为 @playwright/mcp 0.0.83 及其对应发布目录中的 coreBundle；具体实现细节须在采用前按锁定的制品版本/校验值复核，不视为本项目规范或安全证明。当前项目适配以仓库实际 Maven artifactId 和 JUnit4/Cucumber Runner 为准。v1.7 新增 §3.1「全系统技术架构分解」，覆盖技术分层与模块归属、端到端三条路径、核心 SPI 契约、资产仓库存储、现有资产集成映射、红线贯穿与非功能设计；v1.6 新增 §4.6「LLM 页面理解与测试资产生成」及 P1.5 阶段。
 </footer>
 
 </div>

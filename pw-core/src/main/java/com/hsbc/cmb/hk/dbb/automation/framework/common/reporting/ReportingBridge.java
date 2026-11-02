@@ -7,7 +7,7 @@ import java.nio.file.Path;
  *
  * <p>把 web / route 框架层的「截图 / 证据 / 标量数据 / 场景结果」推送，从具体报告引擎
  * （框架 或 v2 {@code ReportBus}）解耦。web / route 仅依赖本接口（经
- * {@link ReportingBridgeRegistry} 取得），具体实现由报告模块（如 pw-reports-v2 的
+ * {@link ReportingBridgeRegistry} 取得），具体实现由报告模块（如 pw-reports 的
  * {@code ReportBus} 适配器）通过 {@code META-INF/services} SPI 提供，运行时由
  * {@link java.util.ServiceLoader} 发现。借此打破 web / route ↔ 报告引擎的编译期耦合，
  * 使 {@code PlaywrightListener} 等框架监听器彻底摆脱对 serenity 的直接依赖。

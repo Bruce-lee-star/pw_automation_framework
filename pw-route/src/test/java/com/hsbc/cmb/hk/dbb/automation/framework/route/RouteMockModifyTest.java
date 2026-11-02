@@ -90,7 +90,7 @@ public class RouteMockModifyTest {
     @Test
     public void mockStaticBodyWithReplacementFulfillsReplacedBody() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         RouteDsl.on(ctx)
                 .api("/api/user")
@@ -114,7 +114,7 @@ public class RouteMockModifyTest {
     @Test
     public void mockInterceptWithReplacementFetchesThenReplaces() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         APIResponse apiResponse = mock(APIResponse.class);
         when(apiResponse.status()).thenReturn(200);
@@ -148,7 +148,7 @@ public class RouteMockModifyTest {
     @Test
     public void interceptWithMixedCaseContentTypeHeaderStillReplacesFields() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         APIResponse apiResponse = mock(APIResponse.class);
         when(apiResponse.status()).thenReturn(200);
@@ -179,7 +179,7 @@ public class RouteMockModifyTest {
     @Test
     public void interceptWithoutContentTypeSniffsJsonAndStillReplacesFields() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         APIResponse apiResponse = mock(APIResponse.class);
         when(apiResponse.status()).thenReturn(200);
@@ -229,7 +229,7 @@ public class RouteMockModifyTest {
     @Test
     public void modifyBodyResumesWithPostData() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         RouteDsl.on(ctx)
                 .api("/api/login")
@@ -255,7 +255,7 @@ public class RouteMockModifyTest {
     @Test
     public void modifyBodyOnNonJsonRequestFailsOpenWithOriginalBody() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         RouteDsl.on(ctx)
                 .api("/api/bin")
@@ -278,7 +278,7 @@ public class RouteMockModifyTest {
     @Test
     public void mockBodyFromFileLoadsClasspathResource() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         RouteDsl.on(ctx)
                 .api("/api/fromfile")
@@ -370,7 +370,7 @@ public class RouteMockModifyTest {
     @Test
     public void modifyRunsOnTheCallingThreadInPlace() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         RouteDsl.on(ctx)
                 .api("/api/thread")
@@ -411,7 +411,7 @@ public class RouteMockModifyTest {
     @Test
     public void interceptFetchHappensOnTheCallingThread() throws Exception {
         mockContext();
-        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        RouteEngine.runtimeOf(ctx);
 
         APIResponse apiResponse = mock(APIResponse.class);
         when(apiResponse.status()).thenReturn(200);

@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  *   <li>{@code UNKNOWN}。</li>
  * </ol>
  *
- * <p>纯字符串实现，不依赖 Playwright 类型——pw-reports-v2 保持模块独立性，任何引擎/框架
+ * <p>纯字符串实现，不依赖 Playwright 类型——pw-reports 保持模块独立性，任何引擎/框架
  * （Java Playwright / Selenium / 纯业务断言）的失败都能分类。</p>
  */
 public final class ErrorClassifier {

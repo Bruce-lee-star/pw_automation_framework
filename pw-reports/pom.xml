@@ -5,22 +5,17 @@
     <modelVersion>4.0.0</modelVersion>
 
     <!--
-      坐标说明（重要）：
-      框架主工程 pw_automation_framework 内**已存在** artifactId=pw-reports 的模块
-      （包 com.hsbc.cmb.hk.dbb.automation.framework.common.reporting，封装 Serenity.recordReportData
-      + SummaryReportGenerator(ftlh) + 监控失败报告）。若本模块沿用同名坐标会 Maven 冲突并
-      语义覆盖，因此独立命名为 pw-reports-v2 与其并存，落地时两个模块同时存在、互不覆盖。
-
-      groupId 沿用主工程（com.hsbc.cmb.dbb.hk.automation）；version 独立编号。
+      报告模块：自建 Serenity 兼容 BDD 报告（Cucumber 事件 -> 线程安全 ReportBus ->
+      ScrubGate -> JSON/HTML 输出，零 serenity-* 依赖）。
+      artifactId 与模块目录统一为 pw-reports；groupId 沿用主工程，version 独立编号。
     -->
     <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
     <artifactId>pw-reports</artifactId>
     <version>1.0.1</version>
     <packaging>jar</packaging>
-    <name>pw-reports-v2</name>
-    <description>Self-built Serenity-compatible BDD reporting (v2, artifact renamed to coexist with the
-        framework's existing pw-reports reporting wrapper): Cucumber events -> thread-safe ReportBus ->
-        ScrubGate -> JSON/HTML output. Zero serenity-* dependencies.</description>
+    <name>pw-reports</name>
+    <description>Self-built Serenity-compatible BDD reporting: Cucumber events -> thread-safe
+        ReportBus -> ScrubGate -> JSON/HTML output. Zero serenity-* dependencies.</description>
 
     <properties>
         <maven.compiler.release>21</maven.compiler.release>

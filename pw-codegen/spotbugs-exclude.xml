@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+      pw-codegen SpotBugs 限期消除基线（与 web 模块同机制：新增违规须消除或登记本文件，禁止冻结式留存）。
+      当前暂无已知项；若运行 spotbugs:check 报出违规，按 owner/SLA 登记后消除。
+    -->
+</FindBugsFilter>

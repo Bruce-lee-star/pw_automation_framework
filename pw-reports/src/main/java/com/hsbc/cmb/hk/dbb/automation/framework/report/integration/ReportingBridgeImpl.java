@@ -15,7 +15,7 @@ import java.nio.file.Path;
  * {@link ReportingBridge} 的 v2 实现 —— 把框架层推送落到 {@link ReportBus}。
  *
  * <p>web / route 经 {@code ReportingBridgeRegistry.get()} 取得本实现（通过
- * {@code META-INF/services} SPI 发现），从而在不依赖 pw-reports-v2 编译期类型的前提下，
+ * {@code META-INF/services} SPI 发现），从而在不依赖 pw-reports 编译期类型的前提下，
  * 把截图 / 证据 / 场景结果写入 v2 报告。本实现不引入任何 serenity 依赖。
  *
  * <p>线程语义：所有写入均经 {@link ReportBus#captureHandle()} 解析当前步骤句柄

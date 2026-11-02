@@ -45,8 +45,8 @@ public class RouteActionFetchTlsTest {
         Boolean actual = ignoreHttpsErrors(captor.getValue());
         assertNotNull("RequestOptions 必须显式携带 ignoreHTTPSErrors（不携带＝驱动严格校验→mock 静默失效）",
                 actual);
-        assertEquals("RequestOptions 的证书策略必须与 RouteAction 的有效开关一致",
-                effectiveFlag(), actual.booleanValue());
+        assertTrue("RequestOptions 的证书策略必须与 RouteAction 的有效开关一致",
+                effectiveFlag() == actual.booleanValue());
     }
 
     @Test

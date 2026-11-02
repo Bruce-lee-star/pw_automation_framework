@@ -281,7 +281,7 @@ public class CodegenCdpNodeExtractorFramePathTest {
                 case "DOM.describeNode": {
                     Long bn = asLong(params.get("backendNodeId"));
                     JsonObject node = new JsonObject();
-                    node.addProperty("backendNodeId", bn == null ? 0L : bn);
+                    node.addProperty("backendNodeId", bn == null ? Long.valueOf(0L) : bn);
                     String frameId = bn == null ? null : frameByNode.get(bn);
                     if (frameId != null) node.addProperty("frameId", frameId);
                     JsonObject payload = new JsonObject();

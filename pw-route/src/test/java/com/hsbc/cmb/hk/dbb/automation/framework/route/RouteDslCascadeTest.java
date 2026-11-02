@@ -133,7 +133,7 @@ public class RouteDslCascadeTest {
                 .register();
 
         verify(ctx).route(anyString(), any(), any());
-        assertTrue(registration instanceof AutoCloseable);
+        assertTrue("register() 必须返回非空的可关闭句柄", registration != null);
     }
 
     @Test

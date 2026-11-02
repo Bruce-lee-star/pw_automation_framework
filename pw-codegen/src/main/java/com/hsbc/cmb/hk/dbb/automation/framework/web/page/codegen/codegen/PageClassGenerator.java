@@ -13,7 +13,7 @@ import java.util.Map;
  *
  * <h2>模板统一（FreeMarker）</h2>
  * <p>类骨架与字段循环全部由 {@code src/main/resources/codegen/templates/page-class.ftl} 描述
- * （与框架报告侧 pw-reports-v2 共用 FreeMarker {@code 2.3.34}）。本类<b>只装配模型</b>：
+ * （与框架报告侧 pw-reports 共用 FreeMarker {@code 2.3.34}）。本类<b>只装配模型</b>：
  * 去重 / 分组 / 命名 / 定位注解一律取自 {@link CodegenFieldPlanner}（Step、Assert 复用同一份
  * {@link CodegenFieldPlanner.Plan}，三个 Tab 的字段名天然一致），渲染走 {@link CodegenTemplates}。
  * 要调整产物格式（缩进、注解样式、import 取舍、是否生成辅助方法）只改模板，不碰 Java。

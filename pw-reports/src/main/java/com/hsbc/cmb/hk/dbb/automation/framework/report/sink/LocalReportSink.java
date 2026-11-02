@@ -21,8 +21,10 @@ import com.hsbc.cmb.hk.dbb.automation.framework.report.render.SummaryHtmlRendere
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -161,6 +163,11 @@ public final class LocalReportSink implements ReportSink {
             log.info("Email report: {}", reportLink("email-report.html"));
         }
 
+        //  2026-11-02 用户需求：命令行整跑（多 case）时，控制台只给聚合入口、不逐条打印以免刷屏；
+        //  另落盘 report-links.txt，逐条列出每条 case 的可点击链接（带 case 名，便于 grep 定位，如查 77），
+        //  CI/托管环境经 pw.report.base.url 绝对化为 http(s)，本地回退 file://。
+        writeReportLinksFile(outcomes, aggregated);
+
         if (errors.get() > 0) {
             log.warn("LocalReportSink completed with {} error(s); JSON preserved where written", errors.get());
         }
@@ -177,6 +184,40 @@ public final class LocalReportSink implements ReportSink {
                 log.info("Case report: {}", reportLink(id + "/" + id + ".html"));
             }
         }
+    }
+
+    /**
+     * 落盘 {@code <outputDir>/report-links.txt}：聚合入口 + 每条 case 的链接（带 case 名，便于 grep 定位）。
+     * 失败不抛（非真相源，仅辅助定位）；链接经 {@link #reportLink} 解析（CI 用 http(s)，本地 file://）。
+     */
+    private void writeReportLinksFile(List<TestOutcome> outcomes, List<TestOutcome> aggregated) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Report links\n");
+            sb.append("Index : ").append(reportLink("index.html")).append('\n');
+            sb.append("Email : ").append(reportLink("email-report.html")).append('\n');
+            sb.append("Per-case:\n");
+            Set<String> seen = new HashSet<>();
+            for (TestOutcome o : outcomes) {
+                appendLinkLine(sb, seen, o);
+            }
+            for (TestOutcome o : aggregated) {
+                appendLinkLine(sb, seen, o);
+            }
+            Files.writeString(dir().resolve("report-links.txt"), sb.toString());
+        } catch (Throwable t) {
+            log.warn("report-links.txt write failed (non-fatal)", t);
+        }
+    }
+
+    /** 追加一行 {@code <case名> => <link>}，按 outcomeId 去重（outline 父页/行页不重复）。 */
+    private void appendLinkLine(StringBuilder sb, Set<String> seen, TestOutcome o) {
+        String id = o.getOutcomeId();
+        if (id == null || !seen.add(id)) {
+            return;
+        }
+        String name = o.getName() != null ? o.getName() : id;
+        sb.append("  ").append(name).append(" => ").append(reportLink(id + "/" + id + ".html")).append('\n');
     }
 
     /** 单步隔离渲染：异常不向外传播，失败计入 {@link #errors}（severe=true 时升级为 error 级日志）。 */

@@ -2,7 +2,7 @@
 
 **评审约束**：只读源码的控制流、并发原语与资源生命周期。**不参考**历史评审文档、`MEMORY.md`、`.workbuddy` 记忆，**不把代码注释中的"已修复/已加固/已评审"作为结论依据**（注释仅用于定位意图，结论一律由代码路径自行推导）。
 
-**覆盖范围**：`pw-core` / `pw-web-ui` / `pw-route` / `pw-reports-v2` / `pw-codegen-v3` 主源码，重点为生命周期、并发、证据链、报告落盘四条主线。
+**覆盖范围**：`pw-core` / `pw-web-ui` / `pw-route` / `pw-reports` / `pw-codegen-v3` 主源码，重点为生命周期、并发、证据链、报告落盘四条主线。
 
 **规模基线**：主源码 423 文件；热点文件 `RouteDsl` 1342、`ConfigRegistry` 1210、`ApiSpec` 1209、`WebFrameworkConfig` 1191、`PageElement` 1162、`RoleElementPageGenerator` 1109、`RoleElementPicker` 1105、`BasePage` 1020。
 
@@ -64,8 +64,8 @@
 - `pw-web-ui/.../lifecycle/CloseGuard.java:126` 每个关闭动作 `new Thread(...)` 执行。
 - `pw-web-ui/.../context/ContextRegistryImpl.java:239` `cleanupContextScoped` 经 `CloseGuard.runBounded("context-close", ...)` 关闭 context。
 - `pw-web-ui/.../trace/ScenarioTraceRecorder.java:190-191` `onContextClosing` 在该 worker 线程上执行导出 → `attachToReport`。
-- `pw-reports-v2/.../integration/ReportingBridgeImpl.java:90-94`（及 `:103-107`）：`bus.captureHandle()` 为 NOOP 就 `return`。
-- `pw-reports-v2/.../event/ReportBus.java:808` `attachTrace` 前置于 `if (... || handle.isNoop() || ...) return;` —— **没有** 跨线程回落。
+- `pw-reports/.../integration/ReportingBridgeImpl.java:90-94`（及 `:103-107`）：`bus.captureHandle()` 为 NOOP 就 `return`。
+- `pw-reports/.../event/ReportBus.java:808` `attachTrace` 前置于 `if (... || handle.isNoop() || ...) return;` —— **没有** 跨线程回落。
 - 对照：`ReportBus.java:733-738` `attachVideo` 在 `handle.isNoop()` 时回落 `activeOutcomeId()`。
 
 **机制**：`captureHandle()` 依赖用例线程的 ThreadLocal。`CloseGuard` 的 worker 线程与场景线程不同，恒 NOOP → trace 既不落到 per-case 目录，也不会被登记到 outcome。文件留在 `traces/`，随后可能被 `TraceRetention.pruneIfDue()` 清掉。
@@ -98,13 +98,13 @@
 
 - **原问题**：`ReportBus.startRun()` 只 `sessions.clear()` + `runFinished.set(false)`，未重置跨线程可见的 `activeStep` / `activeOutcomeId`（并行时为"最近开始的用例"单值），未清累计 `sinkErrors`，也未向 sink 派发 startRun 事件 → 上一轮收尾后的跨线程事件挂到上一轮 outcomeId、`getSinkErrorCount()` 变累计值。
 - **改动**：`startRun()` 复位 `activeStep = null` / `activeOutcomeId = null` / `current.remove()`（本线程残留 ThreadLocal 防御）/ `sinkErrors.set(0)`；并遍历 `sinks` 调新增的 `ReportSink.onRunStarted()`（默认 no-op），由 sink 侧清进程级残留态（见 P1-9）。
-- **验证**：`pw-reports-v2` 263/0 绿（新增 `ReportBusRunLifecycleTest.startRunResetsActiveOutcomeForOtherThreads`——模拟 CloseGuard 收尾线程读活动用例，证明 `startRun` 后归零）；`pw-reports-v2` 主代码编译通过。
+- **验证**：`pw-reports` 263/0 绿（新增 `ReportBusRunLifecycleTest.startRunResetsActiveOutcomeForOtherThreads`——模拟 CloseGuard 收尾线程读活动用例，证明 `startRun` 后归零）；`pw-reports` 主代码编译通过。
 
 ### P1-6 `QueuedNetworkEvidenceBridge.record(NetworkCall)` 在事件线程恒丢证据 ✅ 已修复（2026-10-24）
 
 - **原问题**：`record(NetworkCall)` 走 `bus.captureHandle()` → 路由事件/调度线程无 ThreadLocal 步骤上下文 → `captureHandle()` 恒 NOOP → `attachEvidence`/`recordApiOperation` 对 NOOP 早退**静默丢弃**，且不计入 `dropped`（与队列溢出口径不一致）。
 - **改动**：`record(NetworkCall)` 改为经 `record(call.method(), call.url(), call.toDetailLine())` **入队**（与 `record(String,String,String)` 同路径），由主线程 `flush()` 用先前 `capture()` 的有效句柄写出；队列溢出仍按 `dropped` 口径上报。`NetworkCall` 新增 `toDetailLine()`（不含前置 `method url`），`toOneLine()` 复用，确保落盘格式与旧直接写入路径完全一致。显式句柄的 `record(StepHandle, NetworkCall)` 保持原直接写入语义（调用方已持有效句柄）。
-- **验证**：`pw-reports-v2` 263/0 绿（新增 `QueuedNetworkEvidenceBridgeTest.recordNetworkCallEnqueuesWithoutHandle`——事件线程 `record(NetworkCall)` 后 `pendingCount()==1` 且 flush 后证据落报告、敏感 query 被 ScrubGate 遮蔽）；主代码编译通过。
+- **验证**：`pw-reports` 263/0 绿（新增 `QueuedNetworkEvidenceBridgeTest.recordNetworkCallEnqueuesWithoutHandle`——事件线程 `record(NetworkCall)` 后 `pendingCount()==1` 且 flush 后证据落报告、敏感 query 被 ScrubGate 遮蔽）；主代码编译通过。
 
 ### P1-7 `RouteDelayScheduler` 是全局 2 线程节拍器，且"饱和告警"是死信号 ✅ 已修复（2026-10-24）
 
@@ -128,7 +128,7 @@
 - **改动①**：`ReportSink` 接口新增 `default void onRunStarted()`；`LocalReportSink` 覆写它清 `writtenIds.clear()` + `errors.set(0)`；`ReportBus.startRun()` 复位时向各 sink 派发 `onRunStarted()`（见 P1-5）。
 - **问题②（串行渲染，已修）**：`finishAll`（原 `:86-164`）在 `RunFinished` 派发线程上**串行**完成全部 HTML/JSON/CSV/JUnit/资产渲染，无并发、无超时 → 大轮次墙钟耗时高，且极端情况下可能阻塞/挂死派发线程。
 - **改动②**：重写为**分片 + 并行 + 有界超时**——各独立产物（per-case HTML ×N + summary JSON + index + features + email + monitor + CSV + JUnit + 资产）作为独立任务提交到有界固定线程池并行渲染；沿用既有**单步 try/catch 隔离**（失败计入 `errors`、severe 项升级 error 日志）；`invokeAll(tasks, timeout, SECONDS)` 在 `renderTimeoutSeconds()`（默认 300s，可经 `-Dpw.report.render.timeout.seconds` 覆盖）内 join，**正常规模在超时内全部完成（契约不变：finishAll 返回时报告已落盘），病理性超时则取消未启动任务并告警**（JSON 真相源已实时落盘不丢）。使用 **daemon 线程**，避免渲染线程阻止 JVM 退出。FreeMarker 各渲染器均用静态 `Configuration`（`getTemplate`/`process` 线程安全、`setSharedVariable` 仅静态块配置一次），并发安全。
-- **验证**：`pw-reports-v2` 265/0 绿（基线 263 + 新增 `LocalReportSinkRenderTest` 2 例——`finishAllRendersAllArtifactsAfterParallelSharding` 锁死并行后仍产出 index/summary-json/CSV/JUnit/email/per-case HTML+JSON 全部产物；`finishAllToleratesZeroOutcomes` 零用例不抛、空 index/summary 仍生成；既有 `ReportBusRunLifecycleTest` 2 例无回归）。
+- **验证**：`pw-reports` 265/0 绿（基线 263 + 新增 `LocalReportSinkRenderTest` 2 例——`finishAllRendersAllArtifactsAfterParallelSharding` 锁死并行后仍产出 index/summary-json/CSV/JUnit/email/per-case HTML+JSON 全部产物；`finishAllToleratesZeroOutcomes` 零用例不抛、空 index/summary 仍生成；既有 `ReportBusRunLifecycleTest` 2 例无回归）。
 
 ### P1-10 `getPage(cls, strategy)` 静默丢弃自定义供应商与钩子 ✅ 已修复（2026-10-24）
 `pw-web-ui/.../page/factory/PageObjectFactory.java:278-288`：策略与当前配置不同时新建 `Builder`，只搬 `lifecycle` 与 `lazy`，`customSuppliers` / `postCreateHooks` / `properties` 全部丢失。`newInstance`（`:383-387`）先查全局 `GLOBAL_SUPPLIERS` 再查 `config.getCustomSuppliers()`，所以 `register()` 路径不受影响，但**通过 `Builder.customSupplier()/postCreateHook()` 配置的调用点**在显式传 strategy 时会静默失去注入与钩子 —— 典型表现是 `AbstractManagedPage.getPage()` NPE 或钩子不执行。
@@ -202,7 +202,7 @@
 ### P0-3 ✅ 已修复（最小、对称）
 
 - **改动**：`ReportBus.attachTrace` 抽出 `attachTraceToOutcome(outcomeId, ...)` 并加 `handle.isNoop() → activeOutcomeId()` 兜底（与 `attachVideo`/`attachVideoToOutcome` 完全对称）；`ReportingBridgeImpl.attachTrace` 两个重载同样改为 NOOP 时回落 `bus.activeOutcomeId()` → `attachTraceToOutcome`。
-- **验证**：`pw-reports-v2` 254 run / 0 failure / 0 error，含 `TraceBarRenderTest`、`SnapshotGateTest`。
+- **验证**：`pw-reports` 254 run / 0 failure / 0 error，含 `TraceBarRenderTest`、`SnapshotGateTest`。
 - **同源限制**：`activeOutcomeId()` 是单个 `volatile` 字段（非 ThreadLocal / 非 per-thread）。**并行**执行时，兜底可能把 A 场景的 trace 归到当前"活动"用例 id（与 `attachVideo` 同源、已接受的同一限制）；串行/常规运行下正确。比"静默丢"严格更优。彻底修法（评审方向）是把 `scenarioId` 从 `exportChunk` 一路透传到 bridge，需改 `ReportingBridge` 接口签名（波及 pw-core），本次未做。
 
 ### P0-4 ✅ 已修复（单文件）
@@ -232,7 +232,7 @@
 - **事实澄清**：正常路径本就已直接落 per-case——video 在 context 创建时 `setRecordVideoDir(videoTarget())`（2026-09-30 收口后 context 为 scenario-scoped，创建时句柄有效）；trace 在 scenario 线程上的 `onScenarioEnd` 经 `traceTarget()` 解析到 per-case。**唯一产生副本的**是 `onContextClosing`：它跑在 **CloseGuard 的 `close-bounded-*` 收尾线程**，该线程无 ThreadLocal 用例上下文（句柄恒 NOOP），于是 `traceTarget()/videoTarget()` 返回 null → trace 落到全局 `traces/`、video 落到配置 videoDir，事后由 `mountArtifact`（P0-3）搬/拷进 per-case。
 - **改动**：`ReportingBridgeImpl.traceTarget()/videoTarget()` 在句柄 NOOP 时，**回落到 `ReportBus.activeOutcomeId()`** 解析 per-case 落点（新增 `ReportBus.traceTargetByOutcomeId(String)` / `videoTargetByOutcomeId(String)`，绕开 ThreadLocal 句柄）；`ScenarioTraceRecorder.resolveTraceTarget` 无需改动（它调用的 `traceTarget()` 桥现在总能解析 per-case）。结果：**trace/video 在任意线程（含 CloseGuard 收尾线程）都直接写进 per-case，永不搬/拷**。`mountArtifact` 仅保留为"真正无报告 / 无活动用例"时的证据安全网（落到全局 `traces/` 才搬）。
 - **同源限制（已被 P0-6 消除）**：原 P0-5 沿用 `activeOutcomeId()` 单 volatile 语义——并行下取"最近开始的用例"（最佳努力）。该限制已由 P0-6（per-context 绑定）彻底消除。
-- **验证**：`pw-reports-v2` 257/0 绿（新增 3 例：按 outcomeId 解析 per-case、bridge 活动期解析到 per-case）；`pw-core`/`pw-web-ui` 编译通过；已装本地仓。
+- **验证**：`pw-reports` 257/0 绿（新增 3 例：按 outcomeId 解析 per-case、bridge 活动期解析到 per-case）；`pw-core`/`pw-web-ui` 编译通过；已装本地仓。
 
 ### P0-6 ✅ per-context 绑定彻底正确化（消除并行下"取最近开始的用例"歧义，2026-10-24）
 
@@ -245,7 +245,7 @@
   5. `ReportingBridge` 接口新增 `currentOutcomeId()` 与按 outcomeId 直接挂载的 `attachVideo(outcomeId,Path)` / `attachTrace(outcomeId,Path)` / `attachTrace(outcomeId,Path,start,end,dur)` 默认方法（no-op 桥零改动）；`ReportingBridgeImpl` 覆写委托到 `ReportBus.activeOutcomeId()` / `attachVideoToOutcome` / `attachTraceToOutcome`。
 - **语义收益**：在任何线程（含 CloseGuard 收尾线程）、任何并行度下，trace/video 都精确归属到"被关闭的 context 所属用例"的 per-case 目录——**不再是"最近开始的用例"最佳努力，也永不搬/拷**。
 - **适用范围**：项目已无 feature 模式，每个 scenario 都会重建 context（context 与 scenario 一一对应），故 `createContext` 绑定的 outcomeId 与所关闭 context 始终一致，per-context 绑定在任意 scenario 级路径下完全正确（trace/video 均为 scenario 级别产物）。
-- **验证**：`pw-reports-v2` 260/0 绿（新增 3 例：`ReportingBridgeImplOutcomeBindTest`——`currentOutcomeId` 返回活动用例 id、`attachTrace(outcomeId,…)` / `attachVideo(outcomeId,…)` 精确挂载 tracePath/videoPath）；`pw-web-ui` 新增 `ContextOutcomeBindingTest` 4 例（bind/get/unbind、distinct context 互不串扰、null/empty 忽略）全绿，主代码编译通过；`pw-core`+`pw-reports-v2` 已装本地仓。
+- **验证**：`pw-reports` 260/0 绿（新增 3 例：`ReportingBridgeImplOutcomeBindTest`——`currentOutcomeId` 返回活动用例 id、`attachTrace(outcomeId,…)` / `attachVideo(outcomeId,…)` 精确挂载 tracePath/videoPath）；`pw-web-ui` 新增 `ContextOutcomeBindingTest` 4 例（bind/get/unbind、distinct context 互不串扰、null/empty 忽略）全绿，主代码编译通过；`pw-core`+`pw-reports` 已装本地仓。
 
 ### P0-7 ✅ 驱动信道去"进程级单例"（per-context 实例化，2026-10-24）
 
@@ -262,9 +262,9 @@
 
 ### 代码冗余 / 职责冗余 审查（本轮逐区扫出）
 
-1. **报告层"句柄→outcomeId 归属解析"职责跨两层重复（P0-3 区域）—— 已 Consolidate（2026-10-24）**：`ReportingBridgeImpl.attachTrace`×2、`attachVideo`×1 原本各自实现 `captureHandle → NOOP 则 activeOutcomeId` 回落，与 `ReportBus` 内部兜底重复。因 bus 的 `attachTrace/attachVideo` 在 P0-3 后已自带该兜底，bridge 改为直接 `bus.attachTrace(bus.captureHandle(), ...)` 透传，归属解析唯一收口在 `ReportBus`。验证：`pw-reports-v2` 254/0 绿。
-2. **`attachTraceToOutcome` 与 `attachVideoToOutcome` 主体重复（P0-3 区域）—— 已 Consolidate（2026-10-24）**：两方法"建目录 + move/copy + 设字段"脚手架近乎一致，已抽私有 `mountArtifact(outcomeId, source, relativeTarget, moveWhenOutsideReport, onMounted)`，两方法改为委托。⚠️ **澄清**：二者并非"纯结构重复"——录像恒 `move`（清理 Playwright 临时文件），trace 仅报告**内** `move`、报告**外** `copy`（保留框架侧原件，契约由 `ReportBusTraceTargetTest.foreignTraceIsCopiedOrMoved` 锁定）。差异保留为 `mountArtifact` 的布尔策略参数，未强行统一。验证：`pw-reports-v2` 254/0 绿。
+1. **报告层"句柄→outcomeId 归属解析"职责跨两层重复（P0-3 区域）—— 已 Consolidate（2026-10-24）**：`ReportingBridgeImpl.attachTrace`×2、`attachVideo`×1 原本各自实现 `captureHandle → NOOP 则 activeOutcomeId` 回落，与 `ReportBus` 内部兜底重复。因 bus 的 `attachTrace/attachVideo` 在 P0-3 后已自带该兜底，bridge 改为直接 `bus.attachTrace(bus.captureHandle(), ...)` 透传，归属解析唯一收口在 `ReportBus`。验证：`pw-reports` 254/0 绿。
+2. **`attachTraceToOutcome` 与 `attachVideoToOutcome` 主体重复（P0-3 区域）—— 已 Consolidate（2026-10-24）**：两方法"建目录 + move/copy + 设字段"脚手架近乎一致，已抽私有 `mountArtifact(outcomeId, source, relativeTarget, moveWhenOutsideReport, onMounted)`，两方法改为委托。⚠️ **澄清**：二者并非"纯结构重复"——录像恒 `move`（清理 Playwright 临时文件），trace 仅报告**内** `move`、报告**外** `copy`（保留框架侧原件，契约由 `ReportBusTraceTargetTest.foreignTraceIsCopiedOrMoved` 锁定）。差异保留为 `mountArtifact` 的布尔策略参数，未强行统一。验证：`pw-reports` 254/0 绿。
 3. **"驱动信道健康"状态散落两处全局静态（P0-1/2 区域）**：`GuardedDriverCallImpl.UNUSABLE`（静态）与 `DriverFailureSignal.FAILED`（静态）都在表达"驱动/信道不健康"，语义重叠又不完全等价，无统一归属。评审也指出二者同源（进程级单例承载 per-scenario 故障语义）。**建议**：随 P0-1/2 的 per-context 下沉一并统一为单一"per-context 信道健康"状态。
 4. **`GuardedDriverCallImpl` 内"拆旧执行器 + 建新执行器"逻辑重复（P0-1 区域）**：`handleTimeout` 成功路径与 `resetChannel()` 都做 `shutdownNow()` + 替换实例。可抽 `rebuildExecutor()` 收敛。⚠️ 触及毒化重置核心逻辑，重构需配套测试。
 
-> 冗余处理进度（2026-10-24）：#1、#2 已 Consolidate（`pw-reports-v2` 254/0 绿、已装本地仓）；#4 为纯结构重复但触及毒化重置核心，待配套测试后再动；#3 须随 P0-1/2 架构下沉一并处理。是否继续落实 #3/#4，建议单独确认。
+> 冗余处理进度（2026-10-24）：#1、#2 已 Consolidate（`pw-reports` 254/0 绿、已装本地仓）；#4 为纯结构重复但触及毒化重置核心，待配套测试后再动；#3 须随 P0-1/2 架构下沉一并处理。是否继续落实 #3/#4，建议单独确认。

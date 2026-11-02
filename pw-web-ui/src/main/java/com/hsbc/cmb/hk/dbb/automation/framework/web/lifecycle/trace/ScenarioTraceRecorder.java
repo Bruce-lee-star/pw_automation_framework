@@ -220,7 +220,7 @@ public final class ScenarioTraceRecorder {
             if (Boolean.TRUE.equals(chunkActive())) {
                 //  收尾线程（CloseGuard worker）上 SCENARIO_ID 这一 ThreadLocal 恒为 null；改为优先取
                 //    context 绑定的 outcomeId（精确、跨线程可见），回落 SCENARIO_ID 再回落 unknown。
-                String id = context != null ? ContextOutcomeBinding.outcomeId(context) : null;
+                String id = ContextOutcomeBinding.outcomeId(context);
                 if (id == null) {
                     id = SCENARIO_ID.get();
                 }

@@ -11,6 +11,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -28,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -52,6 +54,11 @@ public final class CodegenPanelManager {
     /** 单例（常驻服务全局唯一）。 */
     private static final CodegenPanelManager INSTANCE = new CodegenPanelManager();
 
+    /**
+     * 返回全局唯一单例。该单例本就对外共享、状态即为调用方驱动（release / 状态查询等），
+     * 并非「意外暴露内部可变状态」；MS_EXPOSE_REP 在此是单例模式的预期形态，故显式抑制。
+     */
+    @SuppressFBWarnings("MS_EXPOSE_REP")
     public static CodegenPanelManager instance() {
         return INSTANCE;
     }
@@ -85,7 +92,7 @@ public final class CodegenPanelManager {
     private volatile State state = State.IDLE;
     private volatile CompletableFuture<PanelProcess> launchFuture;
     /** launch 代数：每次发起 launch 递增；在途 launch 完成时对比代数，过期则自我作废（防 watchdog 竞态）。 */
-    private volatile long launchGeneration = 0;
+    private final AtomicLong launchGeneration = new AtomicLong(0);
     private volatile PanelProcess process;
     /** 当前活跃会话句柄（单例串行：同时至多一个）。 */
     private volatile CodegenPanelHandle activeHandle;
@@ -133,7 +140,8 @@ public final class CodegenPanelManager {
     public CodegenPanelHandle open(Path panelHtml, Consumer<List<Object>> onCommand, String nlsLang) {
         // 每次会话刷新配置（idle timeout 等 -D 可即时生效）；panelResourceDir 由固定导出的 html 推导。
         CodegenPanelConfig cfg = CodegenPanelConfig.fromSystem();
-        Path serveDir = panelHtml == null ? null : panelHtml.getParent().toAbsolutePath().normalize();
+        Path panelParent = panelHtml == null ? null : panelHtml.getParent();
+        Path serveDir = (panelParent == null) ? null : panelParent.toAbsolutePath().normalize();
         cfg = new CodegenPanelConfig(
                 serveDir, cfg.profileDir(), cfg.idleTimeoutMillis(),
                 cfg.launchTimeoutMs(), cfg.navigateTimeoutMs(), cfg.readyTimeoutMs(),
@@ -239,8 +247,7 @@ public final class CodegenPanelManager {
                     continue;   // 双检：其它线程已推进状态
                 }
                 state = State.STARTING;
-                launchGeneration++;
-                long gen = launchGeneration;
+                long gen = launchGeneration.incrementAndGet();
                 launchFuture = CompletableFuture.supplyAsync(() -> launchTask(gen), LAUNCH_EXECUTOR);
             }
             // join 在锁外；join 后回查。
@@ -273,7 +280,7 @@ public final class CodegenPanelManager {
         try {
             PanelProcess np = PanelProcess.launch(CodegenPanelManager.this, config);
             synchronized (lifecycleLock) {
-                if (launchGeneration == gen && state == State.STARTING) {
+                if (launchGeneration.get() == gen && state == State.STARTING) {
                     process = np;
                     state = State.READY;   // 启动线程持锁置位（09 章）
                     return np;
@@ -284,7 +291,7 @@ public final class CodegenPanelManager {
             throw new IllegalStateException("panel launch superseded by generation " + gen);
         } catch (Throwable t) {
             synchronized (lifecycleLock) {
-                if (launchGeneration == gen && state == State.STARTING) {
+                if (launchGeneration.get() == gen && state == State.STARTING) {
                     state = State.DEGRADED;   // 失败锁内置 DEGRADED（09.6）
                     process = null;
                 }
@@ -314,7 +321,7 @@ public final class CodegenPanelManager {
             }
             victim = process;
             process = null;
-            launchGeneration++;   // 作废在途 launch
+            launchGeneration.incrementAndGet();   // 作废在途 launch
             activeHandle = null;
             state = State.IDLE;
             if (victim != null) {

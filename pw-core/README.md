@@ -18,12 +18,12 @@ superseded_by: null
 
 ## 1. 定位
 
-`pw-core` 提供**不依赖任何业务域**的基础能力。`pw-web-ui` / `pw-api-core` / `pw-route` / `pw-reports-v2` 全部依赖它，它自己不依赖任何其他框架模块——这保证底层不会反向依赖上层。
+`pw-core` 提供**不依赖任何业务域**的基础能力。`pw-web-ui` / `pw-api-core` / `pw-route` / `pw-reports` 全部依赖它，它自己不依赖任何其他框架模块——这保证底层不会反向依赖上层。
 
 ## 2. 在架构中的位置
 
 ```text
-  pw-web-ui   pw-api-core   pw-route   pw-reports-v2
+  pw-web-ui   pw-api-core   pw-route   pw-reports
         \          |            |           /
          \         |            |          /
           +--------+-----------+---------+
@@ -33,7 +33,7 @@ superseded_by: null
 
 | 项 | 内容 |
 |---|---|
-| 被谁依赖 | `pw-web-ui` / `pw-api-core` / `pw-route` / `pw-reports-v2` / `pw-codegen`（间接） |
+| 被谁依赖 | `pw-web-ui` / `pw-api-core` / `pw-route` / `pw-reports` / `pw-codegen`（间接） |
 | 依赖谁 | 无框架内依赖（依赖版本由根 POM 管理） |
 | 包名 | `com.hsbc.cmb.hk.dbb.automation.framework.{common,core}` |
 | 分层约束 | ArchUnit 守卫 `core` 不得依赖任何业务域包 |
@@ -131,7 +131,7 @@ String v = ctx.get(KEY);
 
 - **不负责**任何业务域逻辑——配置门面（`WebFrameworkConfig` / `ApiFrameworkConfig`）只是 `ConfigRegistry` 的读取代理，不持有字面量。
 - **不负责**浏览器操作——Playwright 相关能力在 `pw-web-ui`。
-- **不负责**报告渲染——只定义 `ReportingBridge` 契约，实现在 `pw-reports-v2`。
+- **不负责**报告渲染——只定义 `ReportingBridge` 契约，实现在 `pw-reports`。
 - **不持有**任何 `static` 可变状态（除 `ConfigRegistry` 枚举与只读注册表），以保证并行安全。
 
 ## 8. 测试与验证

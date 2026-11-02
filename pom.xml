@@ -39,7 +39,9 @@
         <mockito.version>4.5.1</mockito.version>
         <h2.version>2.2.224</h2.version>
         <flyway.version>9.22.3</flyway.version>
-        <htmlunit3.driver.version>4.23.0</htmlunit3.driver.version>
+        <!-- 供 test-automation 的父 BOM（pw-framework-bom）解析 org.json:json 版本：框架根 POM 此前遗漏定义，
+             导致子模块 POM 在读取父 BOM 时无法解析 ${json.version}。 -->
+        <json.version>20240303</json.version>
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>

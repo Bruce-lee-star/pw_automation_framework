@@ -21,6 +21,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -176,7 +177,7 @@ public class PageElementTest {
 
         PageElement found = el.role(AriaRole.BUTTON, "提交", true);
 
-        found.locatorInternal(); // 触发惰性 supplier 解析，验证透传
+        assertNotNull(found.locatorInternal()); // 触发惰性 supplier 解析，验证透传
         var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByRoleOptions.class);
         verify(base).getByRole(org.mockito.ArgumentMatchers.eq(AriaRole.BUTTON), captor.capture());
         assertEquals("exact 应透传为布尔 true", Boolean.TRUE, captor.getValue().exact);
@@ -191,7 +192,7 @@ public class PageElementTest {
 
         PageElement found = el.role(AriaRole.OPTION, Pattern.compile("保存.*"));
 
-        found.locatorInternal(); // 触发惰性 supplier 解析，验证透传
+        assertNotNull(found.locatorInternal()); // 触发惰性 supplier 解析，验证透传
         var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByRoleOptions.class);
         verify(base).getByRole(org.mockito.ArgumentMatchers.eq(AriaRole.OPTION), captor.capture());
         assertEquals("正则应透传进 name pattern", "保存.*", captor.getValue().name.toString());
@@ -202,10 +203,10 @@ public class PageElementTest {
         BasePage bp = bpWith(mock(Page.class));
         PageElement el = new PageElement(() -> mock(Locator.class), "#x", bp);
 
-        assertThrows(NullPointerException.class, () -> el.role(null));
-        assertThrows(NullPointerException.class, () -> el.role(null, "提交"));
-        assertThrows(NullPointerException.class, () -> el.role(AriaRole.BUTTON, (String) null));
-        assertThrows(NullPointerException.class, () -> el.role(AriaRole.BUTTON, (Pattern) null));
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.role(null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.role(null, "提交"); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.role(AriaRole.BUTTON, (String) null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.role(AriaRole.BUTTON, (Pattern) null); });
     }
 
     @Test
@@ -217,7 +218,7 @@ public class PageElementTest {
 
         PageElement found = el.role(AriaRole.BUTTON, (Locator.GetByRoleOptions) null);
 
-        found.locatorInternal(); // 触发惰性 supplier 解析，验证回落 to getByRole(role)
+        assertNotNull(found.locatorInternal()); // 触发惰性 supplier 解析，验证回落 to getByRole(role)
         verify(base).getByRole(AriaRole.BUTTON);
         assertTrue(found.getSelector().contains("role=" + AriaRole.BUTTON));
     }
@@ -248,7 +249,7 @@ public class PageElementTest {
         when(base.getByText(any(String.class), any(Locator.GetByTextOptions.class))).thenReturn(mock(Locator.class));
 
         PageElement found = el.text("提交订单", true);
-        found.locatorInternal();
+        assertNotNull(found.locatorInternal());
 
         var captor = org.mockito.ArgumentCaptor.forClass(Locator.GetByTextOptions.class);
         verify(base).getByText(org.mockito.ArgumentMatchers.eq("提交订单"), captor.capture());
@@ -263,7 +264,7 @@ public class PageElementTest {
         PageElement el = new PageElement(() -> base, "#list", bp);
         when(base.getByText(any(Pattern.class))).thenReturn(mock(Locator.class));
 
-        el.text(Pattern.compile("保存.*")).locatorInternal();
+        assertNotNull(el.text(Pattern.compile("保存.*")).locatorInternal());
 
         // Pattern 无 equals 语义，用 captor 取真实 pattern 字符串断言
         var captor = org.mockito.ArgumentCaptor.forClass(Pattern.class);
@@ -295,7 +296,7 @@ public class PageElementTest {
         PageElement found = el.placeholder("请输入关键字");
 
         assertTrue("描述须含 placeholder：" + found.getSelector(), found.getSelector().contains("placeholder=请输入关键字"));
-        found.locatorInternal();
+        assertNotNull(found.locatorInternal());
         verify(base).getByPlaceholder("请输入关键字");
     }
 
@@ -309,7 +310,7 @@ public class PageElementTest {
         PageElement found = el.testId("submit-btn");
 
         assertTrue("描述须含 testId：" + found.getSelector(), found.getSelector().contains("testId=submit-btn"));
-        found.locatorInternal();
+        assertNotNull(found.locatorInternal());
         verify(base).getByTestId("submit-btn");
     }
 
@@ -323,7 +324,7 @@ public class PageElementTest {
         PageElement found = el.title("帮助");
 
         assertTrue("描述须含 title：" + found.getSelector(), found.getSelector().contains("title=帮助"));
-        found.locatorInternal();
+        assertNotNull(found.locatorInternal());
         verify(base).getByTitle("帮助");
     }
 
@@ -337,7 +338,7 @@ public class PageElementTest {
         PageElement found = el.altText("宣传图");
 
         assertTrue("描述须含 altText：" + found.getSelector(), found.getSelector().contains("altText=宣传图"));
-        found.locatorInternal();
+        assertNotNull(found.locatorInternal());
         verify(base).getByAltText("宣传图");
     }
 
@@ -346,14 +347,14 @@ public class PageElementTest {
         BasePage bp = bpWith(mock(Page.class));
         PageElement el = new PageElement(() -> mock(Locator.class), "#x", bp);
 
-        assertThrows(NullPointerException.class, () -> el.text((String) null));
-        assertThrows(NullPointerException.class, () -> el.text((Pattern) null));
-        assertThrows(NullPointerException.class, () -> el.label(null));
-        assertThrows(NullPointerException.class, () -> el.placeholder((String) null));
-        assertThrows(NullPointerException.class, () -> el.placeholder((Pattern) null));
-        assertThrows(NullPointerException.class, () -> el.testId(null));
-        assertThrows(NullPointerException.class, () -> el.title(null));
-        assertThrows(NullPointerException.class, () -> el.altText(null));
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.text((String) null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.text((Pattern) null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.label(null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.placeholder((String) null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.placeholder((Pattern) null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.testId(null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.title(null); });
+        assertThrows(NullPointerException.class, () -> { PageElement r = el.altText(null); });
     }
 
     // ---------- isClickable（2026-10-31 新增：可见且可用 = 可点击，快速探测 + 等待兜底） ----------
@@ -418,7 +419,7 @@ public class PageElementTest {
         Locator loc = mock(Locator.class);
         PageElement el = elWithLocator(bp, loc);
 
-        el.uploadFile("test-upload/sample.txt");
+        assertNotNull(el.uploadFile("test-upload/sample.txt"));
 
         ArgumentCaptor<Path[]> captor = ArgumentCaptor.forClass(Path[].class);
         verify(loc).setInputFiles(captor.capture(), any(Locator.SetInputFilesOptions.class));
@@ -435,7 +436,7 @@ public class PageElementTest {
         PageElement el = elWithLocator(bp, loc);
 
         // 资源名用 Windows 风格反斜杠；classpath 资源名恒为 '/'，框架须归一化后在任意系统命中
-        el.uploadFile("test-upload\\sample.txt");
+        assertNotNull(el.uploadFile("test-upload\\sample.txt"));
 
         ArgumentCaptor<Path[]> captor = ArgumentCaptor.forClass(Path[].class);
         verify(loc).setInputFiles(captor.capture(), any(Locator.SetInputFilesOptions.class));
@@ -453,7 +454,7 @@ public class PageElementTest {
         Path userFile = tempDir.resolve("user-upload.txt");
         Files.writeString(userFile, "hello");
 
-        el.uploadFile(userFile.toAbsolutePath().toString());
+        assertNotNull(el.uploadFile(userFile.toAbsolutePath().toString()));
 
         ArgumentCaptor<Path[]> captor = ArgumentCaptor.forClass(Path[].class);
         verify(loc).setInputFiles(captor.capture(), any(Locator.SetInputFilesOptions.class));
@@ -478,7 +479,7 @@ public class PageElementTest {
         Files.writeString(userFile, "x");
         String forwardSlashPath = userFile.toString().replace('\\', '/');
 
-        el.uploadFile(forwardSlashPath);
+        assertNotNull(el.uploadFile(forwardSlashPath));
 
         ArgumentCaptor<Path[]> captor = ArgumentCaptor.forClass(Path[].class);
         verify(loc).setInputFiles(captor.capture(), any(Locator.SetInputFilesOptions.class));
@@ -494,7 +495,7 @@ public class PageElementTest {
         PageElement el = elWithLocator(bp, loc);
 
         ElementOperationException ex = assertThrows(ElementOperationException.class,
-                () -> el.uploadFile("no/such/resource.txt"));
+                () -> { PageElement r = el.uploadFile("no/such/resource.txt"); });
         assertTrue("两端都找不到应抛明确异常：" + ex.getMessage(), ex.getMessage().contains("上传文件不存在"));
         verify(loc, never()).setInputFiles(any(Path[].class), any(Locator.SetInputFilesOptions.class));
     }
@@ -508,7 +509,7 @@ public class PageElementTest {
         Path userFile = tempDir.resolve("user2.txt");
         Files.writeString(userFile, "x");
 
-        el.uploadFile("test-upload/sample.txt", userFile.toAbsolutePath().toString());
+        assertNotNull(el.uploadFile("test-upload/sample.txt", userFile.toAbsolutePath().toString()));
 
         ArgumentCaptor<Path[]> captor = ArgumentCaptor.forClass(Path[].class);
         verify(loc).setInputFiles(captor.capture(), any(Locator.SetInputFilesOptions.class));

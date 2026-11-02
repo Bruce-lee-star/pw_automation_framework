@@ -77,5 +77,11 @@ public record ElementRef(long backendNodeId, String frameId, FrameScope scope, S
      * 故仅子 frame 元素产出该快照才有意义，但定位阶段统一产出、零额外成本）。
      */
     public record Frames(String mainFrameId, Map<String, String> parentByFrame) {
+        //  防御拷贝：record 默认会原样存入并直接返回调用方传入的可变 Map，触发 SpotBugs
+        //  EI_EXPOSE_REP / EI_EXPOSE_REP2；改为存不可变副本，既消除误报也不改变语义
+        //  （parentByFrame 仅被读取，从无写入方）。
+        public Frames {
+            parentByFrame = parentByFrame == null ? Map.of() : Map.copyOf(parentByFrame);
+        }
     }
 }

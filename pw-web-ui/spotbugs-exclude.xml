@@ -96,4 +96,13 @@
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.base.ManagedBasePageImpl"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.page.recording.PageRecorder"/><Bug pattern="EI_EXPOSE_REP"/></Match>
 
+    <!-- ===== web.lifecycle.bridge (RouteEvidenceSink 实现类与接口同名, 1 条) | owner: @web-core | SLA: 2027-Q1 | 方式: 实现类重命名(如 RouteEvidenceSinkImpl)消除同名冲突 ===== -->
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.RouteEvidenceSink"/><Bug pattern="NM_SAME_SIMPLE_NAME_AS_INTERFACE"/></Match>
+
+    <!-- ===== web.lifecycle.event (LifecycleScenarioResult/LifecycleStepResult 暴露可变 Throwable, 4 条) | owner: @web-core | SLA: 2027-Q1 | 方式: error(Throwable) 返回不可变副本 / Builder 防御性拷贝 ===== -->
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioResult"/><Bug pattern="EI_EXPOSE_REP"/></Match>
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioResult$Builder"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult"/><Bug pattern="EI_EXPOSE_REP"/></Match>
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult$Builder"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
+
 </FindBugsFilter>

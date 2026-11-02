@@ -22,7 +22,7 @@
 ## 1. 模块协作与包管理（D1）
 
 ### 1.1 现状（实测依赖方向）
-依赖方向：`pw-reports-v2`、`pw-api-core`、`pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports-v2`；`pw-codegen-v3` → `pw-web-ui`。根 POM 提供统一依赖管理。
+依赖方向：`pw-reports`、`pw-api-core`、`pw-route` → `pw-core`；`pw-web-ui` → `pw-core` + `pw-reports`；`pw-codegen-v3` → `pw-web-ui`。根 POM 提供统一依赖管理。
 
 - 框架模块直接继承根 POM；根 POM 的 `dependencyManagement` 统一管理其依赖版本，不构成运行时模块依赖边。独立维护的 `pw-reports` 保留自身 POM 与版本管理。
 - `pw-route` → `pw-core`；`pw-codegen-v3` → `pw-web-ui`，不构成循环依赖。
@@ -62,7 +62,7 @@ V3 依赖 `pw-web-ui`，应保留其所需的 Web/UI 公共桥接契约。旧版
 ## 3. 日志处理与编码（D3）
 
 ### 3.1 已修复：`ConsoleCapture` 编码不一致（P1 → 已修）
-`pw-reports-v2/.../report/console/ConsoleCapture.java` 的 `TeePrintStream` 原构造为：
+`pw-reports/.../report/console/ConsoleCapture.java` 的 `TeePrintStream` 原构造为：
 ```java
 super(new InterceptingOutputStream(delegate, isError), true);   // 使用 JVM 默认字符集
 ```
@@ -75,7 +75,7 @@ super(new InterceptingOutputStream(delegate, isError), true, StandardCharsets.UT
 （多字节跨 `write` 拆分由行缓冲在 `\n` 处合并后解码。）
 
 ### 3.2 已修复：`ReportServer` 无 charset 的 `getBytes()`（P2 → 已修）
-`pw-reports-v2/.../report/cli/ReportServer.java:146`：
+`pw-reports/.../report/cli/ReportServer.java:146`：
 ```java
 UUID.randomUUID().toString().getBytes()   // 平台默认编码
 ```
@@ -169,14 +169,14 @@ Web 的 `RouteEvidenceSink` 将待写记录按 outcome ID 分队列：route 调�
 | 文件 | 改动 |
 |---|---|
 | `pw-web-ui/.../ScenarioTraceRecorder.java` | Context 绑定的 outcome ID 优先于进程级活动用例快照，避免并行场景 trace 落错目录 |
-| `pw-reports-v2/.../ReportingBridgeImpl.java` | `currentOutcomeId()` 只读当前线程句柄，避免用全局最近用例绑定新 Context |
+| `pw-reports/.../ReportingBridgeImpl.java` | `currentOutcomeId()` 只读当前线程句柄，避免用全局最近用例绑定新 Context |
 | `pw-web-ui/.../ElementOperationSupport.java` | 诊断中报告实际重试次数和总尝试次数 |
 | `pw-codegen-v3` | 保留 V3；删除 V1/V2 旧实现 |
-| `pw-reports-v2/.../ReportBus.java` | 取消全局活动用例/步骤回退；NOOP trace/video 不再猜测归属，暴露未归属产物计数并告警 |
-| `pw-reports-v2/.../ReportingBridgeImpl.java` | 无当前线程句柄时不推断 trace/video 落点；异步路径使用显式 outcome ID |
+| `pw-reports/.../ReportBus.java` | 取消全局活动用例/步骤回退；NOOP trace/video 不再猜测归属，暴露未归属产物计数并告警 |
+| `pw-reports/.../ReportingBridgeImpl.java` | 无当前线程句柄时不推断 trace/video 落点；异步路径使用显式 outcome ID |
 | `pw-core/.../ConfigRegistry.java` | 登记报告展示配置、渲染超时和场景控制台 reporter 开关 |
-| `pw-reports-v2/.../ReportView.java`、`AggregateBuilder.java`、`pw-web-ui/.../ConsoleScenarioListener.java` | 业务配置读取统一通过 `ConfigReader` |
-| `pw-reports-v2/.../ConsoleCaptureTest.java` | 增加 UTF-8 多字节字符跨多次 write 的回归测试 |
+| `pw-reports/.../ReportView.java`、`AggregateBuilder.java`、`pw-web-ui/.../ConsoleScenarioListener.java` | 业务配置读取统一通过 `ConfigReader` |
+| `pw-reports/.../ConsoleCaptureTest.java` | 增加 UTF-8 多字节字符跨多次 write 的回归测试 |
 | `pw-route/.../RouteDelayScheduler.java` | 增加任务启动迟延（累计/最大/平均）和已启动任务计数，可与积压/拒绝计数一起观测 |
 | `pw-core/.../RouteEvidenceSink.java`、`RouteEvidenceRegistry.java` | 增加可选请求上下文透传，不破坏旧实现的默认调用契约 |
 | `pw-web-ui/.../RouteEvidenceSink.java` | 通过 Request → BrowserContext → ContextOutcomeBinding 解析用例；待写队列按 outcome ID 隔离，未知归属不会串用例；增加未归属、丢弃、写失败、写入计数 |

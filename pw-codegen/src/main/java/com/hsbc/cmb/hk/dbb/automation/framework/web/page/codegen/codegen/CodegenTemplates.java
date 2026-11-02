@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 /**
- * 代码生成模板的统一渲染入口（FreeMarker，与框架报告侧 pw-reports-v2 共用引擎 {@code 2.3.34}）。
+ * 代码生成模板的统一渲染入口（FreeMarker，与框架报告侧 pw-reports 共用引擎 {@code 2.3.34}）。
  *
  * <p>Page / Step / Assert 三类产物<b>共用同一套模板机制</b>：模板落在
  * {@code src/main/resources/codegen/templates/}（{@code page-class.ftl} / {@code step-class.ftl} /
