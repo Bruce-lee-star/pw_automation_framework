@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * JUnit 兼容 XML——Serenity 对齐产物（CI / Surefire 聚合 / 第三方仪表盘消费）。
  *
- * <p>文件名 {@code serenity-junit.xml}；按 feature（UserStory）分组为多个 {@code <testsuite>}，
+ * <p>文件名 {@code pw-junit.xml}；按 feature（UserStory）分组为多个 {@code <testsuite>}，
  * 每用例一个 {@code <testcase>}。结果映射：FAILURE→{@code <failure>}、ERROR→{@code <error>}、
  * SKIPPED/IGNORED/UNDEFINED→{@code <skipped>}、SUCCESS/PENDING→通过。用例级 stdout/stderr
  * 经 {@code <system-out>}/{@code <system-err>} 输出（含已捕获的控制台输出）。</p>
@@ -26,10 +26,10 @@ public final class JunitXmlWriter {
     private JunitXmlWriter() {
     }
 
-    /** 写 {@code <dir>/serenity-junit.xml}；返回目标路径。 */
+    /** 写 {@code <dir>/pw-junit.xml}；返回目标路径。 */
     public static Path writeXml(Path dir, List<TestOutcome> outcomes) throws IOException {
         Files.createDirectories(dir);
-        Path target = dir.resolve("serenity-junit.xml");
+        Path target = dir.resolve("pw-junit.xml");
 
         Map<String, List<TestOutcome>> byFeature = new LinkedHashMap<>();
         for (TestOutcome o : outcomes) {

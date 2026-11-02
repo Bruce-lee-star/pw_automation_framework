@@ -39,9 +39,9 @@ class LocalReportSinkRenderTest {
 
         // 等价性回归：并行渲染后全部产物就位
         assertThat(dir.resolve("index.html")).exists();
-        assertThat(dir.resolve("serenity-summary.json")).exists();
-        assertThat(dir.resolve("serenity-summary.csv")).exists();
-        assertThat(dir.resolve("serenity-junit.xml")).exists();
+        assertThat(dir.resolve("pw-summary.json")).exists();
+        assertThat(dir.resolve("pw-summary.csv")).exists();
+        assertThat(dir.resolve("pw-junit.xml")).exists();
         assertThat(dir.resolve("email-report.html")).exists();
         assertThat(dir.resolve("case-a").resolve("case-a.html")).exists();
         assertThat(dir.resolve("case-b").resolve("case-b.html")).exists();
@@ -60,7 +60,7 @@ class LocalReportSinkRenderTest {
         sink.accept(new RunFinishedEvent(List.of()));
         //  零用例不得抛、不得产生错误；index/summary 仍应生成（空运行）
         assertThat(dir.resolve("index.html")).exists();
-        assertThat(dir.resolve("serenity-summary.json")).exists();
+        assertThat(dir.resolve("pw-summary.json")).exists();
         assertThat(sink.writtenIds()).isEmpty();
     }
 

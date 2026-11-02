@@ -361,7 +361,7 @@ public class ApiFrameworkConfig {
      * 获取 框架 输出目录。
      * @return 输出目录路径
      */
-    public static String getSerenityOutputDirectory() {
+    public static String getReportOutputDirectory() {
         return config().hasPath(FRAMEWORK_OUTPUT_DIRECTORY.key())
             ? config().getString(FRAMEWORK_OUTPUT_DIRECTORY.key())
             : FRAMEWORK_OUTPUT_DIRECTORY.defaultValue();

@@ -117,7 +117,7 @@ public interface ReportingBridge {
      * （通常是报告 per-case 目录下的 {@code trace.zip}），从而不产生“框架 traces/ + per-case”两份、
      * 也无须事后拷贝/移动。
      *
-     * <p>默认 {@code null} = 框架自选位置（固定 {@code target/site/serenity/traces}，非配置项）：
+     * <p>默认 {@code null} = 框架自选位置（固定 {@code target/reports/traces}，非配置项）：
      * 无活动用例句柄 / 未接报告时走此路，trace 仍落盘作证据，由 TraceRetention 按 mtime 治理。
      *
      * @return trace 目标文件路径；不需要指导落点时返回 {@code null}
@@ -128,13 +128,13 @@ public interface ReportingBridge {
 
     /**
      * 截图落盘<b>目录</b>（可选）：返回非 {@code null} 时，框架把截图写进该目录（通常是报告
-     * per-case 目录下的 {@code screenshots/}），而不是固定的 {@code target/site/serenity} 根目录。
+     * per-case 目录下的 {@code screenshots/}），而不是固定的 {@code target/reports} 根目录。
      *
-     * <p>动机（2026-10-20 用户反馈）：截图曾以 sha256 命名散落在 {@code target/site/serenity/}
+     * <p>动机（2026-10-20 用户反馈）：截图曾以 sha256 命名散落在 {@code target/reports/}
      * 根下，与 per-case 目录（报告真正引用的位置）割裂，产物目录被垃圾文件污染。
      * 与 {@link #traceTarget()} 同源：报告侧指导框架落点，从源头避免两份。
      *
-     * <p>默认 {@code null} = 框架自选位置（{@code target/site/serenity}，非配置项）：
+     * <p>默认 {@code null} = 框架自选位置（{@code target/reports}，非配置项）：
      * 未接报告 / 无活动用例句柄时走此路，截图仍落盘作证据。
      *
      * @return 截图目录；不需要指导落点时返回 {@code null}

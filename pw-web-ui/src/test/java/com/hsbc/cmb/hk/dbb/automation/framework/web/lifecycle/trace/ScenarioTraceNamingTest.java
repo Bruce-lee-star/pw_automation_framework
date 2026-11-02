@@ -84,12 +84,12 @@ public class ScenarioTraceNamingTest {
         try {
             System.clearProperty(key);
             FrameworkConfigManager.clearCache();
-            assertEquals("target/site/serenity/traces", ScenarioTraceRecorder.traceDir());
+            assertEquals("target/reports/traces", ScenarioTraceRecorder.traceDir());
 
             System.setProperty(key, "custom/traces");
             FrameworkConfigManager.clearCache();
             assertEquals("兜底目录为固定值、不受已移除的配置键影响",
-                    "target/site/serenity/traces", ScenarioTraceRecorder.traceDir());
+                    "target/reports/traces", ScenarioTraceRecorder.traceDir());
         } finally {
             if (prev == null) {
                 System.clearProperty(key);

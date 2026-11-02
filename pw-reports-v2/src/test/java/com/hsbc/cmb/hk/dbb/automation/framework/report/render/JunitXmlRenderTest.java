@@ -18,8 +18,8 @@ class JunitXmlRenderTest {
     void writesJunitXmlWithSuiteAndFailure() throws Exception {
         JunitXmlWriter.writeXml(dir, List.of(OutcomeFixtures.full()));
 
-        Path xml = dir.resolve("serenity-junit.xml");
-        assertTrue(Files.exists(xml), "serenity-junit.xml should be produced");
+        Path xml = dir.resolve("pw-junit.xml");
+        assertTrue(Files.exists(xml), "pw-junit.xml should be produced");
 
         String content = Files.readString(xml);
         assertTrue(content.contains("<testsuites"), "root testsuites");
@@ -33,7 +33,7 @@ class JunitXmlRenderTest {
     @Test
     void groupsByFeatureAndEscapesXml() throws Exception {
         JunitXmlWriter.writeXml(dir, List.of(OutcomeFixtures.full()));
-        String content = Files.readString(dir.resolve("serenity-junit.xml"));
+        String content = Files.readString(dir.resolve("pw-junit.xml"));
         // & in failure message must be escaped
         assertTrue(content.contains("&amp;") || !content.contains("&"), "xml escaped");
         assertTrue(content.contains("tests="), "suite counts present");

@@ -54,7 +54,7 @@ class TraceBarRenderTest {
     @Test
     @DisplayName("托管（baseUrl 存在）→ 下载用绝对 URL；播放按钮仍只开首页")
     void hostedBaseUrlStillOnlyOpensViewerHome() throws Exception {
-        System.setProperty(BASE_URL_PROP, "https://ci.example/job/run42/artifact/serenity/");
+        System.setProperty(BASE_URL_PROP, "https://ci.example/job/run42/artifact/reports/");
         TestOutcome o = OutcomeFixtures.full();
         o.setTracePath("login-12-x/trace.zip");
 

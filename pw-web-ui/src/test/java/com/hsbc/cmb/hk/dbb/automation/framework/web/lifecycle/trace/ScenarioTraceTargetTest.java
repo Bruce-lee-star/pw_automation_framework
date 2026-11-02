@@ -46,7 +46,7 @@ public class ScenarioTraceTargetTest {
         when(bridge.traceTarget()).thenReturn(Path.of("reports", "latest-case", "trace.zip"));
         ReportingBridgeRegistry.install(bridge);
         try {
-            assertEquals(Paths.get("target/site/serenity/traces", "fallback.zip"),
+            assertEquals(Paths.get("target/reports/traces", "fallback.zip"),
                     ScenarioTraceRecorder.resolveTraceTarget(context, "fallback.zip"));
         } finally {
             ContextOutcomeBinding.unbind(context);

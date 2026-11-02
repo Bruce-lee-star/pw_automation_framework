@@ -32,7 +32,7 @@ import java.util.Map;
  * {@code index.html} + {@code feature-*.html} 信息完全重复，且是三页里唯一没对齐顶栏的遗留页。
  * 删除范围：模板 {@code serenity-summary.ftl}、{@code writeSummary}、{@code SUMMARY_FILE}
  * 常量、{@code minimalSummary} 兜底页，以及 {@code LocalReportSink} 里的写盘调用。
- * {@code serenity-summary.json} / {@code serenity-summary.csv} 是<b>数据出口</b>（供 CI 与
+ * {@code pw-summary.json} / {@code pw-summary.csv} 是<b>数据出口</b>（供 CI 与
  * 邮件插件消费），与 HTML 页无关，<b>保留不动</b>。
  *
  * <p>与旧实现的差异（有意）：

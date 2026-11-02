@@ -504,7 +504,7 @@ class PluginEventChainTest {
         finishRun();
 
         assertThat(dir.resolve("index.html")).exists();
-        assertThat(dir.resolve("serenity-summary.json")).exists();
+        assertThat(dir.resolve("pw-summary.json")).exists();
         assertCaseReportExists("indexed", ".html");
     }
 

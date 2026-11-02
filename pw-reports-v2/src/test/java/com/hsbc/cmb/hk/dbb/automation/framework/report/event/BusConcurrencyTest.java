@@ -153,7 +153,7 @@ class BusConcurrencyTest {
 
         assertThat(tempDir.resolve("art-1-a").resolve("art-1-a.json")).exists();
         assertThat(tempDir.resolve("art-2-b").resolve("art-2-b.json")).exists();
-        assertThat(tempDir.resolve("serenity-summary.json")).exists();
+        assertThat(tempDir.resolve("pw-summary.json")).exists();
         assertThat(tempDir.resolve("index.html")).exists();
         assertThat(tempDir.resolve("assets/report.css")).exists();
         assertThat(tempDir.resolve("art-2-b").resolve("art-2-b.html")).exists();

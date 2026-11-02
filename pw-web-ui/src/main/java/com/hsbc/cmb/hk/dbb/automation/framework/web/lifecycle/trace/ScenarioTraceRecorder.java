@@ -64,7 +64,7 @@ public final class ScenarioTraceRecorder {
      * trace.zip 才落到此处作证据；正常使用 v2 报告时 trace 直接落 per-case（{@link #resolveTraceTarget}），
      * 此目录不被使用。
      */
-    static final String TRACE_DIR = "target/site/serenity/traces";
+    static final String TRACE_DIR = "target/reports/traces";
 
     /** trace 保存目录（固定 {@link #TRACE_DIR}，不由配置覆盖——trace 落点由报告经 {@code traceTarget()} 指导）。 */
     static String traceDir() {

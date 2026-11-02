@@ -111,7 +111,7 @@ public final class ReportingBridgeImpl implements ReportingBridge {
     @Override
     public Path screenshotTarget() {
         //  指导框架把截图写进 per-case（<outputDir>/<outcomeId>/screenshots），
-        //   避免 sha256 命名的截图散落在 target/site/serenity 根目录。
+        //   避免 sha256 命名的截图散落在 target/reports 根目录。
         StepHandle handle = bus.captureHandle();
         if (handle.isNoop()) {
             return null;

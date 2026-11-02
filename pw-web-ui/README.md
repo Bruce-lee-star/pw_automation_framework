@@ -131,7 +131,7 @@ Web 域全部键为 `ConfigRegistry.WEB_*`（约 110 项），由 `WebFrameworkC
 | `framework.playwright.concurrent.max` | **自适应**（CPU/2，钳制 [2,32]） | 并发上限；**运行期计算，非固定字面量** |
 | `framework.playwright.concurrent.parallelism` | `4` | 并行度 |
 | `framework.screenshot.strategy` | `AFTER_EACH_STEP` | 截图时机策略 |
-| `framework.output.directory` | `target/site/serenity` | 报告输出目录 |
+| `framework.output.directory` | `target/reports` | 报告输出目录 |
 | `logging.root.level` | `INFO` | 日志级别；DEBUG/TRACE 控制详细诊断日志 |
 | `framework.recording.enabled` | `true` | 是否将浏览器动作写入测试报告（独立于日志级别） |
 

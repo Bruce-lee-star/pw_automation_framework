@@ -1014,7 +1014,6 @@ public enum WebFrameworkConfig {
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY, "serenity.reports.screenshots.directory"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY, "serenity.screenshots.directory"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.outputDirectory"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME, "serenity.rerun.failures.wait.time"),
@@ -1022,7 +1021,6 @@ public enum WebFrameworkConfig {
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_BASE, "serenity.retry.delay.base"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MAX, "serenity.retry.delay.max"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier"),
-                    java.util.Map.entry(ConfigRegistry.API_FRAMEWORK_OUTPUT_DIRECTORY, "serenity.output-directory"),
                     java.util.Map.entry(ConfigRegistry.API_FRAMEWORK_HISTORY_FOLDER, "serenity.history.folder")
             );
 

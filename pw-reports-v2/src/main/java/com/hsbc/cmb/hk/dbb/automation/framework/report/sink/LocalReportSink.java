@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
  * <ol>
  *   <li>{@code CaseFinished} → <b>立即写 per-case JSON</b>（真相源实时保，CI 超时被杀也不丢已完成用例）；</li>
  *   <li>{@code RunFinished} → sweep 补写漏网 JSON → 逐用例渲染 HTML（失败降级最小页）
- *       → serenity-summary.json → index.html → feature-*.html →
+ *       → pw-summary.json → index.html → feature-*.html →
  *       email-report.html（邮件用单页自包含报告）→
  *       monitor-failures.html（无监控失败不落文件）→ assets；</li>
  *       <p>（{@code serenity-summary.html} 已于 2026-10-22 删除：与 index + feature 页信息重复。）</p>
@@ -128,7 +128,7 @@ public final class LocalReportSink implements ReportSink {
         for (TestOutcome o : aggregated) {
             tasks.add(Executors.callable(() -> renderOutcomeSafe(o)));
         }
-        tasks.add(Executors.callable(() -> runRender("serenity-summary.json", true,
+        tasks.add(Executors.callable(() -> runRender("pw-summary.json", true,
                 () -> { JsonWriter.writeSummary(dir(), aggregated); return null; })));
         tasks.add(Executors.callable(() -> runRender("index.html", false,
                 () -> { AggregateBuilder.writeIndex(dir(), aggregated); return null; })));
@@ -138,9 +138,9 @@ public final class LocalReportSink implements ReportSink {
                 () -> { EmailReportRenderer.writeEmailReport(dir(), aggregated); return null; })));
         tasks.add(Executors.callable(() -> runRender("monitor-failures.html", false,
                 () -> { SummaryHtmlRenderer.writeMonitorFailures(dir(), outcomes); return null; })));
-        tasks.add(Executors.callable(() -> runRender("serenity-summary.csv", false,
+        tasks.add(Executors.callable(() -> runRender("pw-summary.csv", false,
                 () -> { CsvWriter.writeCsv(dir(), aggregated); return null; })));
-        tasks.add(Executors.callable(() -> runRender("serenity-junit.xml", false,
+        tasks.add(Executors.callable(() -> runRender("pw-junit.xml", false,
                 () -> { JunitXmlWriter.writeXml(dir(), aggregated); return null; })));
         tasks.add(Executors.callable(() -> runRender("static assets", false,
                 () -> { StaticAssets.copyAssets(dir()); return null; })));

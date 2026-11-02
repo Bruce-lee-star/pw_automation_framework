@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 扁平 CSV 汇总——Serenity 对齐产物（报告可经表格工具 / CI 二次消费）。
  *
- * <p>文件名 {@code serenity-summary.csv}；一行一个用例，列：outcomeId / feature / scenario /
+ * <p>文件名 {@code pw-summary.csv}；一行一个用例，列：outcomeId / feature / scenario /
  * result / durationMs / startTime / endTime / tags / failureClass / failureMessage。
  * 字段按 RFC 4180 转义（含逗号 / 引号 / 换行时加引号并翻倍内部引号）。</p>
  */
@@ -25,10 +25,10 @@ public final class CsvWriter {
     private CsvWriter() {
     }
 
-    /** 写 {@code <dir>/serenity-summary.csv}；返回目标路径。 */
+    /** 写 {@code <dir>/pw-summary.csv}；返回目标路径。 */
     public static Path writeCsv(Path dir, List<TestOutcome> outcomes) throws IOException {
         Files.createDirectories(dir);
-        Path target = dir.resolve("serenity-summary.csv");
+        Path target = dir.resolve("pw-summary.csv");
         StringBuilder sb = new StringBuilder();
         sb.append(String.join(",", HEADER)).append('\n');
         for (TestOutcome o : outcomes) {

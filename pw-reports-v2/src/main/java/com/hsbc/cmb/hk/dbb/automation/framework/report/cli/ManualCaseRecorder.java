@@ -29,13 +29,13 @@ import java.util.Locale;
  * <p><b>模式 A：新建手动 case</b>
  * <pre>
  * java -cp pw-reports-v2.jar ...ManualCaseRecorder \
- *   --dir target/site/serenity --feature "Login" --scenario "手动验证" \
+ *   --dir target/reports --feature "Login" --scenario "手动验证" \
  *   --result PASS --screenshot 1.png --note "人工验证"
  * </pre>
  *
  * <p><b>模式 B：给已有 case（通常是失败的自动 case）补传截图</b>
  * <pre>
- * ...ManualCaseRecorder --dir target/site/serenity \
+ * ...ManualCaseRecorder --dir target/reports \
  *   --append login-scenario-123 --screenshot 1.png --note "人工复现确认"
  * </pre>
  *
@@ -163,7 +163,7 @@ public final class ManualCaseRecorder {
         try (var paths = Files.walk(outputDir)) {
             paths.filter(p -> {
                         String name = p.getFileName().toString();
-                        return name.endsWith(".json") && !name.startsWith("serenity-summary")
+                        return name.endsWith(".json") && !name.startsWith("pw-summary")
                                 && Files.isRegularFile(p);
                     })
                     .forEach(p -> {

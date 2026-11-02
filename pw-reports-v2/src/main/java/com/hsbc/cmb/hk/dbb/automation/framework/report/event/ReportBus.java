@@ -665,7 +665,7 @@ public final class ReportBus {
     /**
      * 当前用例的截图落盘<b>目录</b>（{@code <outputDir>/<outcomeId>/screenshots}）——经
      * {@code ReportingBridge#screenshotTarget()} 指导框架把截图直接写到这里，
-     * 不再散落在 {@code target/site/serenity} 根目录（2026-10-20 用户反馈）。
+     * 不再散落在 {@code target/reports} 根目录（2026-10-20 用户反馈）。
      *
      * <p>与 {@link #traceTarget} 一致的无活动句柄语义：返回 {@code null} 时框架自选位置兜底。
      * 目录<b>不</b>在此处创建（框架侧负责创建），仅返回目标路径。

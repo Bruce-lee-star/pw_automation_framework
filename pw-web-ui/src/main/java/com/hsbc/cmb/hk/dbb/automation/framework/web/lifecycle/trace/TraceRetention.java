@@ -23,7 +23,7 @@ import java.util.stream.Stream;
  * 可整体关闭。
  *
  * <p><b>目标目录</b>：{@link ScenarioTraceRecorder#traceDir()}（<b>固定值</b>
- * {@code target/site/serenity/traces}，<b>无</b> {@code playwright.context.trace.dir} 配置键——
+ * {@code target/reports/traces}，<b>无</b> {@code playwright.context.trace.dir} 配置键——
  * trace 落点由报告经 {@code ReportingBridge#traceTarget()} 指导直接进 per-case，
  * 该目录只是"报告未指导"时的证据兜底）。这是唯一被治理的目录——截图 / WebP 等其它产物不在治理范围。
  */

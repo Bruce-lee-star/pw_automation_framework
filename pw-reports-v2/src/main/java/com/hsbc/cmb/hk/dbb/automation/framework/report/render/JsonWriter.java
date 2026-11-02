@@ -16,7 +16,7 @@ import java.util.TreeMap;
 /**
  * per-case JSON 写出——真相源，优先级最高（R4：一个坏 case 不拖累其余）。
  *
- * <p>文件名 {@code <outcomeId>.json}；汇总 {@code serenity-summary.json}。
+ * <p>文件名 {@code <outcomeId>.json}；汇总 {@code pw-summary.json}。
  * 序列化口径：NON_NULL（空值省略，与 Serenity 一致）、空集合保留为 {@code []}、
  * pretty-print（人可 diff，CI golden 对比稳定）。
  */
@@ -46,7 +46,7 @@ public final class JsonWriter {
         summary.put("reportVersion", 1);
         summary.put("outcomes", outcomes.stream().map(JsonWriter::outcomeSummary).toList());
         summary.put("totals", totals(outcomes));
-        Path target = dir.resolve("serenity-summary.json");
+        Path target = dir.resolve("pw-summary.json");
         writeAtomic(target, MAPPER.writeValueAsBytes(summary));
         return target;
     }

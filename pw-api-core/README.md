@@ -124,7 +124,7 @@ TestServices.clear();
 | `test.retry.count` | `3` | 失败重试次数 |
 | `test.retry.delay` | `1000` | 重试间隔（毫秒） |
 | `api.request.response.logging.enabled` | `false` | **默认关闭**的请求/响应日志 |
-| `framework.output-directory` | `target/site/serenity` | 报告输出目录 |
+| `framework.output-directory` | `target/reports` | 报告输出目录 |
 
 > 另有本模块自有的配置**路径片段**常量（`domain/enums/ConfigKeys`）：`api.base.uri`、`end-points`、`payload`、`schemas`、`query-params`、`path-params`、`headers` 等。
 

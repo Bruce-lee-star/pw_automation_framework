@@ -13,7 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * pw-reports 报告源：读 {@code serenity-summary.json}（outcomes[]）取元信息，
+ * pw-reports 报告源：读 {@code pw-summary.json}（outcomes[]）取元信息，
  * 再逐个读 {@code <outcomeId>.json} 取步骤树（扁平化描述序列）。
  */
 public final class PwReportSource implements ReportSource {
@@ -27,7 +27,7 @@ public final class PwReportSource implements ReportSource {
 
     @Override
     public List<CanonicalOutcome> load(Path dir) {
-        Path summary = dir.resolve("serenity-summary.json");
+        Path summary = dir.resolve("pw-summary.json");
         if (!Files.exists(summary)) {
             return List.of();
         }

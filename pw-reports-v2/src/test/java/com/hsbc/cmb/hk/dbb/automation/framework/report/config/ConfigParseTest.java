@@ -39,11 +39,11 @@ class ConfigParseTest {
     class Defaults {
 
         @Test
-        @DisplayName("四项决策全取默认：启用、target/site/serenity、FOR_FAILURES、不推送")
+        @DisplayName("四项决策全取默认：启用、target/reports、FOR_FAILURES、不推送")
         void defaultsAreUsableOutOfBox() {
             PwReportsConfig c = PwReportsConfig.builder().build();
             assertThat(c.isEnabled()).isTrue();
-            assertThat(c.getOutputDir()).isEqualTo(Paths.get("target/site/serenity"));
+            assertThat(c.getOutputDir()).isEqualTo(Paths.get("target/reports"));
             assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.FOR_FAILURES);
             assertThat(c.isPushEnabled()).isFalse();
             assertThat(c.getPushUrl()).isNull();
@@ -216,7 +216,7 @@ class ConfigParseTest {
             withProps("pw.report.output", "   ");
             try {
                 assertThat(PwReportsConfig.load().getOutputDir())
-                        .isEqualTo(Paths.get("target/site/serenity"));
+                        .isEqualTo(Paths.get("target/reports"));
             } finally {
                 System.clearProperty("pw.report.output");
             }

@@ -27,7 +27,7 @@ import java.util.regex.PatternSyntaxException;
  *   <caption>配置项（4 项）</caption>
  *   <tr><th>属性</th><th>默认</th><th>作用</th></tr>
  *   <tr><td>{@code pw.report.enabled}</td><td>{@code true}</td><td>kill-switch：false 时整体静默</td></tr>
- *   <tr><td>{@code pw.report.output}</td><td>{@code target/site/serenity}</td><td>产物目录（回落 {@code framework.output.directory}）</td></tr>
+ *   <tr><td>{@code pw.report.output}</td><td>{@code target/reports}</td><td>产物目录（回落 {@code framework.output.directory}）</td></tr>
  *   <tr><td>{@code pw.report.screenshot}</td><td>{@code FOR_FAILURES}</td><td>截图策略（见 {@link ScreenshotMode}）</td></tr>
  *   <tr><td>{@code pw.report.push.url}</td><td>空</td><td>非空即启用推送（不再需要单独的 enabled）</td></tr>
  * </table>
@@ -147,7 +147,7 @@ public final class PwReportsConfig {
     /**
      * 产物目录解析顺序：<b>{@code pw.report.output}</b>（系统属性 / 环境变量 {@code PW_REPORT_OUTPUT}）
      * → <b>{@code framework.output.directory}</b>（框架通用配置，经 {@link ConfigReader} 解析：
-     * 系统属性 / 环境变量 / 配置源）→ 默认 {@code target/site/serenity}。
+     * 系统属性 / 环境变量 / 配置源）→ 默认 {@code target/reports}。
      *
      * <p>第二级是刻意保留的兼容：业务侧早已用 {@code framework.output.directory} 表达"报告生成位置"，
      * 该键此前只在 {@code ConfigRegistry} 登记却<b>无任何读取方</b>（等于死配置）。现在它真正生效，
@@ -165,7 +165,7 @@ public final class PwReportsConfig {
             log.debug("pw.report.outputDir falls back to framework.output.directory={}", frameworkDir);
             return frameworkDir.trim();
         }
-        return "target/site/serenity";
+        return "target/reports";
     }
 
     // ---------------------------------------------------------------- getters
@@ -280,7 +280,7 @@ public final class PwReportsConfig {
     public static final class Builder {
 
         private boolean enabled = true;
-        private Path outputDir = Paths.get("target/site/serenity");
+        private Path outputDir = Paths.get("target/reports");
         private ScreenshotMode screenshotMode = ScreenshotMode.FOR_FAILURES;
         private List<Pattern> extraScrubPatterns = new ArrayList<>();
         private Limits limits = Limits.DEFAULT;

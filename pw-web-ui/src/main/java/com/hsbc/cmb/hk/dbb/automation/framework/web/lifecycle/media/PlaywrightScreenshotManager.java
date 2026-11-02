@@ -211,7 +211,7 @@ public class PlaywrightScreenshotManager {
      * </ul>
      *
      * @apiNote 落盘目录由报告侧指导（{@code ReportingBridge#screenshotTarget()}，通常为 per-case
-     *          的 {@code screenshots/}）；未接报告时回落 {@code target/site/serenity}（非配置项）。
+     *          的 {@code screenshots/}）；未接报告时回落 {@code target/reports}（非配置项）。
      *          框架 4.2.0 对截图后缀/格式有内部假设，必须保持 PNG。
      */
     public static String takeScreenshot(String title) {
@@ -248,9 +248,9 @@ public class PlaywrightScreenshotManager {
     /**
      * 解析截图落盘目录：优先 {@code ReportingBridge#screenshotTarget()}（报告 per-case
      * {@code screenshots/}），不可用（未接报告 / 无活动用例句柄 / 路径非法）时回落
-     * {@code target/site/serenity}。
+     * {@code target/reports}。
      *
-     * <p>why：2026-10-20 前截图一律写 {@code target/site/serenity} 根目录并以 sha256 命名，
+     * <p>why：2026-10-20 前截图一律写 {@code target/reports} 根目录并以 sha256 命名，
      * 报告实际引用的是 per-case 下的 {@code step-NNN.png}，于是根目录里堆满无人引用的
      * 垃圾文件、per-case 目录反而不是唯一真相源。与 {@code traceTarget()} 同一设计：
      * 报告侧指导框架落点，从源头避免两份。
@@ -264,7 +264,7 @@ public class PlaywrightScreenshotManager {
         } catch (Throwable t) {
             logger.debug("screenshotTarget unavailable, fallback: {}", t.toString());
         }
-        return Paths.get("target/site/serenity");
+        return Paths.get("target/reports");
     }
 
     /**

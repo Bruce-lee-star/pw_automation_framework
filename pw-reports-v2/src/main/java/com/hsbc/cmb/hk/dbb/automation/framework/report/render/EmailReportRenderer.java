@@ -310,7 +310,7 @@ public final class EmailReportRenderer {
         String base = PwReportsConfig.baseUrl();
         Map<String, Object> l = new LinkedHashMap<>();
         l.put("fullReport", base + "index.html");
-        l.put("csv", base + "serenity-summary.csv");
+        l.put("csv", base + "pw-summary.csv");
         return l;
     }
 

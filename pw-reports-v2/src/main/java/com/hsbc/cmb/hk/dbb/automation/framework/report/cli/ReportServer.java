@@ -309,7 +309,7 @@ public final class ReportServer {
         try (var paths = Files.walk(runDir)) {
             paths.filter(p -> {
                         String name = p.getFileName().toString();
-                        return name.endsWith(".json") && !name.startsWith("serenity-summary")
+                        return name.endsWith(".json") && !name.startsWith("pw-summary")
                                 && Files.isRegularFile(p);
                     })
                     .forEach(p -> {
@@ -444,7 +444,7 @@ public final class ReportServer {
     // ---------------------------------------------------------------- main
 
     public static void main(String[] args) throws IOException {
-        String root = "target/site/serenity";
+        String root = "target/reports";
         int port = 8080;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {

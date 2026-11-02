@@ -22,8 +22,8 @@ class CsvRenderTest {
     void writesHeaderAndOneRowPerOutcome() throws Exception {
         CsvWriter.writeCsv(dir, List.of(OutcomeFixtures.full()));
 
-        Path csv = dir.resolve("serenity-summary.csv");
-        assertTrue(Files.exists(csv), "serenity-summary.csv should be produced");
+        Path csv = dir.resolve("pw-summary.csv");
+        assertTrue(Files.exists(csv), "pw-summary.csv should be produced");
 
         List<String> lines = Files.readAllLines(csv);
         assertEquals("outcomeId,feature,scenario,result,durationMs,startTime,endTime,tags,"
@@ -49,7 +49,7 @@ class CsvRenderTest {
         o.setTags(List.of("a", "b"));
         CsvWriter.writeCsv(dir, List.of(o));
 
-        String row = Files.readAllLines(dir.resolve("serenity-summary.csv")).get(1);
+        String row = Files.readAllLines(dir.resolve("pw-summary.csv")).get(1);
         // name contains a comma → must be wrapped in quotes
         assertTrue(row.contains("\"open, then close\""), "comma field quoted");
         assertTrue(row.contains("a;b"), "tags joined by ;");
