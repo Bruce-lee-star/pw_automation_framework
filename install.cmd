@@ -1,1 +1,1 @@
-mvn -o -pl pw-codegen-v3 -am clean install -DskipTests "-Dcve.gate.skip=true" "-Dcheckstyle.skip=true" "-Dspotbugs.skip=true"
+mvn -o -am clean install -DskipTests "-Dcve.gate.skip=true" "-Dcheckstyle.skip=true" "-Dspotbugs.skip=true"
