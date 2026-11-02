@@ -86,9 +86,6 @@ public class ApiFrameworkConfig {
     /** 框架 输出目录。 */
     public static final ConfigKey FRAMEWORK_OUTPUT_DIRECTORY = ConfigRegistry.API_FRAMEWORK_OUTPUT_DIRECTORY.toConfigKey();
 
-    /** 框架 历史目录。 */
-    public static final ConfigKey FRAMEWORK_HISTORY_FOLDER = ConfigRegistry.API_FRAMEWORK_HISTORY_FOLDER.toConfigKey();
-
     /**
      * API 请求/响应日志是否启用。
      * <p>默认 {@code false}（关闭）：SEC-1 / P-1 安全基线 —— 请求/响应体可能含凭据、token、PII，
@@ -365,16 +362,6 @@ public class ApiFrameworkConfig {
         return config().hasPath(FRAMEWORK_OUTPUT_DIRECTORY.key())
             ? config().getString(FRAMEWORK_OUTPUT_DIRECTORY.key())
             : FRAMEWORK_OUTPUT_DIRECTORY.defaultValue();
-    }
-
-    /**
-     * 获取 框架 历史目录。
-     * @return 历史目录路径
-     */
-    public static String getSerenityHistoryFolder() {
-        return config().hasPath(FRAMEWORK_HISTORY_FOLDER.key())
-            ? config().getString(FRAMEWORK_HISTORY_FOLDER.key())
-            : FRAMEWORK_HISTORY_FOLDER.defaultValue();
     }
 
     // ========================================

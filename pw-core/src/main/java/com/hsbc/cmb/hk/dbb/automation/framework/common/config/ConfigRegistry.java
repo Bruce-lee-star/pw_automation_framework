@@ -621,16 +621,6 @@ public enum ConfigRegistry {
         "12000",
         "全页截图最大滚动高度（像素），<=0 表示不限制"
     ),
-    WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY(
-        "framework.reports.screenshots.directory",
-        "target/reports",
-        "框架 报告截图目录"
-    ),
-    WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY(
-        "framework.screenshots.directory",
-        "target/reports",
-        "框架 截图目录"
-    ),
     WEB_FRAMEWORK_LOGGING(
         "framework.logging",
         "VERBOSE",
@@ -983,11 +973,6 @@ public enum ConfigRegistry {
         "framework.output-directory",
         "target/reports",
         "框架 输出目录"
-    ),
-    API_FRAMEWORK_HISTORY_FOLDER(
-        "framework.history.folder",
-        "target/reports/history",
-        "框架 历史目录"
     ),
     API_API_REQUEST_RESPONSE_LOGS_ENABLED(
         "api.request.response.logging.enabled",

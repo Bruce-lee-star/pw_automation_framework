@@ -627,16 +627,6 @@ public enum WebFrameworkConfig {
      */
     PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT(ConfigRegistry.WEB_PLAYWRIGHT_SCREENSHOT_FULLPAGE_MAX_HEIGHT),
 
-    /**
-     * 框架 报告截图目录
-     */
-    FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY),
-
-    /**
-     * 框架 截图目录
-     */
-    FRAMEWORK_SCREENSHOTS_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY),
-
     // ==================== 报告动作录制配置 ====================
 
     /** Whether browser actions are added to the test report. */
@@ -1011,8 +1001,6 @@ public enum WebFrameworkConfig {
             java.util.Map.ofEntries(
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME, "serenity.project.name"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOT_STRATEGY, "serenity.screenshot.strategy"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_REPORTS_SCREENSHOTS_DIRECTORY, "serenity.reports.screenshots.directory"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOTS_DIRECTORY, "serenity.screenshots.directory"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
@@ -1020,8 +1008,7 @@ public enum WebFrameworkConfig {
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY, "serenity.retry.delay.strategy"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_BASE, "serenity.retry.delay.base"),
                     java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MAX, "serenity.retry.delay.max"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier"),
-                    java.util.Map.entry(ConfigRegistry.API_FRAMEWORK_HISTORY_FOLDER, "serenity.history.folder")
+                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier")
             );
 
     /**
