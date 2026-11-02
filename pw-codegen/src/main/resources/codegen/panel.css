@@ -15,6 +15,8 @@ body { display: flex; flex-direction: column; background: #1e1e1e; color: #ddd; 
 .status.paused::before { background: #4ec9b0; }
 .status.stopped { color: #999; }
 .status.stopped::before { background: #777; }
+.status.ended { color: #999; }
+.status.ended::before { background: #777; }
 .status.error { color: #f14c4c; }
 .status.error::before { background: #f14c4c; }
 
@@ -33,6 +35,11 @@ body { display: flex; flex-direction: column; background: #1e1e1e; color: #ddd; 
 .btn.danger:hover { background: #c42b1c; }
 .btn.ghost { background: transparent; border-color: #555; color: #ccc; }
 .btn.ghost:hover { background: #333; }
+/* 结束后禁用「开始拾取」：本轮 launcher 会话已拆毁（引擎/生成线程已 shutdown，无法原地续拾），
+   复用由下次代码级 inspect() 触发，故置灰避免误导用户去点一个必失败的按钮。 */
+.btn.ended, .btn:disabled { background: #2d2f31; border-color: #3a3d41; color: #6a6a6a; cursor: not-allowed; opacity: .6; }
+.btn.primary.ended, .btn.primary:disabled { background: #2d2f31; border-color: #3a3d41; color: #6a6a6a; cursor: not-allowed; opacity: .6; }
+.btn.ended:hover, .btn:disabled:hover, .btn.primary.ended:hover, .btn.primary:disabled:hover { background: #2d2f31; }
 
 /* ---------- 主体：左列（Elements 上 / Recorded Steps 下） + 右列代码区 ---------- */
 .content { flex: 1; display: flex; min-height: 0; }

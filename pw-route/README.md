@@ -123,9 +123,44 @@ delay.close();
 }
 ```
 
+### 4.1 不想管理句柄？用规则会话批量收集
+
+`register()` / `start()` 始终返回 `AutoCloseable` 句柄（供"只精准注销本批、context 仍存活"使用），
+**但忽略返回值是安全的** —— 所属 `BrowserContext` 关闭时 `RouteRuntimeImpl` 已挂清理钩子，
+整批规则与驱动绑定一并回收，**不会泄漏**。
+
+唯一的小代价：被忽略的 `AutoCloseable` 可能被 IDE / SpotBugs 标黄（`OBL_UNSATISFIED_OBLIGATION`）。
+想彻底消除告警、又保留"精准注销本批"能力，用 **`RouteSession`**：连续注册、句柄自动收集、
+退出作用域一次性精准注销（忘了关也由 context 关闭兜底）。
+
+```java
+void scenario(BrowserContext context) {
+
+    // 推荐：规则会话 —— 连续注册一批，try-with-resources 一次性精准注销（context 仍存活）。
+    try (RouteSession session = RouteDsl.session(context)) {
+        session.on().api("/api/a/**").monitor().expectStatus(200).register();   // 返回值可忽略
+        session.on().api("/api/b/**").mock().status(200).body("{}").register();
+        session.on().api("/api/c/**").delay(2).done().start();
+        session.on().api("/api/login").onlyApi().matchMethod("POST")
+                .mock().status(200).body("{\"token\":\"t\"}").register();
+        // ... 业务步骤 ...
+    } // 退出作用域即精准注销本会话注册的整批规则；忘了关也由 context 关闭兜底。
+
+    // 极简：单条规则、生命周期=整个场景、无需精准注销 → 直接 register() 忽略返回值即可
+    // （无告警顾虑也可接受；context 关闭即回收）
+}
+```
+
+> **选择指引**
+> - 要"只注销本批中的某几条、context 仍存活" → 用 `register()`/`start()` 返回句柄并 `close()`。
+> - 一个步骤里连续注册一批、希望一次性精准清理 + 零告警 → 用 `RouteDsl.session(ctx)`（批量自动收集）。
+> - 单条规则、场景级生灭、无所谓告警 → 直接 `RouteDsl.on(ctx)...register()` 忽略返回值。
+>
+> 三者都受同一兜底保证：**所属 `BrowserContext` 关闭时 runtime 整体回收全部规则**，不存在泄漏。
+
 **预期结果**：被拦截的接口按声明行为响应；`dumpCaptured` 返回采集到的调用记录。
 
-> **生命周期与 IDE 提示**：`register()` / `start()` 返回 `AutoCloseable` 注销句柄，规则也会随所属 `BrowserContext` 关闭而自动清理。为避免 IDE 将被忽略的返回值标黄，业务代码应将句柄保存在场景对象/测试步骤作用域中，并在 teardown 中显式关闭；若规则只在一个词法作用域内生效，可用 `try-with-resources`。不要直接丢弃返回值，也不要在 context 生命周期结束后继续使用规则。
+> **生命周期与 IDE 提示**：`register()` / `start()` 返回 `AutoCloseable` 注销句柄，规则也会随所属 `BrowserContext` 关闭而自动清理。**忽略该返回值不会泄漏**（context 关闭即整体回收），只是可能被静态分析标黄。想消除告警又保留精准注销能力，请统一用 `RouteDsl.session(ctx)` 收集句柄——业务代码不再单独接返回值，IDE 不会标黄。仅在"需精准注销本批中的某几条、context 仍存活"时才在外层持有 `register()`/`start()` 的返回值并在 teardown 中关闭（或 `try-with-resources`）。
 
 **单位注意**：`MonitorDsl.timeout(long)` 与 `CapabilityDsl.delay(long)` 的单位是**秒**（内部 ×1000 转毫秒）。`expectStatus` / `expectJsonPath` 只存在于 `MonitorDsl` 段。
 

@@ -79,13 +79,23 @@ Playwright 解析 browsers 目录 = <cwd>/0   （默认本应为 .playwright/bro
 
 ### 日志乱码定位
 
-框架主 Logback 配置及 route demo 测试配置的 Console encoder 均显式写 UTF-8。若乱码仍只出现在 Jenkins 控制台，应区分「应用输出字节编码」与「控制台/子进程字节解码」：
+框架主 Logback 配置及 route demo 测试配置的 encoder 均通过 Logback 支持的 `<charset>UTF-8</charset>` 显式设置 UTF-8。`<encoding>` 不是 `PatternLayoutEncoder` 的有效属性，会被忽略；若业务仓库的 `logback-test.xml` 覆盖框架配置，也必须同步改为 `<charset>UTF-8</charset>`。Logback 1.5+ 的 `conversionRule` 使用 `class` 属性（旧版 1.2 使用 `converterClass`）。若乱码仍只出现在 Jenkins 控制台，应区分「应用输出字节编码」与「控制台/子进程字节解码」：
 
-1. 对比同一条中文日志在控制台和 UTF-8 文件 appender 中的内容。文件正常而控制台乱码，优先检查 Jenkins agent/controller 与控制台采集链路；两处都乱码则先检查日志源文件、消息构造和 appender 编码。
-2. 检查运行测试的 agent JVM `-Dfile.encoding`、Jenkins agent/controller 启动配置，以及 Windows shell/native 子进程使用的代码页和输出编码。仅设置测试 JVM 的 `-Dfile.encoding=UTF-8` 不能保证 Jenkins 对 native 子进程字节流按 UTF-8 解码。
-3. 不要用替换非 ASCII 日志文字来掩盖编码不一致；修复后用包含中文的实际日志分别验证控制台与文件输出。
+1. 在 Jenkins `bat` 测试命令内先运行 `chcp 65001 >NUL`，再启动 Maven，确保 Windows 控制台代码页与 UTF-8 输出一致；测试 JVM 也应使用 `-Dfile.encoding=UTF-8`。只设置 JVM 字符集不能改变已启动的 Windows 控制台代码页。
+2. 对比同一条中文日志在控制台和 UTF-8 文件 appender 中的内容。文件正常而控制台乱码，优先检查 Jenkins agent/controller 与控制台采集链路；两处都乱码则先检查日志源文件、消息构造和 appender 编码。
+3. 检查 Windows shell/native 子进程使用的代码页和输出编码。仅设置测试 JVM 的 `-Dfile.encoding=UTF-8` 不能保证 Jenkins 对 native 子进程字节流按 UTF-8 解码。
+4. 不要用替换非 ASCII 日志文字来掩盖编码不一致；修复后用包含中文的实际日志分别验证控制台与文件输出。
 
-本仓库无法验证外部 Jenkins agent/controller 的解码配置；该部分仍需在目标流水线环境实测。
+Jenkins `bat` 命令示例（需在业务仓库的 Jenkinsfile 中应用，且 `chcp` 与 Maven 命令应位于同一 `bat` step）：
+
+```groovy
+bat '''
+@chcp 65001 >NUL
+mvn -B test -Dfile.encoding=UTF-8 ...
+'''
+```
+
+当前本机业务仓库工作副本的 [Jenkinsfile](../../test-automation/Jenkinsfile) 测试阶段已加入 `chcp 65001` 与 `-Dfile.encoding=UTF-8`，其 `logback-test.xml` 也已改用 `<charset>`。这些改动需先进入 Jenkins 实际构建的分支；agent/controller 的最终解码效果仍需在目标流水线重新运行并检查中文日志及 UTF-8 文件日志。
 
 ## 附：报告 UI 待优化（本次后续处理）
 

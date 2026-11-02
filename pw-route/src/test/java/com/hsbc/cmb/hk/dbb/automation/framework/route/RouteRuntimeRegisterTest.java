@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteCapability;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteSession;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Request;
@@ -187,5 +188,38 @@ public class RouteRuntimeRegisterTest {
         Route route = mockRoute("https://host/api/none");
         runtime.dispatch(route, "/api/none");
         org.mockito.Mockito.verify(route, org.mockito.Mockito.atLeastOnce()).fallback();
+    }
+
+    @Test
+    public void ignoredHandleStillRegistersAndContextCloseCleansUp() {
+        mockContext();
+        // 业务层忽略 register() 返回值：规则仍应被绑定（driver route 被调用一次），且不会泄漏
+        RouteDsl.on(ctx).api("/api/users/**").monitor().expectStatus(200).register();
+        org.mockito.Mockito.verify(ctx, org.mockito.Mockito.times(1)).route(anyString(), any(), any());
+        // context 关闭即兜底回收，无需业务层持有或关闭句柄
+        closeHandler.accept(ctx);
+        assertTrue("忽略返回值后 context 关闭必须干净回收", RouteEngine.activeRuntimes() == 0);
+    }
+
+    @Test
+    public void routeSessionTracksAndClosesItsOwnBatchOnly() throws Exception {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+
+        // 会话外另注册的独立规则（不应被会话 close 影响）
+        RouteDsl.on(ctx).api("/api/outside").mock().status(200).body("{}").register();
+
+        try (RouteSession session = RouteDsl.session(ctx)) {
+            session.on().api("/api/a").monitor().expectStatus(200).register();
+            session.on().api("/api/b").mock().status(200).body("{}").register();
+            session.on().api("/api/c").delay(1).done().start();
+            org.mockito.Mockito.verify(ctx, org.mockito.Mockito.times(4)).route(anyString(), any(), any());
+            assertNotNull("会话内规则应已注册", runtime.ruleSnapshot().specFor("/api/a"));
+            assertNotNull("会话内规则应已注册", runtime.ruleSnapshot().specFor("/api/b"));
+        }
+        // 会话 close 后，本会话的 /api/a /api/b /api/c 应被精准注销（规则表清空）
+        assertEquals("会话关闭应清空其注册的整批规则", (long) 1, (long) runtime.ruleSnapshot().rules().size());
+        // 会话外的 /api/outside 必须保留
+        assertNotNull("会话外规则不得被会话 close 误清", runtime.ruleSnapshot().specFor("/api/outside"));
     }
 }

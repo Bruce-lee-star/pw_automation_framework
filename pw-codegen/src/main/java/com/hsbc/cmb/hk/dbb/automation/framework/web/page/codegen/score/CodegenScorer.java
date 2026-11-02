@@ -441,7 +441,7 @@ public final class CodegenScorer {
         }
     }
 
-    /** 组装配���选择器：{@code tag[a="1"][b="2"]}（tag 为空时退化为纯属性组合）。 */
+    /** 组装组合属性选择器：{@code tag[a="1"][b="2"]}（tag 为空时退化为纯属性组合）。 */
     private static String comboSelector(CodegenFacts.Fact self, String... conditions) {
         StringBuilder sb = new StringBuilder();
         if (self.tag != null && !self.tag.isBlank()) {

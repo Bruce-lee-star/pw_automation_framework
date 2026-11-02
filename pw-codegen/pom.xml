@@ -11,7 +11,7 @@
         <relativePath>../pw-framework-bom/pom.xml</relativePath>
     </parent>
 
-    <artifactId>pw-codegen-v3</artifactId>
+    <artifactId>pw-codegen</artifactId>
     <name>Automation Framework - Codegen V3</name>
 
     <properties>

@@ -134,7 +134,9 @@
     // ② 瞬时消息（starting / grouped N / start failed: ... / bridge 相关）：只更新徽标文字，
     //    不得改动生命周期状态——否则点一次「标记为一组」就会把 paused 冲成非 paused，
     //    连 Start 按钮文案都退回 Start，用户会以为拾取态丢了。
-    var LIFECYCLE_STATES = { ready: true, inspecting: true, paused: true, stopped: true };
+    // ended 也属生命周期状态：点「结束会话」后面板进程常驻但本轮已收尾，Start 按钮须复位为「开始拾取」，
+    // 且提示条/录制指示要跟随（否则按钮会卡在结束前的「暂停拾取」文案）。
+    var LIFECYCLE_STATES = { ready: true, inspecting: true, paused: true, stopped: true, ended: true };
 
     // 状态原值 → 徽标文案。Java 侧可能推送未登记的状态/错误文本，此时原样显示。
     var STATUS_LABELS = {
@@ -210,7 +212,20 @@
         }
         inspectActive = (s === 'inspecting');
         var btn = document.getElementById('btn-start');
-        if (btn) btn.textContent = inspectActive ? '暂停拾取' : '开始拾取';
+        if (btn) {
+            if (s === 'ended') {
+                // 本轮已结束：面板进程常驻，但当前 launcher 会话已拆毁（引擎/生成线程已 shutdown，无法原地续拾）。
+                // 点「开始拾取」只会撞死引擎报 "start failed"。故禁用按钮 + 改文案，避免误导；
+                // 复用由下次代码级 inspect() 触发（届时 Java 会先推送 ready，按钮随之恢复可用）。
+                btn.textContent = '本轮已结束';
+                btn.disabled = true;
+                btn.classList.add('ended');
+            } else {
+                btn.textContent = inspectActive ? '暂停拾取' : '开始拾取';
+                btn.disabled = false;
+                btn.classList.remove('ended');
+            }
+        }
         renderStepsHint(s);
         // 只在「进入新一轮拾取」时清空步骤：从 paused 恢复拾取属于同一轮，不能清掉已录动作。
         if (s === 'inspecting' && lastStatus !== 'paused') {

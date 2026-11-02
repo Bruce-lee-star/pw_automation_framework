@@ -29,8 +29,7 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- 猸?SessionManager META 骞跺彂缂撳瓨锛欸uava LoadingCache锛坈oncurrencyLevel 鍒嗘閿侊紝婊¤冻澶氱嚎绋嬭鐩?IO 绔炰簤锛夈€?
-             鐗堟湰鐢辨牴 dependencyManagement 缁熶竴閽?33.5.0-jre锛屾澶勬棤闇€閲嶅澹版槑 <version>銆?-->
+        <!-- Guava LoadingCache backs SessionManager's concurrent metadata cache. The version is managed by the root POM. -->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
@@ -44,7 +43,7 @@
             <artifactId>config</artifactId>
         </dependency>
 
-        <!-- ENG-P0-2锛歸eb 瀹為檯鐢ㄥ埌鐨勫閮ㄤ緷璧栵紙鍘熺敱鏍?<dependencies> 缁ф壙锛岀幇鏄惧紡澹版槑锛?-->
+        <!-- Declare external libraries used directly by this module instead of relying on transitive dependencies. -->
         <dependency>
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
@@ -53,21 +52,17 @@
             <groupId>com.microsoft.playwright</groupId>
             <artifactId>playwright</artifactId>
         </dependency>
-        <!-- gson锛欰xeCoreScriptProvider 灏?axe.run 缁撴灉 JSON 鏄犲皠涓烘鏋惰嚜鏈夌粨鏋滄ā鍨嬶紙瑙ｈ€?Deque axe-core 鍖呰鍣ㄥ悗鏂板锛夈€?
-             鐗堟湰鐢辨牴 dependencyManagement 缁熶竴閽夛紙${gson.version}锛夈€?-->
+        <!-- Gson maps axe.run JSON results to framework-owned models; the root POM manages its version. -->
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
-        <!-- selenium-support锛歴erenity 鍏紑 API 寮曠敤 org.openqa.selenium.support.ui.*锛堝 ExpectedCondition锛夛紝
-             椤婚殢 serenity 涓€骞舵樉寮忓０鏄庯紝鍚﹀垯 javac 绗﹀彿琛ュ叏浼?CompletionFailure锛圗NG-P0-2 涓嬫矇鍚庡師缁ф壙鍏崇郴娑堝け锛?-->
+        <!-- Serenity's public API exposes Selenium support types; declare this dependency to satisfy compilation. -->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-support</artifactId>
         </dependency>
 
-        <!-- 娴嬭瘯鏈熶緷璧栵紙JUnit 4锛氫笌 runner 渚х粺涓€锛涘師鍏堢殑 JUnit5 濂椾欢鏀跺熬璁炬柦
-             SuiteTeardownListener / junit-platform-launcher 宸查殢涔嬬Щ闄わ級 -->
         <!-- JUnit 4，与 runner 体系统一（原先的 JUnit5 套件收尾设施 SuiteTeardownListener /
              junit-platform-launcher 已随之移除）。
              scope=provided 而非 test：src/main 的 CucumberWithPw 是 JUnit Runner，编译期需要
@@ -84,17 +79,14 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- WEB-P1-5锛歸eb 妯″潡鍗曟祴琛ュ厖鍩虹渚濊禆锛圥ageWaits/PageNavigation 绛夐渶 mock BasePage/Page锛夈€?
-             鐗堟湰涓?test-automation 淇濇寔涓€鑷达紙4.5.1锛夛紝閬垮厤 RequireUpperBoundDeps 鏍￠獙鍐茬獊銆?-->
+        <!-- Mockito supports unit tests for PageWaits, PageNavigation, BasePage, and related Web classes. -->
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-        <!-- A-9 瀵圭О淇锛歴erenity-core 宸叉帓闄?selenium-java锛屼絾 Serenity 杩愯鏈燂紙SerenityTestExecutionListener
-             缁?SupportedWebDriver 闈欐€佸垵濮嬪寲锛夐渶鍔犺浇鍚?driver 绫伙紝鍚﹀垯妗嗘灦娴嬭瘯鍚姩 NoClassDefFoundError銆?
-             涓?test-automation 涓€鑷磋ˉ selenium-java锛坱est scope锛夋彁渚?driver 绫伙紱鐗堟湰涓庡叏灞€閽?4.23.1 瀵归綈銆?-->
+        <!-- Serenity test initialization needs Selenium driver classes; test scope keeps them out of runtime consumers. -->
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
@@ -102,12 +94,8 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- 渚濊禆娌荤悊锛欳ucumber 宸蹭粠 serenity-model 鐨勪紶閫掗摼璺帓闄わ紙瑙佹牴 DM锛夛紝鑰屾湰妯″潡**纭疄浣跨敤**瀹?鈥斺€?
-             鈶?src/main 鐨勬鏋剁骇 glue锛圕oncurrentExecutionGlue锛夌洿鎺ョ敤 io.cucumber.java.en.* 娉ㄨВ锛坈ucumber-java锛?
-                涓?io.cucumber.datatable.DataTable锛坉atatable锛夛紝鏁呭繀椤讳负 compile 浣滅敤鍩燂紱
-             鈶?Serenity 杩愯鏈燂紙StepEventBus 鈫?Serenity 鐨?Cucumber 闆嗘垚锛夐渶 cucumber-core 鍙姞杞?鈥斺€?
-                杩欎篃鏄湰妯″潡鍗曟祴鍔犺浇 StepEventBus 鏃朵笉鍐?NoClassDefFoundError 鐨勫墠鎻愩€?
-             涓夎€呭湪姝ゆ樉寮忓０鏄庯紝鐗堟湰鐢辨牴 DM 缁熶竴閽?${cucumber.version}锛屼笉闅?Serenity 浼犻€掓紓绉汇€?-->
+        <!-- Cucumber dependencies are explicit because framework glue uses cucumber-java and DataTable,
+             while Serenity runtime integration and tests need cucumber-core. Versions are managed by the root POM. -->
         <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-core</artifactId>
@@ -133,4 +121,3 @@
         </dependency>
     </dependencies>
 </project>
-

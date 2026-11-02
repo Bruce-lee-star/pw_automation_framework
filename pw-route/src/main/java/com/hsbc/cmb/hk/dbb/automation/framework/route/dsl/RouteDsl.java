@@ -107,20 +107,48 @@ public final class RouteDsl {
     private final List<ApiSpec> pending = new ArrayList<>();
     /** 本 DSL 已注册的合并句柄（实例 clear() 注销用）。 */
     private final List<AutoCloseable> registered = new ArrayList<>();
+    /**
+     * 句柄汇集槽：默认空操作（{@link #on} 创建）；{@link RouteSession} 注入一个把句柄收集到会话的槽，
+     * 使业务层可<b>无视</b> {@code register()}/{@code start()} 的返回值而仍能在会话关闭时被精准注销。
+     */
+    private final java.util.function.Consumer<AutoCloseable> handleSink;
 
-    private RouteDsl(BrowserContext context) {
+    private static final java.util.function.Consumer<AutoCloseable> NOOP_SINK = h -> { };
+
+    RouteDsl(BrowserContext context, java.util.function.Consumer<AutoCloseable> sink) {
         this.context = Objects.requireNonNull(context, "context");
+        this.handleSink = Objects.requireNonNull(sink, "sink");
     }
 
-    /** 绑定 BrowserContext。 */
+    /** 绑定 BrowserContext（独立 DSL 实例；句柄需自行持有或在 context 关闭时自动清理）。 */
     public static RouteDsl on(BrowserContext context) {
-        return new RouteDsl(context);
+        return new RouteDsl(context, NOOP_SINK);
     }
 
     /** 绑定 Page（自动取 page.context()）。 */
     public static RouteDsl on(Page page) {
         Objects.requireNonNull(page, "page");
-        return new RouteDsl(page.context());
+        return new RouteDsl(page.context(), NOOP_SINK);
+    }
+
+    /**
+     * 开启一个<b>规则会话</b>：在一次场景 / 步骤内连续注册多条规则，结束时一次性精准注销。
+     *
+     * <p>会话是 {@link AutoCloseable}：业务层可在 try-with-resources 中批量注册，退出作用域即精准清理；
+     * 即便<b>忘了关闭</b>，所属 {@code BrowserContext} 关闭时 runtime 也会整体回收（不泄漏）。
+     * 与直接 {@code on(ctx)...register()} 的区别：会话把每条规则返回的句柄自动汇总，
+     * 无需业务层手工维护 {@code List<AutoCloseable>}。</p>
+     *
+     * @see RouteSession
+     */
+    public static RouteSession session(BrowserContext context) {
+        return new RouteSession(context);
+    }
+
+    /** 绑定 Page 的规则会话（自动取 page.context()）。 */
+    public static RouteSession session(Page page) {
+        Objects.requireNonNull(page, "page");
+        return new RouteSession(page.context());
     }
 
     /** 绑定的上下文（对齐现有 RouteDsl.getContext()）。 */
@@ -408,9 +436,20 @@ public final class RouteDsl {
      * 注册本 DSL 内配置的全部规则，返回合并后的注销句柄。
      *
      * <p>每个 pattern 一个独立绑定；重复调用 register() 对同 pattern 执行覆盖语义。
-     * 返回句柄 close() 幂等，可安全并发调用。
+     * 返回句柄 close() 幂等，可安全并发调用。</p>
+     *
+     * <p><b>业务层不强制持有该句柄</b>：忽略返回值时不会泄漏 —— {@code RouteRuntimeImpl}
+     * 在 {@code BrowserContext.onClose} 已挂清理钩子，context 关闭即整体回收（含全部规则与驱动绑定）。
+     * 被忽略的 {@link AutoCloseable} 返回值可能触发静态分析告警（如 SpotBugs
+     * {@code OBL_UNSATISFIED_OBLIGATION}），若想彻底消除告警且仍保留"精准注销本批"能力，
+     * 请用 {@link #session(BrowserContext)} 开启 {@link RouteSession}：连续注册、句柄自动收集、
+     * 退出作用域一次性精准注销（忘记关闭也由 context 关闭兜底）。</p>
      */
     public AutoCloseable register() {
+        return registerInternal();
+    }
+
+    private AutoCloseable registerInternal() {
         if (pending.isEmpty()) {
             throw new IllegalStateException("No rule configured; call api(pattern).xxx() first");
         }
@@ -442,6 +481,7 @@ public final class RouteDsl {
             }
         };
         registered.add(merged);
+        handleSink.accept(merged);
         return merged;
     }
 
@@ -569,7 +609,7 @@ public final class RouteDsl {
      * 与并发注册 / stop 系列无竞态。
      */
     public AutoCloseable start() {
-        return register();
+        return registerInternal();
     }
 
     /** 当前已声明未提交的规则数（级联调试用）。 */
@@ -982,7 +1022,6 @@ public final class RouteDsl {
             pending.add(b.build());
             return RouteDsl.this.register();
         }
-
     }
 
     /** MOCK 配置。 */
