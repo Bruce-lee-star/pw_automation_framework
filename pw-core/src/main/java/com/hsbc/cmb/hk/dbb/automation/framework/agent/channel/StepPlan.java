@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
+
 /**
  * 版本化步骤计划（设计 §4.3 + §4.3.1）：受控命令 {@link Command} 的有序集合，
  * 是「参数范围授权（v3.7）」的运行期载体。
@@ -31,6 +33,10 @@ import java.util.Objects;
  * <p><b>指纹</b>：{@link #planDigest()} 风格对齐 {@code ApprovalGrant.planDigestOf}
  * （SHA-256 取前 8 字节十六进制，前缀 {@code stepplan-v1}），把「被批准的内容」压成可比较指纹，
  * 供后续参数范围授权绑定（v3.7 下一层）。</p>
+ *
+ * <p><b>参数范围</b>：可选的 {@code scope} 字段（参数名 → 取值域约束）随资产分发，
+ * 并被 {@link #planDigest()} 绑定——scope 变化即指纹变化，使参数取值域与「被批准的内容」对齐；
+ * 运行期由 {@code ParamScopeGate} 在 execute(Command) 边界落实 fail-closed 门禁。</p>
  */
 public final class StepPlan {
 
@@ -40,11 +46,13 @@ public final class StepPlan {
     private final int schemaVersion;
     private final String planId;
     private final List<Command> steps;
+    private final ParamScope scope;
 
-    public StepPlan(int schemaVersion, String planId, List<Command> steps) {
+    public StepPlan(int schemaVersion, String planId, List<Command> steps, ParamScope scope) {
         this.schemaVersion = schemaVersion;
         this.planId = Objects.requireNonNull(planId, "planId");
         this.steps = List.copyOf(steps);
+        this.scope = Objects.requireNonNullElse(scope, ParamScope.EMPTY);
     }
 
     public int schemaVersion() {
@@ -57,6 +65,10 @@ public final class StepPlan {
 
     public List<Command> steps() {
         return steps;
+    }
+
+    public ParamScope scope() {
+        return scope;
     }
 
     /**
@@ -79,8 +91,9 @@ public final class StepPlan {
             for (JsonNode step : stepsNode) {
                 steps.add(parseCommand(step));
             }
-            rejectUnknownFields(root, "schemaVersion", "planId", "steps");
-            return new StepPlan(schemaVersion, planId, steps);
+            ParamScope scope = ParamScope.fromJson(root.get("scope"));
+            rejectUnknownFields(root, "schemaVersion", "planId", "steps", "scope");
+            return new StepPlan(schemaVersion, planId, steps, scope);
         } catch (IOException e) {
             throw new IllegalArgumentException("StepPlan 解析失败: " + e.getMessage(), e);
         }
@@ -177,6 +190,10 @@ public final class StepPlan {
             c.params().entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .forEach(e -> payload.append(e.getKey()).append('=').append(e.getValue()).append('\n'));
+        }
+        String sc = scope.canonical();
+        if (!sc.isEmpty()) {
+            payload.append("scope:").append(sc).append('\n');
         }
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256")

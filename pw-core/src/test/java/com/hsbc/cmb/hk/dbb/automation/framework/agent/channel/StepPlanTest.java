@@ -3,8 +3,10 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class StepPlanTest {
@@ -82,6 +84,50 @@ public class StepPlanTest {
         String tampered = VALID.replace("\"alice\"", "\"bob\"");
         String d3 = StepPlan.parse(tampered).planDigest();
         assertNotEquals(d1, d3);
+    }
+
+    private static final String WITH_SCOPE = "{"
+            + "\"schemaVersion\":1,"
+            + "\"planId\":\"plan-scoped\","
+            + "\"scope\":{\"value\":{\"allow\":[\"alice\",\"bob\"]},\"option\":{\"regex\":\"^[0-9]+$\"}},"
+            + "\"steps\":["
+            + "  {\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\"},"
+            + "  {\"action\":\"FILL\",\"target\":\"role=textbox;name=username\",\"params\":{\"value\":\"alice\"}},"
+            + "  {\"action\":\"SELECT\",\"target\":\"role=combobox;name=role\",\"params\":{\"option\":\"42\"}}"
+            + "]}";
+
+    @Test
+    public void parsesPlanWithScope() {
+        StepPlan plan = StepPlan.parse(WITH_SCOPE);
+        assertFalse(plan.scope().isEmpty());
+        assertTrue(plan.scope().constraintFor("value").orElseThrow().allows("alice"));
+        assertTrue(plan.scope().constraintFor("option").orElseThrow().allows("42"));
+        assertFalse(plan.scope().constraintFor("option").orElseThrow().allows("abc"));
+    }
+
+    @Test
+    public void scopeChangesDigest() {
+        String withScope = VALID.replace("\"steps\"",
+                "\"scope\":{\"value\":{\"allow\":[\"alice\"]}},\"steps\"");
+        String d1 = StepPlan.parse(VALID).planDigest();
+        String d2 = StepPlan.parse(withScope).planDigest();
+        assertNotEquals("scope 必须改变指纹", d1, d2);
+        assertEquals("同一带 scope 计划指纹稳定", d2, StepPlan.parse(withScope).planDigest());
+    }
+
+    @Test
+    public void illegalScopeConstraintRejected() {
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\","
+                + "\"scope\":{\"value\":{\"allow\":[\"a\"],\"regex\":\"b\"}},"
+                + "\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\"}]}"));
+    }
+
+    @Test
+    public void scopeDeclaredButUnknownFieldStillRejected() {
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\",\"scope\":{},\"foo\":\"bar\","
+                + "\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\"}]}"));
     }
 
     private static void assertThrowsIllegal(ThrowingRunnable r) {
