@@ -11,6 +11,13 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -340,6 +347,65 @@ public class CandidateCliTest {
         assertTrue(toStdout.out.contains("# 候选定位器审计报告"));
     }
 
+    @Test
+    public void audit_exposure_sanitized_redacts_identities() throws IOException {
+        approveValid("role=button;name=Log on");
+
+        Result full = exec("audit", "--lib", lib(), "--exposure", "full");
+        full.assertOk();
+        assertTrue("完整报告含审批人实名", full.out.contains("alice"));
+        assertTrue("完整报告含 origin 全文", full.out.contains(ORIGIN));
+
+        Result sanitized = exec("audit", "--lib", lib(), "--exposure", "sanitized");
+        sanitized.assertOk();
+        assertFalse("脱敏报告不应出现审批人实名", sanitized.out.contains("alice"));
+        assertTrue("脱敏报告含确定性假名", sanitized.out.contains("APPROVER-"));
+        assertTrue("脱敏报告 origin 仅留 host", sanitized.out.contains("https://dbb-uat.example.com"));
+        assertTrue("脱敏报告标注级别", sanitized.out.contains("脱敏"));
+
+        assertEquals(CandidateCli.EXIT_USAGE,
+                exec("audit", "--lib", lib(), "--exposure", "bogus").code);
+    }
+
+    @Test
+    public void retention_dry_run_lists_nothing_for_fresh_library() throws IOException {
+        approveValid("role=button;name=Log on");
+        Result dry = exec("retention", "--lib", lib());
+        dry.assertOk();
+        assertTrue(dry.out.contains("干跑"));
+        assertTrue("新鲜库没有可清除项", dry.out.contains("将达到清除条件的 0 条"));
+        // 干跑不写盘：库仍 1 条
+        assertEquals(1, CandidateLibrary.load(lib).size());
+    }
+
+    @Test
+    public void retention_apply_purges_expired_records_only() throws IOException {
+        // 造一个 60 天前的 PROPOSED（已过期）候选库文件，再放一条仍可用的 APPROVED
+        Instant past = Instant.parse("2026-09-01T00:00:00Z"); // 相对 now 远超 30 天
+        Clock clock = Clock.fixed(past, ZoneOffset.UTC);
+        CandidateLibrary lib0 = new CandidateLibrary(new CandidateValidator(), clock);
+        CandidateRecord expired = lib0.propose(LocatorCandidate.of("old.submit",
+                LocatorSpec.role("button", "Old")).withExpectedRole("button").withProposedBy("recorder"));
+        CandidateRecord usable = lib0.propose(LocatorCandidate.of("live.submit",
+                LocatorSpec.role("button", "Live")).withExpectedRole("button").withProposedBy("recorder"));
+        CandidateEvidence pass = CandidateEvidence.builder().matches(1).visible(true).enabled(true)
+                .textMatched(true).businessAssertion("x").assertionPassed(true).build();
+        usable.markValidated(new CandidateValidator().validate(usable.candidate(), pass), pass, past);
+        ApprovalGrant g = ApprovalGrant.issue(usable.id(), RiskTier.LOW,
+                ApprovalGrant.planDigestOf(usable.candidate()), ORIGIN, "APP-1",
+                List.of("alice"), null, past, 180);
+        usable.markApproved(g, past);
+        lib0.save(lib);
+        assertEquals(2, CandidateLibrary.load(lib).size());
+
+        Result apply = exec("retention", "--lib", lib(), "--apply");
+        apply.assertOk();
+        assertTrue(apply.out.contains("已清除 1 条"));
+        assertTrue(apply.out.contains("保留 1 条"));
+        assertEquals("过期的 PROPOSED 被清，仍可用的 APPROVED 保留", 1, CandidateLibrary.load(lib).size());
+        assertEquals(usable.id(), CandidateLibrary.load(lib).all().get(0).id());
+    }
+
     // ------------------------------------------------------------------
     // 用法错误
     // ------------------------------------------------------------------
@@ -365,7 +431,7 @@ public class CandidateCliTest {
         Result h = exec("help");
         h.assertOk();
         for (String cmd : new String[]{"propose", "validate", "approve", "reject", "retire",
-                "list", "show", "locator", "audit"}) {
+                "list", "show", "locator", "audit", "retention"}) {
             assertTrue("help 应列出命令 " + cmd, h.out.contains(cmd));
         }
         assertTrue(h.out.contains("退出码"));

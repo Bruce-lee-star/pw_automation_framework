@@ -118,6 +118,11 @@ public final class CandidateRecord {
         return List.copyOf(history);
     }
 
+    /** 最近一次状态变更的时间（事件链的末条）。用于保留策略计算"自上次变更起过了多久"。 */
+    public Instant lastEventAt() {
+        return history.isEmpty() ? null : history.get(history.size() - 1).at();
+    }
+
     public boolean approved() {
         return state == CandidateState.APPROVED;
     }

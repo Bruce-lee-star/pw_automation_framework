@@ -13,6 +13,8 @@ import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -198,6 +200,38 @@ public final class CandidateLibrary {
      */
     public Optional<LocatorSpec> approvedLocator(String targetRef, String appVersion, String origin) {
         return productionLocator(targetRef, appVersion, origin).map(r -> r.candidate().spec());
+    }
+
+    /**
+     * 按保留策略清除过期记录（设计 §4.4 / R9 最小化审计）。
+     *
+     * <p>只删<b>已过期且宽限期已过</b>的候选；任何仍可使用（授权未过期）的 {@code APPROVED} 记录，
+     * 其清除时点永远在未来，因此不会被误删。清除不可逆——CLI 默认干跑，必须显式 {@code --apply} 才落盘。
+     *
+     * <p>注意：id 计数器 {@code seq} 不回退，被清除的 id 永不复用，避免新记录撞上"已删除记录的历史引用"。
+     *
+     * @return 本次清除的报告（清除数 / 保留数 / 按状态计数 / 被清除 id）
+     */
+    public PurgeReport purgeExpired(Instant now) {
+        return purgeExpired(RetentionPolicy.defaults(), now);
+    }
+
+    /** 用指定策略清除（便于测试注入更短的窗口）。 */
+    public PurgeReport purgeExpired(RetentionPolicy policy, Instant now) {
+        Objects.requireNonNull(policy, "policy");
+        Objects.requireNonNull(now, "now");
+        List<String> removedIds = new ArrayList<>();
+        Map<CandidateState, Integer> removedByState = new EnumMap<>(CandidateState.class);
+        for (Iterator<Map.Entry<String, CandidateRecord>> it = records.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, CandidateRecord> entry = it.next();
+            CandidateRecord record = entry.getValue();
+            if (policy.isExpired(record, now)) {
+                it.remove();
+                removedIds.add(entry.getKey());
+                removedByState.merge(record.state(), 1, Integer::sum);
+            }
+        }
+        return new PurgeReport(removedIds.size(), records.size(), removedByState, removedIds);
     }
 
     /** 全部记录（插入顺序 = 提出顺序）。 */

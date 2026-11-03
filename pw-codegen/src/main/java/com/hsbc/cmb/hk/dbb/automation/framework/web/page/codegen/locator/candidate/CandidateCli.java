@@ -116,6 +116,8 @@ public final class CandidateCli {
                     return locator(opts, out, err);
                 case "audit":
                     return audit(opts, out);
+                case "retention":
+                    return retention(opts, out, err);
                 default:
                     err.println("未知命令：" + command);
                     printUsage(err);
@@ -419,8 +421,9 @@ public final class CandidateCli {
 
     private static int audit(Options o, PrintStream out) throws IOException {
         Path lib = o.library();
+        AuditExposure exposure = AuditExposure.parse(o.get("exposure"));
         CandidateLibrary library = CandidateLibrary.load(lib);
-        String md = CandidateAuditReport.toMarkdown(library, lib, Instant.now(Clock.systemUTC()));
+        String md = CandidateAuditReport.toMarkdown(library, lib, Instant.now(Clock.systemUTC()), exposure);
 
         String outFile = o.get("out");
         if (outFile == null) {
@@ -432,8 +435,47 @@ public final class CandidateCli {
             Files.createDirectories(path.getParent());
         }
         Files.writeString(path, md, StandardCharsets.UTF_8);
-        out.println("审计报告已写入 " + path);
+        out.println("审计报告（" + exposure.name() + "）已写入 " + path);
         return EXIT_OK;
+    }
+
+    /**
+     * 保留/删除策略：默认<b>干跑</b>——只列出将达到清除条件的记录，不写盘；
+     * 加 {@code --apply} 才在持锁下真正清除并原子落盘（清除不可逆）。
+     */
+    private static int retention(Options o, PrintStream out, PrintStream err) throws IOException {
+        Path lib = o.library();
+        boolean apply = o.flag("apply");
+        RetentionPolicy policy = RetentionPolicy.defaults();
+        Instant now = Instant.now(Clock.systemUTC());
+
+        if (!apply) {
+            CandidateLibrary library = CandidateLibrary.load(lib);
+            List<CandidateRecord> expired = library.all().stream()
+                    .filter(r -> policy.isExpired(r, now)).toList();
+            out.println("保留策略（干跑，不写盘）：" + policy.describe());
+            out.println("当前 " + library.size() + " 条；将达到清除条件的 " + expired.size() + " 条：");
+            for (CandidateRecord r : expired) {
+                out.println("  - " + r.id() + " " + r.state() + " " + r.candidate().targetRef()
+                        + "  清除时点 " + TS.format(policy.deadline(r, now)));
+            }
+            out.println("确认清除请加 --apply（会原子落盘，删除后不可恢复；仍可用的 APPROVED 不会被清）");
+            return EXIT_OK;
+        }
+
+        try (LibraryLock ignored = LibraryLock.acquire(lib)) {
+            CandidateLibrary library = CandidateLibrary.load(lib);
+            PurgeReport report = library.purgeExpired(now);
+            library.save(lib);
+            out.println("已清除 " + report.removedCount() + " 条（保留 " + report.retainedCount() + " 条）");
+            if (!report.removedByState().isEmpty()) {
+                out.println("  按状态：" + report.removedByState());
+            }
+            if (!report.removedIds().isEmpty()) {
+                out.println("  被清除：" + String.join(", ", report.removedIds()));
+            }
+            return EXIT_OK;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -654,7 +696,10 @@ public final class CandidateCli {
         out.println("  locator   回注：取出已审批定位符（stdout 仅一行 canonical）");
         out.println("      --target <ref> --app-version <version> --origin <url|env> [--verbose]");
         out.println("      审批过期 / origin 或版本不符 / 内容摘要已变 → 退出码 3，不回退");
-        out.println("  audit     Markdown 审计报告            [--out report.md]");
+        out.println("  audit     Markdown 审计报告            [--out report.md] [--exposure full|internal|sanitized]");
+        out.println("  retention 保留/删除策略（R9 最小化审计）[--apply]  默认干跑列出将清除项，--apply 才落盘");
+        out.println("      导出级别：full=完整（实名+原环境） / internal=内部共享（实名，剥离证据路径）");
+        out.println("              / sanitized=脱敏（审批人假名、origin 仅 host、note/引用隐去、事件链自由文本丢弃）");
         out.println();
         out.println("公共参数： --lib <file>   候选库文件（默认 " + DEFAULT_LIBRARY + "）");
         out.println();

@@ -27,13 +27,27 @@ public final class CandidateAuditReport {
 
     private CandidateAuditReport() {}
 
-    /** 渲染整个候选库的报告。 */
+    /** 渲染整个候选库的报告（默认完整级别）。 */
     public static String toMarkdown(CandidateLibrary library, Path libraryFile, Instant generatedAt) {
+        return toMarkdown(library, libraryFile, generatedAt, AuditExposure.FULL);
+    }
+
+    /**
+     * 渲染整个候选库的报告（指定脱敏级别）。
+     *
+     * <p>脱敏是<b>投影</b>：不改写候选库，每次按请求的 {@link AuditExposure} 现算。
+     * {@link #FULL} 原样；{@link #INTERNAL} 保留实名但剥离证据里的文件系统路径；
+     * {@link #SANITIZED} 审批人假名、origin 仅留 host、note/引用隐去、事件链自由文本丢弃。
+     */
+    public static String toMarkdown(CandidateLibrary library, Path libraryFile, Instant generatedAt,
+                                    AuditExposure exposure) {
+        AuditRedactor redactor = new AuditRedactor(exposure);
         List<CandidateRecord> records = library.all();
         StringBuilder sb = new StringBuilder();
 
         sb.append("# 候选定位器审计报告\n\n");
         sb.append("- 生成时间：").append(ts(generatedAt)).append('\n');
+        sb.append("- 导出级别：").append(exposure.name()).append("（").append(exposure.describe()).append("）\n");
         sb.append("- 候选库：`").append(libraryFile == null ? "(未指定)" : libraryFile.toAbsolutePath()).append("`\n");
         sb.append("- 候选总数：").append(records.size()).append('\n');
         sb.append("- 状态为 APPROVED：").append(count(records, CandidateState.APPROVED)).append('\n');
@@ -62,7 +76,7 @@ public final class CandidateAuditReport {
                         .append(" | ").append(cell(r.candidate().targetRef()))
                         .append(" | `").append(cell(r.candidate().canonical())).append('`')
                         .append(" | ").append(r.state())
-                        .append(" | ").append(cell(orDash(r.approvedBy())))
+                        .append(" | ").append(cell(redactor.approver(orDash(r.approvedBy()))))
                         .append(" | ").append(cell(orDash(r.approvalAppVersion())))
                         .append(" | v").append(r.version())
                         .append(" |\n");
@@ -75,18 +89,20 @@ public final class CandidateAuditReport {
         if (approved.isEmpty()) {
             sb.append("_（没有处于 APPROVED 的候选）_\n\n");
         } else {
-            sb.append("| ID | 目标语义 | 业务后果 | 审批人 | origin | 应用版本 | 到期 | 状态 |\n");
-            sb.append("|---|---|---|---|---|---|---|---|\n");
+            sb.append("| ID | 目标语义 | 业务后果 | 审批人 | origin | 应用版本 | 到期 | 状态 | 备注 |\n");
+            sb.append("|---|---|---|---|---|---|---|---|---|\n");
             for (CandidateRecord r : approved) {
                 ApprovalGrant g = r.grant();
                 sb.append("| ").append(cell(r.id()))
                         .append(" | ").append(cell(r.candidate().targetRef()))
                         .append(" | ").append(g == null ? "-" : g.riskTier().name())
-                        .append(" | ").append(cell(g == null ? orDash(r.approvedBy()) : String.join(", ", g.approvers())))
-                        .append(" | ").append(cell(g == null ? "-" : g.origin()))
+                        .append(" | ").append(cell(g == null ? redactor.approver(orDash(r.approvedBy()))
+                                : String.join(", ", redactor.approverAll(g.approvers()))))
+                        .append(" | ").append(cell(g == null ? "-" : redactor.origin(g.origin())))
                         .append(" | ").append(cell(g == null ? orDash(r.approvalAppVersion()) : g.appVersion()))
                         .append(" | ").append(g == null ? "-" : ts(g.expiresAt()))
                         .append(" | ").append(cell(grantStatus(g, generatedAt)))
+                        .append(" | ").append(cell(g == null ? "-" : redactor.note(g.note())))
                         .append(" |\n");
             }
             sb.append('\n');
@@ -104,8 +120,8 @@ public final class CandidateAuditReport {
                 for (CandidateRecord.Event e : r.history()) {
                     sb.append("| v").append(e.version())
                             .append(" | ").append(e.state())
-                            .append(" | ").append(cell(orDash(e.actor())))
-                            .append(" | ").append(cell(orDash(e.detail())))
+                            .append(" | ").append(cell(redactor.actor(orDash(e.actor()))))
+                            .append(" | ").append(cell(redactor.eventDetail(e.state(), orDash(e.detail()))))
                             .append(" | ").append(ts(e.at()))
                             .append(" |\n");
                 }
@@ -114,6 +130,10 @@ public final class CandidateAuditReport {
         }
 
         sb.append("---\n\n");
+        if (exposure == AuditExposure.SANITIZED) {
+            sb.append("> 本报告为<b>脱敏</b>导出：审批人已假名化、origin 仅留 host、note 与证据引用已隐去、")
+                    .append("事件链自由文本已丢弃。可对外共享，但仍能核对\"谁批的、批了什么、还能用多久\"。\n\n");
+        }
         sb.append("> 审计口径：`VALIDATED` 只代表五条确定性规则通过，**不代表生产可用**；")
                 .append("`APPROVED` 也只在**审批绑定的 origin + 应用版本 + 内容摘要**范围内、且在**有效期内**可用。")
                 .append("同一目标同一版本存在多条可用授权时回注失败（歧义即失败），不按时间或分数择一。\n");
@@ -125,7 +145,7 @@ public final class CandidateAuditReport {
             case PROPOSED:  return "已提出，尚未验证";
             case VALIDATED: return "验证通过（可提交审批，仍非生产定位器）";
             case REJECTED:  return "验证未通过，保留证据以便追溯";
-            case APPROVED:  return "人工审批通过（仍需在绑定范围内且未过期才可回注）";
+            case APPROVED:  return "人工审批已通过（仍需在绑定范围内且未过期才可回注）";
             case RETIRED:   return "已失效，终态，不参与回退";
             default:        return "";
         }
