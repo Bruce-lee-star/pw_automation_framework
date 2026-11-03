@@ -100,7 +100,7 @@
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v2.4（data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
+    <span>版本：<b>v2.6（§4.5 厘清"录制产出"与"需求驱动产出"边界：录制（pw-codegen 手动录取）只产 Page Object + Steps(@Step) + Assert，Feature 由业务需求生成、Glue 由需求→代码绑定生成；并落地 P2 绑定生成器 FeatureGlueGenerator（pw-codegen codegen.binding）：FeatureGluePlan → .feature + 极薄 Cucumber Glue（注解保留 {string}/{int} 表达式、方法体仅 steps.xxx(...)，占位符/类型/字面值三重校验 + import 最小化），16 个契约测试覆盖）；v2.5（§4.5 稳定代码生成由"三层产物（Feature/Glue/PO）"升级为"四层产物（Feature/Glue/Steps/PO）"：新增 Steps 业务流层，与 test-automation 现有 tests/glue · tests/steps · tests/pages 分层一致——Glue 极薄仅委托 Steps，Steps 承载可复用业务流且无定位器，Page Object 仅定位器+原子交互；data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
     <span>日期：<b>2026-11-03</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
@@ -184,7 +184,7 @@
       <div class="arrow">→</div>
       <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;">
         <span class="tag new">新增</span><h4>④ 生成层 CodeGen</h4>
-        <p>StepPlan + 已验证定位器 → 三层产物：Feature / Glue step / Page Object+方法</p>
+        <p>StepPlan + 已验证定位器 → 四层产物：Feature / Glue / Steps / Page Object+方法</p>
         <p>模板化生成 + 编译 + 冒烟执行双验证；产物内嵌 trace 注释</p>
       </div>
       <div class="arrow">→</div>
@@ -218,7 +218,7 @@
     <div class="flow-note">复用面说明：优先评估现有导航、会话、拦截和监控能力；完成 API、生命周期与隔离核验后再复用。预计新增原语通道、快照协议、意图翻译、候选验证和代码生成层。</div>
   </div>
 
-  <div class="note ok"><b>运行时分离（P3 目标形态）：</b>设计期（可选 LLM：意图翻译 + 候选提出）与回归期（<b>纯 JVM 运行</b>：已评审的 StepPlan 固化为 Feature/Glue/PO 代码，直接跑 <code>mvn test</code>）分离。若引入 LLM，供应商、数据驻留、留存条款和凭据管理须经审查；仅将非敏感配置接入 ConfigReader，模型不可用不得影响既有回归链路。</div>
+  <div class="note ok"><b>运行时分离（P3 目标形态）：</b>设计期（可选 LLM：意图翻译 + 候选提出）与回归期（<b>纯 JVM 运行</b>：已评审的 StepPlan 固化为 Feature/Glue/Steps/PO 代码，直接跑 <code>mvn test</code>）分离。若引入 LLM，供应商、数据驻留、留存条款和凭据管理须经审查；仅将非敏感配置接入 ConfigReader，模型不可用不得影响既有回归链路。</div>
 
   <h3 id="s31">3.1 技术架构分解（可落地蓝图）</h3>
   <p>§3 给出五层流水线的高层视图；本节落到<b>模块边界、组件职责、SPI 契约、数据流、存储与集成</b>，作为实现的直接依据。设计原则：新增逻辑集中在 <code>pw-core</code>（协议 / 领域 / 资产 / 编排）与 <code>pw-web-ui</code>（浏览器协议 / 观测）；LLM 与需求源通过 SPI 可选接入，<b>不污染核心与运行时</b>（R6）。</p>
@@ -244,7 +244,7 @@
       <div class="arrow">→</div>
       <div class="box" style="background:var(--accent-soft);border:1px solid #b9dedc;"><span class="tag new">路径 B 资产生产（分析期）</span><h4>需求 + 脱敏观测</h4><p>→ RequirementSource + PageObservationProvider → PageUnderstandingEngine（SPI, LLM）→ AssetDraft → AssetValidator → 人工审批 → AssetRepository(active)</p><p>不进运行时</p></div>
       <div class="arrow">→</div>
-      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">路径 C 资产消费</span><h4>active 资产</h4><p>→ CodeGen 三层产物（Feature/Glue/PO）→ mvn test 回归</p><p>与手写代码同管线</p></div>
+      <div class="box" style="background:#eef5fc;border:1px solid #c8dcf2;"><span class="tag asset">路径 C 资产消费</span><h4>active 资产</h4><p>→ CodeGen 四层产物（Feature/Glue/Steps/PO）→ mvn test 回归</p><p>与手写代码同管线</p></div>
     </div>
   </div>
   <p>三条路径解耦：A 与 C 是回归期纯 JVM 主链路（稳定、可度量）；B 是分析期可选链路（产资产、不直接执行）。B 的产物仅在经审批落库（<code>active</code>）后才被 C 消费，<b>AI 永不进入 A/C 的运行时</b>（R6）。</p>
@@ -563,15 +563,32 @@ steps:
   </table>
   <div class="note warn"><b>AI 候选铁律：</b>AI 产出的一律视为「未验证建议」。入库前需验证命中数、目标语义、可见/可操作状态、业务前置/后置断言和受控审批；重复冒烟次数仅作辅助证据，不构成正确性证明。无法确认目标时必须停止并交由人工处理，不得自动回退到可能命中其他元素的定位器。</div>
 
-  <h3 id="s45">4.5 稳定代码生成（三层产物）</h3>
-  <p>生成物与代码仓同构，生成后立即进入与手写代码相同的评审/编译/运行管线：</p>
+  <h3 id="s45">4.5 稳定代码生成（四层产物 + 断言）</h3>
+  <p>生成物与代码仓同构，生成后立即进入与手写代码相同的评审/编译/运行管线。借鉴 <code>test-automation</code> 既有分层（<code>tests/glue</code> · <code>tests/steps</code> · <code>tests/pages</code>），最终回归资产为 <b>Feature / Glue / Steps / Page Object（＋ Assert）</b>。<b>关键澄清：录制工具（pw-codegen）在手动录取过程中只产出 Page Object + Steps（<code>@Step</code> 业务流）+ Assert 三类，并不生成 Feature 与 Glue</b>；Feature 由业务需求驱动生成，Glue 由需求→代码绑定（P2）生成，二者与录制解耦。</p>
   <table>
-    <tr><th style="width:22%">产物</th><th>内容</th><th>稳定性保障</th></tr>
-    <tr><td><b>Feature</b></td><td>业务语言场景（Given/When/Then），来源于 StepPlan 的业务化改写</td><td>人工可读、可评审</td></tr>
-    <tr><td><b>Glue step</b></td><td>@Given/@When/@Then 方法，仅做参数解包 + 调 Page Object</td><td>无定位器逻辑（单一职责）</td></tr>
-    <tr><td><b>Page Object + 业务方法</b></td><td>定位器常量（已验证回注）+ 业务方法（登录/新建订单…）</td><td>定位器全部来自回注库；方法带 trace javadoc（来源/指纹/验证时间）</td></tr>
+    <tr><th style="width:16%">产物</th><th style="width:16%">来源</th><th>内容</th><th>落点 / 稳定性保障</th></tr>
+    <tr><td><b>Page Object</b></td><td>录制（Tab1）</td><td>定位器常量（已验证回注）+ 原子交互（type/click/readText/waitForVisible…）</td><td><code>tests/pages</code>；无业务流；方法带 trace javadoc（来源/指纹/验证时间）</td></tr>
+    <tr><td><b>Steps（业务流层）</b></td><td>录制（Tab2）</td><td>可复用业务方法（<code>@Step</code> 标注，如 登录 / 新建订单 / 切换 Profile）：由 Page Object 原子交互组合，承载跨页流转、session 管理、API mock 编排</td><td><code>tests/steps</code>；无定位器（只在 PO）；一个 Steps 方法被多个 Glue/场景复用</td></tr>
+    <tr><td><b>Assert（断言）</b></td><td>录制（Tab3）</td><td>与 Steps 会话一一对应的断言方法（<code>assertN</code>），读取页面状态做业务校验（与 <code>test-automation</code> 的 <code>tests/verify/*</code> 同性质）</td><td><code>tests/steps</code> 或独立 verify 包；纯读、无副作用</td></tr>
+    <tr><td><b>Feature</b></td><td><b>业务需求驱动</b>（非录制）</td><td>业务语言场景（Given/When/Then），由 StepPlan 业务化改写而来</td><td><code>resources/features</code>；人工可读、可评审</td></tr>
+    <tr><td><b>Glue</b></td><td><b>需求→代码绑定</b>（P2，非录制）</td><td>Cucumber <code>@Given/@When/@Then</code> 方法，<b>仅做参数解包 + 委托 Steps</b>（如 <code>new LoginSteps().logon(env, user)</code>）</td><td><code>tests/glue</code>；无定位器、无业务流（极薄，单一职责）</td></tr>
   </table>
-  <p>验证管线：<b>模板生成 → 编译（checkstyle 同规）→ 冒烟执行（生成场景跑 1 遍）→ 落库</b>。落库后即普通代码，回归运行时零 LLM（P3）。</p>
+  <div class="note info"><b>为何需要 Steps 层（区别于原“三层 Feature/Glue/PO”）：</b>原设计把业务方法（登录、下单、跨页）塞进 Page Object，是“胖 PO”反模式。独立 Steps 层后：① Page Object 回归“只管元素”的单一职责；② 业务流在 Steps 内可复用、可单测、可跨场景共享；③ Glue 保持极薄、只做短语→方法映射。该 Steps 即录制工具 Tab2 产出的 <code>@Step</code> 类，与 <code>test-automation</code> 的 <code>tests/steps/*Steps.java</code>（如 <code>LoginSteps</code>/<code>HomeSteps</code>）同构。</div>
+  <div class="note warn"><b>录制 ≠ 四层一步到位：</b>手动录取（pw-codegen）只落地 <b>Page Object + Steps + Assert</b> 三类脚本化产物；<b>Feature 由业务需求生成</b>、<b>Glue 由需求→代码绑定生成</b>（把 Feature 短语委托给录制得到的 Steps）。不要把 Feature / Glue 算作录制工具的输出，也不要在录制期强求 BDD 结构——录制产物经需求→代码绑定后，才组装成可跑 <code>mvn test</code> 的四层回归资产。</div>
+  <div class="note ok"><b>P2 绑定生成器已落地：<code>FeatureGlueGenerator</code>（pw-codegen · <code>codegen.binding</code>）</b>——录制与需求两条产线在此汇合：录制的 Steps 类作委托目标，需求侧只描述场景。输入 <code>FeatureGluePlan</code>（feature 名 / 标签 / 场景 / 步骤关键字 / 短语（Cucumber 表达式）/ 参数声明 / feature 字面值 / 委托目标），经 FreeMarker 模板 <code>feature.ftl</code> + <code>glue.ftl</code> 输出两份文本，<code>writeTo(featureDir, glueDir)</code> 落盘。它<b>不接入</b> <code>MultiPageCodegen.build()</code>，与录制互不污染。</div>
+  <table>
+    <tr><th style="width:20%">生成期校验（不留到编译期）</th><th>规则</th></tr>
+    <tr><td>占位符 ↔ 字面值</td><td>数量必须相等，多一个或少一个直接抛 <code>IllegalArgumentException</code></td></tr>
+    <tr><td>占位符 ↔ 参数类型</td><td><code>{string}/{word}</code> → <code>String</code>（feature 内加引号）；<code>{int}/{long}/{double}/{float}/{bigdecimal}/{byte}/{short}/{boolean}</code> → 对应 Java 类型（feature 内裸写并校验格式与取值范围）</td></tr>
+    <tr><td>注解表达式</td><td>Glue 注解<b>原样保留</b> <code>{string}</code> 占位符，绝不替换成字面值——否则 Cucumber 匹配不到 feature 行</td></tr>
+    <tr><td>命名派生</td><td>文件名/类名由 feature 名派生（<code>Role element login → role_element_login.feature / RoleElementLoginGlue</code>）；方法名由短语派生，同场景重名自动加 <code>_2</code> 序号；import 只引实际用到的注解与 Steps 类</td></tr>
+  </table>
+  <pre>@When("I log on as {string} with role {string}")          // 注解 = Cucumber 表达式（占位符不动）
+public void i_log_on_as_with_role(String username, String role) {
+    steps.logon(username, role);                          // delegateForwarding(...)
+    // 录制步骤无参时：steps.step1();（delegate("step1")，短语参数由 Steps 内部消化并生成注释）
+}</pre>
+  <p>验证管线：<b>模板生成 → 编译（checkstyle 同规）→ 冒烟执行（生成场景跑 1 遍）→ 落库</b>。落库后即普通代码，回归运行时零 LLM（P3）。绑定产物与录制产物走同一条验证管线：Glue 编译不过或 feature 匹配不到步骤，都在冒烟阶段暴露。</p>
 
   <h3 id="s46">4.6 LLM 页面理解与测试资产生成（分析期，非运行时）</h3>
   <p>除「自然语言→StepPlan」外，另一个明确依赖 LLM 的环节是<b>页面理解</b>。与单纯"看页面"不同，本环节必须<b>结合需求上下文</b>才能产出有用的测试资产：脱离需求的元素清单只是一堆 DOM 节点，只有把页面元素 / 操作 / 联动<b>映射到需求条目与业务规则</b>，资产才可被评审、可追溯、可度量覆盖度。它只发生在<b>分析期 / 资产生成期</b>，<b>不进入运行时与回归期</b>——回归仍零 LLM（§7 P4）。此环节与 R6「AI 无执行权」不冲突：LLM 消费的是<b>只读、脱敏后的观测</b>（需求上下文 + a11y 快照 + 网络摘要 + 受限诊断），全程不持有浏览器原语调用能力。</p>
@@ -718,7 +735,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><td><b>BrowserCommandChannel</b>（受限原语 + 策略门禁）</td><td>pw-web-ui</td><td>现有 <code>RoleElement</code>、<code>RoleLocatorFactory</code>、<code>LocatorFactory</code> 及交互等待原语；不假设存在名为 RoleElementPicker 的 Java 类</td></tr>
     <tr><td><b>SnapshotTree</b>（快照协议 + 摘要 + 脱敏）</td><td>pw-web-ui</td><td>先评估 Playwright Java 与现有 locator/role 封装能提供的观测能力；<code>SelectorStability</code>/<code>CodegenFacts</code> 是 pw-codegen 实现，跨模块复用需通过接口而非直接依赖</td></tr>
     <tr><td><b>CandidateValidator + 候选审批/版本库</b></td><td>pw-codegen</td><td>CodegenScorer、CodegenPanelManager；候选不因打分或单次唯一命中自动批准</td></tr>
-    <tr><td><b>CodeGen 三层产物</b>（Feature/Glue/PO 模板生成）</td><td>pw-codegen</td><td>CodegenFacts、既有代码模板；适配当前 runner 后走 Checkstyle、编译、隔离测试和评审</td></tr>
+    <tr><td><b>CodeGen 四层产物</b>（Feature/Glue/Steps/PO 模板生成）</td><td>pw-codegen</td><td>CodegenFacts、既有代码模板；适配当前 runner 后走 Checkstyle、编译、隔离测试和评审</td></tr>
     <tr><td><b>AgentTrace / 审计</b></td><td>pw-reports</td><td>现有自研 Report；按数据分类新增访问、保留和导出治理</td></tr>
     <tr><td><b>LLM 网关 SPI</b>（Ollama/云端可插拔）</td><td>可选适配模块（不放 pw-core）</td><td>pw-core 只定义稳定的请求/响应协议；网络客户端、供应商配置和 secret 注入由适配层提供，凭据不得放入普通 ConfigReader 值或日志</td></tr>
     <tr><td><b>CodeGen 语言目标 / 录制入口</b></td><td>pw-codegen</td><td>将上游 Java codegen 作为参考；先核实本项目 Cucumber/JUnit4 runner 和生成模板，再决定语言/runner 产物</td></tr>
@@ -735,7 +752,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <li><b>P0 · 受限确定性垂直切片</b>（无 AI）—— 先实现版本化 DSL、少量白名单原语（snapshot/assert_state 及无副作用演示操作）、策略校验和最小审计；只在隔离靶场运行。确认快照能力/资源上限后，再逐步开放写操作。<br/><b>验收：</b>确定测试数据和浏览器版本下，受限流程结果可比较；失败即停止并提供脱敏诊断。Trace 只供审计，不直接重放真实写操作。</li>
     <li><b>P1 · 意图翻译</b>—— 先结构化录制骨架 → StepPlan；完成数据最小化、网络出口和模型供应商审查后，再评估自然语言 → StepPlan 与 LLM 网关适配层。<br/><b>验收：</b>相同规范化输入可比较出等价计划；非法 schema、越权 Action、未知字段和不批准 origin 均被拒绝。</li>
     <li><b>P1.5 · 页面理解与测试资产生产</b>（分析期 LLM）—— 结合需求上下文（需求条目 / 验收标准 / 业务规则），用 LLM 对脱敏快照分析，产出带需求映射的元素清单、操作行为模型与联动图谱（§4.6），落库为 Page Object/StepPlan/联动断言草案，并支持需求→资产覆盖度；属资产生成期，不进入运行时。<br/><b>验收：</b>资产含需求映射与验证证据、经人工审批落库；输入脱敏（无 secret/PII 进模型）；分析产物不自动成为可信定位器（须过 §4.4 验证）；量化指标（需求覆盖度 / 误报率 / 定位器稳定性）须在 P1.5 评审确定阈值（参考 §4.6.3 / §8.1）；回归期不依赖此 LLM 链路。</li>
-    <li><b>P2 · 稳定代码生成</b>—— 三层产物模板（Feature/Glue/PO+方法）+ 编译 + 冒烟 + 落库；产物内嵌 trace javadoc；资产来源新增 §4.6 的页面理解产物。<br/><b>验收：</b>生成的工程过 checkstyle、冒烟 1 遍绿、落库后 <code>mvn test</code> 零 LLM 运行。</li>
+    <li><b>P2 · 稳定代码生成</b>—— 四层产物模板（Feature/Glue/Steps/PO+方法）+ 编译 + 冒烟 + 落库；产物内嵌 trace javadoc；资产来源新增 §4.6 的页面理解产物。<br/><b>验收：</b>生成的工程过 checkstyle、冒烟 1 遍绿、落库后 <code>mvn test</code> 零 LLM 运行。</li>
     <li><b>P3 · 定位器治理</b>—— CandidateValidator（目标语义/唯一性/可操作性/业务断言）+ 候选审批和版本化回注。<br/><b>验收：</b>候选有来源与验证证据；无法确认时失败关闭并转人工，不自动回退到可能错误的目标。</li>
     <li><b>P4 · 治理与企业化</b>—— 策略/审批、运行时安全测试、审计保留与导出治理、CI 集成（生成期与回归期分离）及非功能指标。<br/><b>验收：</b>安全集成测试全绿；回归 CI 无 LLM；审计访问受控且可按期限删除；满足已批准的性能/并发/恢复目标。</li>
   </ul>
@@ -801,7 +818,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
   </ul>
   <h3>P2 稳定代码生成</h3>
   <ul>
-    <li>[ ] pw-codegen：三层产物模板（Feature / Glue / Page Object+方法），遵循当前 JUnit4/Cucumber Runner 约束，或先单独批准运行器迁移</li>
+    <li>[ ] pw-codegen：四层产物模板（Feature / Glue / Steps / Page Object+方法），遵循当前 JUnit4/Cucumber Runner 约束，或先单独批准运行器迁移</li>
     <li>[ ] 生成 → checkstyle → 编译 → 冒烟 1 遍 → 落库 的管线命令</li>
     <li>[ ] 生成物 trace javadoc（来源/指纹/验证时间）</li>
     <li>[ ] 落库后 <code>mvn test</code> 零 LLM 运行验证</li>
@@ -841,7 +858,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><th style="width:16%">模块</th><th style="width:34%">本轮要新增/改造</th><th>对接现有资产与首版范围</th></tr>
     <tr><td><b>pw-core</b>（协议层）</td><td>StepPlan/按 ActionType 区分的 schema 与策略契约；IntentTranslator SPI；不承载 LLM 网络客户端或 secret provider</td><td>核验 ConfigReader/ErrorClassifier API 后再复用；仅放跨模块稳定协议，不暴露秘密或任意配置值的 debug 查询</td></tr>
     <tr><td><b>pw-web-ui</b>（执行层）</td><td>有界 SnapshotTree 协议；受限 BrowserCommandChannel；StepDriver 执行闭环与策略校验</td><td>核实 RoleElement/RoleLocatorFactory、Route、SessionStore、BrowserStartupImpl 和 ConcurrencyGate 的实际契约；首版只在隔离靶场开放批准原语</td></tr>
-    <tr><td><b>pw-codegen</b>（生成层）</td><td>录制骨架 → StepPlan 转换器；三层产物模板；CandidateValidator + 候选审批/版本化</td><td>CodegenPanelManager、CodegenFacts、CodegenScorer；确认 API 和模块边界后复用，并适配当前 JUnit4/Cucumber Runner</td></tr>
+    <tr><td><b>pw-codegen</b>（生成层）</td><td>录制骨架 → StepPlan 转换器；四层产物模板；CandidateValidator + 候选审批/版本化</td><td>CodegenPanelManager、CodegenFacts、CodegenScorer；确认 API 和模块边界后复用，并适配当前 JUnit4/Cucumber Runner</td></tr>
     <tr><td><b>pw-route / 部署网络层</b></td><td>mock 生命周期与逐请求/逐跳重定向策略；企业出站控制由代理/防火墙保障</td><td>评估现有 Route 对子资源/导航的覆盖能力；不能将应用层路由视作网络出口安全边界</td></tr>
     <tr><td><b>pw-api-core</b>（API 层）</td><td>仅在需求明确时复用 API 断言；storage_state 不进入 AI 上下文</td><td>核验 ApiCapture/BodyStore 的权限、生命周期和敏感数据处理后决定是否复用</td></tr>
     <tr><td><b>pw-reports</b>（观测层）</td><td>AgentTrace 最小审计字段（策略版本/动作类别/耗时/结果/审批引用；不保留原始敏感值）</td><td>评估现有 Report 与 MonitorFailureReportSink；另定义访问控制、保留期限、导出审计和删除流程</td></tr>
