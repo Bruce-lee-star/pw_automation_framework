@@ -1,0 +1,193 @@
+package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * 版本化步骤计划（设计 §4.3 + §4.3.1）：受控命令 {@link Command} 的有序集合，
+ * 是「参数范围授权（v3.7）」的运行期载体。
+ *
+ * <p><b>复用而非新建</b>：直接以 {@link List}&lt;{@link Command}&gt; 承载步骤，
+ * 不另建 Step/Target/Params 类型（Command 已含 ActionType + LocatorSpec target + params）。
+ * 解析采用手动 JsonNode 遍历——Command/LocatorSpec 保持纯领域类型（无 Jackson 注解），
+ * 而 §4.3 的 fail-closed 约束（未知字段拒绝、未知 ActionType 拒绝、NAVIGATE 不带 target、
+ * ASSERT_* 无写入型参数）在此统一落实。</p>
+ *
+ * <p><b>target 互换形态</b>：JSON 中 target 以 {@link LocatorSpec#canonical()} 字符串表达
+ * （框架既有的快照索引键 / 命令目标），经 {@link LocatorSpec#parse(String)} 还原；
+ * 这是比 §4.3 草案里「对象形状」更稳健、且与现有快照体系一致的真实互换格式。</p>
+ *
+ * <p><b>指纹</b>：{@link #planDigest()} 风格对齐 {@code ApprovalGrant.planDigestOf}
+ * （SHA-256 取前 8 字节十六进制，前缀 {@code stepplan-v1}），把「被批准的内容」压成可比较指纹，
+ * 供后续参数范围授权绑定（v3.7 下一层）。</p>
+ */
+public final class StepPlan {
+
+    private static final String DIGEST_PREFIX = "stepplan-v1";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private final int schemaVersion;
+    private final String planId;
+    private final List<Command> steps;
+
+    public StepPlan(int schemaVersion, String planId, List<Command> steps) {
+        this.schemaVersion = schemaVersion;
+        this.planId = Objects.requireNonNull(planId, "planId");
+        this.steps = List.copyOf(steps);
+    }
+
+    public int schemaVersion() {
+        return schemaVersion;
+    }
+
+    public String planId() {
+        return planId;
+    }
+
+    public List<Command> steps() {
+        return steps;
+    }
+
+    /**
+     * 从 JSON DSL 解析（fail-closed：未知字段 / 未知动作 / 结构不合规均抛 {@link IllegalArgumentException}）。
+     */
+    public static StepPlan parse(String json) {
+        Objects.requireNonNull(json, "json");
+        try {
+            JsonNode root = MAPPER.readTree(json);
+            if (!root.isObject()) {
+                throw new IllegalArgumentException("StepPlan 根必须是 JSON 对象");
+            }
+            int schemaVersion = requireInt(root, "schemaVersion");
+            String planId = requireText(root, "planId");
+            JsonNode stepsNode = root.get("steps");
+            if (stepsNode == null || !stepsNode.isArray()) {
+                throw new IllegalArgumentException("StepPlan.steps 必须是数组");
+            }
+            List<Command> steps = new ArrayList<>();
+            for (JsonNode step : stepsNode) {
+                steps.add(parseCommand(step));
+            }
+            rejectUnknownFields(root, "schemaVersion", "planId", "steps");
+            return new StepPlan(schemaVersion, planId, steps);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("StepPlan 解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static Command parseCommand(JsonNode step) {
+        if (!step.isObject()) {
+            throw new IllegalArgumentException("StepPlan 的每个 step 必须是 JSON 对象");
+        }
+        String actionText = requireText(step, "action");
+        Command.ActionType action;
+        try {
+            action = Command.ActionType.valueOf(actionText);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("未知 ActionType: " + actionText);
+        }
+        LocatorSpec target = null;
+        if (step.has("target") && !step.get("target").isNull()) {
+            target = LocatorSpec.parse(step.get("target").asText());
+        }
+        Map<String, String> params = new LinkedHashMap<>();
+        if (step.has("params") && !step.get("params").isNull()) {
+            JsonNode p = step.get("params");
+            if (!p.isObject()) {
+                throw new IllegalArgumentException("step.params 必须是 JSON 对象");
+            }
+            Iterator<Map.Entry<String, JsonNode>> it = p.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> e = it.next();
+                params.put(e.getKey(), e.getValue().asText());
+            }
+        }
+        // —— fail-closed 结构约束（§4.3）——
+        if (action == Command.ActionType.NAVIGATE) {
+            if (target != null) {
+                throw new IllegalArgumentException("NAVIGATE 不允许带 target（无 locator）");
+            }
+        } else if (target == null) {
+            throw new IllegalArgumentException(action + " 必须带 target");
+        }
+        if (action == Command.ActionType.ASSERT_VISIBLE || action == Command.ActionType.ASSERT_TEXT) {
+            if (!params.isEmpty()) {
+                throw new IllegalArgumentException(action + " 不允许带写入型参数");
+            }
+        }
+        rejectUnknownFields(step, "action", "target", "params");
+        return new Command(action, target, params);
+    }
+
+    private static void rejectUnknownFields(JsonNode node, String... allowed) {
+        Iterator<String> it = node.fieldNames();
+        while (it.hasNext()) {
+            String k = it.next();
+            boolean ok = false;
+            for (String a : allowed) {
+                if (a.equals(k)) {
+                    ok = true;
+                    break;
+                }
+            }
+            if (!ok) {
+                throw new IllegalArgumentException("StepPlan 含未知字段: " + k);
+            }
+        }
+    }
+
+    private static int requireInt(JsonNode node, String key) {
+        JsonNode v = node.get(key);
+        if (v == null || !v.isNumber()) {
+            throw new IllegalArgumentException("StepPlan 缺少数字字段: " + key);
+        }
+        return v.asInt();
+    }
+
+    private static String requireText(JsonNode node, String key) {
+        JsonNode v = node.get(key);
+        if (v == null || v.isNull() || v.asText().isEmpty()) {
+            throw new IllegalArgumentException("StepPlan 缺少文本字段: " + key);
+        }
+        return v.asText();
+    }
+
+    /**
+     * 内容指纹（SHA-256 前 8 字节十六进制），风格对齐 {@code ApprovalGrant.planDigestOf}。
+     * 覆盖 schemaVersion + planId + 每步 action / target 规范串 / 排序后的参数——
+     * 任一变化都意味着「被批准的内容变了」。
+     */
+    public String planDigest() {
+        StringBuilder payload = new StringBuilder(DIGEST_PREFIX).append('\n');
+        payload.append(schemaVersion).append('\n').append(planId).append('\n');
+        for (Command c : steps) {
+            payload.append(c.action()).append('\n');
+            payload.append(c.targetRef()).append('\n');
+            c.params().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> payload.append(e.getKey()).append('=').append(e.getValue()).append('\n'));
+        }
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(payload.toString().getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("运行环境缺少 SHA-256，无法计算 StepPlan 指纹", e);
+        }
+    }
+}

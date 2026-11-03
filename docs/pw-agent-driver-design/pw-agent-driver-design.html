@@ -555,13 +555,14 @@ steps:
 
 <h4 id="s431">4.3.1 参数范围授权设计专项（v3.7 草案）</h4>
 <div class="note info">
-  <b>定位：</b>参数范围授权是<b>运行期门禁</b>，约束「StepPlan 某步参数在运行时的取值域」，与定位器审批（<code>ApprovalGrant</code> 绑定 locator 候选的 <code>planDigest</code>）是<b>两套独立 fail-closed 门禁</b>。本专项为<b>设计草案</b>，代码尚未实现；开干前提是 <b>StepPlan 最小契约先建</b>（当前代码 0 命中，文档 L886 列为未启动 TODO）。
+  <b>定位：</b>参数范围授权是<b>运行期门禁</b>，约束「StepPlan 某步参数在运行时的取值域」，与定位器审批（<code>ApprovalGrant</code> 绑定 locator 候选的 <code>planDigest</code>）是<b>两套独立 fail-closed 门禁</b>。本专项为<b>设计草案</b>；其前置 <b>StepPlan 最小契约 v1 已落地</b>（pw-core <code>StepPlan.parse</code> + <code>planDigest</code>），下一步参数范围门禁（ParamScopeGate + ApprovalGrant 参数取值域维度）可启动。
 </div>
-<p><b>缺口：</b><code>ApprovalGrant</code> 当前维度为 <code>candidateId / riskTier / planDigest / origin / appVersion / approvers / expiresAt</code>，<b>无「参数取值域」维度</b>。运行期执行点<b>已存在</b>——<code>BrowserCommandChannel.execute(Command)</code>（pw-core 契约，pw-web-ui <code>PlaywrightChannel</code> 真实现，直接驱动浏览器）——但<b>尚未挂参数范围门禁</b>；且 StepPlan 本身在代码中 0 命中（文档 L886 列为未启动 TODO）。</p>
-<p><b>前置（StepPlan 最小契约，pw-core 协议/领域层，待建）：</b></p>
+<p><b>缺口：</b><code>ApprovalGrant</code> 当前维度为 <code>candidateId / riskTier / planDigest / origin / appVersion / approvers / expiresAt</code>，<b>无「参数取值域」维度</b>。运行期执行点<b>已存在</b>——<code>BrowserCommandChannel.execute(Command)</code>（pw-core 契约，pw-web-ui <code>PlaywrightChannel</code> 真实现，直接驱动浏览器）——但<b>尚未挂参数范围门禁</b>；StepPlan 最小契约 v1 已落地（pw-core），但参数范围门禁（ParamScopeGate + ApprovalGrant 参数取值域维度）仍待建。</p>
+<p><b>前置（StepPlan 最小契约，pw-core，v1 已落地）：</b></p>
 <ul>
-  <li><code>interface StepPlan { int schemaVersion; String planId; List&lt;Command&gt; steps; /* 每步 expect/retryPolicy/approvalRef 作为容器元数据 */ }</code>——<b>直接复用既有 <code>Command</code></b>（pw-core 已存在：<code>ActionType</code> 枚举 + <code>LocatorSpec</code> target + <code>Map&lt;String,String&gt; params</code>），无需另建 Step/Target/Params 类型。</li>
+  <li><code>StepPlan</code>（pw-core 已落地 v1）：<code>planId + schemaVersion + List&lt;Command&gt; steps</code>，<b>直接复用既有 <code>Command</code></b>（<code>ActionType</code> 枚举 + <code>LocatorSpec</code> target + <code>Map&lt;String,String&gt; params</code>）；<code>parse(json)</code> 以 Jackson 手动遍历解析（Command/LocatorSpec 保持纯领域类型、零 Jackson 注解），target 以 <code>LocatorSpec.canonical()</code> 串互换；无需另建 Step/Target/Params 类型。</li>
   <li>按 <code>ActionType</code> 区分 param 结构（<code>NAVIGATE</code> 无 target、<code>ASSERT_*</code> 无写入型参数）；未知 ActionType 拒绝；secret 仅 <code>secretRef</code>；执行身份由执行器注入，不在 Step 自声明（R6）。</li>
+  <li>每步 <code>expect/retryPolicy/approvalRef</code> 不纳入 v1（属执行/审批层）；v1 只取「受控命令有序集合 + 内容指纹」作为参数门禁载体，待 StepDriver/executeAll 与参数范围授权落地时再挂。</li>
   <li>落点：pw-core 纯模型（无副作用、无 LLM 客户端、无 secret provider）。</li>
 </ul>
 <p><b>参数范围如何挂到既有 <code>ApprovalGrant</code>（最小耦合）：</b></p>
@@ -579,7 +580,7 @@ steps:
 </ul>
 <p><b>构建顺序（依赖链）：</b></p>
 <ol>
-  <li>StepPlan 最小契约（pw-core）——前置；</li>
+  <li>StepPlan 最小契约（pw-core，v1 已落地）——前置已满足；</li>
   <li><code>ApprovalGrant</code>/<code>ApprovalPolicy</code> + <code>PARAM_SCOPE_BOUND</code>（pw-codegen，纯治理逻辑，可独立单测）；</li>
   <li><code>BrowserCommandChannel.execute(Command)</code> 已是执行点（pw-core 契约 + <code>PlaywrightChannel</code> 实现）；<code>ParamScopeGate</code> 挂在 execute 边界（或 StepPlan 执行器调 <code>executeAll</code> 前）——门禁挂点；</li>
   <li><code>ParamScopeGate</code> + 测试。</li>
