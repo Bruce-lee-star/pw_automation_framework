@@ -53,8 +53,8 @@ public class AssetPipelineOrchestratorTest {
 
         PipelineResult result = o.run("transfer.feature", "p-transfer");
 
-        assertEquals(3, result.savedIds().size());
-        assertEquals(3, repo.queryByRequirement("REQ-101@1.0").size());
+        assertEquals(4, result.savedIds().size());
+        assertEquals(4, repo.queryByRequirement("REQ-101@1.0").size());
         // AI/规则仅产 DRAFT，永不自动可信（R6）
         assertTrue(repo.queryByRequirement("REQ-101@1.0").stream()
                 .allMatch(a -> a.state() == AssetState.DRAFT));

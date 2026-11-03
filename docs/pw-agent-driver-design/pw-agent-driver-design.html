@@ -270,6 +270,8 @@
 
   <div class="note info"><b>闭环接入真实 PlaywrightChannel（2026-11-03 落地，pw-web-ui <code>web.agent</code>）</b>：新增编排门面 <code>StepPlanRunner</code>，把 pw-core 的「授权执行 + 执行后联动断言」闭环经 <code>RouteTestBedHarness</code> 接到真实 <code>PlaywrightChannel</code>——参数范围门禁在通道边界默认方法（<code>BrowserCommandChannel.execute(Command, ParamScope)</code>）内自动生效（fail-closed，零改动 <code>PlaywrightChannel</code>）。端到端集成测试 <code>StepPlanRunnerIntegrationTest</code>(2) 在本环境真实浏览器跑通：NAVIGATE→FILL(经门禁授权)→两帧 ARIA 快照断言按钮由禁用变启用；且越界值被真实通道门禁拦截（fail-fast）。沿用 <code>assumeNoException</code> 兜底，浏览器不可用时自动跳过。</div>
 
+  <div class="note info"><b>闭环引擎接入资产生产流水线（2026-11-03 落地，pw-agent-analysis + pw-core 载体）</b>：分析层 <code>StepPlanProducer</code> 把 <code>AssetDraftBundle</code> 的<b>联动图谱</b>（本就是「触发操作 + 期望后态」验证规格）派生为 <code>VerifiableStepPlan</code>（执行计划 + 逐步期望 + 页面引用），其 FILL/SELECT 写入参数进入 <code>ParamScope</code> 治理域；编排器 <code>AssetPipelineOrchestrator</code> 在落库前用 <code>ParamScopePolicy.validatePlan</code> 做<b>浏览器无关的治理预检</b>（fail-closed），并把计划以 <code>AssetType.STEP_PLAN</code> 落为 DRAFT 资产。<b>架构守约</b>：分析层零浏览器、不依赖 web-ui；验证期望由新增的 <code>ExpectedChangeMapper</code>（core）生成，与 <code>LinkageGraphVerifier</code> 共用同一语义来源（去重）。执行层 pw-web-ui 的 <code>StepPlanRunner.run(VerifiableStepPlan)</code> 重载直接消费该载体做真实浏览器验证——数据经 pw-core 流动，分析层与执行层解耦。测试：<code>StepPlanProducerTest</code>(2) 覆盖生成/治理域/期望映射/跳过/预检；<code>StepPlanRunnerIntegrationTest</code> 新增载体消费端真实浏览器用例。</div>
+
   <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
   <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
 interface BrowserCommandChannel {            // 原语执行契约（§4.1）

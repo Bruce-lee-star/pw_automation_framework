@@ -9,6 +9,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotExpectatio
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotVerificationResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotVerifier;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.ExpectedChangeMapper;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsText;
 
@@ -183,31 +184,8 @@ public final class LinkageGraphVerifier implements AssetVerifier {
         return SnapshotVerifier.verify(single, List.of(sexp)).allPassed();
     }
 
-    /** ExpectedChange（变化语义）→ SnapshotExpectation（绝对态语义）；无法转化为有效约束时返回 null。 */
+    /** ExpectedChange（变化语义）→ SnapshotExpectation（绝对态语义）；委托共享映射（单一事实来源）。 */
     private SnapshotExpectation toExpectation(LinkageGraph.ExpectedChange exp, String ref) {
-        SnapshotExpectation.Builder b = SnapshotExpectation.forRef(ref);
-        switch (exp.kind()) {
-            case APPEAR:    b.visible(true); break;
-            case DISAPPEAR: b.visible(false); break;
-            case ENABLE:    b.enabled(true); break;
-            case DISABLE:   b.enabled(false); break;
-            case REQUIRED:  b.enabled(true); break;   // 简化：真实实现需校验必填属性
-            case TEXT_CHANGED:
-                if (exp.expectedTextKey() != null && nls != null) {
-                    String raw = nls.value(exp.expectedTextKey());
-                    if (NlsText.isTemplate(raw)) {
-                        b.textMatches(NlsText.pattern(raw).pattern());
-                    } else {
-                        b.text(nls.visibleText(exp.expectedTextKey()));
-                    }
-                } else if (exp.expectedText() != null) {
-                    b.text(exp.expectedText());
-                } else {
-                    return null;
-                }
-                break;
-            default:        return null;
-        }
-        return b.build();
+        return ExpectedChangeMapper.toExpectation(exp, ref, nls);
     }
 }

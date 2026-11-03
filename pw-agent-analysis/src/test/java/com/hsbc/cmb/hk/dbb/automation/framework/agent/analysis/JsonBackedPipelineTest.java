@@ -65,18 +65,18 @@ public class JsonBackedPipelineTest {
 
         PipelineResult result = o.run("transfer.feature", "p-transfer");
 
-        assertEquals(3, result.savedIds().size());
+        assertEquals(4, result.savedIds().size());
         assertTrue("index file on disk", Files.exists(root.resolve("_index.json")));
         assertTrue("asset body files on disk",
                 Files.list(root.resolve("assets")).anyMatch(p -> p.toString().endsWith(".json")));
-        assertEquals(3, repo.queryByRequirement("REQ-101@1.0").size());
+        assertEquals(4, repo.queryByRequirement("REQ-101@1.0").size());
         assertTrue(repo.queryByRequirement("REQ-101@1.0").stream()
                 .allMatch(a -> a.state() == AssetState.DRAFT));
 
         // 重启：新实例加载同一目录，资产与内容完整重建
         JsonFileAssetRepository reloaded = new JsonFileAssetRepository(root);
         List<StoredAsset> reloadedAssets = reloaded.queryByRequirement("REQ-101@1.0");
-        assertEquals(3, reloadedAssets.size());
+        assertEquals(4, reloadedAssets.size());
         assertTrue(reloadedAssets.stream().allMatch(a -> a.state() == AssetState.DRAFT));
 
         StoredAsset linkage = reloadedAssets.stream()

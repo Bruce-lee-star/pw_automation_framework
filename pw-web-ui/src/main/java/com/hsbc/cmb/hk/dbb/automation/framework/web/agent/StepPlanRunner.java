@@ -7,6 +7,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepDriver;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerifier;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerificationResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 
 import java.util.List;
@@ -45,6 +46,17 @@ public final class StepPlanRunner {
                 harness.release(channel);
             }
         }
+    }
+
+    /**
+     * 直接消费分析层产出的「可验证计划」载体（闭环引擎接入资产生产流水线的另一端）。
+     *
+     * <p>pw-agent-analysis 生成的 {@link VerifiableStepPlan}（执行计划 + 逐步期望 + 页面引用）
+     * 经 pw-core 数据载体流动到执行层，本重载直接喂给真实浏览器验证——分析层与执行层
+     * 解耦，互不反向依赖。</p>
+     */
+    public StepVerificationResult run(VerifiableStepPlan vsp) {
+        return run(vsp.plan(), vsp.expectationsPerStep(), vsp.pageRef());
     }
 
     /** 仅授权执行（不带断言），返回每步结果。 */

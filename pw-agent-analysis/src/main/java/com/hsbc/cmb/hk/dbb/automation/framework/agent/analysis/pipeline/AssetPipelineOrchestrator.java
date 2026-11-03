@@ -20,6 +20,10 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.AssetRepository;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.AssetType;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.LinkageGraph;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.Provenance;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +48,7 @@ public final class AssetPipelineOrchestrator {
     private final PageUnderstandingEngine engine;
     private final AssetValidator validator;
     private final AssetRepository repository;
+    private final NlsCatalog nls;
     // pw-core 的 ElementRef/LocatorSpec/LinkageGraph 等使用 refId()/strategy() 风格 getter（非 getX），
     // 且含 record 与 final class 混合；以字段可见性序列化，避免 Jackson 找不到属性。
     private final ObjectMapper mapper = new ObjectMapper()
@@ -55,11 +60,21 @@ public final class AssetPipelineOrchestrator {
                                      PageUnderstandingEngine engine,
                                      AssetValidator validator,
                                      AssetRepository repository) {
+        this(requirementSource, observationProvider, engine, validator, repository, null);
+    }
+
+    public AssetPipelineOrchestrator(RequirementSource requirementSource,
+                                     PageObservationProvider observationProvider,
+                                     PageUnderstandingEngine engine,
+                                     AssetValidator validator,
+                                     AssetRepository repository,
+                                     NlsCatalog nls) {
         this.requirementSource = requirementSource;
         this.observationProvider = observationProvider;
         this.engine = engine;
         this.validator = validator;
         this.repository = repository;
+        this.nls = nls;
     }
 
     /**
@@ -80,6 +95,17 @@ public final class AssetPipelineOrchestrator {
             throw new PipelineValidationException(report);
         }
 
+        // 闭环引擎接入点：从资产草稿派生「可执行 + 可验证」步骤计划，并做浏览器无关的治理预检
+        VerifiableStepPlan vsp = new StepPlanProducer(nls).produce(bundle);
+        try {
+            ParamScopePolicy.validatePlan(vsp.plan());
+        } catch (ParamScopeViolationException ex) {
+            ValidationReport govFail = new ValidationReport(false,
+                    List.of(ValidationReport.Issue.error("StepPlan 治理预检失败: " + ex.getMessage())),
+                    "stepplan-governance-failed");
+            throw new PipelineValidationException(govFail);
+        }
+
         String primaryReq = bundle.linkage().requirementId();
         Provenance provenance = bundle.provenance();
         List<AssetId> saved = new ArrayList<>();
@@ -89,9 +115,11 @@ public final class AssetPipelineOrchestrator {
                 toJson(bundle.behaviors()), provenance)));
         saved.add(repository.save(new AssetDraft(AssetType.LINKAGE_GRAPH, primaryReq,
                 toJson(bundle.linkage()), provenance)));
+        saved.add(repository.save(new AssetDraft(AssetType.STEP_PLAN, primaryReq,
+                toJson(vsp), provenance)));
 
         LOG.info("Pipeline produced {} DRAFT assets for requirement {}", saved.size(), primaryReq);
-        return new PipelineResult(bundle, report, saved);
+        return new PipelineResult(bundle, report, saved, vsp);
     }
 
     private String toJson(Object obj) {

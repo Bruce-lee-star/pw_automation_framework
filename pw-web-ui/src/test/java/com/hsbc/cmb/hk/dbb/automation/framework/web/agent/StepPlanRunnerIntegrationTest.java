@@ -5,6 +5,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotExpectation;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerificationResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamConstraint;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
@@ -85,6 +86,34 @@ public class StepPlanRunnerIntegrationTest {
             } catch (ParamScopeViolationException expected) {
                 // 期望：真实通道边界门禁拦截越界参数
             }
+        } catch (RuntimeException e) {
+            assumeNoException("Playwright browser unavailable in this environment", e);
+        } finally {
+            harness.closeAll();
+        }
+    }
+
+    /** 闭环引擎另一端：分析层产出的 {@link VerifiableStepPlan} 载体直接喂给真实通道验证。 */
+    @Test
+    public void authorizedPlanViaCarrierDrivesRealBrowser() {
+        String targetUrl = resolveFixtureUrl();
+        RouteTestBedHarness harness = new RouteTestBedHarness();
+        try {
+            ParamScope scope = new ParamScope(Map.of(
+                    "url", ParamConstraint.allowedValues(targetUrl),
+                    "value", ParamConstraint.allowedValues("alice")));
+            Command navigate = Command.navigate(targetUrl);
+            Command fill = Command.fill(LocatorSpec.role("textbox", "Username"), "alice");
+            StepPlan plan = new StepPlan(1, "plan-carrier-1", List.of(navigate, fill), scope, List.of());
+            List<List<SnapshotExpectation>> expectations = List.of(
+                    List.of(),
+                    List.of(SnapshotExpectation.forRef("role=button;name=Submit").enabled(true).build()));
+            VerifiableStepPlan vsp = new VerifiableStepPlan(plan, expectations, targetUrl);
+
+            StepVerificationResult result = new StepPlanRunner(harness).run(vsp);
+            assertTrue(result.allPassed());
+            assertEquals(2, result.steps());
+            assertEquals(2, result.passedSteps());
         } catch (RuntimeException e) {
             assumeNoException("Playwright browser unavailable in this environment", e);
         } finally {
