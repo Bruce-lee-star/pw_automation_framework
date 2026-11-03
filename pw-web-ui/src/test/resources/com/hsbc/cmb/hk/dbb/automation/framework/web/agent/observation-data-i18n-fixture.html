@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>data-i18n observation fixture</title>
+</head>
+<body>
+<header>
+    <a href="#privacy" data-i18n="footer.privacy">Privacy</a>
+    <a href="#terms" data-i18n="footer.terms">Terms</a>
+</header>
+<main>
+    <!-- 两个按钮文案相同、key 相同：用于验证 nth 计数 -->
+    <button data-i18n="login.submit" id="submitBtn">Log in</button>
+    <button data-i18n="login.submit" id="submitBtn2">Log in</button>
+    <!-- checkbox 带 key（无可见 aria-label）：验证 key 优先于文案反查 -->
+    <input type="checkbox" data-i18n="link.agree" id="agree">
+    <!-- 无 data-i18n，但有 data-testid 与 aria-label：验证回退 name 精确 -->
+    <input type="text" data-testid="username" aria-label="Username" id="user">
+    <!-- 无 data-i18n，仅靠 aria-label：验证纯回退路径 -->
+    <button id="noI18n" aria-label="Close dialog">Close</button>
+    <p data-i18n="footer.copyright">© 2026 Bank</p>
+    <!-- 隐藏元素：验证观察期被排除 -->
+    <div style="display:none"><button data-i18n="hidden.btn">Hidden</button></div>
+</main>
+</body>
+</html>

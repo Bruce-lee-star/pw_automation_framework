@@ -100,7 +100,7 @@
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v2.3（P1.5 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
+    <span>版本：<b>v2.4（data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
     <span>日期：<b>2026-11-03</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
@@ -401,9 +401,9 @@ VerificationReport report = new LinkageGraphVerifier(harness)
     <tr><td><code>analysis/requirement/RequirementSource.java</code></td><td>SPI：需求解析（Cucumber Feature / 文档 → RequirementContext）；契约</td></tr>
     <tr><td><code>analysis/requirement/RequirementContext.java</code> · <code>RequirementEntry.java</code> · <code>RequirementId.java</code></td><td>结构化需求模型 + 关键词映射（元素→需求溯源）</td></tr>
     <tr><td><code>analysis/requirement/StaticRequirementSource.java</code></td><td>静态/人工需求源（确定性，降级路径）</td></tr>
-    <tr><td><code>analysis/observation/PageObservationProvider.java</code></td><td>SPI：脱敏观测采集（真实现在 pw-web-ui，基于 ARIA 快照）</td></tr>
-    <tr><td><code>analysis/observation/PageObservation.java</code> · <code>ObservedElement.java</code></td><td>只读、白名单字段观测包（R1/R7）</td></tr>
-    <tr><td><code>analysis/observation/ManualPageObservationProvider.java</code></td><td>人工/录制观测（确定性，降级路径）</td></tr>
+    <tr><td><code>agent/observation/PageObservationProvider.java</code></td><td>SPI：脱敏观测采集（真实现在 pw-web-ui：PlaywrightPageObservationProvider 基于 DOM 遍历优先读 data-i18n）</td></tr>
+    <tr><td><code>agent/observation/PageObservation.java</code> · <code>ObservedElement.java</code></td><td>只读、白名单字段观测包（R1/R7）</td></tr>
+    <tr><td><code>agent/observation/ManualPageObservationProvider.java</code></td><td>人工/录制观测（确定性，降级路径）</td></tr>
     <tr><td><code>analysis/engine/PageUnderstandingEngine.java</code></td><td>SPI：需求+观测 → 三类资产草稿（§4.6 ①/②/③）</td></tr>
     <tr><td><code>analysis/engine/ElementInventory.java</code> · <code>BehaviorModel.java</code> · <code>AssetDraftBundle.java</code></td><td>三类资产模型 + 聚合草稿包（含 Provenance 溯源）</td></tr>
     <tr><td><code>analysis/engine/RuleBasedUnderstandingEngine.java</code></td><td><b>无 LLM</b>参考实现：按角色/关键词推断元素清单与行为模型；联动图谱留空（需 LLM 前后差分或靶场验证）；可注入 <code>NlsCatalog</code>，把观测文案反查为 key 作为资产主键与首选定位符（§4.7）</td></tr>

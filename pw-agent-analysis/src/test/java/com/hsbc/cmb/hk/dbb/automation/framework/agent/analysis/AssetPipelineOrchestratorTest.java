@@ -1,9 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.RuleBasedUnderstandingEngine;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.ManualPageObservationProvider;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.ObservedElement;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.PageObservation;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.ManualPageObservationProvider;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.ObservedElement;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.PageObservation;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.pipeline.AssetPipelineOrchestrator;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.pipeline.PipelineResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.pipeline.PipelineValidationException;

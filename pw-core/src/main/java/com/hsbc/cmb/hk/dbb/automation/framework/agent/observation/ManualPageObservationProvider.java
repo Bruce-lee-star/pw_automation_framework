@@ -1,4 +1,4 @@
-package com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation;
+package com.hsbc.cmb.hk.dbb.automation.framework.agent.observation;
 
 import java.util.List;
 

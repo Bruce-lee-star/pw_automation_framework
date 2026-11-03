@@ -4,9 +4,9 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.AssetDraft
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.BehaviorEntry;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.ElementInventoryEntry;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.RuleBasedUnderstandingEngine;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.ManualPageObservationProvider;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.ObservedElement;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.PageObservation;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.ManualPageObservationProvider;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.ObservedElement;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.PageObservation;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.requirement.RequirementContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.requirement.RequirementEntry;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.requirement.RequirementId;

@@ -1,6 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine;
 
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.observation.PageObservation;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.PageObservation;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.requirement.RequirementContext;
 
 /**

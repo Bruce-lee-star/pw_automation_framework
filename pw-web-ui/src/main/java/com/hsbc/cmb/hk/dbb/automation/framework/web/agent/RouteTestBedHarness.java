@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.agent;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.BrowserCommandChannel;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.PageObservationProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.microsoft.playwright.Browser;
@@ -29,6 +30,8 @@ public final class RouteTestBedHarness implements IsolationHarness {
     private final List<PlaywrightChannel> open = new ArrayList<>();
     /** 多语言目录（可选）：注入后靶场通道即可直接执行带 NLS key 的定位符（设计 §4.7）。 */
     private final NlsCatalog nls;
+    /** 最近一次 acquire 创建的页面（供观察提供方复用，保证「执行」与「观察」同源同页面）。 */
+    private Page lastPage;
 
     public RouteTestBedHarness() {
         this(null);
@@ -48,9 +51,24 @@ public final class RouteTestBedHarness implements IsolationHarness {
         BrowserContext context = browser.newContext();
         Page page = context.newPage();
         page.navigate(targetUrl);
+        this.lastPage = page;
         PlaywrightChannel channel = new PlaywrightChannel(page, browser, context, nls);
         open.add(channel);
         return channel;
+    }
+
+    /**
+     * 返回分析期页面观测提供方（设计 §4.6 ②），复用最近一次 {@link #acquire(String)} 创建的页面
+     * 与已注入的 {@link NlsCatalog}。须先调用 {@code acquire(...)}。
+     *
+     * <p>观察提供方优先读取元素 {@code data-i18n} 作为跨语言稳定的 NLS key（见
+     * {@link PlaywrightPageObservationProvider}），比"可访问名反查"更精确。</p>
+     */
+    public PageObservationProvider observationProvider() {
+        if (lastPage == null) {
+            throw new IllegalStateException("acquire(String) must be called before observationProvider()");
+        }
+        return new PlaywrightPageObservationProvider(lastPage, nls);
     }
 
     @Override
