@@ -96,6 +96,16 @@ public class StepPlanTest {
             + "  {\"action\":\"SELECT\",\"target\":\"role=combobox;name=role\",\"params\":{\"option\":\"42\"}}"
             + "]}";
 
+    private static final String WITH_STEP_SCOPE = "{"
+            + "\"schemaVersion\":1,"
+            + "\"planId\":\"plan-step-scoped\","
+            + "\"scope\":{\"value\":{\"allow\":[\"plan-only\"]}},"
+            + "\"steps\":["
+            + "  {\"action\":\"FILL\",\"target\":\"role=textbox;name=username\",\"params\":{\"value\":\"x\"}},"
+            + "  {\"action\":\"FILL\",\"target\":\"role=textbox;name=password\",\"params\":{\"value\":\"y\"},"
+            + "\"scope\":{\"value\":{\"allow\":[\"step-only\"]}}}"
+            + "]}";
+
     @Test
     public void parsesPlanWithScope() {
         StepPlan plan = StepPlan.parse(WITH_SCOPE);
@@ -128,6 +138,38 @@ public class StepPlanTest {
         assertThrowsIllegal(() -> StepPlan.parse(
                 "{\"schemaVersion\":1,\"planId\":\"x\",\"scope\":{},\"foo\":\"bar\","
                 + "\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\"}]}"));
+    }
+
+    @Test
+    public void parsesPlanWithStepScope() {
+        StepPlan plan = StepPlan.parse(WITH_STEP_SCOPE);
+        // plan 级 scope
+        assertTrue(plan.scope().constraintFor("value").orElseThrow().allows("plan-only"));
+        // step 0 无 step scope → resolved = plan scope
+        assertTrue(plan.resolvedScope(0).constraintFor("value").orElseThrow().allows("plan-only"));
+        assertFalse(plan.resolvedScope(0).constraintFor("value").orElseThrow().allows("step-only"));
+        // step 1 有 step scope → resolved = step scope（覆盖 plan）
+        assertTrue(plan.resolvedScope(1).constraintFor("value").orElseThrow().allows("step-only"));
+        assertFalse(plan.resolvedScope(1).constraintFor("value").orElseThrow().allows("plan-only"));
+    }
+
+    @Test
+    public void stepScopeChangesDigest() {
+        String noStepScope = "{"
+                + "\"schemaVersion\":1,\"planId\":\"d\","
+                + "\"steps\":["
+                + "  {\"action\":\"FILL\",\"target\":\"role=textbox;name=u\",\"params\":{\"value\":\"a\"}}"
+                + "]}";
+        String withStepScope = "{"
+                + "\"schemaVersion\":1,\"planId\":\"d\","
+                + "\"steps\":["
+                + "  {\"action\":\"FILL\",\"target\":\"role=textbox;name=u\",\"params\":{\"value\":\"a\"},"
+                + "\"scope\":{\"value\":{\"allow\":[\"a\"]}}}"
+                + "]}";
+        String d1 = StepPlan.parse(noStepScope).planDigest();
+        String d2 = StepPlan.parse(withStepScope).planDigest();
+        assertNotEquals("per-step scope 必须改变指纹", d1, d2);
+        assertEquals("同一带 step scope 计划指纹稳定", d2, StepPlan.parse(withStepScope).planDigest());
     }
 
     private static void assertThrowsIllegal(ThrowingRunnable r) {

@@ -17,7 +17,11 @@ import java.util.TreeMap;
  * scope 一旦变化，指纹即变，天然与「被批准的内容」对齐。</p>
  *
  * <p><b>fail-closed 解析</b>：{@link #fromJson(JsonNode)} 对每个约束对象要求恰好声明
- * {@code allow} 或 {@code regex} 其一，二者互斥；约束结构不合规即拒。</p>
+ * {@code allow} / {@code regex} / {@code range(min,max)} 其一，三者互斥；约束结构不合规即拒。</p>
+ *
+ * <p><b>per-step 覆盖</b>：{@link #composeWith(ParamScope)} 把 step 级 scope 叠加到 plan 级 scope——
+ * 同名参数以 step 级约束为准（覆盖），未覆盖参数沿用 plan 级。StepPlan 经
+ * {@code resolvedScope(stepIndex)} 产出「step 覆盖 plan」后的最终 scope。</p>
  */
 public final class ParamScope {
 
@@ -53,10 +57,14 @@ public final class ParamScope {
         }
         JsonNode allow = node.get("allow");
         JsonNode regex = node.get("regex");
+        JsonNode min = node.get("min");
+        JsonNode max = node.get("max");
         boolean hasAllow = allow != null && !allow.isNull();
         boolean hasRegex = regex != null && !regex.isNull();
-        if (hasAllow && hasRegex) {
-            throw new IllegalArgumentException("scope." + paramKey + " 不能同时声明 allow 与 regex");
+        boolean hasRange = (min != null && !min.isNull()) || (max != null && !max.isNull());
+        int forms = (hasAllow ? 1 : 0) + (hasRegex ? 1 : 0) + (hasRange ? 1 : 0);
+        if (forms > 1) {
+            throw new IllegalArgumentException("scope." + paramKey + " 的 allow/regex/range 互斥，不可同时声明");
         }
         if (hasAllow) {
             if (!allow.isArray()) {
@@ -71,7 +79,32 @@ public final class ParamScope {
         if (hasRegex) {
             return ParamConstraint.matchingRegex(regex.asText());
         }
-        throw new IllegalArgumentException("scope." + paramKey + " 必须声明 allow 或 regex");
+        if (hasRange) {
+            if (min == null || min.isNull() || max == null || max.isNull()) {
+                throw new IllegalArgumentException("scope." + paramKey + ".range 必须同时声明 min 与 max");
+            }
+            if (!min.isNumber() || !max.isNumber()) {
+                throw new IllegalArgumentException("scope." + paramKey + ".range 必须是数字");
+            }
+            return ParamConstraint.inRange(min.asLong(), max.asLong());
+        }
+        throw new IllegalArgumentException("scope." + paramKey + " 必须声明 allow / regex / range 之一");
+    }
+
+    /**
+     * 把本 scope 叠加到 {@code base} 之上：同名参数以本 scope 的约束覆盖 {@code base}，
+     * 未覆盖参数沿用 {@code base}。用于 step 级 scope 覆盖 plan 级 scope。
+     */
+    public ParamScope composeWith(ParamScope base) {
+        if (base == null || base.isEmpty()) {
+            return this;
+        }
+        if (isEmpty()) {
+            return base;
+        }
+        Map<String, ParamConstraint> merged = new LinkedHashMap<>(base.constraints);
+        merged.putAll(this.constraints); // 本 scope 同名覆盖
+        return new ParamScope(merged);
     }
 
     public boolean isEmpty() {

@@ -63,6 +63,18 @@ public class ParamScopeGateTest {
         ParamScopeGate.check(scope, Command.click(USER)); // 无 params
     }
 
+    @Test
+    public void rangeScopeRejectsOutOfRange() {
+        ParamScope scope = new ParamScope(Map.of("option", ParamConstraint.inRange(1, 10)));
+        assertThrowsViolation(() -> ParamScopeGate.check(scope, Command.select(LocatorSpec.parse("role=combobox;name=r"), "11")));
+    }
+
+    @Test
+    public void rangeScopeAllowsInRange() {
+        ParamScope scope = new ParamScope(Map.of("option", ParamConstraint.inRange(1, 10)));
+        ParamScopeGate.check(scope, Command.select(LocatorSpec.parse("role=combobox;name=r"), "7"));
+    }
+
     private static void assertThrowsViolation(ThrowingRunnable r) {
         try {
             r.run();

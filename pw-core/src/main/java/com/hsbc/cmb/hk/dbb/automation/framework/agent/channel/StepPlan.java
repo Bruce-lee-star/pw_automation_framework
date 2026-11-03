@@ -36,7 +36,9 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
  *
  * <p><b>参数范围</b>：可选的 {@code scope} 字段（参数名 → 取值域约束）随资产分发，
  * 并被 {@link #planDigest()} 绑定——scope 变化即指纹变化，使参数取值域与「被批准的内容」对齐；
- * 运行期由 {@code ParamScopeGate} 在 execute(Command) 边界落实 fail-closed 门禁。</p>
+ * 运行期由 {@code ParamScopeGate} 在 execute(Command) 边界落实 fail-closed 门禁。
+ * scope 可分两层声明：plan 级（根 {@code scope}）与 step 级（每步可选 {@code scope}），
+ * 后者按参数名覆盖前者，经 {@link #resolvedScope(int)} 取最终 scope。</p>
  */
 public final class StepPlan {
 
@@ -47,12 +49,14 @@ public final class StepPlan {
     private final String planId;
     private final List<Command> steps;
     private final ParamScope scope;
+    private final List<ParamScope> stepScopes;
 
-    public StepPlan(int schemaVersion, String planId, List<Command> steps, ParamScope scope) {
+    public StepPlan(int schemaVersion, String planId, List<Command> steps, ParamScope scope, List<ParamScope> stepScopes) {
         this.schemaVersion = schemaVersion;
         this.planId = Objects.requireNonNull(planId, "planId");
         this.steps = List.copyOf(steps);
         this.scope = Objects.requireNonNullElse(scope, ParamScope.EMPTY);
+        this.stepScopes = (stepScopes == null) ? List.of() : List.copyOf(stepScopes);
     }
 
     public int schemaVersion() {
@@ -69,6 +73,19 @@ public final class StepPlan {
 
     public ParamScope scope() {
         return scope;
+    }
+
+    /** 该步的 step 级 scope（未声明则返回 {@link ParamScope#EMPTY}）。 */
+    public ParamScope scopeForStep(int index) {
+        if (index >= 0 && index < stepScopes.size()) {
+            return stepScopes.get(index);
+        }
+        return ParamScope.EMPTY;
+    }
+
+    /** 该步的最终 scope：step 级覆盖 plan 级（step 同名约束优先）。 */
+    public ParamScope resolvedScope(int index) {
+        return scopeForStep(index).composeWith(scope());
     }
 
     /**
@@ -88,12 +105,14 @@ public final class StepPlan {
                 throw new IllegalArgumentException("StepPlan.steps 必须是数组");
             }
             List<Command> steps = new ArrayList<>();
+            List<ParamScope> stepScopes = new ArrayList<>();
             for (JsonNode step : stepsNode) {
                 steps.add(parseCommand(step));
+                stepScopes.add(ParamScope.fromJson(step.get("scope")));
             }
             ParamScope scope = ParamScope.fromJson(root.get("scope"));
             rejectUnknownFields(root, "schemaVersion", "planId", "steps", "scope");
-            return new StepPlan(schemaVersion, planId, steps, scope);
+            return new StepPlan(schemaVersion, planId, steps, scope, stepScopes);
         } catch (IOException e) {
             throw new IllegalArgumentException("StepPlan 解析失败: " + e.getMessage(), e);
         }
@@ -139,7 +158,7 @@ public final class StepPlan {
                 throw new IllegalArgumentException(action + " 不允许带写入型参数");
             }
         }
-        rejectUnknownFields(step, "action", "target", "params");
+        rejectUnknownFields(step, "action", "target", "params", "scope");
         return new Command(action, target, params);
     }
 
@@ -184,12 +203,17 @@ public final class StepPlan {
     public String planDigest() {
         StringBuilder payload = new StringBuilder(DIGEST_PREFIX).append('\n');
         payload.append(schemaVersion).append('\n').append(planId).append('\n');
-        for (Command c : steps) {
+        for (int i = 0; i < steps.size(); i++) {
+            Command c = steps.get(i);
             payload.append(c.action()).append('\n');
             payload.append(c.targetRef()).append('\n');
             c.params().entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .forEach(e -> payload.append(e.getKey()).append('=').append(e.getValue()).append('\n'));
+            String ssc = stepScopes.get(i).canonical();
+            if (!ssc.isEmpty()) {
+                payload.append("stepScope:").append(i).append('{').append(ssc).append('}').append('\n');
+            }
         }
         String sc = scope.canonical();
         if (!sc.isEmpty()) {

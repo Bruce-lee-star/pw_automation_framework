@@ -73,6 +73,43 @@ public class ParamScopeTest {
         assertEquals("a{regex=y}b{allow=x}", a.canonical());
     }
 
+    @Test
+    public void parsesRange() {
+        ParamScope s = ParamScope.fromJson(node("{\"count\":{\"min\":1,\"max\":10}}"));
+        assertTrue(s.constraintFor("count").orElseThrow().isRange());
+        assertTrue(s.constraintFor("count").get().allows("5"));
+        assertFalse(s.constraintFor("count").get().allows("11"));
+    }
+
+    @Test
+    public void rejectsRangeMissingBound() {
+        assertThrowsIllegal(() -> ParamScope.fromJson(node("{\"count\":{\"min\":1}}")));
+    }
+
+    @Test
+    public void rejectsConflictingForms() {
+        assertThrowsIllegal(() -> ParamScope.fromJson(node("{\"v\":{\"allow\":[\"a\"],\"regex\":\"b\"}}")));
+    }
+
+    @Test
+    public void composeWithOverridesBase() {
+        ParamScope base = ParamScope.fromJson(node("{\"value\":{\"allow\":[\"a\",\"b\"]}}"));
+        ParamScope step = ParamScope.fromJson(node("{\"value\":{\"allow\":[\"x\"]},\"opt\":{\"allow\":[\"y\"]}}"));
+        ParamScope merged = step.composeWith(base);
+        // step 覆盖 base 的 value
+        assertTrue(merged.constraintFor("value").get().allows("x"));
+        assertFalse(merged.constraintFor("value").get().allows("a"));
+        // base 的 opt 不存在 → 沿用 step 的 opt
+        assertTrue(merged.constraintFor("opt").get().allows("y"));
+    }
+
+    @Test
+    public void composeWithEmptyShortCircuits() {
+        ParamScope base = ParamScope.fromJson(node("{\"value\":{\"allow\":[\"a\"]}}"));
+        assertEquals(base, base.composeWith(ParamScope.EMPTY));
+        assertEquals(base, ParamScope.EMPTY.composeWith(base));
+    }
+
     private static void assertThrowsIllegal(ThrowingRunnable r) {
         try {
             r.run();
