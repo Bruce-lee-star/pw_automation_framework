@@ -266,6 +266,8 @@
 
   <div class="note info"><b>授权执行 + 联动断言最小闭环（2026-11-03 落地，pw-core <code>agent.channel</code>）</b>：在 <code>StepDriver</code>（参数范围门禁闭环）与 <code>SnapshotVerifier</code>（绝对态字段断言）之上新增组合器 <code>StepVerifier.verify(plan, channel, expectationsPerStep)</code>——先经 <code>StepDriver</code> 拿到每步 <code>CommandResult</code>（门禁越界 fail-fast 直接传播、不进入断言），再对每步结果快照跑 <code>SnapshotVerifier</code>；无快照结果（命令失败）视为该步验证失败。验证期望以<b>伴随列表</b>传入，与执行规格 <code>StepPlan</code> 分离，<b>零契约 / schema 改动</b>。聚合结果 <code>StepVerificationResult</code>（整体 pass + 逐步 + 跨步计数 + 失败明细）。集成测试 <code>StepVerifierTest</code>(6) 用内存 fake 通道端到端跑通。</div>
 
+  <div class="note info"><b>变化态驱动复用绝对态断言（2026-11-03 落地）</b>：<code>LinkageGraphVerifier</code> 原内部的 <code>assertChange</code>/<code>textMatches</code> 精确比较分支已去除，改为把每条 <code>ExpectedChange</code>（变化语义：APPEAR/DISAPPEAR/ENABLE/DISABLE/REQUIRED/TEXT_CHANGED）翻译成 <code>SnapshotExpectation</code>（绝对态语义），定位到元素后交由 <code>SnapshotVerifier</code> 统一做字段级断言——单一事实来源，不再两处维护字段比较逻辑。元素三级回退定位（含 NLS 模板正则扫描）仍保留（<code>SnapshotVerifier</code> 只做按 ref 的精确字段断言、不感知 NLS 模板）。行为语义等价，新增 <code>LinkageGraphVerifierChangeKindsTest</code>(9) 覆盖各变化态分支。</div>
+
   <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
   <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
 interface BrowserCommandChannel {            // 原语执行契约（§4.1）

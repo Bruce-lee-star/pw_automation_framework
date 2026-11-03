@@ -5,6 +5,9 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.CommandResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Snapshot;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotExpectation;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotVerificationResult;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotVerifier;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsText;
@@ -100,7 +103,7 @@ public final class LinkageGraphVerifier implements AssetVerifier {
             String detail = "ok";
             for (LinkageGraph.ExpectedChange exp : rule.expectations()) {
                 LocatorSpec targetLoc = localize(exp.target().primaryLocator());
-                if (!assertChange(stateOf(after, targetLoc, exp.target().primaryLocator()), exp)) {
+                if (!checkChange(after, exp, targetLoc, exp.target().primaryLocator())) {
                     allOk = false;
                     detail = "change mismatch at " + exp.target().refId() + " expected " + exp.kind();
                     break;
@@ -157,37 +160,54 @@ public final class LinkageGraphVerifier implements AssetVerifier {
         return null;
     }
 
-    private boolean assertChange(Snapshot.ElementState state, LinkageGraph.ExpectedChange exp) {
+    /**
+     * 把「状态变化」期望转换为绝对态字段断言，复用 {@link SnapshotVerifier} 做字段级比较。
+     *
+     * <p>元素定位仍走原有三级回退（{@link #stateOf}），因 {@code SnapshotVerifier} 只做按 ref 的
+     * 精确字段断言、不感知 NLS 模板；定位到元素后，用其实际 ref 构建单元素快照交给
+     * {@code SnapshotVerifier} 断言。语义与重构前一致：APPEAR=可见、DISAPPEAR=不可见
+     * （元素已定位存在）、ENABLE/DISABLE/REQUIRED=启用态、TEXT_CHANGED=文本相等/正则；
+     * 元素未找到时仅 DISAPPEAR 视为通过。</p>
+     */
+    private boolean checkChange(Snapshot after, LinkageGraph.ExpectedChange exp,
+                               LocatorSpec localized, LocatorSpec original) {
+        Snapshot.ElementState state = stateOf(after, localized, original);
         if (state == null) {
             return exp.kind() == LinkageGraph.ExpectedChange.ChangeKind.DISAPPEAR;
         }
-        switch (exp.kind()) {
-            case APPEAR:    return state.visible();
-            case DISAPPEAR: return !state.visible();
-            case ENABLE:    return state.enabled();
-            case DISABLE:   return !state.enabled();
-            case TEXT_CHANGED:
-                return textMatches(state.text(), exp);
-            case REQUIRED:  return state.enabled();   // 简化：真实实现需校验必填属性
-            default:        return false;
+        SnapshotExpectation sexp = toExpectation(exp, state.ref());
+        if (sexp == null) {
+            return false; // TEXT_CHANGED 无可用期望文本等无法判定的情况，保持原 textMatches 语义
         }
+        Snapshot single = new Snapshot(after.pageRef(), List.of(state));
+        return SnapshotVerifier.verify(single, List.of(sexp)).allPassed();
     }
 
-    /**
-     * 文本断言：优先按 NLS key 解析当前语言后比较（多语言资产），模板值按正则匹配；
-     * 无 key 时回落到字面文案比较。
-     */
-    private boolean textMatches(String actualText, LinkageGraph.ExpectedChange exp) {
-        if (actualText == null) {
-            return false;
+    /** ExpectedChange（变化语义）→ SnapshotExpectation（绝对态语义）；无法转化为有效约束时返回 null。 */
+    private SnapshotExpectation toExpectation(LinkageGraph.ExpectedChange exp, String ref) {
+        SnapshotExpectation.Builder b = SnapshotExpectation.forRef(ref);
+        switch (exp.kind()) {
+            case APPEAR:    b.visible(true); break;
+            case DISAPPEAR: b.visible(false); break;
+            case ENABLE:    b.enabled(true); break;
+            case DISABLE:   b.enabled(false); break;
+            case REQUIRED:  b.enabled(true); break;   // 简化：真实实现需校验必填属性
+            case TEXT_CHANGED:
+                if (exp.expectedTextKey() != null && nls != null) {
+                    String raw = nls.value(exp.expectedTextKey());
+                    if (NlsText.isTemplate(raw)) {
+                        b.textMatches(NlsText.pattern(raw).pattern());
+                    } else {
+                        b.text(nls.visibleText(exp.expectedTextKey()));
+                    }
+                } else if (exp.expectedText() != null) {
+                    b.text(exp.expectedText());
+                } else {
+                    return null;
+                }
+                break;
+            default:        return null;
         }
-        if (exp.expectedTextKey() != null && nls != null) {
-            String raw = nls.value(exp.expectedTextKey());
-            if (NlsText.isTemplate(raw)) {
-                return NlsText.pattern(raw).matcher(actualText).find();
-            }
-            return nls.visibleText(exp.expectedTextKey()).equals(actualText);
-        }
-        return exp.expectedText() != null && exp.expectedText().equals(actualText);
+        return b.build();
     }
 }
