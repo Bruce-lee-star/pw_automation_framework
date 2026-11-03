@@ -67,22 +67,30 @@ public final class NlsText {
                 : Pattern.compile(src, Pattern.DOTALL);
     }
 
-    /** 归一化 + 剥 HTML + 解码实体（不 trim，供正则编译复用）。 */
+    /** 归一化 + 解码实体 + 剥 HTML（不 trim，供正则编译复用）。 */
     private static String stripHtmlAndNormalize(String value) {
         String t = value.replace("\r\n", "\n").replace('\u00A0', ' ');
-        t = t.replaceAll("<br\\s*/?>", " ").replaceAll("<[^>]+>", " ");
+        // 必须先解码实体、再剥标签：否则 "&lt;b&gt;x&lt;/b&gt;" 解码成 "<b>x</b>" 时，
+        // 去标签已执行过，字面尖括号会残留在可见文本里，与页面渲染结果对不上。
         t = decodeEntities(t);
+        t = t.replaceAll("<br\\s*/?>", " ").replaceAll("<[^>]+>", " ");
         return t.replaceAll("\\s+", " ");
     }
 
+    /**
+     * 解码常见 HTML 实体（含 {@code &lt; &gt; &nbsp; &amp; &quot; &apos; &copy;}）。
+     *
+     * <p>{@code &amp;} 放最后解码：正常文本里的 "Tom &amp; Jerry" → "Tom & Jerry" 正确；
+     * 罕见的多重转义（{@code &amp;lt;}）不在此覆盖范围内（简单顺序解码的已知边界）。</p>
+     */
     private static String decodeEntities(String s) {
         return s.replace("&nbsp;", " ")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">")
                 .replace("&quot;", "\"")
                 .replace("&apos;", "'")
-                .replace("&amp;", "&")
-                .replace("&copy;", "©");
+                .replace("&copy;", "©")
+                .replace("&amp;", "&");
     }
 
     private static String escapeKeepingPlaceholders(String t) {
