@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "featureName": "Role element login",
+  "gluePackage": "com.example.glue",
+  "stepsPackage": "com.example.steps",
+  "stepsClass": "LoginSteps",
+  "tags": ["regression", "login"],
+  "scenarios": [
+    {
+      "name": "Maker logs on",
+      "steps": [
+        {
+          "keyword": "Given",
+          "phrase": "I open the login page",
+          "delegate": "step1"
+        },
+        {
+          "keyword": "When",
+          "phrase": "I log on as {string} with role {string}",
+          "params": [
+            {"name": "username", "type": "string"},
+            {"name": "role", "type": "string"}
+          ],
+          "args": ["alice", "maker"],
+          "delegate": "logon",
+          "forward": true
+        },
+        {
+          "keyword": "Then",
+          "phrase": "I should see the home page",
+          "delegate": "step2"
+        }
+      ]
+    }
+  ]
+}

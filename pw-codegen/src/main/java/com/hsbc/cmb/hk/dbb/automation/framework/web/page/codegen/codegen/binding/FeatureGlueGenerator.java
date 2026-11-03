@@ -1,12 +1,11 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.binding;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenFileWriter;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenMarkers;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenTemplates;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -379,6 +378,24 @@ public final class FeatureGlueGenerator {
             throw new IllegalArgumentException("不支持的 Cucumber 参数类型 {" + name + "}");
         }
 
+        /**
+         * 解析 JSON / 文本里的类型写法：接受 Cucumber 名（{@code string}/{@code bigdecimal}）
+         * 与 Java 风格名（{@code String}/{@code BIG_DECIMAL}），大小写不敏感。
+         */
+        public static ParamType parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                throw new IllegalArgumentException("参数类型不可为空");
+            }
+            String v = raw.trim();
+            for (ParamType t : values()) {
+                if (t.cucumberName.equalsIgnoreCase(v) || t.name().equalsIgnoreCase(v)) {
+                    return t;
+                }
+            }
+            throw new IllegalArgumentException("不支持的参数类型 [" + raw + "]，可用: "
+                    + Arrays.toString(Arrays.stream(values()).map(ParamType::cucumberName).toArray()));
+        }
+
         /** 把字面值写成 feature 里该类型应有的形态（string 加引号，数值裸写并校验）。 */
         String featureLiteral(String raw, String phrase, int position) {
             if (raw == null) {
@@ -440,6 +457,15 @@ public final class FeatureGlueGenerator {
 
         public static Param of(String name, ParamType type) {
             return new Param(name, type);
+        }
+
+        // --- 同包读取（BindingPlanJson 序列化用；不对外暴露可变集合） ---
+        String name() {
+            return name;
+        }
+
+        ParamType type() {
+            return type;
         }
 
         private static boolean isJavaIdentifier(String s) {
@@ -516,6 +542,31 @@ public final class FeatureGlueGenerator {
             this.forwardAllParams = true;
             return this;
         }
+
+        // --- 同包读取（BindingPlanJson 序列化用） ---
+        String keyword() {
+            return keyword;
+        }
+
+        String phrase() {
+            return phrase;
+        }
+
+        List<Param> paramList() {
+            return List.copyOf(params);
+        }
+
+        List<String> argList() {
+            return List.copyOf(literalArgs);
+        }
+
+        String delegateMethod() {
+            return delegateMethod;
+        }
+
+        boolean forwardsParams() {
+            return forwardAllParams;
+        }
     }
 
     /** 一个业务场景（Feature 里的 {@code Scenario}）。 */
@@ -534,6 +585,15 @@ public final class FeatureGlueGenerator {
         public Scenario step(BindingStep step) {
             steps.add(Objects.requireNonNull(step, "step"));
             return this;
+        }
+
+        // --- 同包读取（BindingPlanJson 序列化用） ---
+        String name() {
+            return name;
+        }
+
+        List<BindingStep> stepList() {
+            return List.copyOf(steps);
         }
     }
 
@@ -591,6 +651,43 @@ public final class FeatureGlueGenerator {
             scenarios.add(Objects.requireNonNull(scenario, "scenario"));
             return this;
         }
+
+        // --- 同包读取（BindingPlanJson 序列化用） ---
+        String featureName() {
+            return featureName;
+        }
+
+        String featureFileName() {
+            return featureFileName;
+        }
+
+        String gluePackageName() {
+            return gluePackageName;
+        }
+
+        String glueClassName() {
+            return glueClassName;
+        }
+
+        String stepsPackageName() {
+            return stepsPackageName;
+        }
+
+        String stepsClassName() {
+            return stepsClassName;
+        }
+
+        String stepsVar() {
+            return stepsVar;
+        }
+
+        List<String> tagNames() {
+            return List.copyOf(tags);
+        }
+
+        List<Scenario> scenarioList() {
+            return List.copyOf(scenarios);
+        }
     }
 
     /** 生成结果：两份产物内容 + 建议文件名，可一次性落盘。 */
@@ -608,14 +705,25 @@ public final class FeatureGlueGenerator {
             this.glueContent = glueContent;
         }
 
-        /** 落盘到 {@code featureDir} / {@code glueDir}（目录不存在会自动创建）。 */
-        public void writeTo(Path featureDir, Path glueDir) throws IOException {
+        /** 产物目标路径 → 内容（不落盘；供流水线做批量 / 事务式写入）。 */
+        public Map<Path, String> outputs(Path featureDir, Path glueDir) {
             Objects.requireNonNull(featureDir, "featureDir");
             Objects.requireNonNull(glueDir, "glueDir");
-            Files.createDirectories(featureDir);
-            Files.writeString(featureDir.resolve(featureFileName), featureContent, StandardCharsets.UTF_8);
-            Files.createDirectories(glueDir);
-            Files.writeString(glueDir.resolve(glueFileName), glueContent, StandardCharsets.UTF_8);
+            Map<Path, String> outputs = new LinkedHashMap<>();
+            outputs.put(featureDir.resolve(featureFileName), featureContent);
+            outputs.put(glueDir.resolve(glueFileName), glueContent);
+            return outputs;
+        }
+
+        /**
+         * 落盘到 {@code featureDir} / {@code glueDir}（目录不存在自动创建）。
+         *
+         * <p>带生成标记冲突守卫：目标存在但首行无生成标记（= 手写代码）时抛
+         * {@link com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenConflictException}，
+         * 且<b>两份产物一个都不写</b>，不会留下半截状态。
+         */
+        public void writeTo(Path featureDir, Path glueDir) throws IOException {
+            CodegenFileWriter.writeAllGenerated(outputs(featureDir, glueDir));
         }
     }
 }
