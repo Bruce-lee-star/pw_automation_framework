@@ -1,0 +1,7 @@
+{
+  "en-US": {
+    "login.submit": "Log on",
+    "login.cancel": "Cancel",
+    "login.welcome": "Welcome, {{user}}"
+  }
+}

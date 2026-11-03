@@ -100,7 +100,7 @@
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v2.9（P3 补成可操作闭环：<code>CandidateCli</code> 成为唯一写入口——propose / validate / approve / reject / retire / locator / list / show / audit 九条命令，提出→验证→审批→回注可用独立进程跑通；退出码 0/1/2/3/4/5 即 CI 契约，<code>locator</code> 的 stdout 仅一行 canonical、诊断走 stderr；写操作持文件锁，拿不到锁直接失败而不排队强写（避免静默覆盖别人的审批）；<code>validate</code> 无证据判用法错误且不落盘，避免手误把候选打成 REJECTED 终态；<code>CandidateEvidenceJson</code> 用包装类型承载缺省值（缺字段=未观测，而非命中 0）；<code>CandidateAuditReport</code> 导出 Markdown 审计链；reject/retire 记录真实操作者，事件链不再出现 manual）；v2.8（P3 定位器治理首刀：CandidateValidator 五条确定性规则（目标语义/唯一性/可见/可操作/业务断言）+ 证据 fail-closed；CandidateLibrary 版本化候选库（PROPOSED→VALIDATED→APPROVED→RETIRED，审批者+应用版本+事件链，JSON 原子落盘）；productionLocator/approvedLocator 只认 APPROVED 且版本一致，0 条或多条一律返回空、无次优回退——"验证通过 ≠ 生产可用"由代码强制而非文档口号）；v2.7（P2 需求→代码绑定补齐流水线入口：BindingCodegenPipeline + BindingPlanJson（计划以 JSON 提交进仓、可往返序列化、评审 diff），落盘统一走 CodegenFileWriter 生成标记守卫——目标首行无 GENERATED 标记即视为手写、拒绝覆盖且两份产物一个都不写（先全查后全写）；编译/冒烟明确交由目标仓 CI，不在 pw-codegen 内伪造结论）；v2.6（§4.5 厘清"录制产出"与"需求驱动产出"边界：录制（pw-codegen 手动录取）只产 Page Object + Steps(@Step) + Assert，Feature 由业务需求生成、Glue 由需求→代码绑定生成；并落地 P2 绑定生成器 FeatureGlueGenerator（pw-codegen codegen.binding）：FeatureGluePlan → .feature + 极薄 Cucumber Glue（注解保留 {string}/{int} 表达式、方法体仅 steps.xxx(...)，占位符/类型/字面值三重校验 + import 最小化），16 个契约测试覆盖）；v2.5（§4.5 稳定代码生成由"三层产物（Feature/Glue/PO）"升级为"四层产物（Feature/Glue/Steps/PO）"：新增 Steps 业务流层，与 test-automation 现有 tests/glue · tests/steps · tests/pages 分层一致——Glue 极薄仅委托 Steps，Steps 承载可复用业务流且无定位器，Page Object 仅定位器+原子交互；data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
+    <span>版本：<b>v3.0（P3 取证自动化：证据由探针在真实页面产生，不再手工填 <code>--matches/--visible</code>——<code>LocatorResolver</code> 收口唯一翻译（命令通道与探针共用）、<code>EvidenceProbe</code>/<code>PlaywrightEvidenceProbe</code> 只观测不判断（多元素不 first() 凑结果）、<code>CandidateEvidenceCollector</code> 真比可访问名（模板走正则、实体与空白归一化）、<code>CandidateIntake</code> 一把跑完"提出→取证→验证→落盘"且观测失败不消耗候选（保持 PROPOSED 可重跑）；顺带修字面名含 <code>{{var}}</code> 时的匹配漏洞；v2.9（P3 补成可操作闭环：<code>CandidateCli</code> 成为唯一写入口——propose / validate / approve / reject / retire / locator / list / show / audit 九条命令，提出→验证→审批→回注可用独立进程跑通；退出码 0/1/2/3/4/5 即 CI 契约，<code>locator</code> 的 stdout 仅一行 canonical、诊断走 stderr；写操作持文件锁，拿不到锁直接失败而不排队强写（避免静默覆盖别人的审批）；<code>validate</code> 无证据判用法错误且不落盘，避免手误把候选打成 REJECTED 终态；<code>CandidateEvidenceJson</code> 用包装类型承载缺省值（缺字段=未观测，而非命中 0）；<code>CandidateAuditReport</code> 导出 Markdown 审计链；reject/retire 记录真实操作者，事件链不再出现 manual）；v2.8（P3 定位器治理首刀：CandidateValidator 五条确定性规则（目标语义/唯一性/可见/可操作/业务断言）+ 证据 fail-closed；CandidateLibrary 版本化候选库（PROPOSED→VALIDATED→APPROVED→RETIRED，审批者+应用版本+事件链，JSON 原子落盘）；productionLocator/approvedLocator 只认 APPROVED 且版本一致，0 条或多条一律返回空、无次优回退——"验证通过 ≠ 生产可用"由代码强制而非文档口号）；v2.7（P2 需求→代码绑定补齐流水线入口：BindingCodegenPipeline + BindingPlanJson（计划以 JSON 提交进仓、可往返序列化、评审 diff），落盘统一走 CodegenFileWriter 生成标记守卫——目标首行无 GENERATED 标记即视为手写、拒绝覆盖且两份产物一个都不写（先全查后全写）；编译/冒烟明确交由目标仓 CI，不在 pw-codegen 内伪造结论）；v2.6（§4.5 厘清"录制产出"与"需求驱动产出"边界：录制（pw-codegen 手动录取）只产 Page Object + Steps(@Step) + Assert，Feature 由业务需求生成、Glue 由需求→代码绑定生成；并落地 P2 绑定生成器 FeatureGlueGenerator（pw-codegen codegen.binding）：FeatureGluePlan → .feature + 极薄 Cucumber Glue（注解保留 {string}/{int} 表达式、方法体仅 steps.xxx(...)，占位符/类型/字面值三重校验 + import 最小化），16 个契约测试覆盖）；v2.5（§4.5 稳定代码生成由"三层产物（Feature/Glue/PO）"升级为"四层产物（Feature/Glue/Steps/PO）"：新增 Steps 业务流层，与 test-automation 现有 tests/glue · tests/steps · tests/pages 分层一致——Glue 极薄仅委托 Steps，Steps 承载可复用业务流且无定位器，Page Object 仅定位器+原子交互；data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
     <span>日期：<b>2026-11-03</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
@@ -592,6 +592,25 @@ candidate approve  --id cand-0001 --approver "carol" --app-version 2026.11.3
 candidate locator  --target login.submit --app-version 2026.11.3   # → role=button;name=Log on</code></pre>
   <div class="note warn"><b>回注失败不是"查不到"，而是"必须停"：</b><code>locator</code> 命中 0 条时不会退而求其次，只把原因打进 stderr（无候选 / 无一条 APPROVED / 版本不符 / 多条审批歧义），进程以 <code>3</code> 退出。调用方把它当"空结果继续跑"，就等于绕过了整套治理。</div>
 
+  <h4>取证自动化 · 证据必须来自页面，而不是填表</h4>
+  <p><code>validate --matches 1 --visible true</code> 里的数字不是证据，是<b>填表人的假设</b>；而定位器失效恰恰是自动化维护里最高频的故障。P3 的闭环因此补上「取证」这一环：探针在真实页面上观测，人只负责给业务断言（"点完应该看到什么"）——那是唯一机器无法替你判断的部分。</p>
+  <table>
+    <tr><th style="width:26%">组件</th><th>职责</th><th style="width:32%">关键约束</th></tr>
+    <tr><td><code>LocatorResolver</code>（pw-web-ui）</td><td>Role-First 定位符 → Playwright Locator 的<b>唯一</b>翻译实现</td><td>命令通道与取证探针共用同一条翻译：否则"探测时命中、上线后命中别的元素"无从对账</td></tr>
+    <tr><td><code>EvidenceProbe</code> / <code>PlaywrightEvidenceProbe</code></td><td>只观测：命中数、可见、可操作、实际可访问名、tag 与 <code>data-i18n</code></td><td>不做判断（判断在 <code>CandidateValidator</code>）；命中数 ≠ 1 时<b>不</b>用 <code>first()</code> 凑一个结果</td></tr>
+    <tr><td><code>CandidateEvidenceCollector</code></td><td>观测事实 + 业务断言 → <code>CandidateEvidence</code>；文案比对与归一化</td><td>文案必须<b>真的比一遍</b>：唯一命中 ≠ 文案一致（testid 复用会让 1 个命中指到别的业务元素）</td></tr>
+    <tr><td><code>CandidateIntake</code></td><td>提出 → 取证 → 验证 → 落盘，一把跑完</td><td>全程持写锁、最后一次落盘；<b>观测失败不消耗候选</b></td></tr>
+  </table>
+  <pre><code>// 录制会话 / 用例里：一条候选，自动取证入库
+CandidateIntake.IntakeResult r = CandidateIntake.run(
+        Path.of("locators/candidates.json"),
+        LocatorCandidate.of("login.submit", LocatorSpec.roleOfKey("button", "login.submit"))
+                       .withExpectedRole("button"),
+        new PlaywrightEvidenceProbe(page, nlsCatalog),
+        "点击 Log on 后出现欢迎页标题", true, "trace-2026-11-03-01");</code></pre>
+  <div class="note warn"><b>「没看清」不能判成「看错了」：</b>探针炸了（页面没加载、浏览器崩了）时，候选停在 <code>PROPOSED</code> 可重跑；若直接判 <code>REJECTED</code>，而 <code>REJECTED</code> 又是不可再验证的终态，一次网络抖动就会永久废掉一条本来正确的候选。</div>
+  <div class="note ok"><b>实测补的两个洞：</b>① 字面可访问名里带 <code>{{var}}</code> 模板时曾被当普通字符串比较，必然 0 命中且不报错（只表现为"突然找不到元素"）——现在字面模板与 NLS 模板走同一条正则匹配；② 证据落盘用 <code>CandidateEvidenceJson.write</code>，"未观测"写 <code>-1</code>、"未执行"写 <code>null</code>，审批人重读看到的就是当时的事实。</div>
+
   <h3 id="s45">4.5 稳定代码生成（四层产物 + 断言）</h3>
   <p>生成物与代码仓同构，生成后立即进入与手写代码相同的评审/编译/运行管线。借鉴 <code>test-automation</code> 既有分层（<code>tests/glue</code> · <code>tests/steps</code> · <code>tests/pages</code>），最终回归资产为 <b>Feature / Glue / Steps / Page Object（＋ Assert）</b>。<b>关键澄清：录制工具（pw-codegen）在手动录取过程中只产出 Page Object + Steps（<code>@Step</code> 业务流）+ Assert 三类，并不生成 Feature 与 Glue</b>；Feature 由业务需求驱动生成，Glue 由需求→代码绑定（P2）生成，二者与录制解耦。</p>
   <table>
@@ -855,12 +874,13 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <li>[ ] 落库后 <code>mvn test</code> 零 LLM 运行验证</li>
   </ul>
   <h3>P3 定位器回注闭环</h3>
-  <div class="note ok"><b>已落地（v2.8 / v2.9，pw-codegen <code>locator.candidate</code>）：</b><code>CandidateValidator</code>（五条规则 + fail-closed）、<code>CandidateLibrary</code>（版本化候选库：状态机 / 审批者 + 应用版本 / 事件链 / JSON 原子落盘）、<code>productionLocator</code> / <code>approvedLocator</code>（只认 APPROVED，歧义即空，无次优回退），以及<b>可操作闭环</b> <code>CandidateCli</code> + <code>CandidateEvidenceJson</code> + <code>CandidateAuditReport</code>（提出 → 验证 → 审批 → 回注全流程可执行、退出码可进 CI、写操作持文件锁）。<b>尚未落地：</b>候选治理 UI、审批流对接（工单/IM）、运行时复核任务调度——这些属 P4 治理范围。</div>
+  <div class="note ok"><b>已落地（v2.8 / v2.9 / v3.0，pw-codegen <code>locator.candidate</code>）：</b><code>CandidateValidator</code>（五条规则 + fail-closed）、<code>CandidateLibrary</code>（版本化候选库：状态机 / 审批者 + 应用版本 / 事件链 / JSON 原子落盘）、<code>productionLocator</code> / <code>approvedLocator</code>（只认 APPROVED，歧义即空，无次优回退），以及<b>可操作闭环</b> <code>CandidateCli</code> + <code>CandidateEvidenceJson</code> + <code>CandidateAuditReport</code>（提出 → 验证 → 审批 → 回注全流程可执行、退出码可进 CI、写操作持文件锁），以及 <b>取证自动化</b> <code>EvidenceProbe</code> / <code>PlaywrightEvidenceProbe</code> / <code>CandidateEvidenceCollector</code> / <code>CandidateIntake</code>（证据由真实页面观测产生，不再手工填命中数）。<b>尚未落地：</b>候选治理 UI、审批流对接（工单/IM）、运行时复核任务调度——这些属 P4 治理范围。</div>
   <ul>
     <li>[x] pw-codegen：CandidateValidator（目标语义、唯一性、可见/可操作状态、业务断言）</li>
     <li>[x] 版本化候选库（来源/证据/审批者/目标应用版本/失效状态）；不自动把候选升级为生产定位器</li>
     <li>[x] 确认失败即停止，不自动回退到可能命中其他元素的候选</li>
     <li>[x] 操作闭环：CLI 唯一写入口 + 证据 JSON 契约 + 审计报告导出 + 并发写保护</li>
+    <li>[x] 取证自动化：<code>LocatorResolver</code> 单一翻译 + 真实页面探针 + 一键 intake（观测失败不消耗候选）</li>
   </ul>
   <h3>P4 治理与企业化</h3>
   <ul>

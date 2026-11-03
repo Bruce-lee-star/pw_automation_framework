@@ -8,13 +8,9 @@ import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.channels.FileChannel;
-import java.nio.channels.FileLock;
-import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -118,7 +114,7 @@ public final class CandidateCli {
                     printUsage(err);
                     return EXIT_USAGE;
             }
-        } catch (ConflictException e) {
+        } catch (LibraryConflictException e) {
             err.println("并发冲突：" + e.getMessage());
             return EXIT_CONFLICT;
         } catch (IllegalArgumentException e) {
@@ -544,6 +540,8 @@ public final class CandidateCli {
         out.println("      --id <id>");
         out.println("      --evidence <file.json> | --matches n --visible true --enabled true");
         out.println("                                --text-matched true --assertion \"...\" --assertion-passed true");
+        out.println("      ⚠ 手工填的数字只是假设：应由 CandidateIntake + 取证探针在真实页面生成证据；");
+        out.println("        手填仅用于离线复核（例如复现一次已归档的取证）。");
         out.println("  approve   人工审批（VALIDATED → APPROVED，唯一的生产入口）");
         out.println("      --id <id> --approver <who> --app-version <version>");
         out.println("  reject    人工驳回（→ REJECTED）      --id <id> --reason \"...\" [--by who]");
@@ -654,62 +652,6 @@ public final class CandidateCli {
                 throw new IllegalArgumentException("--lib 缺少取值：候选库文件路径");
             }
             return Path.of(v);
-        }
-    }
-
-    /** 写操作的排他锁；拿不到就失败，不排队也不强写。 */
-    private static final class LibraryLock implements AutoCloseable {
-
-        private final FileChannel channel;
-        private final FileLock lock;
-
-        private LibraryLock(FileChannel channel, FileLock lock) {
-            this.channel = channel;
-            this.lock = lock;
-        }
-
-        static LibraryLock acquire(Path libraryFile) throws IOException {
-            Path absolute = libraryFile.toAbsolutePath();
-            Path parent = absolute.getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            // 锁文件刻意不删除：删除会让"另一个进程刚打开同一 inode"的窗口重新出现。
-            Path lockFile = absolute.resolveSibling(absolute.getFileName() + ".lock");
-            FileChannel channel = FileChannel.open(lockFile,
-                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-            FileLock lock;
-            try {
-                lock = channel.tryLock();
-            } catch (OverlappingFileLockException e) {
-                channel.close();
-                throw new ConflictException("另一个线程正在修改 " + libraryFile.toAbsolutePath());
-            } catch (IOException e) {
-                channel.close();
-                throw new ConflictException("无法获取候选库锁：" + lockFile + " - " + e.getMessage());
-            }
-            if (lock == null) {
-                channel.close();
-                throw new ConflictException("另一个进程正在修改 " + libraryFile.toAbsolutePath()
-                        + "；已放弃本次写入（无锁覆盖会静默丢掉别人的审批记录）");
-            }
-            return new LibraryLock(channel, lock);
-        }
-
-        @Override
-        public void close() throws IOException {
-            try {
-                lock.release();
-            } finally {
-                channel.close();
-            }
-        }
-    }
-
-    /** 并发冲突（区别于 I/O 错误，便于脚本决定"重试"还是"报错"）。 */
-    private static final class ConflictException extends RuntimeException {
-        ConflictException(String message) {
-            super(message);
         }
     }
 }

@@ -84,6 +84,21 @@ public final class CandidateEvidenceJson {
         return GSON.toJson(dto);
     }
 
+    /**
+     * 把证据写到文件（UTF-8，自动创建父目录）。
+     *
+     * <p>这是"录制会话/Trace 自动产出证据 JSON"的落点：取证跑完后把证据留档，
+     * 审批人不必重跑浏览器就能复核"当时到底看到了什么"。</p>
+     */
+    public static void write(Path file, CandidateEvidence evidence) throws IOException {
+        Objects.requireNonNull(file, "file");
+        Path parent = file.toAbsolutePath().getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Files.writeString(file, toJson(evidence), StandardCharsets.UTF_8);
+    }
+
     // --- Gson DTO：包装类型是刻意选择，缺省即"未观测" ---
 
     private static final class EvidenceDto {

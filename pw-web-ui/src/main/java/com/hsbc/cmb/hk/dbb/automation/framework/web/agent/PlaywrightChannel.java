@@ -6,19 +6,15 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.CommandResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Snapshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsText;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.options.AriaRole;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * BrowserCommandChannel 的 Playwright 真实现（设计 3.1.3 / 4.1 / 4.5）。
@@ -179,45 +175,11 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
     /**
      * 把 Role-First 定位符翻译为 Playwright Locator。
      *
-     * <p><b>多语言</b>：ROLE 梯队的名若以 NLS key 表达（{@code nameKey}），先按当前语言解析成文案
-     * 再 {@code getByRole(role,{name})}；值含模板（{@code {{var}}}）时改用 {@code setName(Pattern)}。
-     * 这与 codegen 的 {@code Nls.t(key)} 完全同义，故资产可跨语言复用。</p>
+     * <p>翻译只有一份实现（{@link LocatorResolver}）：命令通道与候选取证探针共用，
+     * 保证"探测到的"与"将来执行到的"是同一条定位。</p>
      */
     private Locator toLocator(LocatorSpec spec) {
-        switch (spec.strategy()) {
-            case ROLE: {
-                AriaRole r = AriaRole.valueOf(spec.role().toUpperCase(Locale.ROOT));
-                Page.GetByRoleOptions opts = new Page.GetByRoleOptions();
-                Pattern namePattern = null;
-                String name = spec.name();
-                if (spec.nameKey() != null && nls != null) {
-                    String raw = nls.value(spec.nameKey());
-                    if (NlsText.isTemplate(raw)) {
-                        namePattern = NlsText.pattern(raw);
-                    } else {
-                        name = nls.visibleText(spec.nameKey());
-                    }
-                }
-                if (namePattern != null) {
-                    opts = opts.setName(namePattern);
-                } else if (name != null && !name.isEmpty()) {
-                    opts = opts.setName(name);
-                }
-                Locator l = page.getByRole(r, opts);
-                int nth = spec.nth();
-                return nth == 0 ? l : l.nth(nth);
-            }
-            case TEST_ID:
-                return page.getByTestId(spec.testId());
-            case ID:
-                return page.locator("#" + spec.id());
-            case TEXT:
-                return page.getByText(spec.text());
-            case CSS:
-                return page.locator(spec.css());
-            default:
-                throw new IllegalArgumentException("Unsupported locator strategy: " + spec.strategy());
-        }
+        return LocatorResolver.resolve(page, spec, nls);
     }
 
     /** 关闭底层页面/上下文/浏览器（幂等）。 */
