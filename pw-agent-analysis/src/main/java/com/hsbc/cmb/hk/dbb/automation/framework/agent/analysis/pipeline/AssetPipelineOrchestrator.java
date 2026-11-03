@@ -95,8 +95,8 @@ public final class AssetPipelineOrchestrator {
             throw new PipelineValidationException(report);
         }
 
-        // 闭环引擎接入点：从资产草稿派生「可执行 + 可验证」步骤计划，并做浏览器无关的治理预检
-        VerifiableStepPlan vsp = new StepPlanProducer(nls).produce(bundle);
+        // 闭环引擎接入点：从资产草稿派生「可执行 + 可验证」步骤计划（优先采用需求源测试数据），并做浏览器无关的治理预检
+        VerifiableStepPlan vsp = new StepPlanProducer(nls).produce(bundle, req);
         try {
             ParamScopePolicy.validatePlan(vsp.plan());
         } catch (ParamScopeViolationException ex) {

@@ -15,6 +15,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePo
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -75,6 +76,42 @@ public class StepPlanProducerTest {
         assertEquals(Boolean.TRUE, exp.enabled());
 
         // 分析侧治理预检（浏览器无关）通过：副作用参数均已声明
+        ParamScopePolicy.validatePlan(vsp.plan());
+    }
+
+    @Test
+    public void prefersRequirementTestDataOverTriggerValue() {
+        ElementRef username = new ElementRef("username",
+                List.of(LocatorSpec.role("textbox", "Username")), "textbox");
+        ElementRef submit = new ElementRef("submit",
+                List.of(LocatorSpec.role("button", "Submit")), "button");
+
+        LinkageGraph.ExpectedChange enableSubmit = new LinkageGraph.ExpectedChange(
+                submit, LinkageGraph.ExpectedChange.ChangeKind.ENABLE, null);
+        // 图谱内嵌值 alice；需求源声明 username=bob，应优先采用 b=bob
+        LinkageGraph.LinkageRule rule = new LinkageGraph.LinkageRule(
+                username, Command.ActionType.FILL, "alice", List.of(enableSubmit));
+        LinkageGraph linkage = new LinkageGraph("REQ-3", List.of(rule));
+
+        RequirementContext req = new RequirementContext(List.of(), "test", Map.of("username", "bob"));
+        AssetDraftBundle bundle = new AssetDraftBundle(
+                req,
+                new ElementInventory(List.of(
+                        new ElementInventoryEntry(username, "用户名", "REQ-3"),
+                        new ElementInventoryEntry(submit, "提交", "REQ-3"))),
+                new BehaviorModel(List.of()),
+                linkage,
+                Provenance.manual(PAGE),
+                PAGE);
+
+        VerifiableStepPlan vsp = new StepPlanProducer().produce(bundle, req);
+
+        // 需求源测试数据优先：FILL 用 bob 而非图谱内嵌的 alice
+        assertEquals("bob", vsp.plan().steps().get(1).params().get("value"));
+        assertTrue(vsp.plan().scope().constraintFor("value").get().allows("bob"));
+        assertFalse(vsp.plan().scope().constraintFor("value").get().allows("alice"));
+
+        // 治理预检仍通过（bob 已声明）
         ParamScopePolicy.validatePlan(vsp.plan());
     }
 

@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.pipeline;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.AssetDraftBundle;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.requirement.RequirementContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.ExpectedChangeMapper;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.LinkageGraph;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
@@ -45,8 +46,22 @@ public final class StepPlanProducer {
         this.nls = nls;
     }
 
-    /** 从资产草稿包派生「可验证步骤计划」。 */
+    /** 从资产草稿包派生「可验证步骤计划」（仅依赖图谱内嵌的触发值）。 */
     public VerifiableStepPlan produce(AssetDraftBundle bundle) {
+        return produce(bundle, null);
+    }
+
+    /**
+     * 从资产草稿包派生「可验证步骤计划」，并优先采用需求源声明的权威测试数据。
+     *
+     * <p>对于 FILL/SELECT 等写入型触发，若 {@code req} 为 {@code null} 或其测试数据未覆盖该
+     * 触发元素的 refId，则回退到联动图谱内嵌的 {@code triggerValue()}；否则使用需求源的值，
+     * 使派生的执行计划真正带有业务值而非图谱默认值。</p>
+     *
+     * @param bundle 资产草稿包
+     * @param req    需求上下文（含测试数据），可为 {@code null}
+     */
+    public VerifiableStepPlan produce(AssetDraftBundle bundle, RequirementContext req) {
         String pageRef = bundle.pageRef();
         List<Command> steps = new ArrayList<>();
         List<List<SnapshotExpectation>> expectationsPerStep = new ArrayList<>();
@@ -63,7 +78,7 @@ public final class StepPlanProducer {
             if (triggerLoc == null) {
                 continue; // 无角色优先定位符：确定性校验已 ERROR，跳过派生
             }
-            steps.add(toCommand(rule, values, options));
+            steps.add(toCommand(rule, req, values, options));
             expectationsPerStep.add(toExpectations(rule));
         }
 
@@ -73,16 +88,19 @@ public final class StepPlanProducer {
         return new VerifiableStepPlan(plan, List.copyOf(expectationsPerStep), pageRef);
     }
 
-    private Command toCommand(LinkageGraph.LinkageRule rule, Set<String> values, Set<String> options) {
+    private Command toCommand(LinkageGraph.LinkageRule rule, RequirementContext req,
+                              Set<String> values, Set<String> options) {
         LocatorSpec loc = rule.trigger().primaryLocator();
+        String override = (req == null) ? null : req.testValue(rule.trigger().refId());
+        String value = (override != null && !override.isBlank()) ? override : rule.triggerValue();
         return switch (rule.triggerAction()) {
             case FILL -> {
-                values.add(rule.triggerValue());
-                yield Command.fill(loc, rule.triggerValue());
+                values.add(value);
+                yield Command.fill(loc, value);
             }
             case SELECT -> {
-                options.add(rule.triggerValue());
-                yield Command.select(loc, rule.triggerValue());
+                options.add(value);
+                yield Command.select(loc, value);
             }
             case CHECK -> new Command(Command.ActionType.CHECK, loc, Map.of());
             case UNCHECK -> new Command(Command.ActionType.UNCHECK, loc, Map.of());
