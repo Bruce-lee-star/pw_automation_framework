@@ -268,6 +268,8 @@
 
   <div class="note info"><b>变化态驱动复用绝对态断言（2026-11-03 落地）</b>：<code>LinkageGraphVerifier</code> 原内部的 <code>assertChange</code>/<code>textMatches</code> 精确比较分支已去除，改为把每条 <code>ExpectedChange</code>（变化语义：APPEAR/DISAPPEAR/ENABLE/DISABLE/REQUIRED/TEXT_CHANGED）翻译成 <code>SnapshotExpectation</code>（绝对态语义），定位到元素后交由 <code>SnapshotVerifier</code> 统一做字段级断言——单一事实来源，不再两处维护字段比较逻辑。元素三级回退定位（含 NLS 模板正则扫描）仍保留（<code>SnapshotVerifier</code> 只做按 ref 的精确字段断言、不感知 NLS 模板）。行为语义等价，新增 <code>LinkageGraphVerifierChangeKindsTest</code>(9) 覆盖各变化态分支。</div>
 
+  <div class="note info"><b>闭环接入真实 PlaywrightChannel（2026-11-03 落地，pw-web-ui <code>web.agent</code>）</b>：新增编排门面 <code>StepPlanRunner</code>，把 pw-core 的「授权执行 + 执行后联动断言」闭环经 <code>RouteTestBedHarness</code> 接到真实 <code>PlaywrightChannel</code>——参数范围门禁在通道边界默认方法（<code>BrowserCommandChannel.execute(Command, ParamScope)</code>）内自动生效（fail-closed，零改动 <code>PlaywrightChannel</code>）。端到端集成测试 <code>StepPlanRunnerIntegrationTest</code>(2) 在本环境真实浏览器跑通：NAVIGATE→FILL(经门禁授权)→两帧 ARIA 快照断言按钮由禁用变启用；且越界值被真实通道门禁拦截（fail-fast）。沿用 <code>assumeNoException</code> 兜底，浏览器不可用时自动跳过。</div>
+
   <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
   <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
 interface BrowserCommandChannel {            // 原语执行契约（§4.1）

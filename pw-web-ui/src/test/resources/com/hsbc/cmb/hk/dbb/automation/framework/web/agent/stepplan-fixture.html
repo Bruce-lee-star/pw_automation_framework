@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>StepPlan Fixture</title>
+</head>
+<body>
+  <h1>Controlled Step Fixture</h1>
+  <label>
+    Username
+    <input id="username" type="text" aria-label="Username" />
+  </label>
+  <!-- 提交按钮初始禁用；输入非空后由 JS 启用 —— 用于验证 FILL（经参数范围门禁授权）真实改变了页面状态 -->
+  <button id="submit" aria-label="Submit" disabled>Submit</button>
+  <script>
+    var u = document.getElementById('username');
+    var b = document.getElementById('submit');
+    u.addEventListener('input', function () {
+      b.disabled = (u.value.length === 0);
+    });
+  </script>
+</body>
+</html>
