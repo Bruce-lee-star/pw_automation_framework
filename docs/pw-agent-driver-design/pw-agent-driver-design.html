@@ -100,8 +100,8 @@
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v2.2（新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
-    <span>日期：<b>2026-11-02</b></span>
+    <span>版本：<b>v2.3（P1.5 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
+    <span>日期：<b>2026-11-03</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
   </div>
@@ -797,7 +797,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <li>[ ] 需求来源适配：复用框架已有 Cucumber Feature（Given/When/Then 即需求载体）或导入需求/验收文档作为分析上下文</li>
     <li>[ ] pw-codegen：资产草案 → Page Object/StepPlan/联动断言草案落库管线；经候选验证器 + 人工审批</li>
     <li>[ ] 联动图谱差分提取（操作前/后快照对比）；联动断言对应需求业务规则，可作为录制骨架补充</li>
-    <li>[ ] pw-core：技术架构落地（§3.1）——<b>Agent 包契约 + pw-web-ui 浏览器绑定已落地（§3.1.3.1 / §3.1.3.2）</b>：pw-core 定义 BrowserCommandChannel / Command / Snapshot / AssetVerifier / LinkageGraphVerifier / IsolationHarness 契约与编排；pw-web-ui 实现 PlaywrightChannel + RouteTestBedHarness，并附端到端示例（LinkageGraphVerifier* 测试真实浏览器 4/4 通过）。剩余：AssetRepository / AssetStateMachine 状态机 与 分析层 SPI 契约（RequirementSource / PageObservationProvider / PageUnderstandingEngine / AssetValidator）；明确各组件 Maven 模块归属与可选适配包边界；资产本体 JSON + 元数据索引存储</li>
+    <li>[ ] pw-core：技术架构落地（§3.1）——<b>Agent 包契约 + pw-web-ui 浏览器绑定已落地（§3.1.3.1 / §3.1.3.2）</b>：pw-core 定义 BrowserCommandChannel / Command / Snapshot / AssetVerifier / LinkageGraphVerifier / IsolationHarness 契约与编排；pw-web-ui 实现 PlaywrightChannel + RouteTestBedHarness，并附端到端示例（LinkageGraphVerifier* 测试真实浏览器 4/4 通过）。剩余：AssetRepository / AssetStateMachine 状态机 与 分析层 SPI 契约（RequirementSource / PageObservationProvider / PageUnderstandingEngine / AssetValidator）；明确各组件 Maven 模块归属与可选适配包边界（已基本落地：pw-core 契约+资产层+JsonFileAssetRepository 文件型仓库；pw-agent-analysis 承载分析层 SPI 与无 LLM 参考实现；可选 LLM 适配包独立模块、依赖可排除）。资产本体 JSON + 元数据索引存储已于 DEV-V6 落地（JsonFileAssetRepository：每个资产存为嵌套 content 的 JSON 本体 + _index.json 元数据索引，重启可重建；分析流水线经 AssetRepository 接口无缝接入）</li>
   </ul>
   <h3>P2 稳定代码生成</h3>
   <ul>
