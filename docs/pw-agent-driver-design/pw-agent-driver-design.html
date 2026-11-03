@@ -575,6 +575,7 @@ steps:
 <p><b>运行期门禁落点（已存在执行原语，缺门禁）：</b></p>
 <ul>
   <li>执行原语即 <code>BrowserCommandChannel.execute(Command)</code>（pw-core 契约定义、<code>PlaywrightChannel</code> 真实现，直接驱动浏览器）；StepPlan 经 <code>executeAll</code> 顺序执行。门禁已挂在<b>该边界</b>：<code>BrowserCommandChannel</code> 新增<b>向后兼容</b>默认方法 <code>execute(Command, ParamScope)</code> / <code>executeAll(List, ParamScope)</code>，执行每步前先 <code>ParamScopeGate.check(resolvedScope(stepIndex), command)</code>；既有 <code>execute(Command)</code> / <code>executeAll(List)</code> 调用方不受影响。</li>
+  <li><b>闭环编排</b>：最小编排器 <code>StepDriver.execute(StepPlan, BrowserCommandChannel)</code>（pw-core）已落地——先 <code>ParamScopePolicy.validatePlan</code> 治理预检（副作用动作须声明 scope），再逐步以 <code>resolvedScope(stepIndex)</code> 经 2-arg 边界执行，使门禁接线真正闭合；门禁失败 fail-fast。本类只做<b>编排 + 门禁接线</b>，<b>不含</b>联动断言 / 快照比对（属更大专项）。</li>
   <li>对每个 param value 校验是否在 <code>allow</code> 闭集 / 匹配 <code>regex</code> / 落在 <code>range</code> 数值闭区间；<code>Enum</code> 由 <code>allow</code> 闭集覆盖；<code>secretRef</code> 仅解析为引用，原文不进 Command（R1）。</li>
   <li>任一参数越界 → 抛 <code>ParamScopeViolationException</code>，<b>不执行该步</b>（fail-closed，无次优回退）。</li>
   <li>与定位器审批、靶场隔离（v3.6）构成纵深：前者管「用哪个 locator/origin/version」，本门禁管「参数值合不合法」，隔离管「打哪台机器」；三者都只在隔离靶场生效（R4/R8）。</li>
@@ -584,15 +585,16 @@ steps:
   <li>StepPlan 最小契约（pw-core，v1 已落地）——前置已满足；</li>
   <li><code>ParamScope</code> + <code>ParamScopeGate</code>（pw-core，v1 已落地，<b>解耦</b> ApprovalGrant；不并入定位器审批）；</li>
   <li><code>BrowserCommandChannel.execute(Command)</code> 边界接线（pw-core，<b>已落地</b>：默认方法 <code>execute(Command,ParamScope)</code>/<code>executeAll(List,ParamScope)</code>，向后兼容）；</li>
-  <li><code>ParamScopeGate</code> + <code>ParamScopePolicy</code> + 测试（<b>已落地</b>）。</li>
+  <li><code>ParamScopeGate</code> + <code>ParamScopePolicy</code> + 测试（<b>已落地</b>）；</li>
+  <li><code>StepDriver.execute(StepPlan, BrowserCommandChannel)</code> 闭环编排（pw-core，<b>已落地</b>：治理预检 + 逐步过门禁边界；不含联动断言）。</li>
 </ol>
 <p><b>可证伪测试（分层）：</b></p>
 <ul>
-  <li>单测（已落地）：<code>ParamScope</code> 解析 / 约束校验（allow / regex / range 三形态互斥、结构非法即拒、range 缺 bound 或 min&gt;max 即拒）；<code>composeWith</code> step 覆盖 plan；<code>ParamScopeGate</code> 在「未声明参数 / 取值越界（含 range）/ secretRef 豁免 / 无 scope 放行」各分支的 fail-closed 行为；<code>StepPlan.scope()</code> / <code>resolvedScope()</code> 解析 + <code>planDigest</code> 对 plan/step scope 的双重敏感性；<code>ParamScopePolicy.validatePlan</code> 对「副作用参数未声明 / 空 scope 计划 / step 覆盖 plan 后合规」的判定；<code>BrowserCommandChannel</code> 默认方法接线（越界即拒且不实际执行、合规则委托、空 scope 放行）。</li>
+  <li>单测（已落地）：<code>ParamScope</code> 解析 / 约束校验（allow / regex / range 三形态互斥、结构非法即拒、range 缺 bound 或 min&gt;max 即拒）；<code>composeWith</code> step 覆盖 plan；<code>ParamScopeGate</code> 在「未声明参数 / 取值越界（含 range）/ secretRef 豁免 / 无 scope 放行」各分支的 fail-closed 行为；<code>StepPlan.scope()</code> / <code>resolvedScope()</code> 解析 + <code>planDigest</code> 对 plan/step scope 的双重敏感性；<code>ParamScopePolicy.validatePlan</code> 对「副作用参数未声明 / 空 scope 计划 / step 覆盖 plan 后合规」的判定；<code>BrowserCommandChannel</code> 默认方法接线（越界即拒且不实际执行、合规则委托、空 scope 放行）；<code>StepDriver.execute</code> 编排（全步执行 + per-step 覆盖生效 + 门禁 fail-fast 不误执行 + 治理预检先于执行 + null 守卫）。</li>
   <li>运行期：经 <code>BrowserCommandChannel.execute(Command, scope)</code> 执行参数越界 Command → 抛异常且不实际触发；参数在域内 → 放行；</li>
   <li>安全：<code>secretRef</code> 原文不入 StepPlan；越权 origin 仍被既有 origin 绑定拒绝。</li>
 </ul>
-<div class="note warn"><b>不凭空设计的边界：</b>本专项只设计「参数范围授权一层 + StepPlan 最小契约作为载体」。完整 <code>IntentEngine</code>/<code>StepDriver</code>/资产落库是更大的 P0/P1（文档 L886/896/899/909），须作独立设计专项；本专项不擅自展开。在 StepPlan/StepDriver 实体落地前，参数范围授权无法独立闭合。</div>
+<div class="note warn"><b>不凭空设计的边界：</b>本专项只设计「参数范围授权一层 + StepPlan 最小契约作为载体 + 最小闭环编排」。完整 <code>IntentEngine</code>/<b>带联动断言的</b><code>StepDriver</code>/资产落库是更大的 P0/P1（文档 L886/896/899/909），须作独立设计专项；本专项不擅自展开。最小 <code>StepDriver</code>（仅编排 + 门禁接线，不含联动断言/快照比对）已落地，使参数范围授权<b>独立于完整驱动引擎即可闭合</b>；带联动断言的确定性执行仍待独立专项。</div>
 
 <h3 id="s44">4.4 定位器四梯队与生命周期</h3>
   <table>
