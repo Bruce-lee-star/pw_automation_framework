@@ -262,6 +262,8 @@
   </div>
   <p>验证失败 → 资产回 <code>pending_review</code> 或标 <code>incomplete</code>，转人工；验证 flaky（跨多次不稳定）→ 自动降为需重验。验证复用 RouteTestBed 隔离靶场（R4/R8）、BrowserCommandChannel 执行底座、SnapshotTree 感知，<b>不产生 LLM 调用</b>。<b>AssetVerifier 的最小可用实现 <code>LinkageGraphVerifier</code> 已落地于 pw-core（见 §3.1.3.1）</b>，其编排即本节描述的"采集→执行→断言→稳定性统计"闭环。</p>
 
+  <div class="note info"><b>联动断言最小构成块（2026-11-03 落地，pw-core <code>agent.channel</code>）</b>：在 <code>LinkageGraphVerifier</code> 的「状态变化（APPEAR/DISAPPEAR/ENABLE/…）」语义之外，新增<b>绝对态字段级</b>断言块 <code>SnapshotVerifier</code> + <code>SnapshotExpectation</code> + <code>SnapshotVerificationResult</code>——纯确定性、浏览器无关、无需 IsolationHarness，给定执行后 <code>Snapshot</code> 与一组期望（ref 定位 + 可选 role/name/visible/enabled/text 精确相等 / text 正则），产出结构化校验结果（逐条 <code>AssertionFailure</code>）。二者互补：前者验「变化」、本块验「此刻绝对态」。本块是验证驱动的构成块，未来可由 <code>LinkageGraphVerifier</code> 复用做字段级断言，<b>不展开完整引擎</b>。9 例单测全绿（<code>SnapshotVerifierTest</code>）。</div>
+
   <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
   <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
 interface BrowserCommandChannel {            // 原语执行契约（§4.1）
