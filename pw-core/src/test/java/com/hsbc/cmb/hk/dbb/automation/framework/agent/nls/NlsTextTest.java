@@ -51,4 +51,50 @@ public class NlsTextTest {
         assertTrue(NlsText.pattern("Click &lt;b&gt;{{user}}&lt;/b&gt;").matcher("Click Alice").find());
         assertFalse(NlsText.pattern("Click &lt;b&gt;{{user}}&lt;/b&gt;").matcher("Miss").find());
     }
+
+    @Test
+    public void decodesNamedEntitiesBeyondBasics() {
+        // 命名实体（不止 &lt; &gt;）：符号 / 排版 / 货币 / 重音 / 希腊 / 分数
+        assertEquals("Registered®", NlsText.visibleText("Registered&reg;"));
+        assertEquals("Brand™", NlsText.visibleText("Brand&trade;"));
+        assertEquals("Café", NlsText.visibleText("Caf&eacute;"));
+        assertEquals("naïve", NlsText.visibleText("na&iuml;ve"));
+        assertEquals("1—10", NlsText.visibleText("1&mdash;10"));
+        assertEquals("wait…", NlsText.visibleText("wait&hellip;"));
+        assertEquals("37°C", NlsText.visibleText("37&deg;C"));
+        assertEquals("2×3", NlsText.visibleText("2&times;3"));
+        assertEquals("price €99", NlsText.visibleText("price &euro;99"));
+        assertEquals("price £99", NlsText.visibleText("price &pound;99"));
+        assertEquals("α β γ", NlsText.visibleText("&alpha; &beta; &gamma;"));
+        assertEquals("¼ ½ ¾", NlsText.visibleText("&frac14; &frac12; &frac34;"));
+    }
+
+    @Test
+    public void decodesNumericCharacterReferences() {
+        // 数字实体（十进制 &#nnn; 与十六进制 &#xhh;）可表示任意码点，覆盖命名表之外的字符
+        assertEquals("© 2026", NlsText.visibleText("&#169; 2026"));
+        assertEquals("Café", NlsText.visibleText("Caf&#xe9;"));        // é = U+00E9
+        assertEquals("price €99", NlsText.visibleText("price &#8364;99"));
+        assertEquals("\uD83D\uDE00 smile", NlsText.visibleText("&#128512; smile")); // astral 代理对
+    }
+
+    @Test
+    public void numericNbspNormalizedToSpace() {
+        // &#160; 解码为 nbsp 字符后，应被归一为普通空格并折叠
+        assertEquals("a b", NlsText.visibleText("a&#160;&#160;b"));
+    }
+
+    @Test
+    public void decodeEntitiesPublicApi() {
+        // 公共解码入口：命名 + 数字混合；不误伤无分号的 & 与未知实体
+        assertEquals("a < b & c &unknown; d",
+                NlsText.decodeEntities("a &lt; b &amp; c &unknown; d"));
+        assertEquals("©é€", NlsText.decodeEntities("&copy;&#xe9;&#8364;"));
+    }
+
+    @Test
+    public void doesNotOverDecodeDoubleAmp() {
+        // 单趟解码，与浏览器一致：&amp;amp; → &amp;（字面），不被过度解成 &
+        assertEquals("&amp;", NlsText.decodeEntities("&amp;amp;"));
+    }
 }

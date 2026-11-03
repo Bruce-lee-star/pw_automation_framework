@@ -47,6 +47,23 @@ public class NLSUtilsTest {
         assertFalse("模板占位符不应残留 {{name}}", src.contains("{{name}}"));
     }
 
+    /** codegen 的 visibleText 与 templateRegexSource 都应解码<b>全部</b> HTML 实体（统一到 NlsText）。 */
+    @Test
+    public void visibleText_decodesAllEntities() {
+        assertEquals("Brand™", NLSUtils.visibleText("Brand&trade;"));
+        assertEquals("Café", NLSUtils.visibleText("Caf&eacute;"));
+        assertEquals("© 2026", NLSUtils.visibleText("&#169; 2026"));
+    }
+
+    @Test
+    public void templateRegexSource_decodesEntitiesLikeVisibleText() {
+        // codegen 模板定位路径与可见文本路径解码同一套实体，避免不一致
+        String tpl = NLSUtils.templateRegexSource("Price &euro;{{amount}}");
+        assertTrue("应解码 &euro; → €", tpl.contains("€"));
+        assertTrue("占位符应编译为捕获组", tpl.contains("(.*?)"));
+        assertFalse("原始实体名不应残留", tpl.contains("&euro;"));
+    }
+
     /** {@code NlsBundle.visibleText(key)} 应等于手写 {@code NLSUtils.visibleText(bind(file).get(key))}，且剥离 HTML。 */
     @Test
     public void bundleVisibleText_stripsHtmlAndMatchesManualForm() throws Exception {

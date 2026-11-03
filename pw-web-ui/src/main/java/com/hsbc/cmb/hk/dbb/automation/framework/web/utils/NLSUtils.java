@@ -264,89 +264,30 @@ public final class NLSUtils {
         return NlsText.visibleText(value);
     }
 
-    /** 归一化 + 剥 HTML + 解码实体（不 trim，供 {@link #templateRegexSource} 复用，保持历史行为一致）。 */
-    private static String stripHtmlAndNormalize(String value) {
-        String t = value.replace("\r\n", "\n").replace('\u00A0', ' ');
-        t = t.replaceAll("<br\\s*/?>", " ").replaceAll("<[^>]+>", " ");
-        t = decodeEntities(t);
-        return t.replaceAll("\\s+", " ");
-    }
-
     /**
      * 把含模板变量的 nls 文本值编译为「跨语言/跨引擎通用」的正则源字符串（不含 {@code ^$} 锚点，
-     * 由调用方决定匹配语义）。用途：
+     * 由调用方决定匹配语义）。
+     *
+     * <p><b>委托</b>：归一化语义（剥 HTML、解码<b>全部</b> HTML 实体、{{var}}→{@code (.*?)}、trim）
+     * 已统一下沉到 {@link NlsText#templateRegexSource(String)}，此处直接复用，保证
+     * "codegen 拾取反查" 与 "Agent 资产/定位" 对同一 nls 值编译出完全一致的可见文本/正则。</p>
+     *
+     * <p>用途：</p>
      * <ul>
      *   <li>拾取反查：注入浏览器后配合 {@code new RegExp(src).test(可见文本)} 反查 key；</li>
      *   <li>运行时定位：{@link #templatePattern(String)} 包装为 {@link Pattern} 传给 Playwright 的
      *       {@code getByText(Pattern)} / {@code getByAltText(Pattern)} 等做正则匹配。</li>
      * </ul>
-     * 处理细节：
-     * <ol>
-     *   <li>归一化空白（\r\n→\n、&amp;nbsp;→空格、折叠）；</li>
-     *   <li>剥离 HTML 标签（{@code getByText} 比对的是可见文本不含标签；{@code <br>} 转空格）；</li>
-     *   <li>解码常见 HTML 实体（可见文本里是实体对应的字符，如 {@code &amp;copy;}→©）；</li>
-     *   <li>转义正则元字符，但把 {@code {{var}} 占位符替换为 {@code (.*?)}（非贪婪，匹配任意真实值）。</li>
-     * </ol>
-     * 占位符名在各国语言里保持一致（如 {{deviceModel}}），故任意语言编译出的正则源都能还原匹配。
      */
     public static String templateRegexSource(String value) {
-        if (value == null)  {return "";} 
-        String t = stripHtmlAndNormalize(value);
-        return escapeRegexKeepingPlaceholders(t);
+        return NlsText.templateRegexSource(value);
     }
 
     /** 把含模板变量的 nls 值编译为正则 {@link Pattern}（{@link Pattern#DOTALL}，使 {@code .} 可跨换行）。 */
     public static Pattern templatePattern(String value) {
-        String src = templateRegexSource(value);
-        return src.isEmpty() ? Pattern.compile(Pattern.quote(value == null ? "" : value), Pattern.DOTALL)
-                             : Pattern.compile(src, Pattern.DOTALL);
+        return NlsText.pattern(value);
     }
 
-    private static String decodeEntities(String s) {
-        return s.replace("&nbsp;", " ")
-                .replace("&lt;", "<")
-                .replace("&gt;", ">")
-                .replace("&quot;", "\"")
-                .replace("&apos;", "'")
-                .replace("&amp;", "&")
-                .replace("&copy;", "©");
-    }
-
-    private static String escapeRegexKeepingPlaceholders(String t) {
-        StringBuilder sb = new StringBuilder();
-        int i = 0, n = t.length();
-        while (i < n) {
-            if (t.startsWith("{{", i)) {
-                int end = t.indexOf("}}", i);
-                if (end < 0) {
-                    sb.append(escapeRegexLiteral(t.substring(i)));
-                    break;
-                }
-                sb.append("(.*?)");
-                i = end + 2;
-            } else {
-                int next = t.indexOf("{{", i);
-                if (next < 0)  {next = n;} 
-                sb.append(escapeRegexLiteral(t.substring(i, next)));
-                i = next;
-            }
-        }
-        return sb.toString();
-    }
-
-    private static String escapeRegexLiteral(String s) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            // 这些字符在 JS/Java 正则里都是元字符，统一转义（两边通用）
-            if ("[](){}.*+?^$|\\".indexOf(c) >= 0) {
-                sb.append('\\').append(c);
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
-    }
 
     private static Map<String, Map<String, String>> readAndParse(String filePath) {
         Map<String, Map<String, String>> parsed = JsonUtils.fromJson(readFile(filePath), LANG_TABLE_TYPE);
