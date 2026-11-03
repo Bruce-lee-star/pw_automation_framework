@@ -33,7 +33,7 @@ public final class LanguageState {
     /**
      * 语言切换时调用，告知框架当前显示的语言。
      *
-     * @param lang 语言标识（取自对应 nls 文件第一层语言 Key，如 "en"、"zh"）；{@code null} 等价于清除
+     * @param lang 语言标识（取自对应 nls 文件第一层语言 Key，如 "en"、"zh"，或带地区的 "en-US"、"zh-CN"、"zh-HK"）；{@code null} 等价于清除
      */
     public static void setLanguage(String lang) {
         if (lang == null) {

@@ -34,6 +34,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * }
  * }</pre>
  *
+ * <p><b>语言标签形态</b>：顶层 key 当作语言标识<b>原样</b>使用，不区分大小写/地区格式——
+ * 既支持 {@code "en"}/{@code "zh"} 这种短标签，也支持业务常见的<b>带地区标签</b>
+ * {@code "en-US"}/{@code "zh-CN"}/{@code "zh-HK"}（如 {@code NLS_footer.json}）。
+ * 唯一约束：调用方传入的语言标识必须<b>精确等于</b> json 顶层 key（如用 {@code "en-US"} 而非 {@code "en"}），
+ * 因为目录按该字符串直接索引。key 本身也可以是英文短语（如 {@code "Privacy and Security footer"}），
+ * 定位只认 key、文案运行期按语言解析，故短语 key 与短 id key 同等对待。</p>
+ *
  * <p><b>语言来源</b>：优先取构造时指定的语言（便于<b>同一份资产跨语言巡检</b>——en 验一遍、zh 再验一遍）；
  * 未指定则取 {@link LanguageState#getLanguage()}（业务切语言时已由框架设置，与 codegen/page object 同一来源）。
  * 二者都没有时立刻抛 {@link IllegalStateException}，而不是"静默查不到 key 退化成字面文案"——后者在多语言下

@@ -1,0 +1,26 @@
+{
+	"en-US": {
+		"Privacy and Security footer": "Privacy and Security",
+		"Privacy and Security": "Privacy and Security. This link will open in a new window.",
+		"Terms of Use footer": "Terms of Use",
+		"Terms of Use": "Terms of Use. This link will open in a new window.",
+		"footer_privacy_and_security_link": "https://www.business.hsbc.com.hk/en-gb/hk/generic/privacy-and-security",
+		"Copyright footer": "&copy; Copyright. The Hongkong and Shanghai Banking Corporation Limited, 2002-{{currentYear}}. All rights reserved. "
+	},
+	"zh-CN": {
+		"Privacy and Security footer": "私隐与保安",
+		"Privacy and Security": "私隐与保安 此连结将会以新窗口开启",
+		"Terms of Use footer": "网站使用条款",
+		"Terms of Use": "网站使用条款 此连结将会以新窗口开启",
+		"footer_privacy_and_security_link": "https://www.business.hsbc.com.hk/zh-cn/hk/generic/privacy-and-security",
+		"Copyright footer": "&copy; 版权所有。 The Hongkong and Shanghai Banking Corporation Limited 香港上海汇丰银行有限公司，2002-{{currentYear}}。不得转载。"
+	},
+	"zh-HK": {
+		"Privacy and Security footer": "私隱與保安",
+		"Privacy and Security": "私隱與保安 此連結將會以新視窗開啟",
+		"Terms of Use footer": "網站使用條款",
+		"Terms of Use": "網站使用條款 此連結將會以新視窗開啟",
+		"footer_privacy_and_security_link": "https://www.business.hsbc.com.hk/zh-hk/hk/generic/privacy-and-security",
+		"Copyright footer": "&copy; 版權所有。 The Hongkong and Shanghai Banking Corporation Limited 香港上海滙豐銀行有限公司，2002-{{currentYear}}。不得轉載。"
+	}
+}

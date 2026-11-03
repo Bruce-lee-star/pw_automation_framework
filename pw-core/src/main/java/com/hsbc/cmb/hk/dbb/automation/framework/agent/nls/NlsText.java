@@ -54,7 +54,9 @@ public final class NlsText {
         if (value == null) {
             return "";
         }
-        return escapeKeepingPlaceholders(stripHtmlAndNormalize(value));
+        // 归一化后 trim：nls 值常带首尾空白（如 "...All rights reserved. "），而页面可访问名已被浏览器 trim，
+        // 不 trim 会让编译出的正则要求"尾部空格"导致反查/定位失败（footer 的 Copyright 模板即典型场景）。
+        return escapeKeepingPlaceholders(stripHtmlAndNormalize(value).trim());
     }
 
     /** 把 nls 值编译为正则（{@link Pattern#DOTALL}，使 {@code .} 可跨换行）。 */
