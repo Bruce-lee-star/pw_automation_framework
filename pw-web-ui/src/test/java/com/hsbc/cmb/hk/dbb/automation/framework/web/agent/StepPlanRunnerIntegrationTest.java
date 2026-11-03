@@ -103,12 +103,12 @@ public class StepPlanRunnerIntegrationTest {
                     "url", ParamConstraint.allowedValues(targetUrl),
                     "value", ParamConstraint.allowedValues("alice")));
             Command navigate = Command.navigate(targetUrl);
-            Command fill = Command.fill(LocatorSpec.role("textbox", "Username"), "alice");
+            // 期望内联进命令：FILL 后提交按钮启用（一步 = 动作 + 其执行后期望）
+            Command fill = Command.fill(LocatorSpec.role("textbox", "Username"), "alice")
+                    .withExpectations(List.of(
+                            SnapshotExpectation.forRef("role=button;name=Submit").enabled(true).build()));
             StepPlan plan = new StepPlan(1, "plan-carrier-1", List.of(navigate, fill), scope, List.of());
-            List<List<SnapshotExpectation>> expectations = List.of(
-                    List.of(),
-                    List.of(SnapshotExpectation.forRef("role=button;name=Submit").enabled(true).build()));
-            VerifiableStepPlan vsp = new VerifiableStepPlan(plan, expectations, targetUrl);
+            VerifiableStepPlan vsp = new VerifiableStepPlan(plan, targetUrl);
 
             StepVerificationResult result = new StepPlanRunner(harness).run(vsp);
             assertTrue(result.allPassed());

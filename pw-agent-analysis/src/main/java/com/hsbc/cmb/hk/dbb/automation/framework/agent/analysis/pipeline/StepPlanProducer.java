@@ -64,11 +64,9 @@ public final class StepPlanProducer {
     public VerifiableStepPlan produce(AssetDraftBundle bundle, RequirementContext req) {
         String pageRef = bundle.pageRef();
         List<Command> steps = new ArrayList<>();
-        List<List<SnapshotExpectation>> expectationsPerStep = new ArrayList<>();
 
-        // 首步：导航到来源页面（其 url 须进入治理域）
+        // 首步：导航到来源页面（其 url 须进入治理域）；导航无执行后期望
         steps.add(Command.navigate(pageRef));
-        expectationsPerStep.add(List.of());
 
         Set<String> values = new LinkedHashSet<>();
         Set<String> options = new LinkedHashSet<>();
@@ -78,14 +76,15 @@ public final class StepPlanProducer {
             if (triggerLoc == null) {
                 continue; // 无角色优先定位符：确定性校验已 ERROR，跳过派生
             }
-            steps.add(toCommand(rule, req, values, options));
-            expectationsPerStep.add(toExpectations(rule));
+            Command cmd = toCommand(rule, req, values, options);
+            // 期望内联进命令（一步 = 动作 + 其执行后绝对态期望）
+            steps.add(cmd.withExpectations(toExpectations(rule)));
         }
 
         ParamScope scope = buildScope(pageRef, values, options);
         StepPlan plan = new StepPlan(1, "plan-" + bundle.linkage().requirementId(),
                 List.copyOf(steps), scope, List.of());
-        return new VerifiableStepPlan(plan, List.copyOf(expectationsPerStep), pageRef);
+        return new VerifiableStepPlan(plan, pageRef);
     }
 
     private Command toCommand(LinkageGraph.LinkageRule rule, RequirementContext req,

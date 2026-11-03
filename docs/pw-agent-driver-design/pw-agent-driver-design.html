@@ -276,6 +276,8 @@
 
   <div class="note info"><b>统一执行入口（2026-11-03 落地，pw-core）</b>：资产验证与资产生产流水线现收敛到<b>同一个闭环</b>——新增 core 构建器 <code>LinkageGraphStepPlans.toVerifiableStepPlan(graph, url, nls)</code>（与 analysis 的 <code>StepPlanProducer</code> 对称：导航 + 每条联动规则触发步骤 + 逐步期望 + 资产自身取值的 ParamScope 治理域），<code>LinkageGraphVerifier</code> 不再自建 Command / 内联快照比对，而是经该构建器产出 <code>VerifiableStepPlan</code>、在 repeat 循环里统一走 <code>StepVerifier.verify(vsp, channel)</code>（= <code>StepDriver</code> 门禁执行 + <code>SnapshotVerifier</code> 断言）。即"靶场验证"与"资产生产流水线"两种来源产出的 <code>VerifiableStepPlan</code> 都经同一执行入口验证；三级回退定位（stateOf）因静态本地化 ref 已覆盖全部既有测试而移除，期望经 <code>ExpectedChangeMapper</code> 单一来源生成。验证：core 21 例（变化态 + NLS + 快照）零回归，web-ui 真实浏览器样例 + 闭环集成 5 例全绿。</div>
 
+  <div class="note info"><b>期望内联进 StepPlan schema（2026-11-03 落地，pw-core）</b>：原先 <code>VerifiableStepPlan</code> 用「计划 + 独立期望列表按索引对齐」双轨，脆弱且序列化需单独处理期望。现把每个命令的执行后绝对态期望<b>内联进 <code>Command</code></b>（<code>Command.expectations</code>，一步 = 动作 + 其期望后态），<code>VerifiableStepPlan</code> 退化为 <code>(StepPlan, pageRef)</code>，<code>expectationsPerStep()</code> 从计划命令派生。<code>Command</code> 保留 3 参构造与工厂（默认空期望）+ <code>withExpectations</code> 便捷装配，完全向后兼容；<code>StepPlanProducer</code>/<code>LinkageGraphStepPlans</code> 改为把期望内联进命令。验证：core 160 / analysis 17 / web-ui 473 例全绿（含真实浏览器集成），无连带回归。</div>
+
   <h4>3.1.3 核心 SPI 契约（骨架，Java 风格）</h4>
   <pre><code>// pw-core：协议与领域契约（不依赖浏览器实现）
 interface BrowserCommandChannel {            // 原语执行契约（§4.1）

@@ -40,24 +40,24 @@ public final class LinkageGraphStepPlans {
     public static VerifiableStepPlan toVerifiableStepPlan(LinkageGraph graph, String targetUrl, NlsCatalog nls) {
         List<Command> steps = new ArrayList<>();
         List<ParamScope> stepScopes = new ArrayList<>();
-        List<List<SnapshotExpectation>> expectationsPerStep = new ArrayList<>();
 
-        // 首步：导航到目标页面（pageRef 即导航目标）
+        // 首步：导航到目标页面（pageRef 即导航目标）；导航无执行后期望
         steps.add(Command.navigate(targetUrl));
         stepScopes.add(ParamScope.EMPTY);
-        expectationsPerStep.add(List.of());
 
         for (LinkageGraph.LinkageRule rule : graph.rules()) {
             LocatorSpec triggerLoc = localize(rule.trigger().primaryLocator(), nls);
-            steps.add(new Command(rule.triggerAction(), triggerLoc, triggerParams(rule)));
+            // 期望内联进命令（一步 = 触发动作 + 其执行后绝对态期望）
+            Command trigger = new Command(rule.triggerAction(), triggerLoc, triggerParams(rule))
+                    .withExpectations(ruleExpectations(rule, nls));
+            steps.add(trigger);
             stepScopes.add(triggerScope(rule));
-            expectationsPerStep.add(ruleExpectations(rule, nls));
         }
 
         // plan 级 scope：导航 url 授权（其余副作用参数在 step 级按资产取值授权）
         ParamScope planScope = new ParamScope(Map.of("url", ParamConstraint.allowedValues(targetUrl)));
         StepPlan plan = new StepPlan(1, "linkage-" + graph.requirementId(), steps, planScope, stepScopes);
-        return new VerifiableStepPlan(plan, expectationsPerStep, targetUrl);
+        return new VerifiableStepPlan(plan, targetUrl);
     }
 
     private static LocatorSpec localize(LocatorSpec spec, NlsCatalog nls) {
