@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.AssertionFailure;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -60,5 +61,22 @@ public final class StepVerifier {
             }
         }
         return new StepVerificationResult(perStep);
+    }
+
+    /**
+     * 执行计划并对每步结果做联动断言——以「可验证计划」载体为入口。
+     *
+     * <p>等价 {@link #verify(StepPlan, BrowserCommandChannel, List)}，但把计划 / 逐步期望 /
+     * 页面引用打包进 {@link VerifiableStepPlan}（分析层 → 执行层的数据契约），使资产验证
+     * 与资产生产流水线收敛到<b>同一个闭环入口</b>：两种来源产出的 {@code VerifiableStepPlan}
+     * 都经 {@code StepDriver}（门禁执行）+ {@code SnapshotVerifier}（断言）验证。</p>
+     *
+     * @param vsp     可验证步骤计划（含执行计划、逐步期望、页面引用）
+     * @param channel 命令通道（含门禁边界）
+     * @return 每步的校验结果聚合
+     * @throws ParamScopeViolationException 任一步参数越界（来自 StepDriver，fail-fast）
+     */
+    public static StepVerificationResult verify(VerifiableStepPlan vsp, BrowserCommandChannel channel) {
+        return verify(vsp.plan(), channel, vsp.expectationsPerStep());
     }
 }
