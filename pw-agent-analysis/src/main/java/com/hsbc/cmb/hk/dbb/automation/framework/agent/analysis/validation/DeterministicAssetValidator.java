@@ -3,7 +3,6 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.validation;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.AssetDraftBundle;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.BehaviorEntry;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.ElementInventoryEntry;
-import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.ElementRef;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.LinkageGraph;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;

@@ -6,9 +6,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 
 /**
  * AutoBrowser Processor - 框架层自动处理 @AutoBrowser 注解（企业级 · 去 框架 专项 DEV-V5）。
