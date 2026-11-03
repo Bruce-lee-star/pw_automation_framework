@@ -29,6 +29,16 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- 闭环引擎端到端测试（test 作用域）：跨层验证「分析层 StepPlanProducer 产出
+             → 真实浏览器 StepPlanRunner 验证」。仅 test 作用域，生产代码不反向依赖分析层，
+             不违反「分析层零浏览器、不得依赖 web-ui」的架构铁律。 -->
+        <dependency>
+            <groupId>com.hsbc.cmb.dbb.hk.automation</groupId>
+            <artifactId>pw-agent-analysis</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>

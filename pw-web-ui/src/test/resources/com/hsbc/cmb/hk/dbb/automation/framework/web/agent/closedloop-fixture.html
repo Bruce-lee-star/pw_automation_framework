@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Closed-Loop Fixture</title>
+</head>
+<body>
+  <h1>Account Opening</h1>
+
+  <!-- 联动 A：FILL username（非空）→ Submit 启用(ENABLE) -->
+  <input id="username" aria-label="Username" placeholder="Username" />
+  <button id="submit" aria-label="Submit" disabled>Submit</button>
+
+  <!-- 联动 B：SELECT accountType=corporate → purpose 出现(APPEAR) -->
+  <select id="accountType" aria-label="Account type">
+    <option value="personal">Personal</option>
+    <option value="corporate">Corporate</option>
+  </select>
+  <input id="purpose" aria-label="Purpose" style="display:none" placeholder="Purpose" />
+
+  <!-- 联动 C：CLICK agree → reason 启用(ENABLE) -->
+  <label>
+    <input type="checkbox" id="agree" aria-label="I agree to the terms" />
+    I agree to the terms
+  </label>
+  <input id="reason" aria-label="Reason" disabled placeholder="Reason" />
+
+  <script>
+    document.getElementById('username').addEventListener('input', function (e) {
+      document.getElementById('submit').disabled = (e.target.value.trim().length === 0);
+    });
+    document.getElementById('accountType').addEventListener('change', function (e) {
+      document.getElementById('purpose').style.display =
+        (e.target.value === 'corporate') ? 'inline-block' : 'none';
+    });
+    document.getElementById('agree').addEventListener('change', function (e) {
+      document.getElementById('reason').disabled = !e.target.checked;
+    });
+  </script>
+</body>
+</html>
