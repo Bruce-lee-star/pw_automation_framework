@@ -55,6 +55,13 @@ public final class CandidateCli {
     /** 默认库路径：与"资产进仓"的习惯一致，结果可提交评审。 */
     static final Path DEFAULT_LIBRARY = Path.of("locators", "candidates.json");
 
+    /** 审批时间统一到秒：纳秒对人没有意义，却让输出难以对齐阅读。 */
+    private static final java.time.format.DateTimeFormatter TS =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss'Z'")
+                    .withZone(java.time.ZoneOffset.UTC);
+    private static final java.time.format.DateTimeFormatter DATE =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(java.time.ZoneOffset.UTC);
+
     private static final Gson GSON = new GsonBuilder()
             .setPrettyPrinting()
             .disableHtmlEscaping()
@@ -192,22 +199,52 @@ public final class CandidateCli {
 
     private static int approve(Options o, PrintStream out, PrintStream err) throws IOException {
         String id = o.require("id", "候选 id");
-        String approver = o.require("approver", "审批人（审批必须落到具体的人）");
+        String approvers = o.require("approver", "审批人（多人用逗号分隔，如 \"alice,bob\"；CRITICAL 需两名）");
+        String risk = o.require("risk", "业务后果等级（LOW/MEDIUM/HIGH/CRITICAL），不提供默认档");
+        String origin = o.require("origin", "页面来源/环境，如 https://dbb-uat.example.com 或 uat");
         String appVersion = o.require("app-version", "目标应用版本（审批必须绑定版本）");
+        int validDays = o.has("valid-days") ? o.intValue("valid-days") : 0;
+
+        ApprovalRequest request = ApprovalRequest.builder()
+                .approvers(approvers)
+                .riskTier(risk)
+                .origin(origin)
+                .appVersion(appVersion)
+                .validityDays(validDays)
+                .planDigest(o.get("plan-digest"))
+                .note(o.get("note"))
+                .build();
         Path lib = o.library();
 
         try (LibraryLock ignored = LibraryLock.acquire(lib)) {
             CandidateLibrary library = CandidateLibrary.load(lib);
-            CandidateRecord record = library.approve(id, approver, appVersion);
+            CandidateRecord record;
+            try {
+                record = library.approve(id, request);
+            } catch (IllegalStateException e) {
+                // 拒绝也算"跑完了"：把七条规则逐条打出来，别让人反复试错才猜到卡在哪条。
+                err.println(e.getMessage());
+                return EXIT_REJECTED;
+            }
             library.save(lib);
 
-            out.println("已审批 " + record.id() + " → APPROVED（approver=" + record.approvedBy()
-                    + ", appVersion=" + record.approvalAppVersion() + ", v" + record.version() + "）");
+            ApprovalGrant grant = record.grant();
+            out.println("已审批 " + record.id() + " → APPROVED（v" + record.version() + "）");
+            out.println("  业务后果  : " + grant.riskTier() + " —— " + grant.riskTier().describe());
+            out.println("  审批人    : " + String.join(", ", grant.approvers()));
+            out.println("  绑定环境  : " + grant.origin());
+            out.println("  应用版本  : " + grant.appVersion());
+            out.println("  计划摘要  : " + grant.planDigest());
+            out.println("  有效期至  : " + TS.format(grant.expiresAt()));
             out.println("回注：locator --lib " + lib + " --target " + record.candidate().targetRef()
-                    + " --app-version " + record.approvalAppVersion());
-            if (record.validation() != null && record.validation().passed()) {
-                err.println("注意：审批只确认「这条定位器可用于该应用版本」，页面改版后须重新取证并重新审批");
+                    + " --app-version " + grant.appVersion() + " --origin " + grant.origin());
+
+            String proposedBy = record.candidate().proposedBy();
+            if (proposedBy != null && grant.approvers().stream().anyMatch(a -> a.equalsIgnoreCase(proposedBy))) {
+                err.println("注意：本次为自审（审批人 " + proposedBy + " 即提出者），已按 " + grant.riskTier()
+                        + " 规则记录；MEDIUM 及以上不允许自审");
             }
+            err.println("注意：审批只在其绑定范围内有效——页面改版、超期或换环境都须重新取证并重新审批");
             return EXIT_OK;
         }
     }
@@ -272,13 +309,19 @@ public final class CandidateCli {
             out.println("（没有符合条件的候选）");
             return EXIT_OK;
         }
-        out.printf("%-9s %-10s %-22s %-40s %-16s %-12s %s%n",
-                "ID", "STATE", "TARGET", "LOCATOR", "APPROVER", "APP-VER", "V");
+        Instant now = Instant.now(Clock.systemUTC());
+        out.printf("%-9s %-10s %-9s %-20s %-34s %-14s %-10s %-12s %s%n",
+                "ID", "STATE", "RISK", "TARGET", "LOCATOR", "APPROVER", "APP-VER", "EXPIRES", "V");
         for (CandidateRecord r : rows) {
-            out.printf("%-9s %-10s %-22s %-40s %-16s %-12s v%d%n",
-                    r.id(), r.state(), r.candidate().targetRef(), r.candidate().canonical(),
-                    dash(r.approvedBy()), dash(r.approvalAppVersion()), r.version());
+            ApprovalGrant g = r.grant();
+            out.printf("%-9s %-10s %-9s %-20s %-34s %-14s %-10s %-12s v%d%n",
+                    r.id(), r.state(), g == null ? "-" : g.riskTier(),
+                    r.candidate().targetRef(), r.candidate().canonical(),
+                    g == null ? dash(r.approvedBy()) : String.join(",", g.approvers()),
+                    dash(r.approvalAppVersion()),
+                    expiryCell(g, now), r.version());
         }
+        out.println("（EXPIRES 列以 ! 结尾 = 审批已过期，回注会被拒绝）");
         return EXIT_OK;
     }
 
@@ -324,8 +367,19 @@ public final class CandidateCli {
                 out.println("  证据细节  : " + e.detail());
             }
         }
-        if (r.approvedBy() != null) {
-            out.println("  审批      : " + r.approvedBy() + " @ appVersion=" + r.approvalAppVersion());
+        if (r.grant() != null) {
+            ApprovalGrant g = r.grant();
+            Instant now = Instant.now(Clock.systemUTC());
+            out.println("  审批      : " + String.join(", ", g.approvers()) + "（" + g.riskTier() + "）");
+            out.println("  绑定      : origin=" + g.origin() + "  appVersion=" + g.appVersion()
+                    + "  digest=" + g.planDigest());
+            out.println("  有效期    : " + TS.format(g.issuedAt()) + " → " + TS.format(g.expiresAt())
+                    + (g.expiredAt(now) ? "（已过期，不可回注）" : "（剩余 " + g.daysUntilExpiry(now) + " 天）"));
+            if (g.note() != null) {
+                out.println("  审批说明  : " + g.note());
+            }
+        } else if (r.approved()) {
+            out.println("  审批      : 无授权凭据（历史手工审批，不可回注，须重新审批）");
         }
         if (r.retireReason() != null) {
             out.println("  失效原因  : " + r.retireReason());
@@ -340,20 +394,25 @@ public final class CandidateCli {
     private static int locator(Options o, PrintStream out, PrintStream err) throws IOException {
         String target = o.require("target", "目标语义引用");
         String appVersion = o.require("app-version", "目标应用版本");
+        String origin = o.require("origin", "页面来源/环境（须与审批时绑定的一致）");
         CandidateLibrary library = CandidateLibrary.load(o.library());
 
-        Optional<CandidateRecord> hit = library.productionLocator(target, appVersion);
+        Optional<CandidateRecord> hit = library.productionLocator(target, appVersion, origin);
         if (hit.isEmpty()) {
-            err.println("未解析到可用的生产定位器（target=" + target.trim() + ", appVersion=" + appVersion.trim() + "）");
-            diagnose(library, target.trim(), appVersion.trim(), err);
-            err.println("处理原则：停止并转人工。不得回退到其它候选，也不得降级使用旧版本审批。");
+            err.println("未解析到可用的生产定位器（target=" + target.trim()
+                    + ", appVersion=" + appVersion.trim() + ", origin=" + origin.trim() + "）");
+            diagnose(library, target.trim(), appVersion.trim(), origin.trim(), err);
+            err.println("处理原则：停止并转人工。不得回退到其它候选，也不得降级使用旧版本/过期审批。");
             return EXIT_NOT_RESOLVED;
         }
         // stdout 只留一行 canonical，方便 $(...) 直接取用
         out.println(hit.get().candidate().canonical());
         if (o.flag("verbose")) {
             CandidateRecord r = hit.get();
-            err.println("# " + r.id() + " approver=" + r.approvedBy() + " appVersion=" + r.approvalAppVersion());
+            ApprovalGrant g = r.grant();
+            err.println("# " + r.id() + " risk=" + g.riskTier() + " approver=" + String.join(",", g.approvers())
+                    + " appVersion=" + g.appVersion() + " origin=" + g.origin()
+                    + " digest=" + g.planDigest() + " 有效期至 " + TS.format(g.expiresAt()));
         }
         return EXIT_OK;
     }
@@ -382,7 +441,8 @@ public final class CandidateCli {
     // ------------------------------------------------------------------
 
     /** 回注失败时逐条说明原因——但绝不因此挑一条"最像"的顶上。 */
-    private static void diagnose(CandidateLibrary library, String target, String appVersion, PrintStream err) {
+    private static void diagnose(CandidateLibrary library, String target, String appVersion, String origin,
+                                 PrintStream err) {
         List<CandidateRecord> sameTarget = library.all().stream()
                 .filter(r -> r.candidate().targetRef().equals(target))
                 .toList();
@@ -398,16 +458,29 @@ public final class CandidateCli {
             }
             return;
         }
-        if (approved.size() > 1) {
-            err.println("  原因：该版本存在 " + approved.size() + " 条 APPROVED，歧义即失败（不按分数/时间择一）：");
-            for (CandidateRecord r : approved) {
+        Instant now = Instant.now(Clock.systemUTC());
+        List<CandidateRecord> usable = approved.stream()
+                .filter(r -> r.grant() != null && r.grant().covers(origin, appVersion,
+                        ApprovalGrant.planDigestOf(r.candidate()), now))
+                .toList();
+        if (usable.size() > 1) {
+            err.println("  原因：本次请求匹配到 " + usable.size() + " 条有效授权，歧义即失败"
+                    + "（不按分数/时间择一）：");
+            for (CandidateRecord r : usable) {
                 err.println("    - " + r.id() + " " + r.candidate().canonical());
             }
             return;
         }
-        err.println("  原因：已审批的候选绑定的是另一个应用版本（审批版本="
-                + approved.get(0).approvalAppVersion() + "，请求版本=" + appVersion + "）");
-        err.println("  处理：页面改版后须重新取证 → 重新验证 → 重新审批，不复用旧版本审批");
+        err.println("  原因：该目标有 " + approved.size() + " 条 APPROVED，但没有一条授权覆盖本次请求：");
+        for (CandidateRecord r : approved) {
+            if (r.grant() == null) {
+                err.println("    - " + r.id() + " 无授权凭据（历史手工审批）：不可回注，须重新审批");
+            } else {
+                err.println("    - " + r.id() + " " + r.grant().describeMismatch(origin, appVersion,
+                        ApprovalGrant.planDigestOf(r.candidate()), now));
+            }
+        }
+        err.println("  处理：页面改版后须重新取证 → 重新验证 → 重新审批；审批到期须重新取证续期，不复用旧授权");
     }
 
     private static LocatorSpec parseLocator(String canonical) {
@@ -462,13 +535,17 @@ public final class CandidateCli {
 
     private static Map<String, Object> summaryMap(CandidateRecord r) {
         Map<String, Object> m = new LinkedHashMap<>();
+        ApprovalGrant g = r.grant();
         m.put("id", r.id());
         m.put("state", r.state().name());
         m.put("targetRef", r.candidate().targetRef());
         m.put("locator", r.candidate().canonical());
         m.put("expectedRole", r.candidate().expectedRole());
+        m.put("riskTier", g == null ? null : g.riskTier().name());
+        m.put("origin", g == null ? null : g.origin());
         m.put("approvedBy", r.approvedBy());
         m.put("appVersion", r.approvalAppVersion());
+        m.put("expiresAt", g == null ? null : g.expiresAt().toString());
         m.put("version", r.version());
         return m;
     }
@@ -479,6 +556,19 @@ public final class CandidateCli {
         m.put("evidenceRef", r.candidate().evidenceRef());
         m.put("proposedBy", r.candidate().proposedBy());
         m.put("retireReason", r.retireReason());
+        ApprovalGrant g = r.grant();
+        if (g != null) {
+            Map<String, Object> gm = new LinkedHashMap<>();
+            gm.put("riskTier", g.riskTier().name());
+            gm.put("planDigest", g.planDigest());
+            gm.put("origin", g.origin());
+            gm.put("appVersion", g.appVersion());
+            gm.put("approvers", g.approvers());
+            gm.put("note", g.note());
+            gm.put("issuedAt", g.issuedAt().toString());
+            gm.put("expiresAt", g.expiresAt().toString());
+            m.put("approval", gm);
+        }
 
         CandidateValidator.Validation v = r.validation();
         if (v != null) {
@@ -525,6 +615,14 @@ public final class CandidateCli {
         return s == null || s.isBlank() ? "-" : s;
     }
 
+    /** 到期列：过期加 {@code !} 后缀，避免"日期看起来还没到"的误读。 */
+    private static String expiryCell(ApprovalGrant g, Instant now) {
+        if (g == null) {
+            return "-";
+        }
+        return DATE.format(g.expiresAt()) + (g.expiredAt(now) ? "!" : "");
+    }
+
     private static void printUsage(PrintStream out) {
         out.println("候选定位器库 CLI（设计 §4.4 / P3）");
         out.println();
@@ -543,13 +641,19 @@ public final class CandidateCli {
         out.println("      ⚠ 手工填的数字只是假设：应由 CandidateIntake + 取证探针在真实页面生成证据；");
         out.println("        手填仅用于离线复核（例如复现一次已归档的取证）。");
         out.println("  approve   人工审批（VALIDATED → APPROVED，唯一的生产入口）");
-        out.println("      --id <id> --approver <who> --app-version <version>");
+        out.println("      --id <id> --approver <who[,who2]> --risk <LOW|MEDIUM|HIGH|CRITICAL>");
+        out.println("      --origin <url|env> --app-version <version> [--valid-days n] [--plan-digest d] [--note ...]");
+        out.println("      业务后果等级决定审批强度：");
+        out.println("        LOW 1 人可自审 ≤180 天 / MEDIUM 1 人须职责分离 ≤90 天");
+        out.println("        HIGH 1 人须职责分离 ≤30 天 / CRITICAL 2 人须职责分离 ≤7 天");
+        out.println("      等级不提供默认值；--plan-digest 省略时按当前内容签发并回显");
         out.println("  reject    人工驳回（→ REJECTED）      --id <id> --reason \"...\" [--by who]");
         out.println("  retire    失效（→ RETIRED，终态）      --id <id> --reason \"...\" [--by who]");
         out.println("  list      列出候选                     [--state S] [--target ref] [--json]");
-        out.println("  show      单条详情（含事件链）          --id <id> [--json]");
+        out.println("  show      单条详情（含事件链与授权绑定）--id <id> [--json]");
         out.println("  locator   回注：取出已审批定位符（stdout 仅一行 canonical）");
-        out.println("      --target <ref> --app-version <version> [--verbose]");
+        out.println("      --target <ref> --app-version <version> --origin <url|env> [--verbose]");
+        out.println("      审批过期 / origin 或版本不符 / 内容摘要已变 → 退出码 3，不回退");
         out.println("  audit     Markdown 审计报告            [--out report.md]");
         out.println();
         out.println("公共参数： --lib <file>   候选库文件（默认 " + DEFAULT_LIBRARY + "）");

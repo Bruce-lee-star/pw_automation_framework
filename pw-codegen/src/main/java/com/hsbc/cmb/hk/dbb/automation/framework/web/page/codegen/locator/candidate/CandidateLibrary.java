@@ -47,16 +47,22 @@ public final class CandidateLibrary {
             .create();
 
     private final CandidateValidator validator;
+    private final ApprovalPolicy approvalPolicy;
     private final Clock clock;
     private int seq;
     private final Map<String, CandidateRecord> records = new LinkedHashMap<>();
 
     public CandidateLibrary() {
-        this(new CandidateValidator(), Clock.systemUTC());
+        this(new CandidateValidator(), new ApprovalPolicy(), Clock.systemUTC());
     }
 
     public CandidateLibrary(CandidateValidator validator, Clock clock) {
+        this(validator, new ApprovalPolicy(), clock);
+    }
+
+    public CandidateLibrary(CandidateValidator validator, ApprovalPolicy approvalPolicy, Clock clock) {
         this.validator = Objects.requireNonNull(validator, "validator");
+        this.approvalPolicy = Objects.requireNonNull(approvalPolicy, "approvalPolicy");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -93,20 +99,29 @@ public final class CandidateLibrary {
     }
 
     /**
-     * 人工审批：{@code VALIDATED → APPROVED}。
+     * 人工审批：{@code VALIDATED → APPROVED}，并且必须通过 {@link ApprovalPolicy} 的七条规则。
      *
-     * <p>这是<b>唯一</b>能把候选变成生产定位器的入口，且必须记录审批者与目标应用版本。
-     * 验证未通过（{@code REJECTED}）或未验证（{@code PROPOSED}）的候选在这里被拒绝。
+     * <p>这是<b>唯一</b>能把候选变成生产定位器的入口。审批不是"记一个名字"：
+     * 请求必须声明业务后果等级、origin、应用版本与审批人（{@link RiskTier#CRITICAL} 需两人），
+     * 通过后签发 {@link ApprovalGrant}，把「谁、批的哪份内容、在哪个环境、有效期到何时」固化下来。
+     *
+     * @throws IllegalStateException 状态不是 VALIDATED，或策略拒绝（越级审批 / 职责不分离 / 摘要不符 / 有效期越界）
      */
-    public CandidateRecord approve(String id, String approver, String appVersion) {
+    public CandidateRecord approve(String id, ApprovalRequest request) {
         CandidateRecord record = get(id);
         if (record.state() != CandidateState.VALIDATED) {
             throw new IllegalStateException("仅 VALIDATED 候选可审批，当前 " + record.state()
                     + "：验证通过不会自动升级，未验证候选不得跳过验证直接审批");
         }
-        requireText(approver, "approver 不可为空：候选必须落到具体审批人");
-        requireText(appVersion, "appVersion 不可为空：审批必须绑定目标应用版本");
-        record.markApproved(approver.trim(), appVersion.trim(), Instant.now(clock));
+        if (request == null) {
+            throw new IllegalArgumentException("request 不可为空：审批必须显式声明后果等级、origin 与有效期");
+        }
+        Instant now = Instant.now(clock);
+        ApprovalPolicy.Verdict verdict = approvalPolicy.evaluate(record, request, now);
+        if (!verdict.approved()) {
+            throw new IllegalStateException("审批被拒绝：" + verdict.summary());
+        }
+        record.markApproved(verdict.grant(), now);
         return record;
     }
 
@@ -150,30 +165,39 @@ public final class CandidateLibrary {
     }
 
     /**
-     * 取出可用于生产的定位器：<b>APPROVED + 目标语义一致 + 应用版本一致 + 唯一命中</b>。
+     * 取出可用于生产的定位器：<b>APPROVED + 凭据有效 + 目标语义一致 + 应用版本一致 + origin 一致 + 唯一命中</b>。
      *
-     * <p>返回空可能意味着：没有候选、未审批、版本不匹配、或多条审批互相冲突。
+     * <p>凭据有效 = 未过期，且 {@link ApprovalGrant#covers} 的四项绑定逐条对上；
+     * 被手工改成 APPROVED、却没有授权凭据的历史记录同样返回空。
+     *
+     * <p>返回空可能意味着：没有候选、未审批、审批过期、版本或 origin 不匹配、内容摘要已变、或多条审批互相冲突。
      * 无论哪种，调用方都应<b>停止并转人工</b>，不得自行回退到其它候选。
+     *
+     * @param origin 页面来源/环境（如 {@code https://dbb-uat.example.com} 或 {@code uat}），须与审批时绑定的一致
      */
-    public Optional<CandidateRecord> productionLocator(String targetRef, String appVersion) {
+    public Optional<CandidateRecord> productionLocator(String targetRef, String appVersion, String origin) {
         requireText(targetRef, "targetRef 不可为空");
         requireText(appVersion, "appVersion 不可为空");
+        requireText(origin, "origin 不可为空：回注必须指明环境/来源，否则无法核对审批绑定");
+        Instant now = Instant.now(clock);
         List<CandidateRecord> hits = records.values().stream()
                 .filter(CandidateRecord::approved)
                 .filter(r -> r.candidate().targetRef().equals(targetRef.trim()))
-                .filter(r -> appVersion.trim().equals(r.approvalAppVersion()))
+                .filter(r -> r.grant() != null
+                        && r.grant().covers(origin, appVersion.trim(),
+                                ApprovalGrant.planDigestOf(r.candidate()), now))
                 .toList();
         return hits.size() == 1 ? Optional.of(hits.get(0)) : Optional.empty();
     }
 
     /**
-     * 回注出口：取出<b>已审批</b>候选的 {@link LocatorSpec}，供代码生成 / 运行时直接使用。
+     * 回注出口：取出<b>已审批且授权仍有效</b>候选的 {@link LocatorSpec}，供代码生成 / 运行时直接使用。
      *
-     * <p>语义与 {@link #productionLocator} 完全一致（版本不符、未审批、歧义都返回空），
+     * <p>语义与 {@link #productionLocator} 完全一致（过期、版本不符、origin 不符、摘要已变、未审批、歧义都返回空），
      * 只是把"记录"收敛成"定位符"，调用方拿不到审批链之外的信息。
      */
-    public Optional<LocatorSpec> approvedLocator(String targetRef, String appVersion) {
-        return productionLocator(targetRef, appVersion).map(r -> r.candidate().spec());
+    public Optional<LocatorSpec> approvedLocator(String targetRef, String appVersion, String origin) {
+        return productionLocator(targetRef, appVersion, origin).map(r -> r.candidate().spec());
     }
 
     /** 全部记录（插入顺序 = 提出顺序）。 */
@@ -266,6 +290,7 @@ public final class CandidateLibrary {
             rd.state = r.state().name();
             rd.approvedBy = r.approvedBy();
             rd.approvalAppVersion = r.approvalAppVersion();
+            rd.approval = toDto(r.grant());
             rd.retireReason = r.retireReason();
             rd.version = r.version();
             rd.validation = toDto(r.validation());
@@ -317,6 +342,42 @@ public final class CandidateLibrary {
         return dto;
     }
 
+    private static ApprovalDto toDto(ApprovalGrant g) {
+        if (g == null) {
+            return null;
+        }
+        ApprovalDto dto = new ApprovalDto();
+        dto.candidateId = g.candidateId();
+        dto.riskTier = g.riskTier().name();
+        dto.planDigest = g.planDigest();
+        dto.origin = g.origin();
+        dto.appVersion = g.appVersion();
+        dto.approvers = new ArrayList<>(g.approvers());
+        dto.note = g.note();
+        dto.issuedAt = g.issuedAt().toString();
+        dto.expiresAt = g.expiresAt().toString();
+        return dto;
+    }
+
+    private static ApprovalGrant fromDto(ApprovalDto dto, String recordId) {
+        if (dto == null) {
+            return null;
+        }
+        if (dto.candidateId != null && !dto.candidateId.isBlank() && !dto.candidateId.equals(recordId)) {
+            throw new IllegalArgumentException(
+                    "授权凭据挂在其它候选上（凭据 " + dto.candidateId + "，记录 " + recordId + "）：拒绝加载");
+        }
+        try {
+            return ApprovalGrant.restore(recordId, RiskTier.parse(dto.riskTier), dto.planDigest,
+                    dto.origin, dto.appVersion, dto.approvers, dto.note,
+                    dto.issuedAt == null ? null : Instant.parse(dto.issuedAt),
+                    dto.expiresAt == null ? null : Instant.parse(dto.expiresAt));
+        } catch (RuntimeException e) {
+            // 凭据字段坏了就是坏了：宁可整库读取失败，也不要悄悄当成"无审批"继续跑。
+            throw new IllegalArgumentException("授权凭据解析失败（" + recordId + "）：" + e.getMessage(), e);
+        }
+    }
+
     private static CandidateRecord fromDto(RecordDto rd) {
         LocatorCandidate candidate = LocatorCandidate.of(rd.targetRef, LocatorSpec.parse(rd.locator))
                 .withExpectedRole(rd.expectedRole)
@@ -359,7 +420,7 @@ public final class CandidateLibrary {
         }
 
         return new CandidateRecord(rd.id, candidate, CandidateState.valueOf(rd.state), validation, evidence,
-                rd.approvedBy, rd.approvalAppVersion, rd.retireReason, rd.version, history);
+                fromDto(rd.approval, rd.id), rd.approvedBy, rd.retireReason, rd.version, history);
     }
 
     private static void requireText(String value, String message) {
@@ -386,11 +447,31 @@ public final class CandidateLibrary {
         String state;
         String approvedBy;
         String approvalAppVersion;
+        ApprovalDto approval;
         String retireReason;
         int version;
         ValidationDto validation;
         EvidenceDto evidence;
         List<EventDto> history;
+    }
+
+    /**
+     * 授权凭据的落盘形态。
+     *
+     * <p>{@code approvedBy}/{@code approvalAppVersion} 仍写在记录上，是为了让旧版本工具链读得懂；
+     * 但读取时<b>只认</b> {@code approval} 块——只有它带 origin、摘要与到期时间，能支撑回注核对。
+     * 旧库里"手工改成 APPROVED 但没有 approval 块"的记录，加载后视为无凭据，不可回注。
+     */
+    private static final class ApprovalDto {
+        String candidateId;
+        String riskTier;
+        String planDigest;
+        String origin;
+        String appVersion;
+        List<String> approvers;
+        String note;
+        String issuedAt;
+        String expiresAt;
     }
 
     private static final class ValidationDto {

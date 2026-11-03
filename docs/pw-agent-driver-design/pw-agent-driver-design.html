@@ -100,7 +100,7 @@
   <h1>pw Agent Driver —— 浏览器指挥与 Step 代码生成</h1>
   <p>把「业务流意图 → 浏览器执行 → 元素定位 → Step 业务代码」串成一条可治理的流水线。参照 Microsoft Playwright MCP 的快照/ref 驱动机制，但不将其当作安全边界。本稿当前为<b>方向有条件通过、实现方案待细化</b>：先交付受限 DSL 的确定性垂直切片，再评审并引入 AI 能力。</p>
   <div class="meta">
-    <span>版本：<b>v3.0（P3 取证自动化：证据由探针在真实页面产生，不再手工填 <code>--matches/--visible</code>——<code>LocatorResolver</code> 收口唯一翻译（命令通道与探针共用）、<code>EvidenceProbe</code>/<code>PlaywrightEvidenceProbe</code> 只观测不判断（多元素不 first() 凑结果）、<code>CandidateEvidenceCollector</code> 真比可访问名（模板走正则、实体与空白归一化）、<code>CandidateIntake</code> 一把跑完"提出→取证→验证→落盘"且观测失败不消耗候选（保持 PROPOSED 可重跑）；顺带修字面名含 <code>{{var}}</code> 时的匹配漏洞；v2.9（P3 补成可操作闭环：<code>CandidateCli</code> 成为唯一写入口——propose / validate / approve / reject / retire / locator / list / show / audit 九条命令，提出→验证→审批→回注可用独立进程跑通；退出码 0/1/2/3/4/5 即 CI 契约，<code>locator</code> 的 stdout 仅一行 canonical、诊断走 stderr；写操作持文件锁，拿不到锁直接失败而不排队强写（避免静默覆盖别人的审批）；<code>validate</code> 无证据判用法错误且不落盘，避免手误把候选打成 REJECTED 终态；<code>CandidateEvidenceJson</code> 用包装类型承载缺省值（缺字段=未观测，而非命中 0）；<code>CandidateAuditReport</code> 导出 Markdown 审计链；reject/retire 记录真实操作者，事件链不再出现 manual）；v2.8（P3 定位器治理首刀：CandidateValidator 五条确定性规则（目标语义/唯一性/可见/可操作/业务断言）+ 证据 fail-closed；CandidateLibrary 版本化候选库（PROPOSED→VALIDATED→APPROVED→RETIRED，审批者+应用版本+事件链，JSON 原子落盘）；productionLocator/approvedLocator 只认 APPROVED 且版本一致，0 条或多条一律返回空、无次优回退——"验证通过 ≠ 生产可用"由代码强制而非文档口号）；v2.7（P2 需求→代码绑定补齐流水线入口：BindingCodegenPipeline + BindingPlanJson（计划以 JSON 提交进仓、可往返序列化、评审 diff），落盘统一走 CodegenFileWriter 生成标记守卫——目标首行无 GENERATED 标记即视为手写、拒绝覆盖且两份产物一个都不写（先全查后全写）；编译/冒烟明确交由目标仓 CI，不在 pw-codegen 内伪造结论）；v2.6（§4.5 厘清"录制产出"与"需求驱动产出"边界：录制（pw-codegen 手动录取）只产 Page Object + Steps(@Step) + Assert，Feature 由业务需求生成、Glue 由需求→代码绑定生成；并落地 P2 绑定生成器 FeatureGlueGenerator（pw-codegen codegen.binding）：FeatureGluePlan → .feature + 极薄 Cucumber Glue（注解保留 {string}/{int} 表达式、方法体仅 steps.xxx(...)，占位符/类型/字面值三重校验 + import 最小化），16 个契约测试覆盖）；v2.5（§4.5 稳定代码生成由"三层产物（Feature/Glue/PO）"升级为"四层产物（Feature/Glue/Steps/PO）"：新增 Steps 业务流层，与 test-automation 现有 tests/glue · tests/steps · tests/pages 分层一致——Glue 极薄仅委托 Steps，Steps 承载可复用业务流且无定位器，Page Object 仅定位器+原子交互；data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
+    <span>版本：<b>v3.1（P4 首刀 · 按业务后果授权：审批从"记一个名字"升级为可核对的授权凭据——<code>RiskTier</code> 四级（LOW 可自审 ≤180 天 / MEDIUM·HIGH 须职责分离 ≤90·≤30 天 / CRITICAL 两人且职责分离 ≤7 天，<b>不提供默认档</b>）、<code>ApprovalPolicy</code> 八条规则全跑不短路（含占位身份识别、同一人写两遍不算两人、提出者未登记即拒绝职责分离）、<code>ApprovalGrant</code> 绑定计划摘要（SHA-256 前 16 位，不含证据）+ origin + 应用版本 + 到期时间；<code>approve(id, approver, appVersion)</code> 旧签名<b>直接删除</b>（保留即旁路），CLI 的 <code>--risk</code>/<code>--origin</code> 改为必填，<code>locator</code> 回注改三参并校验未过期/环境/版本/摘要一致，过期不自动续期、旧库无凭据记录一律不可回注；审计报告增「授权绑定与到期」节与临期提示）；v3.0（P3 取证自动化：证据由探针在真实页面产生，不再手工填 <code>--matches/--visible</code>——<code>LocatorResolver</code> 收口唯一翻译（命令通道与探针共用）、<code>EvidenceProbe</code>/<code>PlaywrightEvidenceProbe</code> 只观测不判断（多元素不 first() 凑结果）、<code>CandidateEvidenceCollector</code> 真比可访问名（模板走正则、实体与空白归一化）、<code>CandidateIntake</code> 一把跑完"提出→取证→验证→落盘"且观测失败不消耗候选（保持 PROPOSED 可重跑）；顺带修字面名含 <code>{{var}}</code> 时的匹配漏洞；v2.9（P3 补成可操作闭环：<code>CandidateCli</code> 成为唯一写入口——propose / validate / approve / reject / retire / locator / list / show / audit 九条命令，提出→验证→审批→回注可用独立进程跑通；退出码 0/1/2/3/4/5 即 CI 契约，<code>locator</code> 的 stdout 仅一行 canonical、诊断走 stderr；写操作持文件锁，拿不到锁直接失败而不排队强写（避免静默覆盖别人的审批）；<code>validate</code> 无证据判用法错误且不落盘，避免手误把候选打成 REJECTED 终态；<code>CandidateEvidenceJson</code> 用包装类型承载缺省值（缺字段=未观测，而非命中 0）；<code>CandidateAuditReport</code> 导出 Markdown 审计链；reject/retire 记录真实操作者，事件链不再出现 manual）；v2.8（P3 定位器治理首刀：CandidateValidator 五条确定性规则（目标语义/唯一性/可见/可操作/业务断言）+ 证据 fail-closed；CandidateLibrary 版本化候选库（PROPOSED→VALIDATED→APPROVED→RETIRED，审批者+应用版本+事件链，JSON 原子落盘）；productionLocator/approvedLocator 只认 APPROVED 且版本一致，0 条或多条一律返回空、无次优回退——"验证通过 ≠ 生产可用"由代码强制而非文档口号）；v2.7（P2 需求→代码绑定补齐流水线入口：BindingCodegenPipeline + BindingPlanJson（计划以 JSON 提交进仓、可往返序列化、评审 diff），落盘统一走 CodegenFileWriter 生成标记守卫——目标首行无 GENERATED 标记即视为手写、拒绝覆盖且两份产物一个都不写（先全查后全写）；编译/冒烟明确交由目标仓 CI，不在 pw-codegen 内伪造结论）；v2.6（§4.5 厘清"录制产出"与"需求驱动产出"边界：录制（pw-codegen 手动录取）只产 Page Object + Steps(@Step) + Assert，Feature 由业务需求生成、Glue 由需求→代码绑定生成；并落地 P2 绑定生成器 FeatureGlueGenerator（pw-codegen codegen.binding）：FeatureGluePlan → .feature + 极薄 Cucumber Glue（注解保留 {string}/{int} 表达式、方法体仅 steps.xxx(...)，占位符/类型/字面值三重校验 + import 最小化），16 个契约测试覆盖）；v2.5（§4.5 稳定代码生成由"三层产物（Feature/Glue/PO）"升级为"四层产物（Feature/Glue/Steps/PO）"：新增 Steps 业务流层，与 test-automation 现有 tests/glue · tests/steps · tests/pages 分层一致——Glue 极薄仅委托 Steps，Steps 承载可复用业务流且无定位器，Page Object 仅定位器+原子交互；data-i18n 优先采集 + observation 契约迁 pw-core：PlaywrightPageObservationProvider 基于 DOM 遍历优先读取元素 data-i18n 作为跨语言稳定 NLS key（比可访问名反查更精确，消除同文案多 key 歧义），回退文案反查保持兼容；observation SPI 包由 pw-agent-analysis 迁至 pw-core（与 channel/nls/asset 同级，零浏览器零 LLM）；v2.3 剩余项落地：新增 JsonFileAssetRepository（资产本体 JSON + _index.json 元数据索引，原子写+重启重建），分析流水线经 AssetRepository 接口无缝接入；v2.2 新增 §4.7 多语言（NLS）与跨语言资产稳定性：nls json 与 codegen 同一约定，资产只存 key、运行期按当前语言解析；落地 pw-core agent/nls（NlsText / NlsCatalog / JsonNlsCatalog）+ LocatorSpec.nameKey + 验证器/通道本地化，同一份资产 en/zh 均 PASS；v2.1 落地可选分析模块 pw-agent-analysis 与 pw-core 资产层状态机；v2.0 定位策略重构为 Role-First；v1.9 落地 pw-web-ui 浏览器绑定；v1.5–v1.8 覆盖技术架构、Agent 包骨架与 LLM 资产生产流程）</b></span>
     <span>日期：<b>2026-11-03</b></span>
     <span>基线：<b>v2.23.5 (f9c8df90)</b></span>
     <span>参照源码：<b>D:\IdeaProject\playwright-mcp-0.0.83（@playwright/mcp 0.0.83）</b></span>
@@ -568,10 +568,10 @@ steps:
     <tr><th style="width:27%">组件</th><th>职责 / 铁律</th></tr>
     <tr><td><code>CandidateEvidence</code><br><span style="color:#666">codegen.locator.candidate</span></td><td>一次观测的证据：命中数、可见、可操作、文案匹配、业务断言及其结果、trace 引用。<b>缺证据默认不通过</b>（<code>matches=-1</code> / <code>assertionPassed=null</code>）。</td></tr>
     <tr><td><code>CandidateValidator</code></td><td>五条确定性规则<b>全跑不短路</b>：TARGET_SEMANTICS（期望 role 与候选策略/role 一致 + 文案匹配）、UNIQUENESS（恰好 1）、VISIBILITY、ACTIONABILITY、BUSINESS_ASSERTION。结论只有「可提交审批 / 不可」，<b>不产出生产定位器</b>。</td></tr>
-    <tr><td><code>CandidateLibrary</code></td><td>状态机 <code>PROPOSED → VALIDATED → APPROVED → RETIRED</code>（<code>REJECTED</code> 旁路）。只有 <code>approve(id, approver, appVersion)</code> 能升级，且必须给审批人与应用版本；每次变更 <code>version+1</code> 并追加事件（人/因/时）。JSON 原子落盘，重启可恢复。</td></tr>
-    <tr><td><code>productionLocator</code> / <code>approvedLocator</code></td><td>唯一回注出口：只认 APPROVED + 目标语义一致 + 应用版本一致 + <b>唯一命中</b>；0 条或多条一律返回空（歧义即失败），<b>没有次优回退</b>。</td></tr>
+    <tr><td><code>CandidateLibrary</code></td><td>状态机 <code>PROPOSED → VALIDATED → APPROVED → RETIRED</code>（<code>REJECTED</code> 旁路）。只有 <code>approve(id, ApprovalRequest)</code> 能升级（v3.1 起必须声明业务后果等级、origin、版本与审批人，见下节「审批授权」）；每次变更 <code>version+1</code> 并追加事件（人/因/时）。JSON 原子落盘，重启可恢复。</td></tr>
+    <tr><td><code>productionLocator</code> / <code>approvedLocator</code></td><td>唯一回注出口：只认 APPROVED + 凭据未过期 + 目标语义 + 应用版本 + origin + 计划摘要一致 + <b>唯一命中</b>；0 条或多条一律返回空（歧义即失败），<b>没有次优回退</b>。</td></tr>
   </table>
-  <div class="note ok"><b>「验证通过 ≠ 生产可用」是代码级强制，不是文档口号：</b><code>submitForValidation</code> 通过只到 <code>VALIDATED</code>，<code>productionLocator</code> 只认 <code>APPROVED</code>；测试用「验证通过后回注出口必须为空」直接钉住这条语义。审批记录含审批者、应用版本、证据与完整事件链，可回答"这条定位器凭什么可信"。</div>
+  <div class="note ok"><b>「验证通过 ≠ 生产可用」是代码级强制，不是文档口号：</b><code>submitForValidation</code> 通过只到 <code>VALIDATED</code>，<code>productionLocator</code> 只认 <code>APPROVED</code>；测试用「验证通过后回注出口必须为空」直接钉住这条语义。审批记录（v3.1 起为授权凭据）含审批者、业务后果等级、origin、计划摘要、应用版本、有效期、证据与完整事件链，可回答"这条定位器凭什么可信、还能用多久"。</div>
 
   <h4>操作面 · 候选库 CLI（P3 闭环）</h4>
   <p>状态机内核之外必须有可执行入口，否则「审批」只能靠手改 JSON——把 <code>state</code> 手工改成 <code>APPROVED</code> 就绕过了审批人、应用版本与事件链，治理立刻退化成一句口号。<code>CandidateCli</code> 是<b>唯一</b>写入口，所有变更都走库的状态机：</p>
@@ -579,17 +579,19 @@ steps:
     <tr><th style="width:24%">命令</th><th>作用</th><th style="width:34%">关键约束</th></tr>
     <tr><td><code>propose</code></td><td>提出候选（<code>--target</code> 目标语义 + <code>--locator</code> canonical 串 + <code>--expected-role</code>）</td><td>只到 PROPOSED，不做任何可信度判断</td></tr>
     <tr><td><code>validate</code></td><td>用证据跑五条规则（<code>--evidence</code> JSON 文件，或逐项 <code>--matches/--visible/--enabled/--text-matched/--assertion/--assertion-passed</code>）</td><td>无证据 = 用法错误且<b>不写盘</b>：避免手误把候选打成 REJECTED 终态</td></tr>
-    <tr><td><code>approve</code></td><td>人工审批 → APPROVED</td><td>必须 <code>--approver</code> + <code>--app-version</code>；未验证候选一律拒绝</td></tr>
+    <tr><td><code>approve</code></td><td>人工审批 → APPROVED，签发授权凭据</td><td>必须 <code>--approver</code> + <code>--risk</code> + <code>--origin</code> + <code>--app-version</code>（v3.1 起）；未验证候选一律拒绝，规则不满足退出码 2</td></tr>
     <tr><td><code>reject</code> / <code>retire</code></td><td>驳回 / 失效（终态）</td><td>必须写原因；操作者（<code>--by</code>，默认系统用户）进事件链</td></tr>
-    <tr><td><code>locator</code></td><td>回注：取出已审批定位符</td><td>stdout <b>仅一行 canonical</b>，诊断走 stderr；取不到即退出码 3</td></tr>
+    <tr><td><code>locator</code></td><td>回注：取出已审批定位符</td><td>必须给 <code>--origin</code>；stdout <b>仅一行 canonical</b>，诊断走 stderr；过期/换环境/版本不符/摘要已变/歧义 → 退出码 3</td></tr>
     <tr><td><code>list</code> / <code>show</code> / <code>audit</code></td><td>只读视图：清单 / 单条含事件链 / Markdown 审计报告</td><td><code>--json</code> 供脚本消费；报告是只读投影，可随时重跑</td></tr>
   </table>
   <p><b>退出码即 CI 契约：</b><code>0</code> 成功 · <code>1</code> 用法/输入错误 · <code>2</code> 被治理规则拒绝 · <code>3</code> 未解析到生产定位器（调用方必须停下转人工）· <code>4</code> 并发冲突 · <code>5</code> I/O 错误。写操作全程持文件锁（<code>&lt;库文件&gt;.lock</code>），拿不到锁<b>直接失败而不是排队或强写</b>——两人同时审批时静默覆盖会丢掉一条审批记录，这比报错严重得多。</p>
   <pre><code># 提出 → 验证 → 审批 → 回注：每一步是独立进程，状态从 JSON 恢复
 candidate propose  --target login.submit --locator "role=button;name=Log on" --expected-role button --by alice
 candidate validate --id cand-0001 --evidence evidence.json
-candidate approve  --id cand-0001 --approver "carol" --app-version 2026.11.3
-candidate locator  --target login.submit --app-version 2026.11.3   # → role=button;name=Log on</code></pre>
+candidate approve  --id cand-0001 --approver "carol" --risk MEDIUM \
+                   --origin https://dbb-uat.example.com --app-version 2026.11.3
+candidate locator  --target login.submit --app-version 2026.11.3 --origin https://dbb-uat.example.com
+# → role=button;name=Log on</code></pre>
   <div class="note warn"><b>回注失败不是"查不到"，而是"必须停"：</b><code>locator</code> 命中 0 条时不会退而求其次，只把原因打进 stderr（无候选 / 无一条 APPROVED / 版本不符 / 多条审批歧义），进程以 <code>3</code> 退出。调用方把它当"空结果继续跑"，就等于绕过了整套治理。</div>
 
   <h4>取证自动化 · 证据必须来自页面，而不是填表</h4>
@@ -610,6 +612,28 @@ CandidateIntake.IntakeResult r = CandidateIntake.run(
         "点击 Log on 后出现欢迎页标题", true, "trace-2026-11-03-01");</code></pre>
   <div class="note warn"><b>「没看清」不能判成「看错了」：</b>探针炸了（页面没加载、浏览器崩了）时，候选停在 <code>PROPOSED</code> 可重跑；若直接判 <code>REJECTED</code>，而 <code>REJECTED</code> 又是不可再验证的终态，一次网络抖动就会永久废掉一条本来正确的候选。</div>
   <div class="note ok"><b>实测补的两个洞：</b>① 字面可访问名里带 <code>{{var}}</code> 模板时曾被当普通字符串比较，必然 0 命中且不报错（只表现为"突然找不到元素"）——现在字面模板与 NLS 模板走同一条正则匹配；② 证据落盘用 <code>CandidateEvidenceJson.write</code>，"未观测"写 <code>-1</code>、"未执行"写 <code>null</code>，审批人重读看到的就是当时的事实。</div>
+
+  <h4>审批授权 · 按业务后果分级（P4 首刀）</h4>
+  <p>只有状态机还不够：旧 <code>approve(id, approver, appVersion)</code> <b>只校验两个字符串非空</b>，任何人可以批任何定位器。这留下四个真实缺口——<b>批的不是眼前这份内容</b>（定位符被改过，凭据上看不出来）、<b>在测试环境批的拿去生产用</b>（不绑定 origin）、<b>一次审批永久有效</b>（页面早改版，凭据还"活着"）、<b>谁批的都算</b>（没有业务后果分级，也没有职责分离）。因此审批结果改为一份可核对的<b>授权凭据</b> <code>ApprovalGrant</code>，而不是一个名字。</p>
+  <table>
+    <tr><th style="width:22%">组件</th><th>职责 / 铁律</th></tr>
+    <tr><td><code>RiskTier</code></td><td><code>LOW</code>（可读性，1 人可自审 ≤180 天）· <code>MEDIUM</code>（流程走向，1 人须职责分离 ≤90 天）· <code>HIGH</code>（数据写入，≤30 天）· <code>CRITICAL</code>（资金/不可逆，2 人须职责分离 ≤7 天）。<b>不提供默认档</b>：若允许缺省，凡是"忘了标"的候选都会落进最松的档，分级退化成"谁漏填谁受益"。</td></tr>
+    <tr><td><code>ApprovalRequest</code></td><td>审批人显式声明等级、origin、应用版本、审批人（可逗号分隔多人）、可选有效期与摘要。<b>不接受"只给一个名字"的简写</b>。</td></tr>
+    <tr><td><code>ApprovalPolicy</code></td><td>八条规则<b>全跑不短路</b>：<code>RISK_TIER_DECLARED</code> / <code>APPROVER_IDENTITY</code>（占位符 <code>manual/cli/system/true</code> 不算人）/ <code>APPROVAL_COUNT</code>（同一人写两遍不算两人）/ <code>SEPARATION_OF_DUTIES</code>（审批人 ≠ 提出者；<b>提出者未登记时拒绝</b>，否则"不署名"就成了稳定的自批通道）/ <code>PLAN_DIGEST</code> / <code>ORIGIN_BOUND</code>（禁止 <code>*</code> 通配）/ <code>APP_VERSION_BOUND</code> / <code>VALIDITY_WINDOW</code>（超过等级上限即拒绝，不给关键定位器批一年）。</td></tr>
+    <tr><td><code>ApprovalGrant</code></td><td>不可变凭据：<code>candidateId · riskTier · planDigest · origin · appVersion · approvers · issuedAt · expiresAt</code>。计划摘要 = SHA-256(<code>targetRef + canonical + expectedRole</code>) 前 16 位——<b>不含证据</b>：重新取证不该触发重新审批，否则人会开始嫌麻烦而绕过流程。</td></tr>
+    <tr><td><code>productionLocator</code> / <code>approvedLocator</code></td><td>改为三参（<code>targetRef, appVersion, origin</code>），校验<b>未过期 + origin 一致 + 版本一致 + 摘要一致 + 唯一命中</b>。任一项不满足即返回空，<b>过期不自动续期</b>；无凭据的历史 <code>APPROVED</code> 记录一律不可回注。</td></tr>
+  </table>
+  <pre><code># 资金类操作：两名审批人，职责分离，有效期 7 天
+candidate approve --id cand-0001 --risk CRITICAL --approver "bob,carol" \\
+                  --origin https://dbb-uat.example.com --app-version 2026.11.3 --note "工单 CHG-1024"
+#   → 业务后果  : CRITICAL —— 影响资金/不可逆操作：2 人审批，须职责分离，≤7 天
+#   → 计划摘要  : f73e34aa56aa2487        有效期至 : 2026-11-10 07:20:13Z
+
+candidate locator --target transfer.confirm --app-version 2026.11.3 --origin https://dbb-uat.example.com
+# 换环境 → 退出码 3：origin 不匹配（审批绑定 uat，请求 prod）</code></pre>
+  <div class="note warn"><b>为什么不留"简写重载"：</b>一旦存在 <code>approve(id, approver, appVersion)</code> 这种只给名字就能过的入口，上面的分级、职责分离、origin 与有效期绑定可以被一行调用全部绕过。API 层面直接删掉旧签名，CLI 层面把 <code>--risk</code>/<code>--origin</code> 设为必填——<b>治理规则只有"没有旁路"才算生效</b>。</div>
+  <div class="note info"><b>旧库迁移语义：</b>历史记录只有 <code>approvedBy + approvalAppVersion</code>、没有 <code>approval</code> 块，加载后 <code>hasGrant()=false</code>：审批人仍可展示（审计不断档），但回注一律为空，须重新审批。凭据字段损坏则整库读取失败——<b>宁可读不出来，也不要悄悄当成"无审批"继续跑</b>。</div>
+  <div class="note ok"><b>由测试钉住的语义（<code>ApprovalPolicyTest</code> 11 项 + <code>CandidateLibraryTest</code>/<code>CandidateCliTest</code> 扩展）：</b>缺等级/缺 origin/缺版本各自命中对应规则；<code>bob,bob</code> 不算两人；MEDIUM 自审被拒而 LOW 自审放行并告警；未登记提出者的候选不得进入 MEDIUM 及以上；摘要不符即拒；<code>*</code> 通配不接受；有效期超上限即拒；过期后回注为空但状态仍为 APPROVED；换 origin 取不到；旧库无凭据不可回注。</div>
 
   <h3 id="s45">4.5 稳定代码生成（四层产物 + 断言）</h3>
   <p>生成物与代码仓同构，生成后立即进入与手写代码相同的评审/编译/运行管线。借鉴 <code>test-automation</code> 既有分层（<code>tests/glue</code> · <code>tests/steps</code> · <code>tests/pages</code>），最终回归资产为 <b>Feature / Glue / Steps / Page Object（＋ Assert）</b>。<b>关键澄清：录制工具（pw-codegen）在手动录取过程中只产出 Page Object + Steps（<code>@Step</code> 业务流）+ Assert 三类，并不生成 Feature 与 Glue</b>；Feature 由业务需求驱动生成，Glue 由需求→代码绑定（P2）生成，二者与录制解耦。</p>
@@ -874,7 +898,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <li>[ ] 落库后 <code>mvn test</code> 零 LLM 运行验证</li>
   </ul>
   <h3>P3 定位器回注闭环</h3>
-  <div class="note ok"><b>已落地（v2.8 / v2.9 / v3.0，pw-codegen <code>locator.candidate</code>）：</b><code>CandidateValidator</code>（五条规则 + fail-closed）、<code>CandidateLibrary</code>（版本化候选库：状态机 / 审批者 + 应用版本 / 事件链 / JSON 原子落盘）、<code>productionLocator</code> / <code>approvedLocator</code>（只认 APPROVED，歧义即空，无次优回退），以及<b>可操作闭环</b> <code>CandidateCli</code> + <code>CandidateEvidenceJson</code> + <code>CandidateAuditReport</code>（提出 → 验证 → 审批 → 回注全流程可执行、退出码可进 CI、写操作持文件锁），以及 <b>取证自动化</b> <code>EvidenceProbe</code> / <code>PlaywrightEvidenceProbe</code> / <code>CandidateEvidenceCollector</code> / <code>CandidateIntake</code>（证据由真实页面观测产生，不再手工填命中数）。<b>尚未落地：</b>候选治理 UI、审批流对接（工单/IM）、运行时复核任务调度——这些属 P4 治理范围。</div>
+  <div class="note ok"><b>已落地（v2.8 / v2.9 / v3.0 / v3.1，pw-codegen <code>locator.candidate</code>）：</b><code>CandidateValidator</code>（五条规则 + fail-closed）、<code>CandidateLibrary</code>（版本化候选库：状态机 / 审批者 + 应用版本 / 事件链 / JSON 原子落盘）、<code>productionLocator</code> / <code>approvedLocator</code>（只认 APPROVED，歧义即空，无次优回退），以及<b>可操作闭环</b> <code>CandidateCli</code> + <code>CandidateEvidenceJson</code> + <code>CandidateAuditReport</code>（提出 → 验证 → 审批 → 回注全流程可执行、退出码可进 CI、写操作持文件锁），以及 <b>取证自动化</b> <code>EvidenceProbe</code> / <code>PlaywrightEvidenceProbe</code> / <code>CandidateEvidenceCollector</code> / <code>CandidateIntake</code>（证据由真实页面观测产生，不再手工填命中数），以及 <b>按业务后果授权</b>（v3.1）<code>RiskTier</code> / <code>ApprovalRequest</code> / <code>ApprovalPolicy</code> / <code>ApprovalGrant</code>（等级不设默认档、职责分离与双人审批、计划摘要 + origin + 版本 + 有效期绑定，回注逐项核对、过期即失效、旧库无凭据不可用）。<b>尚未落地：</b>候选治理 UI、审批流对接（工单/IM）、运行时复核任务调度、参数范围授权——这些属 P4 治理范围。</div>
   <ul>
     <li>[x] pw-codegen：CandidateValidator（目标语义、唯一性、可见/可操作状态、业务断言）</li>
     <li>[x] 版本化候选库（来源/证据/审批者/目标应用版本/失效状态）；不自动把候选升级为生产定位器</li>
@@ -885,7 +909,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
   <h3>P4 治理与企业化</h3>
   <ul>
     <li>[ ] R1-R9 分层测试（单元、集成、安全测试）；ArchUnit 仅检查结构约束</li>
-    <li>[ ] 按业务后果授权，审批与计划摘要、origin、身份、参数范围和有效期绑定</li>
+    <li>[x] 按业务后果授权，审批与计划摘要、origin、身份、参数范围和有效期绑定<br><span style="color:#666">已落地（v3.1）：<code>RiskTier</code> + <code>ApprovalPolicy</code>（八条规则）+ <code>ApprovalGrant</code>（计划摘要 / origin / 身份 / 多人审批 / 有效期）；回注逐项核对且过期即失效。<b>未覆盖：参数范围</b>——它约束的是运行时参数取值域（StepPlan 级），属运行时授权，与本节的定位器审批是两套门禁。</span></li>
     <li>[ ] 审计报表（脱敏导出、访问审计、保留/删除策略；回放仅限隔离靶场）</li>
     <li>[ ] CI 集成：生成期（LLM）与回归期（无 LLM）流水线分离</li>
   </ul>

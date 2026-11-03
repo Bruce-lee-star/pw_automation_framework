@@ -36,7 +36,8 @@ public final class CandidateAuditReport {
         sb.append("- 生成时间：").append(ts(generatedAt)).append('\n');
         sb.append("- 候选库：`").append(libraryFile == null ? "(未指定)" : libraryFile.toAbsolutePath()).append("`\n");
         sb.append("- 候选总数：").append(records.size()).append('\n');
-        sb.append("- 可用于生产（APPROVED）：").append(count(records, CandidateState.APPROVED)).append("\n\n");
+        sb.append("- 状态为 APPROVED：").append(count(records, CandidateState.APPROVED)).append('\n');
+        sb.append("- 其中授权当前有效（可回注）：").append(usableCount(records, generatedAt)).append("\n\n");
 
         sb.append("## 状态分布\n\n");
         sb.append("| 状态 | 数量 | 含义 |\n|---|---:|---|\n");
@@ -69,6 +70,29 @@ public final class CandidateAuditReport {
             sb.append('\n');
         }
 
+        sb.append("## 授权绑定与到期\n\n");
+        List<CandidateRecord> approved = records.stream().filter(CandidateRecord::approved).toList();
+        if (approved.isEmpty()) {
+            sb.append("_（没有处于 APPROVED 的候选）_\n\n");
+        } else {
+            sb.append("| ID | 目标语义 | 业务后果 | 审批人 | origin | 应用版本 | 到期 | 状态 |\n");
+            sb.append("|---|---|---|---|---|---|---|---|\n");
+            for (CandidateRecord r : approved) {
+                ApprovalGrant g = r.grant();
+                sb.append("| ").append(cell(r.id()))
+                        .append(" | ").append(cell(r.candidate().targetRef()))
+                        .append(" | ").append(g == null ? "-" : g.riskTier().name())
+                        .append(" | ").append(cell(g == null ? orDash(r.approvedBy()) : String.join(", ", g.approvers())))
+                        .append(" | ").append(cell(g == null ? "-" : g.origin()))
+                        .append(" | ").append(cell(g == null ? orDash(r.approvalAppVersion()) : g.appVersion()))
+                        .append(" | ").append(g == null ? "-" : ts(g.expiresAt()))
+                        .append(" | ").append(cell(grantStatus(g, generatedAt)))
+                        .append(" |\n");
+            }
+            sb.append('\n');
+            sb.append("> `有效` 才可能被回注；`已过期` 须重新取证续期；`无授权凭据` 是旧版手工审批，回注一律拒绝。\n\n");
+        }
+
         sb.append("## 事件链\n\n");
         if (records.isEmpty()) {
             sb.append("_（空库）_\n\n");
@@ -91,8 +115,8 @@ public final class CandidateAuditReport {
 
         sb.append("---\n\n");
         sb.append("> 审计口径：`VALIDATED` 只代表五条确定性规则通过，**不代表生产可用**；")
-                .append("只有 `APPROVED`（含审批人与应用版本）才可能被回注为定位器。")
-                .append("同一目标同一版本存在多条 `APPROVED` 时回注失败（歧义即失败），不按时间或分数择一。\n");
+                .append("`APPROVED` 也只在**审批绑定的 origin + 应用版本 + 内容摘要**范围内、且在**有效期内**可用。")
+                .append("同一目标同一版本存在多条可用授权时回注失败（歧义即失败），不按时间或分数择一。\n");
         return sb.toString();
     }
 
@@ -101,7 +125,7 @@ public final class CandidateAuditReport {
             case PROPOSED:  return "已提出，尚未验证";
             case VALIDATED: return "验证通过（可提交审批，仍非生产定位器）";
             case REJECTED:  return "验证未通过，保留证据以便追溯";
-            case APPROVED:  return "人工审批通过，可被生产回注";
+            case APPROVED:  return "人工审批通过（仍需在绑定范围内且未过期才可回注）";
             case RETIRED:   return "已失效，终态，不参与回退";
             default:        return "";
         }
@@ -109,6 +133,25 @@ public final class CandidateAuditReport {
 
     private static long count(List<CandidateRecord> records, CandidateState state) {
         return records.stream().filter(r -> r.state() == state).count();
+    }
+
+    /** 当前真正能被回注的数量：APPROVED + 有凭据 + 未过期。 */
+    private static long usableCount(List<CandidateRecord> records, Instant now) {
+        return records.stream()
+                .filter(CandidateRecord::approved)
+                .filter(r -> r.grant() != null && !r.grant().expiredAt(now))
+                .count();
+    }
+
+    /** 凭据状态：有效 / 已过期 / 无授权凭据，临期单独提示便于提前续期。 */
+    private static String grantStatus(ApprovalGrant g, Instant now) {
+        if (g == null) {
+            return "无授权凭据";
+        }
+        if (g.expiredAt(now)) {
+            return "已过期";
+        }
+        return g.daysUntilExpiry(now) <= 7 ? "有效（7 天内到期）" : "有效";
     }
 
     private static String ts(Instant instant) {

@@ -19,8 +19,9 @@ public final class CandidateRecord {
     private CandidateState state;
     private CandidateValidator.Validation validation;
     private CandidateEvidence evidence;
-    private String approvedBy;
-    private String approvalAppVersion;
+    private ApprovalGrant grant;
+    /** 旧版落盘里的审批人（无授权凭据时仅用于审计展示，不参与任何回注判断）。 */
+    private String legacyApprovedBy;
     private String retireReason;
     private int version;
     private final List<Event> history = new ArrayList<>();
@@ -37,15 +38,15 @@ public final class CandidateRecord {
     /** 从持久化恢复（不做迁移校验，状态以落盘为准）。 */
     CandidateRecord(String id, LocatorCandidate candidate, CandidateState state,
                     CandidateValidator.Validation validation, CandidateEvidence evidence,
-                    String approvedBy, String approvalAppVersion, String retireReason,
+                    ApprovalGrant grant, String legacyApprovedBy, String retireReason,
                     int version, List<Event> history) {
         this.id = id;
         this.candidate = candidate;
         this.state = state;
         this.validation = validation;
         this.evidence = evidence;
-        this.approvedBy = approvedBy;
-        this.approvalAppVersion = approvalAppVersion;
+        this.grant = grant;
+        this.legacyApprovedBy = grant == null ? legacyApprovedBy : null;
         this.retireReason = retireReason;
         this.version = version;
         if (history != null) {
@@ -75,14 +76,34 @@ public final class CandidateRecord {
         return evidence;
     }
 
-    /** 审批者（仅 APPROVED 后有值）。 */
+    /**
+     * 审批者（仅 APPROVED 且有授权凭据时有值）。
+     *
+     * <p>多人审批（CRITICAL）时返回首位审批人；完整名单见 {@link #grant()}。
+     * 旧库中被手工改成 APPROVED 的记录返回旧字段里记的名字，仅用于审计展示。
+     */
     public String approvedBy() {
-        return approvedBy;
+        return grant == null ? legacyApprovedBy : grant.primaryApprover();
     }
 
-    /** 审批时的目标应用版本（生产取出须与当前版本一致）。 */
+    /**
+     * 审批时的目标应用版本（生产取出须与当前版本一致）。
+     *
+     * <p>历史库中被手工改成 APPROVED、但没有授权凭据的记录，这里返回 {@code null}——
+     * 回注出口据此拒用，不会把"没有凭据的审批"当成有效授权。
+     */
     public String approvalAppVersion() {
-        return approvalAppVersion;
+        return grant == null ? null : grant.appVersion();
+    }
+
+    /** 授权凭据（未经 {@link ApprovalPolicy} 签发时为 {@code null}）。 */
+    public ApprovalGrant grant() {
+        return grant;
+    }
+
+    /** 是否持有有效授权凭据（不含有效期判断，有效期在回注时按当前时间核对）。 */
+    public boolean hasGrant() {
+        return grant != null;
     }
 
     public String retireReason() {
@@ -118,10 +139,24 @@ public final class CandidateRecord {
         bump(CandidateState.REJECTED, actor == null ? candidate.proposedBy() : actor, detail, at);
     }
 
-    void markApproved(String approver, String appVersion, Instant at) {
-        this.approvedBy = approver;
-        this.approvalAppVersion = appVersion;
-        bump(CandidateState.APPROVED, approver, "人工审批通过（appVersion=" + appVersion + "）", at);
+    /**
+     * 落审批：只接受策略签发的授权凭据。
+     *
+     * <p>刻意不提供 {@code markApproved(String approver, String appVersion)} 这样的简写：
+     * 一旦存在"只给名字就能过"的重载，前面的分级、职责分离、origin 与有效期绑定全部可以被一行调用绕过。
+     */
+    void markApproved(ApprovalGrant grant, Instant at) {
+        if (grant == null) {
+            throw new IllegalArgumentException("grant 不可为空：审批必须带可核对的授权凭据");
+        }
+        this.grant = grant;
+        this.legacyApprovedBy = null;
+        bump(CandidateState.APPROVED, String.join(", ", grant.approvers()),
+                "人工审批通过（risk=" + grant.riskTier()
+                        + ", origin=" + grant.origin()
+                        + ", appVersion=" + grant.appVersion()
+                        + ", digest=" + grant.planDigest()
+                        + ", 有效期至 " + grant.expiresAt() + "）", at);
     }
 
     void markRetired(String reason, String actor, Instant at) {

@@ -57,7 +57,7 @@ public class CandidateIntakeTest {
         assertEquals(1, reloaded.size());
         assertEquals(CandidateState.VALIDATED, reloaded.get(r.candidateId()).state());
         assertTrue("验证通过只是 VALIDATED，不能直接当生产定位器",
-                reloaded.productionLocator("login.submit", "2026.11.3").isEmpty());
+                reloaded.productionLocator("login.submit", "2026.11.3", "https://dbb-uat.example.com").isEmpty());
     }
 
     @Test
@@ -91,7 +91,9 @@ public class CandidateIntakeTest {
 
         assertTrue(second.validated());
         assertFalse("同一目标两条候选并存时不得自动挑一条",
-                CandidateLibrary.load(lib()).approvedLocator("login.submit", "2026.11.3").isPresent());
+                CandidateLibrary.load(lib())
+                        .approvedLocator("login.submit", "2026.11.3", "https://dbb-uat.example.com")
+                        .isPresent());
     }
 
     @Test
