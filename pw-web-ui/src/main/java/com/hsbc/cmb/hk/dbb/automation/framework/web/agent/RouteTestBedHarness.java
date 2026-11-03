@@ -4,14 +4,18 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.BrowserCommandChan
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.PageObservationProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 隔离靶场 SPI 的 Playwright 实现（设计 §3.1.2.1 / R4 / R8）。
@@ -41,8 +45,12 @@ public final class RouteTestBedHarness implements IsolationHarness {
         this.nls = nls;
     }
 
+    /** 靶场允许目标主机配置键：逗号分隔 host[:port]，默认空 = 全拒（fail-closed）。 */
+    static final String ALLOWED_HOSTS_KEY = "pw.agent.testbed.allowedHosts";
+
     @Override
     public BrowserCommandChannel acquire(String targetUrl) {
+        rejectNonSandboxTarget(targetUrl);
         if (playwright == null) {
             playwright = Playwright.create();
         }
@@ -91,6 +99,59 @@ public final class RouteTestBedHarness implements IsolationHarness {
         }
         open.clear();
         quietlyClosePlaywright();
+    }
+
+    /**
+     * fail-closed 靶场沙箱护栏（R4/R8 运行期落点）：受控重放/验证只能指向
+     * file://（本地 fixture）、loopback 或 {@link #ALLOWED_HOSTS_KEY} 显式列出的主机；
+     * 其余网络主机一律拒绝，确保隔离靶场不会被误指向生产环境。
+     */
+    static void rejectNonSandboxTarget(String targetUrl) {
+        if (targetUrl == null || targetUrl.isBlank()) {
+            throw new TestBedTargetRejectedException("<blank>", ALLOWED_HOSTS_KEY);
+        }
+        String scheme;
+        String host;
+        try {
+            URI uri = new URI(targetUrl);
+            scheme = uri.getScheme();
+            host = stripBrackets(uri.getHost());
+        } catch (URISyntaxException e) {
+            throw new TestBedTargetRejectedException(targetUrl, ALLOWED_HOSTS_KEY);
+        }
+        if ("file".equalsIgnoreCase(scheme) || isLoopback(host)) {
+            return;
+        }
+        String allowed = ConfigReader.getProperty(ALLOWED_HOSTS_KEY, "");
+        for (String h : allowed.split(",")) {
+            if (host != null && host.equalsIgnoreCase(h.trim())) {
+                return;
+            }
+        }
+        throw new TestBedTargetRejectedException(host, ALLOWED_HOSTS_KEY);
+    }
+
+    private static boolean isLoopback(String host) {
+        if (host == null) {
+            return false;
+        }
+        String h = host.toLowerCase(Locale.ROOT);
+        if (h.startsWith("[") && h.endsWith("]")) {
+            h = h.substring(1, h.length() - 1);
+        }
+        return "localhost".equals(h) || "127.0.0.1".equals(h)
+                || "::1".equals(h) || "0:0:0:0:0:0:0:1".equals(h);
+    }
+
+    /** IPv6 字面量在 {@link URI#getHost()} 中带方括号，去掉以便与 allow-list / loopback 判定一致。 */
+    private static String stripBrackets(String host) {
+        if (host == null) {
+            return null;
+        }
+        if (host.startsWith("[") && host.endsWith("]")) {
+            return host.substring(1, host.length() - 1);
+        }
+        return host;
     }
 
     private void quietlyClosePlaywright() {

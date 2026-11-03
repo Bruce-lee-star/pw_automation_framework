@@ -40,14 +40,14 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
     /** 多语言目录（可选）：把 role 定位里的 NLS key 解析为当前语言文案（设计 §4.7）。 */
     private final NlsCatalog nls;
 
-    public PlaywrightChannel(Page page, Browser browser, BrowserContext context) {
+    PlaywrightChannel(Page page, Browser browser, BrowserContext context) {
         this(page, browser, context, null);
     }
 
     /**
      * @param nls 多语言目录；{@code null} 表示单语言（定位符里只有字面文案）
      */
-    public PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls) {
+    PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls) {
         this.page = page;
         this.browser = browser;
         this.context = context;
