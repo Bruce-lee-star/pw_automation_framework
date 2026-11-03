@@ -46,4 +46,17 @@ public enum AuditExposure {
             default:        return name();
         }
     }
+
+    /**
+     * 敏感级别排序：数值越大越敏感。约定 {@code SANITIZED < INTERNAL < FULL}。
+     * 供读取侧鉴权比较"请求级别"与"角色允许上限"使用。
+     */
+    public int rank() {
+        switch (this) {
+            case SANITIZED: return 0;
+            case INTERNAL:  return 1;
+            case FULL:      return 2;
+            default:        return 0;
+        }
+    }
 }

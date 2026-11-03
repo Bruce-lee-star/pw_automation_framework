@@ -137,6 +137,8 @@ public final class CandidateAuditReport {
         sb.append("> 审计口径：`VALIDATED` 只代表五条确定性规则通过，**不代表生产可用**；")
                 .append("`APPROVED` 也只在**审批绑定的 origin + 应用版本 + 内容摘要**范围内、且在**有效期内**可用。")
                 .append("同一目标同一版本存在多条可用授权时回注失败（歧义即失败），不按时间或分数择一。\n");
+        sb.append("\n> **R9 不可重执行**：本报告是只读审计投影，不是可安全重执行的回放脚本；")
+                .append("导出物不含任何可直接执行的命令、脚本或回放指令，凭据与定位符仅以文本形式呈现。\n");
         return sb.toString();
     }
 

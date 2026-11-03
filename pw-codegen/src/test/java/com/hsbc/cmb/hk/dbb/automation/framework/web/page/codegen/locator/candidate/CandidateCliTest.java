@@ -341,17 +341,19 @@ public class CandidateCliTest {
         assertTrue("审计报告必须写明 VALIDATED 不等于生产可用", md.contains("不代表生产可用"));
         assertTrue("审计报告要能看出授权绑定了什么", md.contains("授权绑定与到期"));
         assertTrue(md.contains("有效"));
+        assertTrue("未声明 --reader 默认按 external 导出脱敏级", md.contains("脱敏"));
 
         Result toStdout = exec("audit", "--lib", lib());
         toStdout.assertOk();
         assertTrue(toStdout.out.contains("# 候选定位器审计报告"));
+        assertTrue("默认导出即脱敏（安全默认）", toStdout.out.contains("脱敏"));
     }
 
     @Test
     public void audit_exposure_sanitized_redacts_identities() throws IOException {
         approveValid("role=button;name=Log on");
 
-        Result full = exec("audit", "--lib", lib(), "--exposure", "full");
+        Result full = exec("audit", "--lib", lib(), "--reader", "auditor", "--exposure", "full");
         full.assertOk();
         assertTrue("完整报告含审批人实名", full.out.contains("alice"));
         assertTrue("完整报告含 origin 全文", full.out.contains(ORIGIN));
@@ -365,6 +367,34 @@ public class CandidateCliTest {
 
         assertEquals(CandidateCli.EXIT_USAGE,
                 exec("audit", "--lib", lib(), "--exposure", "bogus").code);
+    }
+
+    @Test
+    public void audit_over_entitled_reader_is_denied() throws IOException {
+        approveValid("role=button;name=Log on");
+        Result r = exec("audit", "--lib", lib(), "--reader", "external", "--exposure", "full");
+        assertEquals("越权导出应被拒绝", CandidateCli.EXIT_FORBIDDEN, r.code);
+        assertTrue("越权原因应写入 stderr", r.err.contains("读取侧鉴权"));
+        assertFalse("越权不应输出任何报告内容", r.out.contains("# 候选定位器审计报告"));
+    }
+
+    @Test
+    public void audit_engineer_cannot_get_full_but_internal_ok() throws IOException {
+        approveValid("role=button;name=Log on");
+        Result full = exec("audit", "--lib", lib(), "--reader", "engineer", "--exposure", "full");
+        assertEquals("engineer 请求 full 应被拒绝", CandidateCli.EXIT_FORBIDDEN, full.code);
+
+        Result internal = exec("audit", "--lib", lib(), "--reader", "engineer", "--exposure", "internal");
+        internal.assertOk();
+        assertTrue(internal.out.contains("# 候选定位器审计报告"));
+    }
+
+    @Test
+    public void audit_unknown_reader_treated_as_external_is_denied_when_asking_internal() throws IOException {
+        approveValid("role=button;name=Log on");
+        Result r = exec("audit", "--lib", lib(), "--reader", "bogus", "--exposure", "internal");
+        assertEquals("未知角色按 external 处理，请求 internal 应被拒绝",
+                CandidateCli.EXIT_FORBIDDEN, r.code);
     }
 
     @Test

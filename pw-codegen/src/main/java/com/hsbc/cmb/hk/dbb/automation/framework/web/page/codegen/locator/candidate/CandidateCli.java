@@ -51,6 +51,8 @@ public final class CandidateCli {
     public static final int EXIT_NOT_RESOLVED = 3;
     public static final int EXIT_CONFLICT = 4;
     public static final int EXIT_IO = 5;
+    /** 读取侧鉴权拒绝：请求的导出级别超出读取者角色许可上限（R9 访问控制，fail-closed）。 */
+    public static final int EXIT_FORBIDDEN = 6;
 
     /** 默认库路径：与"资产进仓"的习惯一致，结果可提交评审。 */
     static final Path DEFAULT_LIBRARY = Path.of("locators", "candidates.json");
@@ -115,7 +117,7 @@ public final class CandidateCli {
                 case "locator":
                     return locator(opts, out, err);
                 case "audit":
-                    return audit(opts, out);
+                    return audit(opts, out, err);
                 case "retention":
                     return retention(opts, out, err);
                 default:
@@ -419,9 +421,21 @@ public final class CandidateCli {
         return EXIT_OK;
     }
 
-    private static int audit(Options o, PrintStream out) throws IOException {
+    private static int audit(Options o, PrintStream out, PrintStream err) throws IOException {
         Path lib = o.library();
-        AuditExposure exposure = AuditExposure.parse(o.get("exposure"));
+        AuditReaderRole role = AuditReaderRole.parse(o.get("reader"));
+        // 不声明 --exposure 时，按角色允许上限导出（external→SANITIZED / auditor→FULL），
+        // 保证缺省即最小权限、且不会因"默认 FULL 超出 anonymous 上限"而被拒。
+        AuditExposure requested = o.get("exposure") == null
+                ? role.maxExposure()
+                : AuditExposure.parse(o.get("exposure"));
+        // 读取侧鉴权（R9 访问控制 / fail-closed）：指定了超出角色上限的 --exposure 即拒绝。
+        AuditAccessDecision decision = AuditAccessPolicy.decide(role, requested);
+        if (!decision.allowed()) {
+            err.println("审计导出被拒绝：" + decision.reason());
+            return EXIT_FORBIDDEN;
+        }
+        AuditExposure exposure = decision.exposure();
         CandidateLibrary library = CandidateLibrary.load(lib);
         String md = CandidateAuditReport.toMarkdown(library, lib, Instant.now(Clock.systemUTC()), exposure);
 
@@ -696,7 +710,8 @@ public final class CandidateCli {
         out.println("  locator   回注：取出已审批定位符（stdout 仅一行 canonical）");
         out.println("      --target <ref> --app-version <version> --origin <url|env> [--verbose]");
         out.println("      审批过期 / origin 或版本不符 / 内容摘要已变 → 退出码 3，不回退");
-        out.println("  audit     Markdown 审计报告            [--out report.md] [--exposure full|internal|sanitized]");
+        out.println("  audit     Markdown 审计报告            [--out report.md] [--exposure full|internal|sanitized] [--reader external|engineer|auditor]");
+        out.println("             读取侧鉴权（R9）：不声明 --reader 默认按 external（仅 sanitized）；不声明 --exposure 按角色上限导出；指定超出上限的级别即拒绝(退出码6)");
         out.println("  retention 保留/删除策略（R9 最小化审计）[--apply]  默认干跑列出将清除项，--apply 才落盘");
         out.println("      导出级别：full=完整（实名+原环境） / internal=内部共享（实名，剥离证据路径）");
         out.println("              / sanitized=脱敏（审批人假名、origin 仅 host、note/引用隐去、事件链自由文本丢弃）");
