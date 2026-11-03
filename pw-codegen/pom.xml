@@ -73,4 +73,22 @@
             <scope>provided</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              候选库 CLI 的运行入口（P3 操作闭环）。
+              用法：mvn -q -pl pw-codegen exec:java -Dexec.args="help"
+              注意 exec:java 的工作目录是模块目录（pw-codegen/），相对路径按模块根解析。
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <mainClass>com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.candidate.CandidateCli</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

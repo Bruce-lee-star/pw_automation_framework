@@ -111,10 +111,11 @@ public final class CandidateRecord {
         bump(CandidateState.VALIDATED, candidate.proposedBy(), "验证通过（可提交审批，仍非生产定位器）", at);
     }
 
-    void markRejected(CandidateValidator.Validation v, CandidateEvidence e, String reason, Instant at) {
+    void markRejected(CandidateValidator.Validation v, CandidateEvidence e,
+                      String detail, String actor, Instant at) {
         this.validation = v;
         this.evidence = e;
-        bump(CandidateState.REJECTED, candidate.proposedBy(), "验证未通过：" + reason, at);
+        bump(CandidateState.REJECTED, actor == null ? candidate.proposedBy() : actor, detail, at);
     }
 
     void markApproved(String approver, String appVersion, Instant at) {

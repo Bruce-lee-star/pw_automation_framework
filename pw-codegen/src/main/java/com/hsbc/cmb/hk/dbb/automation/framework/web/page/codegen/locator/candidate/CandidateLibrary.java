@@ -86,7 +86,8 @@ public final class CandidateLibrary {
         if (validation.passed()) {
             record.markValidated(validation, evidence, now);
         } else {
-            record.markRejected(validation, evidence, "见 findings", now);
+            record.markRejected(validation, evidence, "验证未通过：见 findings",
+                    record.candidate().proposedBy(), now);
         }
         return record;
     }
@@ -111,23 +112,40 @@ public final class CandidateLibrary {
 
     /** 人工驳回（{@code PROPOSED/VALIDATED → REJECTED}），必须写明原因。 */
     public CandidateRecord reject(String id, String reason) {
+        return reject(id, reason, null);
+    }
+
+    /**
+     * 人工驳回并记录<b>驳回人</b>。
+     *
+     * <p>{@code actor} 为空时退回提出者（兼容早期调用）；CLI 一律传真实操作者，
+     * 否则审计链上"谁驳回了这条候选"就追不到人。
+     */
+    public CandidateRecord reject(String id, String reason, String actor) {
         CandidateRecord record = get(id);
         if (record.state() != CandidateState.PROPOSED && record.state() != CandidateState.VALIDATED) {
             throw new IllegalStateException("仅 PROPOSED/VALIDATED 候选可驳回，当前 " + record.state());
         }
         requireText(reason, "reason 不可为空：驳回必须留下原因");
-        record.markRejected(record.validation(), record.evidence(), "人工驳回：" + reason.trim(), Instant.now(clock));
+        record.markRejected(record.validation(), record.evidence(), "人工驳回：" + reason.trim(),
+                actor == null || actor.isBlank() ? null : actor.trim(), Instant.now(clock));
         return record;
     }
 
     /** 失效（任意非 RETIRED → RETIRED），必须写明原因；失效候选不参与任何回退。 */
     public CandidateRecord retire(String id, String reason) {
+        return retire(id, reason, null);
+    }
+
+    /** 失效并记录<b>执行人</b>（审计链需要能追到"谁下架的"）。 */
+    public CandidateRecord retire(String id, String reason, String actor) {
         CandidateRecord record = get(id);
         if (record.state() == CandidateState.RETIRED) {
             throw new IllegalStateException("候选已失效：" + id);
         }
         requireText(reason, "reason 不可为空：失效必须说明原因");
-        record.markRetired(reason.trim(), "manual", Instant.now(clock));
+        record.markRetired(reason.trim(), actor == null || actor.isBlank() ? "manual" : actor.trim(),
+                Instant.now(clock));
         return record;
     }
 
