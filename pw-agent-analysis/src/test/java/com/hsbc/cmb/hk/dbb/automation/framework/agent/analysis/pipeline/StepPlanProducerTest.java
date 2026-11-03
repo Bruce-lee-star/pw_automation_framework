@@ -11,6 +11,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.Provenance;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
 import org.junit.Test;
 
@@ -62,11 +63,12 @@ public class StepPlanProducerTest {
         assertSame(Command.ActionType.FILL, vsp.plan().steps().get(1).action());
         assertEquals("alice", vsp.plan().steps().get(1).params().get("value"));
 
-        // ParamScope 治理域：url + value 均声明
+        // ParamScope 治理域：url 在 plan 级声明；value 在 FILL 步的 resolvedScope 精确授权
         assertTrue(vsp.plan().scope().constraintFor("url").isPresent());
         assertTrue(vsp.plan().scope().constraintFor("url").get().allows(PAGE));
-        assertTrue(vsp.plan().scope().constraintFor("value").isPresent());
-        assertTrue(vsp.plan().scope().constraintFor("value").get().allows("alice"));
+        ParamScope fillScope = vsp.plan().resolvedScope(1);
+        assertTrue(fillScope.constraintFor("value").isPresent());
+        assertTrue(fillScope.constraintFor("value").get().allows("alice"));
 
         // 逐步期望：NAVIGATE 步无断言；FILL 步断言 submit 启用
         assertTrue(vsp.expectationsPerStep().get(0).isEmpty());
@@ -108,8 +110,9 @@ public class StepPlanProducerTest {
 
         // 需求源测试数据优先：FILL 用 bob 而非图谱内嵌的 alice
         assertEquals("bob", vsp.plan().steps().get(1).params().get("value"));
-        assertTrue(vsp.plan().scope().constraintFor("value").get().allows("bob"));
-        assertFalse(vsp.plan().scope().constraintFor("value").get().allows("alice"));
+        ParamScope fillScope = vsp.plan().resolvedScope(1);
+        assertTrue(fillScope.constraintFor("value").get().allows("bob"));
+        assertFalse(fillScope.constraintFor("value").get().allows("alice"));
 
         // 治理预检仍通过（bob 已声明）
         ParamScopePolicy.validatePlan(vsp.plan());

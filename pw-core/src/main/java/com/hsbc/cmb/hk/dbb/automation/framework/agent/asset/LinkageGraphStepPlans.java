@@ -51,7 +51,7 @@ public final class LinkageGraphStepPlans {
             Command trigger = new Command(rule.triggerAction(), triggerLoc, triggerParams(rule))
                     .withExpectations(ruleExpectations(rule, nls));
             steps.add(trigger);
-            stepScopes.add(triggerScope(rule));
+            stepScopes.add(ParamScope.forAssetWriteValue(rule.triggerAction(), rule.triggerValue()));
         }
 
         // plan 级 scope：导航 url 授权（其余副作用参数在 step 级按资产取值授权）
@@ -75,18 +75,6 @@ public final class LinkageGraphStepPlans {
             }
         }
         return p;
-    }
-
-    private static ParamScope triggerScope(LinkageGraph.LinkageRule rule) {
-        String v = rule.triggerValue();
-        if (v == null || v.isEmpty()) {
-            return ParamScope.EMPTY;
-        }
-        switch (rule.triggerAction()) {
-            case FILL:   return new ParamScope(Map.of("value", ParamConstraint.allowedValues(v)));
-            case SELECT: return new ParamScope(Map.of("option", ParamConstraint.allowedValues(v)));
-            default:     return ParamScope.EMPTY;
-        }
     }
 
     private static List<SnapshotExpectation> ruleExpectations(LinkageGraph.LinkageRule rule, NlsCatalog nls) {

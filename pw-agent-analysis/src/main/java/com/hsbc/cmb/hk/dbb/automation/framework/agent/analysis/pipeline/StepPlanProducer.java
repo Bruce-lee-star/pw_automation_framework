@@ -14,10 +14,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 把资产生产流水线的产物转成「可执行 + 可验证」步骤计划（设计 §4.6 路径 B 延伸）。
@@ -64,47 +62,52 @@ public final class StepPlanProducer {
     public VerifiableStepPlan produce(AssetDraftBundle bundle, RequirementContext req) {
         String pageRef = bundle.pageRef();
         List<Command> steps = new ArrayList<>();
+        List<ParamScope> stepScopes = new ArrayList<>();
 
-        // 首步：导航到来源页面（其 url 须进入治理域）；导航无执行后期望
+        // 首步：导航到来源页面；导航无副作用参数，step 级范围为空，url 由 plan 级授权
         steps.add(Command.navigate(pageRef));
-
-        Set<String> values = new LinkedHashSet<>();
-        Set<String> options = new LinkedHashSet<>();
+        stepScopes.add(ParamScope.EMPTY);
 
         for (LinkageGraph.LinkageRule rule : bundle.linkage().rules()) {
             LocatorSpec triggerLoc = rule.trigger().primaryLocator();
             if (triggerLoc == null) {
                 continue; // 无角色优先定位符：确定性校验已 ERROR，跳过派生
             }
-            Command cmd = toCommand(rule, req, values, options);
-            // 期望内联进命令（一步 = 动作 + 其执行后绝对态期望）
-            steps.add(cmd.withExpectations(toExpectations(rule)));
+            // 一步 = 触发动作 + 其执行后绝对态期望（期望内联进命令）
+            steps.add(toCommand(rule, req).withExpectations(toExpectations(rule)));
+            // 该步的范围：副作用参数按资产取值精确授权（与 LinkageGraphStepPlans 同构）
+            stepScopes.add(stepScopeFor(rule, req));
         }
 
-        ParamScope scope = buildScope(pageRef, values, options);
+        // plan 级 scope：仅声明导航 url（与 LinkageGraphStepPlans 对称）；
+        // 副作用参数（value/option）在 step 级按资产取值授权，两条闭环路径结构一致、指纹可比对
+        ParamScope planScope = new ParamScope(Map.of("url", ParamConstraint.allowedValues(pageRef)));
         StepPlan plan = new StepPlan(1, "plan-" + bundle.linkage().requirementId(),
-                List.copyOf(steps), scope, List.of());
+                List.copyOf(steps), planScope, List.copyOf(stepScopes));
         return new VerifiableStepPlan(plan, pageRef);
     }
 
-    private Command toCommand(LinkageGraph.LinkageRule rule, RequirementContext req,
-                              Set<String> values, Set<String> options) {
+    private Command toCommand(LinkageGraph.LinkageRule rule, RequirementContext req) {
         LocatorSpec loc = rule.trigger().primaryLocator();
-        String override = (req == null) ? null : req.testValue(rule.trigger().refId());
-        String value = (override != null && !override.isBlank()) ? override : rule.triggerValue();
+        String value = resolvedValue(rule, req);
         return switch (rule.triggerAction()) {
-            case FILL -> {
-                values.add(value);
-                yield Command.fill(loc, value);
-            }
-            case SELECT -> {
-                options.add(value);
-                yield Command.select(loc, value);
-            }
+            case FILL -> Command.fill(loc, value);
+            case SELECT -> Command.select(loc, value);
             case CHECK -> new Command(Command.ActionType.CHECK, loc, Map.of());
             case UNCHECK -> new Command(Command.ActionType.UNCHECK, loc, Map.of());
             default -> Command.click(loc); // CLICK / 其它用户动作
         };
+    }
+
+    /** 写入型触发取值：优先需求源测试数据，缺失回退图谱内嵌 triggerValue。 */
+    private String resolvedValue(LinkageGraph.LinkageRule rule, RequirementContext req) {
+        String override = (req == null) ? null : req.testValue(rule.trigger().refId());
+        return (override != null && !override.isBlank()) ? override : rule.triggerValue();
+    }
+
+    /** 该步的参数范围：FILL→value、SELECT→option，按解析后取值精确授权。 */
+    private ParamScope stepScopeFor(LinkageGraph.LinkageRule rule, RequirementContext req) {
+        return ParamScope.forAssetWriteValue(rule.triggerAction(), resolvedValue(rule, req));
     }
 
     private List<SnapshotExpectation> toExpectations(LinkageGraph.LinkageRule rule) {
@@ -120,17 +123,5 @@ public final class StepPlanProducer {
             }
         }
         return List.copyOf(out);
-    }
-
-    private ParamScope buildScope(String pageRef, Set<String> values, Set<String> options) {
-        Map<String, ParamConstraint> m = new java.util.HashMap<>();
-        m.put("url", ParamConstraint.allowedValues(pageRef));
-        if (!values.isEmpty()) {
-            m.put("value", ParamConstraint.allowedValues(values.toArray(new String[0])));
-        }
-        if (!options.isEmpty()) {
-            m.put("option", ParamConstraint.allowedValues(options.toArray(new String[0])));
-        }
-        return new ParamScope(m);
     }
 }

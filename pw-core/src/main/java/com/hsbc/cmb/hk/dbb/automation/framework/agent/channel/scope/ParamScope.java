@@ -2,6 +2,8 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
+
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,6 +29,27 @@ public final class ParamScope {
 
     /** 空 scope（无约束）。 */
     public static final ParamScope EMPTY = new ParamScope(Map.of());
+
+    /**
+     * 由资产写入型动作的「解析后取值」派生<b>逐步</b>参数范围：
+     * FILL → {@code {"value":[v]}}，SELECT → {@code {"option":[v]}}；
+     * 其它动作（CLICK/CHECK/UNCHECK）或空值 → {@link #EMPTY}。
+     *
+     * <p>这是「资产自身取值 → 治理域」的唯一映射点，被 {@code LinkageGraphStepPlans}
+     * （core 资产验证路径）与 {@code StepPlanProducer}（analysis 生产 pipeline 路径）两条闭环
+     * 构建路径共用，确保对同一资产产出一致的范围结构——plan 级仅声明导航 {@code url}，
+     * 副作用参数在 step 级按资产取值精确授权，使治理指纹可比对、且 fail-closed 粒度一致。</p>
+     */
+    public static ParamScope forAssetWriteValue(Command.ActionType action, String value) {
+        if (value == null || value.isEmpty()) {
+            return EMPTY;
+        }
+        return switch (action) {
+            case FILL -> new ParamScope(Map.of("value", ParamConstraint.allowedValues(value)));
+            case SELECT -> new ParamScope(Map.of("option", ParamConstraint.allowedValues(value)));
+            default -> EMPTY;
+        };
+    }
 
     private final Map<String, ParamConstraint> constraints;
 
