@@ -44,8 +44,12 @@ public final class AssetStepPlanExecutor {
     /**
      * 执行指定 {@code STEP_PLAN} 资产并回写验证报告。
      *
+     * <p>执行目标恒取资产自带的 {@link VerifiableStepPlan#pageRef()}（由 {@link StepPlanRunner}
+     * 消费），而非 {@code scope.targetUrl()}——资产自描述、避免外部覆盖导致与落库内容不一致；
+     * {@code scope} 在此仅提供 {@link VerificationScope#repeat()}（稳定性统计重复次数）。</p>
+     *
      * @param id    资产标识（须为 {@link AssetType#STEP_PLAN}）
-     * @param scope 验证范围（目标 URL + 重复次数）
+     * @param scope 验证范围（其重复次数用于稳定性统计；目标 URL 不覆盖资产 pageRef）
      * @return 验证报告（同时已回写仓库）
      * @throws IllegalArgumentException 资产不存在或类型非 {@code STEP_PLAN}
      */
