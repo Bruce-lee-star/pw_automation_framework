@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsText;
 
@@ -36,7 +38,9 @@ public final class LocatorSpec {
     private final Strategy strategy;
     private final Map<String, String> attrs;   // role/name/nth/testId/id/text/css
 
-    private LocatorSpec(Strategy strategy, Map<String, String> attrs) {
+    @JsonCreator
+    private LocatorSpec(@JsonProperty("strategy") Strategy strategy,
+                        @JsonProperty("attrs") Map<String, String> attrs) {
         this.strategy = strategy;
         this.attrs = attrs;
     }

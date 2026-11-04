@@ -20,6 +20,10 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeGate;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -45,6 +49,14 @@ public class ClosedLoopExecutionReconciliationTest {
 
     private static final String PAGE = "https://app/p";
     private static final String REQ = "REQ-EXEC";
+
+    /**
+     * 与生产流水线 {@code AssetPipelineOrchestrator} 完全一致的序列化配置（FIELD 可见、GETTER 不可见），
+     * 用于模拟 {@code STEP_PLAN} 资产落库 JSON → 反序列化回来这一持久化往返。
+     */
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY)
+            .setVisibility(PropertyAccessor.GETTER, JsonAutoDetect.Visibility.NONE);
 
     @Test
     public void isomorphicPlansDriveIdenticalExecutionAndVerification() {
@@ -93,6 +105,39 @@ public class ClosedLoopExecutionReconciliationTest {
         assertEquals("skipped null-locator rule yields identical execution trace",
                 prod.trace, ver.trace);
         assertVerificationEqual(prod.result, ver.result);
+    }
+
+    /**
+     * 持久化边界对账：产线 {@link StepPlanProducer} 产出的 {@link VerifiableStepPlan} 经<b>生产序列化配置</b>
+     * 落库为 {@code STEP_PLAN} 资产 JSON，再反序列化回来（即生产态消费端加载落库资产），喂给真实
+     * {@link StepVerifier} 跑出的执行轨迹与验证侧逐字节一致且验证结论一致。
+     *
+     * <p>价值：把闭环对账锁死到<b>持久化往返</b>边界——若资产序列化丢失任何治理字段（定位符 / scope /
+     * 内联期望），此处会立即暴露为轨迹或验证结论漂移，而非依赖真浏览器 E2E 才偶然发现。</p>
+     */
+    @Test
+    public void persistedProductionPlanBehavesIdenticallyToVerificationPath() throws Exception {
+        LinkageGraph graph = buildGraph();
+        NlsCatalog nls = new StubNls();
+
+        // 生产侧：流水线产出的计划（被序列化为 STEP_PLAN 资产落库）
+        VerifiableStepPlan producerVsp = new StepPlanProducer(nls).produce(buildBundle(graph));
+        String persisted = MAPPER.writeValueAsString(producerVsp);
+        // 生产态消费端：从落库资产读回（同一 VerifiableStepPlan 契约；与生产流水线同一 Jackson 配置）
+        VerifiableStepPlan restored = VerifiableStepPlan.fromJson(persisted);
+
+        // 验证侧：同源资产经统一闭环入口派生
+        VerifiableStepPlan verifyVsp = LinkageGraphStepPlans.toVerifiableStepPlan(graph, PAGE, nls);
+
+        Snapshot snapshot = satisfyingSnapshot(restored);
+        ExecResult prod = run(restored, snapshot);
+        ExecResult ver = run(verifyVsp, snapshot);
+
+        assertEquals("restored persisted production plan drives identical execution to verification path",
+                prod.trace, ver.trace);
+        assertVerificationEqual(prod.result, ver.result);
+        assertTrue("both paths pass against the same post-state snapshot",
+                prod.result.allPassed() && ver.result.allPassed());
     }
 
     private ExecResult run(VerifiableStepPlan vsp, Snapshot snapshot) {

@@ -1,5 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -17,17 +21,28 @@ import java.util.regex.PatternSyntaxException;
  *
  * <p><b>fail-closed</b>：{@link #allows(String)} 在约束未满足时返回 {@code false}；
  * 构造即校验，非法约束（非法正则 / 区间 min&gt;max / 多形态混用）在解析期即拒。</p>
+ *
+ * <p><b>可序列化</b>：正则以源字符串 {@code regex} 存储（{@link Pattern} 懒编译），
+ * 故本类型在「FIELD 可见 / GETTER 不可见」的 Jackson 配置下可无损往返——这是
+ * {@code STEP_PLAN} 资产经 {@code AssetPipelineOrchestrator} 落库后再被生产侧读回的前提。</p>
  */
 public final class ParamConstraint {
 
     private final Set<String> allowedValues;   // 非 null 当且仅当用户选了 allow
-    private final Pattern pattern;             // 非 null 当且仅当用户选了 regex
+    private final String regex;                // 非 null 当且仅当用户选了 regex（源串，懒编译）
     private final Long min;                    // 非 null 当且仅当用户选了 range
     private final Long max;
 
-    private ParamConstraint(Set<String> allowedValues, Pattern pattern, Long min, Long max) {
+    private transient Pattern compiled;         // regex 的懒编译结果，不参与序列化
+
+    /** 字段构造（亦为 Jackson 反序列化入口，与 {@link ParamScope#fromJson} 的 allow/regex/range 形状一致）。 */
+    @JsonCreator
+    private ParamConstraint(@JsonProperty("allowedValues") Set<String> allowedValues,
+                            @JsonProperty("regex") String regex,
+                            @JsonProperty("min") Long min,
+                            @JsonProperty("max") Long max) {
         this.allowedValues = allowedValues;
-        this.pattern = pattern;
+        this.regex = regex;
         this.min = min;
         this.max = max;
     }
@@ -45,10 +60,11 @@ public final class ParamConstraint {
     public static ParamConstraint matchingRegex(String regex) {
         Objects.requireNonNull(regex, "regex");
         try {
-            return new ParamConstraint(null, Pattern.compile(regex), null, null);
+            Pattern.compile(regex); // 提前校验，非法正则即拒
         } catch (PatternSyntaxException e) {
             throw new IllegalArgumentException("ParamConstraint 非法正则: " + regex, e);
         }
+        return new ParamConstraint(null, regex, null, null);
     }
 
     /** 数值闭区间约束（含端点）。{@code min > max} 即拒（区间方向非法）。 */
@@ -67,8 +83,8 @@ public final class ParamConstraint {
         if (allowedValues != null) {
             return allowedValues.contains(value);
         }
-        if (pattern != null) {
-            return pattern.matcher(value).matches();
+        if (regex != null) {
+            return compiled().matcher(value).matches();
         }
         // 数值区间：非数字即拒
         try {
@@ -79,12 +95,21 @@ public final class ParamConstraint {
         }
     }
 
+    private Pattern compiled() {
+        if (compiled == null) {
+            compiled = Pattern.compile(regex);
+        }
+        return compiled;
+    }
+
     /** 是否正则形态（用于 canonical / 诊断）。 */
+    @JsonIgnore
     public boolean isRegex() {
-        return pattern != null;
+        return regex != null;
     }
 
     /** 是否数值区间形态。 */
+    @JsonIgnore
     public boolean isRange() {
         return min != null;
     }
@@ -94,8 +119,8 @@ public final class ParamConstraint {
         if (allowedValues != null) {
             return "allow=" + String.join(",", allowedValues);
         }
-        if (pattern != null) {
-            return "regex=" + pattern.pattern();
+        if (regex != null) {
+            return "regex=" + regex;
         }
         return "range=" + min + ".." + max;
     }
@@ -112,8 +137,8 @@ public final class ParamConstraint {
         if (allowedValues != null) {
             return that.allowedValues != null && allowedValues.equals(that.allowedValues);
         }
-        if (pattern != null) {
-            return that.pattern != null && pattern.pattern().equals(that.pattern.pattern());
+        if (regex != null) {
+            return that.regex != null && regex.equals(that.regex);
         }
         return that.min != null && Objects.equals(min, that.min) && Objects.equals(max, that.max);
     }
@@ -123,8 +148,8 @@ public final class ParamConstraint {
         if (allowedValues != null) {
             return allowedValues.hashCode();
         }
-        if (pattern != null) {
-            return pattern.pattern().hashCode();
+        if (regex != null) {
+            return regex.hashCode();
         }
         return Objects.hash(min, max);
     }

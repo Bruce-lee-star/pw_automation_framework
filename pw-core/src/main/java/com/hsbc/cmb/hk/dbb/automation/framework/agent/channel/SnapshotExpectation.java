@@ -1,5 +1,8 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -34,6 +37,29 @@ public final class SnapshotExpectation {
         this.enabled = b.enabled;
         this.text = b.text;
         this.textMatches = b.textMatches;
+        if (this.text != null && this.textMatches != null) {
+            throw new IllegalStateException("text 与 textMatches 互斥，不可同时设置");
+        }
+    }
+
+    /** Jackson 反序列化入口（与字段形状一致；exists 缺省视为 true，对齐 Builder 语义）。 */
+    @JsonCreator
+    private SnapshotExpectation(@JsonProperty("ref") String ref,
+                                @JsonProperty("exists") Boolean exists,
+                                @JsonProperty("role") String role,
+                                @JsonProperty("name") String name,
+                                @JsonProperty("visible") Boolean visible,
+                                @JsonProperty("enabled") Boolean enabled,
+                                @JsonProperty("text") String text,
+                                @JsonProperty("textMatches") String textMatches) {
+        this.ref = Objects.requireNonNull(ref, "ref");
+        this.exists = (exists == null) ? Boolean.TRUE : exists;
+        this.role = role;
+        this.name = name;
+        this.visible = visible;
+        this.enabled = enabled;
+        this.text = text;
+        this.textMatches = textMatches;
         if (this.text != null && this.textMatches != null) {
             throw new IllegalStateException("text 与 textMatches 互斥，不可同时设置");
         }

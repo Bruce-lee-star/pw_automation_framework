@@ -1,5 +1,8 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
@@ -53,7 +56,8 @@ public final class ParamScope {
 
     private final Map<String, ParamConstraint> constraints;
 
-    public ParamScope(Map<String, ParamConstraint> constraints) {
+    @JsonCreator
+    public ParamScope(@JsonProperty("constraints") Map<String, ParamConstraint> constraints) {
         this.constraints = Map.copyOf(Objects.requireNonNull(constraints, "constraints"));
     }
 
@@ -130,6 +134,7 @@ public final class ParamScope {
         return new ParamScope(merged);
     }
 
+    @JsonIgnore
     public boolean isEmpty() {
         return constraints.isEmpty();
     }

@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -51,7 +53,12 @@ public final class StepPlan {
     private final ParamScope scope;
     private final List<ParamScope> stepScopes;
 
-    public StepPlan(int schemaVersion, String planId, List<Command> steps, ParamScope scope, List<ParamScope> stepScopes) {
+    @JsonCreator
+    public StepPlan(@JsonProperty("schemaVersion") int schemaVersion,
+                    @JsonProperty("planId") String planId,
+                    @JsonProperty("steps") List<Command> steps,
+                    @JsonProperty("scope") ParamScope scope,
+                    @JsonProperty("stepScopes") List<ParamScope> stepScopes) {
         this.schemaVersion = schemaVersion;
         this.planId = Objects.requireNonNull(planId, "planId");
         this.steps = List.copyOf(steps);

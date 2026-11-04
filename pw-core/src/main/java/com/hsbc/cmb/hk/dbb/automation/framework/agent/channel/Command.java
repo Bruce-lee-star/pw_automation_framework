@@ -1,5 +1,8 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -27,8 +30,11 @@ public final class Command {
     private final List<SnapshotExpectation> expectations;
 
     /** 完整构造（含内联期望）。 */
-    public Command(ActionType action, LocatorSpec target, Map<String, String> params,
-                  List<SnapshotExpectation> expectations) {
+    @JsonCreator
+    public Command(@JsonProperty("action") ActionType action,
+                  @JsonProperty("target") LocatorSpec target,
+                  @JsonProperty("params") Map<String, String> params,
+                  @JsonProperty("expectations") List<SnapshotExpectation> expectations) {
         this.action = action;
         this.target = target;
         this.params = params == null ? Collections.emptyMap() : params;
