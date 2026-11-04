@@ -4,6 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.engine.AssetDraft
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.analysis.requirement.RequirementContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.ExpectedChangeMapper;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.LinkageGraph;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.LinkageGraphStepPlans;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotExpectation;
@@ -88,7 +89,8 @@ public final class StepPlanProducer {
     }
 
     private Command toCommand(LinkageGraph.LinkageRule rule, RequirementContext req) {
-        LocatorSpec loc = rule.trigger().primaryLocator();
+        // 触发定位符须经多语言解析（与 LinkageGraphStepPlans 同一来源），保证 NLS 下定位符同构
+        LocatorSpec loc = LinkageGraphStepPlans.localize(rule.trigger().primaryLocator(), nls);
         String value = resolvedValue(rule, req);
         return switch (rule.triggerAction()) {
             case FILL -> Command.fill(loc, value);
@@ -113,7 +115,8 @@ public final class StepPlanProducer {
     private List<SnapshotExpectation> toExpectations(LinkageGraph.LinkageRule rule) {
         List<SnapshotExpectation> out = new ArrayList<>();
         for (LinkageGraph.ExpectedChange ch : rule.expectations()) {
-            LocatorSpec targetLoc = ch.target().primaryLocator();
+            // 期望目标定位符同样经多语言解析（与 LinkageGraphStepPlans 同一来源）
+            LocatorSpec targetLoc = LinkageGraphStepPlans.localize(ch.target().primaryLocator(), nls);
             if (targetLoc == null) {
                 continue;
             }

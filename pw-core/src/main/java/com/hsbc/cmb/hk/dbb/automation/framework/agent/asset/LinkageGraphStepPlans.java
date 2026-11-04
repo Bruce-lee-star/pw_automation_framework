@@ -60,7 +60,15 @@ public final class LinkageGraphStepPlans {
         return new VerifiableStepPlan(plan, targetUrl);
     }
 
-    private static LocatorSpec localize(LocatorSpec spec, NlsCatalog nls) {
+    /**
+     * 资产定位符的「角色优先 + 多语言」解析，是触发/期望定位符推导的<b>唯一来源</b>，
+     * 与 {@code StepPlanProducer}（分析层产线路径）共用——两者对同一条规则必须产出同一个
+     * localized 定位符，否则 {@link StepPlan#planDigest()} 指纹不一致（同一资产两条闭环路径对账失败）。
+     *
+     * @return {@code spec} 为 {@code null} 时返回 {@code null}；否则按当前语言解析 {@code nameKey}
+     *         （{@link LocatorSpec#localize(NlsCatalog)}，catalog 或 key 缺失时原样返回）
+     */
+    public static LocatorSpec localize(LocatorSpec spec, NlsCatalog nls) {
         return spec == null ? null : spec.localize(nls);
     }
 
