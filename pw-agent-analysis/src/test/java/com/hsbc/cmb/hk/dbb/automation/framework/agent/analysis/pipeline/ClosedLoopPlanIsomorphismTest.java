@@ -18,6 +18,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -102,9 +103,65 @@ public class ClosedLoopPlanIsomorphismTest {
         assertEquals(Command.ActionType.FILL, verifyVsp.plan().steps().get(1).action());
     }
 
+    /**
+     * 唯一有意差异刻画：当产线路径带需求测试数据覆盖（username=bob）而验证路径无覆盖概念
+     * （始终用资产内嵌 triggerValue=alice）时，两路治理内容<b>仅在写入值及其 step 级 scope 上不同</b>，
+     * 其余分量（步骤顺序 / action / 本地化定位符 / plan 级 scope / 内联期望 ref / 非写入步）完全一致。
+     * 本用例把「唯一差异」从口头约定固化为可执行的契约断言，防未来意外漂移。
+     */
+    @Test
+    public void valueOverrideIsTheOnlyDivergenceBetweenProductionAndVerificationPaths() {
+        ElementRef username = new ElementRef("username",
+                List.of(LocatorSpec.roleOfKey("textbox", "user.key")), "textbox");
+        ElementRef submit = new ElementRef("submit",
+                List.of(LocatorSpec.roleOfKey("button", "submit.key")), "button");
+
+        LinkageGraph.ExpectedChange enableSubmit = new LinkageGraph.ExpectedChange(
+                submit, LinkageGraph.ExpectedChange.ChangeKind.ENABLE, null);
+        LinkageGraph.LinkageRule fillRule = new LinkageGraph.LinkageRule(
+                username, Command.ActionType.FILL, "alice", List.of());
+        LinkageGraph.LinkageRule clickRule = new LinkageGraph.LinkageRule(
+                submit, Command.ActionType.CLICK, "", List.of(enableSubmit));
+        LinkageGraph graph = new LinkageGraph(REQ, List.of(fillRule, clickRule));
+
+        NlsCatalog nls = new StubNls();
+        // 产线路径带需求覆盖：username=bob（优先于图谱内嵌的 alice）
+        RequirementContext req = new RequirementContext(List.of(), "test", Map.of("username", "bob"));
+        VerifiableStepPlan producerVsp = new StepPlanProducer(nls).produce(buildBundle(graph, req), req);
+        // 验证路径无覆盖概念：始终用资产内嵌 triggerValue()=alice
+        VerifiableStepPlan verifyVsp = LinkageGraphStepPlans.toVerifiableStepPlan(graph, PAGE, nls);
+
+        // —— 除写入值外，两路治理内容逐分量一致 ——
+        assertEquals(3, producerVsp.plan().steps().size());
+        assertEquals(3, verifyVsp.plan().steps().size());
+        for (int i = 0; i < 3; i++) {
+            Command cp = producerVsp.plan().steps().get(i);
+            Command cv = verifyVsp.plan().steps().get(i);
+            assertEquals("step " + i + " action", cp.action(), cv.action());
+            assertEquals("step " + i + " targetRef", cp.targetRef(), cv.targetRef());
+            assertEquals("step " + i + " expectations", expectationRefs(cp), expectationRefs(cv));
+        }
+        assertEquals("plan scope", producerVsp.plan().scope().canonical(), verifyVsp.plan().scope().canonical());
+
+        // FILL 步（index 1）：唯一差异点 —— 写入值
+        assertEquals("bob", producerVsp.plan().steps().get(1).params().get("value"));
+        assertEquals("alice", verifyVsp.plan().steps().get(1).params().get("value"));
+        // 对应的 step 级 scope 也仅在该值上不同
+        assertTrue(producerVsp.plan().resolvedScope(1).constraintFor("value").get().allows("bob"));
+        assertTrue(verifyVsp.plan().resolvedScope(1).constraintFor("value").get().allows("alice"));
+        // CLICK 步（index 2）：无论值源如何都无任何差异（值源不影响 CLICK）
+        assertEquals(new TreeMap<>(producerVsp.plan().steps().get(2).params()),
+                new TreeMap<>(verifyVsp.plan().steps().get(2).params()));
+        assertEquals(producerVsp.plan().scopeForStep(2).canonical(), verifyVsp.plan().scopeForStep(2).canonical());
+    }
+
     private AssetDraftBundle buildBundle(LinkageGraph graph) {
+        return buildBundle(graph, new RequirementContext(List.of(), "test"));
+    }
+
+    private AssetDraftBundle buildBundle(LinkageGraph graph, RequirementContext req) {
         return new AssetDraftBundle(
-                new RequirementContext(List.of(), "test"),
+                req,
                 new ElementInventory(List.of(
                         new ElementInventoryEntry(new ElementRef("username",
                                 List.of(LocatorSpec.roleOfKey("textbox", "user.key")), "textbox"), "用户名", REQ),
