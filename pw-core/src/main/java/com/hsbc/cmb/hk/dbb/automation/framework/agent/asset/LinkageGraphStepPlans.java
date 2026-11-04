@@ -46,9 +46,12 @@ public final class LinkageGraphStepPlans {
         stepScopes.add(ParamScope.EMPTY);
 
         for (LinkageGraph.LinkageRule rule : graph.rules()) {
-            LocatorSpec triggerLoc = localize(rule.trigger().primaryLocator(), nls);
+            LocatorSpec triggerLoc = rule.trigger().primaryLocator();
+            if (triggerLoc == null) {
+                continue; // 无角色优先定位符：确定性校验已 ERROR，跳过派生（与 StepPlanProducer 一致）
+            }
             // 期望内联进命令（一步 = 触发动作 + 其执行后绝对态期望）
-            Command trigger = new Command(rule.triggerAction(), triggerLoc, triggerParams(rule))
+            Command trigger = new Command(rule.triggerAction(), localize(triggerLoc, nls), triggerParams(rule))
                     .withExpectations(ruleExpectations(rule, nls));
             steps.add(trigger);
             stepScopes.add(ParamScope.forAssetWriteValue(rule.triggerAction(), rule.triggerValue()));
