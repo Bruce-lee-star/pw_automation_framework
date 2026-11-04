@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.ActionTypePolicy;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepPlan;
 
@@ -52,15 +53,7 @@ public final class ParamScopePolicy {
     }
 
     private static boolean isSideEffecting(Command c) {
-        switch (c.action()) {
-            case NAVIGATE:
-            case FILL:
-            case SELECT:
-            case CHECK:
-            case UNCHECK:
-                return true;
-            default:
-                return false;
-        }
+        // 单一事实来源：逐动作副作用语义改由 ActionTypePolicy 持有（v3.10），此处不再硬编码
+        return ActionTypePolicy.of(c.action()).sideEffecting();
     }
 }

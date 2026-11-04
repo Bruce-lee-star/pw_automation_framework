@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.ActionTypePolicy;
+
 /**
  * 确定性步骤执行编排（v3.7，pw-core，浏览器无关）。
  *
@@ -39,7 +41,16 @@ public final class StepDriver {
         for (int i = 0; i < plan.steps().size(); i++) {
             Command step = plan.steps().get(i);
             // 门禁边界：channel.execute(Command, ParamScope) 默认方法先 ParamScopeGate.check 再 execute(Command)
-            results.add(channel.execute(step, plan.resolvedScope(i)));
+            CommandResult result = channel.execute(step, plan.resolvedScope(i));
+            // 重试策略（P0 第 3 项）：仅幂等动作允许有限重试；写操作一次失败即停，避免 trace 重放二次提交
+            ActionTypePolicy.ActionPolicy policy = ActionTypePolicy.of(step.action());
+            int attempts = 1;
+            while (!result.success() && policy.idempotent() && policy.maxRetries() > 0
+                    && attempts <= policy.maxRetries()) {
+                result = channel.execute(step, plan.resolvedScope(i));
+                attempts++;
+            }
+            results.add(result);
         }
         return results;
     }
