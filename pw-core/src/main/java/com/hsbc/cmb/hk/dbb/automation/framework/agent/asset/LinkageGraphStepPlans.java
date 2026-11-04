@@ -14,6 +14,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * 联动图谱 → 可验证步骤计划 的构建器（闭环执行入口收敛，与 pw-agent-analysis 的
  * {@code StepPlanProducer} 对称）。
@@ -34,6 +37,8 @@ import java.util.Map;
  */
 public final class LinkageGraphStepPlans {
 
+    private static final Logger LOG = LoggerFactory.getLogger(LinkageGraphStepPlans.class);
+
     private LinkageGraphStepPlans() {
     }
 
@@ -48,7 +53,11 @@ public final class LinkageGraphStepPlans {
         for (LinkageGraph.LinkageRule rule : graph.rules()) {
             LocatorSpec triggerLoc = rule.trigger().primaryLocator();
             if (triggerLoc == null) {
-                continue; // 无角色优先定位符：确定性校验已 ERROR，跳过派生（与 StepPlanProducer 一致）
+                // 无角色优先定位符：确定性校验已 ERROR，跳过派生（与产线 StepPlanProducer 一致）。
+                // DEBUG 仅作可观测性：运维可据此定位"某触发元素为何在该路径没有步骤"。
+                LOG.debug("跳过无角色优先定位符的联动规则 requirement={} 触发refId={}（与产线 StepPlanProducer 一致）",
+                        graph.requirementId(), rule.trigger().refId());
+                continue;
             }
             // 期望内联进命令（一步 = 触发动作 + 其执行后绝对态期望）
             Command trigger = new Command(rule.triggerAction(), localize(triggerLoc, nls), triggerParams(rule))
@@ -68,8 +77,16 @@ public final class LinkageGraphStepPlans {
      * 与 {@code StepPlanProducer}（分析层产线路径）共用——两者对同一条规则必须产出同一个
      * localized 定位符，否则 {@link StepPlan#planDigest()} 指纹不一致（同一资产两条闭环路径对账失败）。
      *
+     * @param spec 原始定位符，可为 {@code null}
+     * @param nls  多语言目录，可为 {@code null}（缺失时原样返回）
      * @return {@code spec} 为 {@code null} 时返回 {@code null}；否则按当前语言解析 {@code nameKey}
      *         （{@link LocatorSpec#localize(NlsCatalog)}，catalog 或 key 缺失时原样返回）
+     *
+     * @apiNote 闭环引擎两条构建路径（{@code LinkageGraphStepPlans} 验证入口 与
+     *          {@code StepPlanProducer} 产线入口）<b>必须</b>经本方法推导定位符，<b>不得</b>在任一侧
+     *          另起本地化逻辑——否则会重新引入 NLS 下定位符 / 指纹双轨不一致（历史回归，已由
+     *          {@code ClosedLoopPlanIsomorphismTest} 锁死）。本方法提升为 {@code public static} 仅为
+     *          跨模块（pw-core ↔ pw-agent-analysis）共享同一来源，并非对外开放的业务 API。
      */
     public static LocatorSpec localize(LocatorSpec spec, NlsCatalog nls) {
         return spec == null ? null : spec.localize(nls);

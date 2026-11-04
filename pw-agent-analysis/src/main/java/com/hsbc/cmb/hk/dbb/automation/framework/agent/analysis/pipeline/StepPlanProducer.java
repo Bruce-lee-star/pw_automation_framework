@@ -18,6 +18,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * 把资产生产流水线的产物转成「可执行 + 可验证」步骤计划（设计 §4.6 路径 B 延伸）。
  *
@@ -34,6 +37,8 @@ import java.util.Map;
  * 消费（经 pw-core 的 {@link VerifiableStepPlan} 载体流动，分析层不反向依赖 web-ui）。</p>
  */
 public final class StepPlanProducer {
+
+    private static final Logger LOG = LoggerFactory.getLogger(StepPlanProducer.class);
 
     private final NlsCatalog nls;
 
@@ -59,6 +64,13 @@ public final class StepPlanProducer {
      *
      * @param bundle 资产草稿包
      * @param req    需求上下文（含测试数据），可为 {@code null}
+     *
+     * @apiNote 本产线入口与 pw-core 的验证入口 {@code LinkageGraphStepPlans} 构成闭环引擎的两条
+     *          构建路径，二者产出<b>治理内容完全同构</b>（步骤 / 动作 / 本地化定位符 / 参数 / 逐步 scope /
+     *          plan scope / 内联期望），仅写入值来源有意不同（本入口优先需求测试数据覆盖，验证入口用
+     *          资产内嵌 {@code triggerValue}）。定位符一律经 {@code LinkageGraphStepPlans.localize}
+     *          唯一来源推导，空定位符规则一致跳过；该同构契约由 {@code ClosedLoopPlanIsomorphismTest}
+     *          锁定，防止任一侧漂移回双轨。
      */
     public VerifiableStepPlan produce(AssetDraftBundle bundle, RequirementContext req) {
         String pageRef = bundle.pageRef();
@@ -72,7 +84,10 @@ public final class StepPlanProducer {
         for (LinkageGraph.LinkageRule rule : bundle.linkage().rules()) {
             LocatorSpec triggerLoc = rule.trigger().primaryLocator();
             if (triggerLoc == null) {
-                continue; // 无角色优先定位符：确定性校验已 ERROR，跳过派生
+                // 无角色优先定位符：确定性校验已 ERROR，跳过派生（与验证入口 LinkageGraphStepPlans 一致）。
+                LOG.debug("跳过无角色优先定位符的联动规则 触发refId={}（与验证入口 LinkageGraphStepPlans 一致）",
+                        rule.trigger().refId());
+                continue;
             }
             // 一步 = 触发动作 + 其执行后绝对态期望（期望内联进命令）
             steps.add(toCommand(rule, req).withExpectations(toExpectations(rule)));
