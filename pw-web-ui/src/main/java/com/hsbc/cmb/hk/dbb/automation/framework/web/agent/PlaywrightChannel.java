@@ -6,12 +6,16 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.CommandResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Snapshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotBounds;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.ActionTypePolicy;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotEnvelope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.LoadState;
+
+import static com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command.ActionType.*;
 
 import java.util.List;
 import java.util.Map;
@@ -41,10 +45,25 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
     private final NlsCatalog nls;
     /** 快照资源上界（§4.2）；默认 {@link SnapshotBounds#DEFAULT}。 */
     private final SnapshotBounds bounds;
+    /**
+     * 逐动作超时解析（§4.1 / P0 第 3 项运行期施加）：把 {@link ActionTypePolicy} 的
+     * {@code defaultTimeout} 真正注入到每个 Playwright 调用；生产默认取策略元数据，
+     * 测试可注入极短超时以确定性验证运行期超时生效。
+     */
+    private final TimeoutResolver timeoutResolver;
     /** 本通道内的快照序号，动作后每次重新快照单调递增。 */
     private long snapshotVersion;
     private final String contextId = "ctx-" + Integer.toHexString(System.identityHashCode(this));
     private final String pageId = "page-" + Integer.toHexString(System.identityHashCode(this));
+
+    /** 逐动作超时解析策略：运行期把元数据 defaultTimeout 施加到 Playwright 调用。 */
+    @FunctionalInterface
+    interface TimeoutResolver {
+        long timeoutMillis(Command.ActionType action);
+    }
+
+    private static final TimeoutResolver DEFAULT_TIMEOUT_RESOLVER =
+            a -> ActionTypePolicy.of(a).defaultTimeout().toMillis();
 
     PlaywrightChannel(Page page, Browser browser, BrowserContext context) {
         this(page, browser, context, null);
@@ -59,11 +78,22 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
 
     /** 包内构造器：可注入资源上界（有界协议测试 / 大页面显式放宽）。 */
     PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls, SnapshotBounds bounds) {
+        this(page, browser, context, nls, bounds, DEFAULT_TIMEOUT_RESOLVER);
+    }
+
+    /** 包内构造器：额外注入超时解析（真实浏览器超时测试用极短超时确定性验证）。 */
+    PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls,
+                      SnapshotBounds bounds, TimeoutResolver timeoutResolver) {
         this.page = page;
         this.browser = browser;
         this.context = context;
         this.nls = nls;
         this.bounds = bounds;
+        this.timeoutResolver = timeoutResolver;
+    }
+
+    private long timeoutFor(Command.ActionType action) {
+        return timeoutResolver.timeoutMillis(action);
     }
 
     @Override
@@ -97,32 +127,40 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
             Map<String, String> params = command.params();
             switch (action) {
                 case NAVIGATE:
-                    page.navigate(params.get("url"));
+                    page.navigate(params.get("url"),
+                            new Page.NavigateOptions().setTimeout(timeoutFor(NAVIGATE)));
                     break;
                 case CLICK:
-                    require(locator, action).click();
+                    require(locator, action).click(
+                            new Locator.ClickOptions().setTimeout(timeoutFor(CLICK)));
                     break;
                 case FILL:
-                    require(locator, action).fill(params.get("value"));
+                    require(locator, action).fill(params.get("value"),
+                            new Locator.FillOptions().setTimeout(timeoutFor(FILL)));
                     break;
                 case SELECT:
-                    require(locator, action).selectOption(params.get("option"));
+                    require(locator, action).selectOption(params.get("option"),
+                            new Locator.SelectOptionOptions().setTimeout(timeoutFor(SELECT)));
                     break;
                 case CHECK:
-                    require(locator, action).check();
+                    require(locator, action).check(
+                            new Locator.CheckOptions().setTimeout(timeoutFor(CHECK)));
                     break;
                 case UNCHECK:
-                    require(locator, action).uncheck();
+                    require(locator, action).uncheck(
+                            new Locator.UncheckOptions().setTimeout(timeoutFor(UNCHECK)));
                     break;
                 case WAIT:
                     if (locator != null) {
-                        locator.waitFor();
+                        locator.waitFor(new Locator.WaitForOptions().setTimeout(timeoutFor(WAIT)));
                     } else {
-                        page.waitForLoadState();
+                        page.waitForLoadState(LoadState.LOAD,
+                                new Page.WaitForLoadStateOptions().setTimeout(timeoutFor(WAIT)));
                     }
                     break;
                 case ASSERT_VISIBLE:
-                    require(locator, action).waitFor();
+                    require(locator, action).waitFor(
+                            new Locator.WaitForOptions().setTimeout(timeoutFor(ASSERT_VISIBLE)));
                     break;
                 case ASSERT_TEXT:
                     require(locator, action);
