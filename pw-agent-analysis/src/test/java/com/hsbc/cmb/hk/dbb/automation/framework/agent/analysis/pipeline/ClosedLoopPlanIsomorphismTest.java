@@ -77,6 +77,39 @@ public class ClosedLoopPlanIsomorphismTest {
         assertIsomorphic(producerVsp.plan(), verifyVsp.plan());
     }
 
+    /**
+     * 指纹级对账：同一资产经两路派生的同构计划，其 {@link StepPlan#planDigest()} 必须<b>逐字节相等</b>。
+     * 这是闭环对账的最终护栏——把「结构同构」收敛为「内容指纹一致」，使两条闭环路径可直接比对指纹
+     * 而无需关心名义 {@code planId} 前缀（{@code plan-} / {@code linkage-}）。{@code planDigest}
+     * 已排除 {@code planId}（运行时标识 / 可观测性前缀，非被批准内容）。
+     */
+    @Test
+    public void planDigestIsByteIdenticalAcrossClosedLoopPaths() {
+        ElementRef username = new ElementRef("username",
+                List.of(LocatorSpec.roleOfKey("textbox", "user.key")), "textbox");
+        ElementRef submit = new ElementRef("submit",
+                List.of(LocatorSpec.roleOfKey("button", "submit.key")), "button");
+
+        LinkageGraph.ExpectedChange enableSubmit = new LinkageGraph.ExpectedChange(
+                submit, LinkageGraph.ExpectedChange.ChangeKind.ENABLE, null);
+        LinkageGraph.LinkageRule fillRule = new LinkageGraph.LinkageRule(
+                username, Command.ActionType.FILL, "alice", List.of());
+        LinkageGraph.LinkageRule clickRule = new LinkageGraph.LinkageRule(
+                submit, Command.ActionType.CLICK, "", List.of(enableSubmit));
+        LinkageGraph graph = new LinkageGraph(REQ, List.of(fillRule, clickRule));
+
+        NlsCatalog nls = new StubNls();
+        // 无需求覆盖 → 两路值源一致、内容完全同构
+        VerifiableStepPlan producerVsp = new StepPlanProducer(nls).produce(buildBundle(graph));
+        VerifiableStepPlan verifyVsp = LinkageGraphStepPlans.toVerifiableStepPlan(graph, PAGE, nls);
+
+        assertEquals("planDigest must be byte-identical across closed-loop paths",
+                producerVsp.plan().planDigest(), verifyVsp.plan().planDigest());
+        // 名义 planId 前缀仍刻意不同（可观测性），但不进入指纹
+        assertTrue(producerVsp.plan().planId().startsWith("plan-"));
+        assertTrue(verifyVsp.plan().planId().startsWith("linkage-"));
+    }
+
     @Test
     public void nullPrimaryLocatorRuleIsSkippedByBothPaths() {
         ElementRef username = new ElementRef("username",

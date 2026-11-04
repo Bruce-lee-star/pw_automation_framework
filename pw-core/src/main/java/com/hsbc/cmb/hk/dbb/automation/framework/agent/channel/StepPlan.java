@@ -197,12 +197,14 @@ public final class StepPlan {
 
     /**
      * 内容指纹（SHA-256 前 8 字节十六进制），风格对齐 {@code ApprovalGrant.planDigestOf}。
-     * 覆盖 schemaVersion + planId + 每步 action / target 规范串 / 排序后的参数——
-     * 任一变化都意味着「被批准的内容变了」。
+     * 覆盖 schemaVersion + 每步 action / target 规范串 / 排序后的参数 / 逐步与 plan 级 scope——
+     * 任一变化都意味着「被批准的内容变了」。<b>不含 {@code planId}</b>：planId 是运行时标识
+     * （且两闭环路径刻意以 {@code plan-} / {@code linkage-} 前缀区分做可观测性），不属于被批准内容，
+     * 故排除——使同一资产经两条闭环路径派生出的同构计划产出<b>相同指纹</b>，可直接比对对账。
      */
     public String planDigest() {
         StringBuilder payload = new StringBuilder(DIGEST_PREFIX).append('\n');
-        payload.append(schemaVersion).append('\n').append(planId).append('\n');
+        payload.append(schemaVersion).append('\n');
         for (int i = 0; i < steps.size(); i++) {
             Command c = steps.get(i);
             payload.append(c.action()).append('\n');
