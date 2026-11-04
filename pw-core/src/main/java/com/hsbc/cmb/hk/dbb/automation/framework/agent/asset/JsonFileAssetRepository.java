@@ -65,7 +65,7 @@ public final class JsonFileAssetRepository implements AssetRepository {
         AssetId id = new AssetId("asset:" + draft.type().name().toLowerCase() + ":" + n, 1);
         long now = System.currentTimeMillis();
         StoredAsset asset = new StoredAsset(id, draft.type(), draft.requirementId(), AssetState.DRAFT,
-                draft.provenance(), draft.contentJson(), now, now);
+                draft.provenance(), draft.contentJson(), null, now, now);
         store.put(id, asset);
         persist(asset);
         LOG.debug("Asset saved as DRAFT: {}", id);
@@ -117,10 +117,24 @@ public final class JsonFileAssetRepository implements AssetRepository {
         }
         AssetState next = stateMachine.transition(current.state(), event);
         StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), next,
-                current.provenance(), current.contentJson(), current.createdAt(), System.currentTimeMillis());
+                current.provenance(), current.contentJson(), current.report(), current.createdAt(), System.currentTimeMillis());
         store.put(id, updated);
         persist(updated);
         LOG.info("Asset {} transition {} -> {} by {}", id, current.state(), next, actor);
+        return updated;
+    }
+
+    @Override
+    public synchronized StoredAsset recordVerification(AssetId id, VerificationReport report) {
+        StoredAsset current = store.get(id);
+        if (current == null) {
+            throw new IllegalArgumentException("Unknown asset: " + id);
+        }
+        StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), current.state(),
+                current.provenance(), current.contentJson(), report, current.createdAt(), System.currentTimeMillis());
+        store.put(id, updated);
+        persist(updated);
+        LOG.info("Asset {} verification recorded (status={}, stability={})", id, report.status(), report.stability());
         return updated;
     }
 
@@ -166,6 +180,10 @@ public final class JsonFileAssetRepository implements AssetRepository {
         }
         node.put("createdAt", asset.createdAt());
         node.put("updatedAt", asset.updatedAt());
+        // 回写的验证报告（§4.6 量化验收）手动序列化，避免对 VerificationReport 施加 Jackson 绑定
+        if (asset.report() != null) {
+            node.set("verification", toReportJson(asset.report()));
+        }
         return node;
     }
 
@@ -191,7 +209,44 @@ public final class JsonFileAssetRepository implements AssetRepository {
         }
         long createdAt = node.get("createdAt").asLong();
         long updatedAt = node.get("updatedAt").asLong();
-        return new StoredAsset(id, type, requirementId, state, provenance, contentJson, createdAt, updatedAt);
+        VerificationReport report = node.has("verification") ? fromReportJson((ObjectNode) node.get("verification")) : null;
+        return new StoredAsset(id, type, requirementId, state, provenance, contentJson, report, createdAt, updatedAt);
+    }
+
+    /** 手动序列化验证报告（避免对 VerificationReport 施加 Jackson 绑定契约）。 */
+    private ObjectNode toReportJson(VerificationReport report) {
+        ObjectNode v = mapper.createObjectNode();
+        v.put("status", report.status().name());
+        v.put("stability", report.stability());
+        v.put("evidence", report.evidence());
+        ArrayNode items = mapper.createArrayNode();
+        for (VerificationReport.VerificationItem it : report.items()) {
+            ObjectNode itn = mapper.createObjectNode();
+            itn.put("ruleId", it.ruleId());
+            itn.put("passed", it.passed());
+            itn.put("detail", it.detail());
+            items.add(itn);
+        }
+        v.set("items", items);
+        return v;
+    }
+
+    /** 手动反序列化验证报告（与 {@link #toReportJson} 互逆）。 */
+    private VerificationReport fromReportJson(ObjectNode v) {
+        VerificationReport.Status status = VerificationReport.Status.valueOf(v.get("status").asText());
+        double stability = v.get("stability").asDouble();
+        String evidence = v.has("evidence") ? v.get("evidence").asText("") : "";
+        List<VerificationReport.VerificationItem> items = new ArrayList<>();
+        if (v.has("items")) {
+            for (var el : v.get("items")) {
+                ObjectNode itn = (ObjectNode) el;
+                items.add(new VerificationReport.VerificationItem(
+                        itn.get("ruleId").asText(),
+                        itn.get("passed").asBoolean(),
+                        itn.has("detail") ? itn.get("detail").asText("") : ""));
+            }
+        }
+        return new VerificationReport(status, stability, items, evidence);
     }
 
     private void writeIndex() throws IOException {

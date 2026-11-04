@@ -149,4 +149,29 @@ public class JsonFileAssetRepositoryTest {
         }
         assertNull(repo.get(new AssetId("asset:ghost:999")));
     }
+
+    @Test
+    public void recordVerificationPersistsAndReloadsFromDisk() throws Exception {
+        Path root = tmp.newFolder().toPath();
+        JsonFileAssetRepository repo = new JsonFileAssetRepository(root);
+        AssetId id = repo.save(sampleDraft("REQ-V"));
+
+        List<VerificationReport.VerificationItem> items = List.of(
+                new VerificationReport.VerificationItem("step-0:NAVIGATE@<navigate>", true, "ok"),
+                new VerificationReport.VerificationItem("step-1:FILL@textbox", false, "element missing"));
+        VerificationReport report = new VerificationReport(VerificationReport.Status.FLAKY, 0.5, items, "trace://x");
+        repo.recordVerification(id, report);
+
+        // 重新从磁盘加载：回写的报告（含状态/稳定性/逐条结论/证据）须无损重建
+        JsonFileAssetRepository reloaded = new JsonFileAssetRepository(root);
+        StoredAsset ra = reloaded.get(id);
+        assertNotNull(ra.report());
+        assertEquals(VerificationReport.Status.FLAKY, ra.report().status());
+        assertEquals(0.5, ra.report().stability(), 1e-9);
+        assertEquals(2, ra.report().items().size());
+        assertEquals("step-0:NAVIGATE@<navigate>", ra.report().items().get(0).ruleId());
+        assertEquals(false, ra.report().items().get(1).passed());
+        assertEquals("element missing", ra.report().items().get(1).detail());
+        assertEquals("trace://x", ra.report().evidence());
+    }
 }

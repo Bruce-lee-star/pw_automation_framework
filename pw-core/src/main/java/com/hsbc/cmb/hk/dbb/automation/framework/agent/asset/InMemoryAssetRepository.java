@@ -29,7 +29,7 @@ public final class InMemoryAssetRepository implements AssetRepository {
         AssetId id = new AssetId("asset:" + draft.type().name().toLowerCase() + ":" + n, 1);
         long now = System.currentTimeMillis();
         StoredAsset asset = new StoredAsset(id, draft.type(), draft.requirementId(), AssetState.DRAFT,
-                draft.provenance(), draft.contentJson(), now, now);
+                draft.provenance(), draft.contentJson(), null, now, now);
         store.put(id, asset);
         LOG.debug("Asset saved as DRAFT: {}", id);
         return id;
@@ -62,7 +62,7 @@ public final class InMemoryAssetRepository implements AssetRepository {
         }
         AssetState next = stateMachine.transition(current.state(), event);
         StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), next,
-                current.provenance(), current.contentJson(), current.createdAt(), System.currentTimeMillis());
+                current.provenance(), current.contentJson(), current.report(), current.createdAt(), System.currentTimeMillis());
         store.put(id, updated);
         LOG.info("Asset {} transition {} -> {} by {}", id, current.state(), next, actor);
         return updated;
@@ -77,6 +77,19 @@ public final class InMemoryAssetRepository implements AssetRepository {
             }
         }
         return result;
+    }
+
+    @Override
+    public synchronized StoredAsset recordVerification(AssetId id, VerificationReport report) {
+        StoredAsset current = store.get(id);
+        if (current == null) {
+            throw new IllegalArgumentException("Unknown asset: " + id);
+        }
+        StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), current.state(),
+                current.provenance(), current.contentJson(), report, current.createdAt(), System.currentTimeMillis());
+        store.put(id, updated);
+        LOG.info("Asset {} verification recorded (status={}, stability={})", id, report.status(), report.stability());
+        return updated;
     }
 
     @Override

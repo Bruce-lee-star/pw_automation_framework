@@ -34,4 +34,17 @@ public interface AssetRepository {
 
     /** 读取资产（含版本）。 */
     StoredAsset get(AssetId id);
+
+    /**
+     * 回写验证报告（§4.6 量化验收）：把 {@link AssetVerifier} 产出的 {@link VerificationReport}
+     * 落到资产本体（置信度 / 稳定性 / 逐条结论），供回归链路与需求覆盖度统计消费。
+     *
+     * <p>不产生状态迁移（验证是观察性动作，不改变 DRAFT/ACTIVE 等可信度状态机）；仅更新资产的
+     * 报告字段，使其在 {@link #get} 时携带最近一次验证结论。</p>
+     *
+     * @param id     资产标识
+     * @param report 验证报告（非空）
+     * @return 携带报告后的资产
+     */
+    StoredAsset recordVerification(AssetId id, VerificationReport report);
 }

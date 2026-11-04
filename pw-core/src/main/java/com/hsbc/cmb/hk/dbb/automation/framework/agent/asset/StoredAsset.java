@@ -11,11 +11,13 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.asset;
  * @param state         当前状态
  * @param provenance    溯源
  * @param contentJson   资产内容（分析域模型序列化）
+ * @param report        最近一次验证报告（§4.6 量化验收：回写置信度 / 稳定性）；未验证时为 {@code null}
  * @param createdAt     创建时间（epoch millis）
  * @param updatedAt     最近更新时间（epoch millis）
  */
 public record StoredAsset(AssetId id, AssetType type, String requirementId, AssetState state,
-                          Provenance provenance, String contentJson, long createdAt, long updatedAt) {
+                          Provenance provenance, String contentJson, VerificationReport report,
+                          long createdAt, long updatedAt) {
 
     /** 校验/审批记录（R9）：操作者 + 时间 + 事件。 */
     public record AuditEntry(String actor, AssetStateMachine.Event event, long atEpoch) {}
