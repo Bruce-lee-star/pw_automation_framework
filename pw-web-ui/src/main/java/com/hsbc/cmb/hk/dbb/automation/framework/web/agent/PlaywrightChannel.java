@@ -5,14 +5,14 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.CommandResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Snapshot;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotBounds;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotEnvelope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,6 +39,12 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
     private final BrowserContext context;
     /** 多语言目录（可选）：把 role 定位里的 NLS key 解析为当前语言文案（设计 §4.7）。 */
     private final NlsCatalog nls;
+    /** 快照资源上界（§4.2）；默认 {@link SnapshotBounds#DEFAULT}。 */
+    private final SnapshotBounds bounds;
+    /** 本通道内的快照序号，动作后每次重新快照单调递增。 */
+    private long snapshotVersion;
+    private final String contextId = "ctx-" + Integer.toHexString(System.identityHashCode(this));
+    private final String pageId = "page-" + Integer.toHexString(System.identityHashCode(this));
 
     PlaywrightChannel(Page page, Browser browser, BrowserContext context) {
         this(page, browser, context, null);
@@ -48,75 +54,39 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
      * @param nls 多语言目录；{@code null} 表示单语言（定位符里只有字面文案）
      */
     PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls) {
+        this(page, browser, context, nls, SnapshotBounds.DEFAULT);
+    }
+
+    /** 包内构造器：可注入资源上界（有界协议测试 / 大页面显式放宽）。 */
+    PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls, SnapshotBounds bounds) {
         this.page = page;
         this.browser = browser;
         this.context = context;
         this.nls = nls;
+        this.bounds = bounds;
     }
 
     @Override
-    public Snapshot snapshot() {
-        // ARIA 快照枚举（隐藏元素已被排除，隐含可见），逐节点生成 Role-First 定位符
-        // （role + 可访问名 + 同组出现序号）作为快照索引键。
-        List<Snapshot.ElementState> states = new ArrayList<>();
+    public synchronized Snapshot snapshot() {
+        long version = ++snapshotVersion;
+        String url;
         try {
-            String raw = page.ariaSnapshot();
-            states.addAll(parseAria(raw));
+            url = page.url();
         } catch (RuntimeException e) {
-            // 快照采集失败不影响命令执行；返回空快照，断言阶段自然判失败
-            return new Snapshot(page.url(), states);
+            url = "<unknown>";
         }
-        return new Snapshot(page.url(), states);
-    }
-
-    /** 解析 ARIA 快照文本为角色优先的元素状态列表。 */
-    private List<Snapshot.ElementState> parseAria(String raw) {
-        List<Snapshot.ElementState> states = new ArrayList<>();
-        Map<String, Integer> counters = new HashMap<>();
-        if (raw == null) {
-            return states;
+        // 采集异常不再静默返回「空快照」（会被误当作「页面确实没有元素」），
+        // 而是明确标注 UNSUPPORTED，交由 SnapshotVerifier 的 fail-closed 门禁处理。
+        String raw;
+        try {
+            raw = page.ariaSnapshot();
+        } catch (RuntimeException e) {
+            SnapshotEnvelope envelope = SnapshotEnvelope.unsupported(
+                    contextId, pageId, "main", version,
+                    "ARIA_COLLECTION_FAILED: " + e.getClass().getSimpleName());
+            return new Snapshot(url, List.of(), envelope);
         }
-        for (String line : raw.split("\n")) {
-            String t = line.trim();
-            if (!t.startsWith("- ")) {
-                continue; // 跳过属性/续行（如 - /url:、- text:）
-            }
-            String body = t.substring(2).trim();
-            if (body.startsWith("/")) {
-                continue; // 属性行，如 - /url: https://...
-            }
-            // role：第一个 token（遇空格/"[/: 截断）
-            int end = body.length();
-            for (int i = 0; i < body.length(); i++) {
-                char c = body.charAt(i);
-                if (c == ' ' || c == '"' || c == '[' || c == ':') {
-                    end = i;
-                    break;
-                }
-            }
-            String role = body.substring(0, end);
-            if ("text".equals(role)) {
-                continue; // 跳过纯文本节点
-            }
-            // name：首个引号对内的内容
-            String name = null;
-            int q1 = body.indexOf('"');
-            if (q1 >= 0) {
-                int q2 = body.indexOf('"', q1 + 1);
-                if (q2 > q1) {
-                    name = body.substring(q1 + 1, q2);
-                }
-            }
-            boolean disabled = body.contains("[disabled]");
-            String key = role + "|" + (name == null ? "" : name);
-            int nth = counters.getOrDefault(key, 0);
-            counters.put(key, nth + 1);
-            LocatorSpec spec = LocatorSpec.role(role, name, nth);
-            String safeName = name == null ? "" : name;
-            states.add(new Snapshot.ElementState(
-                    spec.canonical(), role, safeName, true, !disabled, safeName));
-        }
-        return states;
+        return AriaSnapshotParser.parse(raw, url, contextId, pageId, "main", version, bounds).snapshot();
     }
 
     @Override

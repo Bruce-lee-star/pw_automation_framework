@@ -29,18 +29,35 @@ public final class SnapshotVerifier {
         Objects.requireNonNull(expectations, "expectations");
         List<AssertionFailure> failures = new ArrayList<>();
         int passed = 0;
+        // §4.2 fail-closed：截断/不支持的快照是部分观测，「没看到」不能等价于「不存在」。
+        // 旧式无协议信封的精简快照（envelope == null）保持原有语义，不受本门禁影响。
+        boolean incomplete = !snapshot.isComplete();
+        String incompleteDetail = incomplete
+                ? snapshot.envelope().status() + " (" + snapshot.envelope().detail() + ")"
+                : "";
         for (SnapshotExpectation exp : expectations) {
             Snapshot.ElementState state = snapshot.byRef(exp.ref());
             if (exp.exists()) {
                 if (state == null) {
-                    failures.add(new AssertionFailure("element missing: " + exp.ref(), "present", "absent"));
+                    failures.add(new AssertionFailure(
+                            incomplete
+                                    ? "snapshot incomplete " + incompleteDetail
+                                        + " — element not observed, absence not proven: " + exp.ref()
+                                    : "element missing: " + exp.ref(),
+                            "present", "absent"));
                     continue;
                 }
             } else {
                 if (state != null) {
                     failures.add(new AssertionFailure("element present but expected absent: " + exp.ref(), "absent", "present"));
+                } else if (incomplete) {
+                    // 部分观测下不能据「未收录」断言元素已消失/不存在
+                    failures.add(new AssertionFailure(
+                            "snapshot incomplete " + incompleteDetail
+                                    + " — absence not proven: " + exp.ref(),
+                            "absent", "not observed"));
                 } else {
-                    passed++; // 期望不存在且确实不存在 → 通过
+                    passed++; // 完整快照下期望不存在且确实不存在 → 通过
                 }
                 continue;
             }

@@ -19,14 +19,34 @@ import java.util.stream.Collectors;
 public final class Snapshot {
     private final String pageRef;                       // 页面指纹
     private final Map<String, ElementState> byRef;      // ref(canonical) -> 状态
+    private final SnapshotEnvelope envelope;            // 协议信封（可为 null：旧式精简快照）
 
+    /** 旧构造器：无协议信封（测试用假通道 / 历史调用方），语义与 v3.7 之前完全一致。 */
     public Snapshot(String pageRef, List<ElementState> elements) {
+        this(pageRef, elements, null);
+    }
+
+    /**
+     * 带协议信封的构造器（生产采集路径）。
+     *
+     * @param envelope 观测版本/资源边界/状态；{@code null} 表示未声明协议（不触发验证侧 fail-closed 门禁）
+     */
+    public Snapshot(String pageRef, List<ElementState> elements, SnapshotEnvelope envelope) {
         this.pageRef = pageRef;
         this.byRef = elements.stream()
                 .collect(Collectors.toMap(ElementState::ref, Function.identity(), (a, b) -> a));
+        this.envelope = envelope;
     }
 
     public String pageRef() { return pageRef; }
+
+    /** 快照协议信封；旧式精简快照返回 {@code null}。 */
+    public SnapshotEnvelope envelope() { return envelope; }
+
+    /** 该快照是否明确为完整观测（无信封的历史快照按「未声明」处理，返回 true 以保持向后兼容）。 */
+    public boolean isComplete() {
+        return envelope == null || envelope.isComplete();
+    }
     public List<ElementState> elements() {
         return Collections.unmodifiableList(new java.util.ArrayList<>(byRef.values()));
     }
