@@ -37,8 +37,9 @@ jobs:
         run: mvn -B -q -DskipTests exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
 
       - name: Build and verify (gates: compile + Checkstyle + SpotBugs + unit + CVE + summary report)
-        # CT2-01：本 step 覆盖根 reactor 的 6 个框架模块（pw-core/pw-reports/pw-api-core/
-        #   pw-web-ui/pw-codegen-v3/pw-route）—— test-automation 是【独立构建单元】（已移出本仓库），
+        # CT2-01：本 step 覆盖根 reactor 的 7 个框架模块（pw-core/pw-agent-analysis/pw-reports/
+        #   pw-api-core/pw-web-ui/pw-codegen/pw-route，以根 pom.xml <modules> 为准；旧注释的
+        #   "6 个 / pw-codegen-v3" 已过时）—— test-automation 是【独立构建单元】（已移出本仓库），
         #   其真实浏览器 IT 由下方 e2e job 两段式执行（stage1 install → stage2 verify + 断言）。
         # -DskipITs：框架模块自身无 failsafe IT，保留以显式声明「主门禁不依赖浏览器环境」。
         # -Psca：A-2 治理——激活 SCA profile，在 package 阶段 install 兄弟模块到 .m2（供 OSV-Scanner
