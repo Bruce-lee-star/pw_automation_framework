@@ -194,8 +194,12 @@ public final class CodegenFieldPlanner {
     /**
      * Step 方法名的动词部分：按 role 派生（click/fill/check）。
      * 与 {@link #actionFor} 同源，避免"方法名叫 fillXxx、里面却是 click()"的错位。
+     *
+     * <p><b>公开给录制骨架转换复用</b>（{@code RecordedSkeletonConverter}）：同一份录制产物派生
+     * 「生成代码的动词」与「骨架动作原语」时必须同一口径，否则 checkbox 会被代码侧生成
+     * {@code check()}、却在骨架侧被记成 {@code CLICK}，两条消费链语义漂移。</p>
      */
-    static String verbFor(CodegenEntry e) {
+    public static String verbFor(CodegenEntry e) {
         String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
         switch (role) {
             case "textbox":
