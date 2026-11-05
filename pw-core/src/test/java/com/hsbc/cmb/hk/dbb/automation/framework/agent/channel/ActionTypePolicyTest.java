@@ -10,12 +10,12 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
- * 锁定逐动作策略元数据（v3.10，浏览器无关，9 个 ActionType 全覆盖）。
+ * 锁定逐动作策略元数据（v3.10，浏览器无关，全部 ActionType 全覆盖）。
  */
 public class ActionTypePolicyTest {
 
     @Test
-    public void allNineActionsAreMapped() {
+    public void allActionsAreMapped() {
         for (Command.ActionType a : Command.ActionType.values()) {
             assertNotNull("policy missing for " + a, ActionTypePolicy.of(a));
         }
@@ -32,6 +32,7 @@ public class ActionTypePolicyTest {
         assertFalse(ActionTypePolicy.of(Command.ActionType.WAIT).sideEffecting());
         assertFalse(ActionTypePolicy.of(Command.ActionType.ASSERT_VISIBLE).sideEffecting());
         assertFalse(ActionTypePolicy.of(Command.ActionType.ASSERT_TEXT).sideEffecting());
+        assertFalse(ActionTypePolicy.of(Command.ActionType.SWITCH_TO_POPUP).sideEffecting());
     }
 
     @Test
@@ -52,6 +53,8 @@ public class ActionTypePolicyTest {
         assertEquals(1, ActionTypePolicy.of(Command.ActionType.WAIT).maxRetries());
         assertEquals(1, ActionTypePolicy.of(Command.ActionType.CHECK).maxRetries());
         assertEquals(1, ActionTypePolicy.of(Command.ActionType.NAVIGATE).maxRetries());
+        assertTrue(ActionTypePolicy.of(Command.ActionType.SWITCH_TO_POPUP).idempotent());
+        assertEquals(0, ActionTypePolicy.of(Command.ActionType.SWITCH_TO_POPUP).maxRetries());
     }
 
     @Test

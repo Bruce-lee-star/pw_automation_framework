@@ -50,6 +50,7 @@ public final class ActionTypePolicy {
             case WAIT:           return new ActionPolicy(false, true,  Duration.ofMillis(15 * SEC), 1);
             case ASSERT_VISIBLE: return new ActionPolicy(false, true,  Duration.ofMillis(10 * SEC), 0);
             case ASSERT_TEXT:    return new ActionPolicy(false, true,  Duration.ofMillis(10 * SEC), 0);
+            case SWITCH_TO_POPUP:return new ActionPolicy(false, true,  Duration.ofMillis(5 * SEC), 0);
             default:             throw new AssertionError("unmapped action: " + action);
         }
     }

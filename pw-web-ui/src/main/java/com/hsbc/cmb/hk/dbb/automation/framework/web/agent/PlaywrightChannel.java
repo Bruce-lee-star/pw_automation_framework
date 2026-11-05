@@ -19,6 +19,9 @@ import static com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command.Act
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * BrowserCommandChannel 的 Playwright 真实现（设计 3.1.3 / 4.1 / 4.5）。
@@ -38,7 +41,7 @@ import java.util.Map;
  */
 public final class PlaywrightChannel implements BrowserCommandChannel {
 
-    private final Page page;
+    private Page page;
     private final Browser browser;
     private final BrowserContext context;
     /** 多语言目录（可选）：把 role 定位里的 NLS key 解析为当前语言文案（设计 §4.7）。 */
@@ -53,10 +56,12 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
     private final TimeoutResolver timeoutResolver;
     /** 通道会话所有权（P0 第 4 项 · 并发所有权）：保证同一 page 会话的命令独占串行执行。 */
     private final SessionOwnership ownership;
+    /** 捕获的 popup 新页面（P0 第 4 项 · Frame 生命周期）：click 触发 window.open 后由 onPopup 填充。 */
+    private final List<Page> receivedPopups = new CopyOnWriteArrayList<>();
     /** 本通道内的快照序号，动作后每次重新快照单调递增。 */
     private long snapshotVersion;
     private final String contextId = "ctx-" + Integer.toHexString(System.identityHashCode(this));
-    private final String pageId = "page-" + Integer.toHexString(System.identityHashCode(this));
+    private String pageId = "page-" + Integer.toHexString(System.identityHashCode(this));
 
     /** 逐动作超时解析策略：运行期把元数据 defaultTimeout 施加到 Playwright 调用。 */
     @FunctionalInterface
@@ -99,6 +104,8 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
         this.bounds = bounds;
         this.timeoutResolver = timeoutResolver;
         this.ownership = ownership;
+        // Frame 生命周期（P0 第 4 项）：注册 popup 捕获，使 window.open 弹出的新页面可被驱动捕获
+        page.onPopup(popup -> receivedPopups.add(popup));
     }
 
     private long timeoutFor(Command.ActionType action) {
@@ -186,6 +193,9 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
                                 + "] actual=[" + (actual == null ? "" : actual.trim()) + "]");
                     }
                     break;
+                case SWITCH_TO_POPUP:
+                    switchToPopup();
+                    break;
                 default:
                     return CommandResult.fail("Unsupported action: " + action);
             }
@@ -193,6 +203,43 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
         } catch (RuntimeException e) {
             return CommandResult.fail(e.getMessage());
         }
+    }
+
+    /**
+     * 切换到最近弹出的新页面（P0 第 4 项 · Frame 生命周期）。
+     *
+     * <p>click 触发 {@code window.open} 后，新页面经 {@code onPopup} 捕获进 {@link #receivedPopups}；
+     * 本方法把当前驱动目标切到该 popup（同一 context，资源随 {@link #close()} 一并释放）。
+     * 若尚未捕获（回调异步），则以 {@link Command.ActionType#WAIT} 策略超时等待下一次 popup 事件兜底。</p>
+     */
+    private Page switchToPopup() {
+        Page popup = awaitPopup();
+        this.page = popup;
+        this.pageId = "page-" + Integer.toHexString(System.identityHashCode(popup));
+        // popup 由 window.open 异步加载，给一点 load 等待（失败不阻断切页）
+        try {
+            popup.waitForLoadState(LoadState.LOAD,
+                    new Page.WaitForLoadStateOptions().setTimeout(timeoutFor(WAIT)));
+        } catch (RuntimeException ignored) {
+            // 导航进行中或已就绪：切页已生效，后续命令会重新解析
+        }
+        return popup;
+    }
+
+    /**
+     * 等待 onPopup 回调捕获 popup（click 触发 window.open 后由 {@link #receivedPopups} 填充）。
+     * Playwright 的 {@code onPopup} 通常在 click 返回前已派发，此处仅作异步边界兜底。
+     */
+    private Page awaitPopup() {
+        long timeoutMs = timeoutFor(WAIT);
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (receivedPopups.isEmpty()) {
+            if (System.nanoTime() >= deadlineNanos) {
+                throw new IllegalStateException("No popup captured within " + timeoutMs + "ms");
+            }
+            LockSupport.parkNanos(20_000_000L);
+        }
+        return receivedPopups.get(receivedPopups.size() - 1);
     }
 
     /**

@@ -21,7 +21,9 @@ public final class Command {
 
     /** 受控原语类型（对齐 MCP 工具集，但收敛为企业级契约）。 */
     public enum ActionType {
-        NAVIGATE, CLICK, FILL, SELECT, CHECK, UNCHECK, WAIT, ASSERT_VISIBLE, ASSERT_TEXT
+        NAVIGATE, CLICK, FILL, SELECT, CHECK, UNCHECK, WAIT, ASSERT_VISIBLE, ASSERT_TEXT,
+        /** 切换到最近弹出的新页面（P0 第 4 项 Frame 生命周期 · popup 新页面捕获）。 */
+        SWITCH_TO_POPUP
     }
 
     private final ActionType action;
@@ -74,5 +76,10 @@ public final class Command {
     }
     public static Command assertVisible(LocatorSpec ref) {
         return new Command(ActionType.ASSERT_VISIBLE, ref, Collections.emptyMap());
+    }
+
+    /** 切换到最近弹出的新页面（popup 捕获）；无 target、无参数，属上下文切换原语。 */
+    public static Command switchToPopup() {
+        return new Command(ActionType.SWITCH_TO_POPUP, null, Collections.emptyMap());
     }
 }
