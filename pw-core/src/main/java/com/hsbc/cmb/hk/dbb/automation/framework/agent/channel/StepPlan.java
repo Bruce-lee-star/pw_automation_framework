@@ -165,6 +165,20 @@ public final class StepPlan {
                 throw new IllegalArgumentException(action + " 不允许带写入型参数");
             }
         }
+        // 按 ActionType 校验参数键（§4.3）：外部输入（模型建议/手写计划）最常臆造参数键，
+        // 在此处拒绝比让执行器拿到未知键更早、更可诊断；schema 与意图侧共用 ActionParamSchema。
+        ActionParamSchema.Spec spec = ActionParamSchema.specOf(action);
+        for (String key : params.keySet()) {
+            if (!spec.allowedParams().contains(key)) {
+                throw new IllegalArgumentException(action + " 不允许参数: " + key);
+            }
+        }
+        for (String key : spec.requiredParams()) {
+            String value = params.get(key);
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException(action + " 缺少必填参数: " + key);
+            }
+        }
         rejectUnknownFields(step, "action", "target", "params", "scope");
         return new Command(action, target, params);
     }

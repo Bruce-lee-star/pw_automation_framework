@@ -172,6 +172,49 @@ public class StepPlanTest {
         assertEquals("同一带 step scope 计划指纹稳定", d2, StepPlan.parse(withStepScope).planDigest());
     }
 
+    // ---- 按 ActionType 的参数键 schema（§4.3 缺口补齐，v3.20） ----
+
+    @Test
+    public void rejectsUnknownParamKeyForAction() {
+        // 模型/外部输入最常见的臆造：给 CLICK 塞 value
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\","
+                + "\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\","
+                + "\"params\":{\"value\":\"x\"}}]}"));
+    }
+
+    @Test
+    public void rejectsMissingRequiredParam() {
+        // NAVIGATE 缺 url
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\",\"steps\":[{\"action\":\"NAVIGATE\"}]}"));
+        // FILL 缺 value
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\","
+                + "\"steps\":[{\"action\":\"FILL\",\"target\":\"role=textbox;name=u\"}]}"));
+        // SELECT 缺 option
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\","
+                + "\"steps\":[{\"action\":\"SELECT\",\"target\":\"role=combobox;name=role\"}]}"));
+    }
+
+    @Test
+    public void rejectsBlankRequiredParam() {
+        assertThrowsIllegal(() -> StepPlan.parse(
+                "{\"schemaVersion\":1,\"planId\":\"x\","
+                + "\"steps\":[{\"action\":\"FILL\",\"target\":\"role=textbox;name=u\","
+                + "\"params\":{\"value\":\"  \"}}]}"));
+    }
+
+    @Test
+    public void acceptsOmittedOptionalParam() {
+        // WAIT 的 ms 是可选参数：省略仍合法
+        StepPlan plan = StepPlan.parse("{\"schemaVersion\":1,\"planId\":\"x\","
+                + "\"steps\":[{\"action\":\"WAIT\",\"target\":\"role=button;name=Submit\"}]}");
+        assertEquals(1, plan.steps().size());
+        assertTrue(plan.steps().get(0).params().isEmpty());
+    }
+
     private static void assertThrowsIllegal(ThrowingRunnable r) {
         try {
             r.run();
