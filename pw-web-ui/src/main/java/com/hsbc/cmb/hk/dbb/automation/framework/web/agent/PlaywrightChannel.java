@@ -51,6 +51,8 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
      * 测试可注入极短超时以确定性验证运行期超时生效。
      */
     private final TimeoutResolver timeoutResolver;
+    /** 通道会话所有权（P0 第 4 项 · 并发所有权）：保证同一 page 会话的命令独占串行执行。 */
+    private final SessionOwnership ownership;
     /** 本通道内的快照序号，动作后每次重新快照单调递增。 */
     private long snapshotVersion;
     private final String contextId = "ctx-" + Integer.toHexString(System.identityHashCode(this));
@@ -84,12 +86,19 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
     /** 包内构造器：额外注入超时解析（真实浏览器超时测试用极短超时确定性验证）。 */
     PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls,
                       SnapshotBounds bounds, TimeoutResolver timeoutResolver) {
+        this(page, browser, context, nls, bounds, timeoutResolver, SessionOwnership.locked());
+    }
+
+    /** 包内构造器：额外注入会话所有权（并发所有权测试可注入自定义实现）。 */
+    PlaywrightChannel(Page page, Browser browser, BrowserContext context, NlsCatalog nls,
+                      SnapshotBounds bounds, TimeoutResolver timeoutResolver, SessionOwnership ownership) {
         this.page = page;
         this.browser = browser;
         this.context = context;
         this.nls = nls;
         this.bounds = bounds;
         this.timeoutResolver = timeoutResolver;
+        this.ownership = ownership;
     }
 
     private long timeoutFor(Command.ActionType action) {
@@ -121,6 +130,12 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
 
     @Override
     public CommandResult execute(Command command) {
+        // 并发所有权（P0 第 4 项）：同一 page 会话的命令经所有权契约独占串行执行，
+        // 防止多 StepDriver / 多线程交错驱动同一通道导致 Playwright 并发异常。
+        return ownership.runExclusive(() -> executeOnPage(command));
+    }
+
+    private CommandResult executeOnPage(Command command) {
         try {
             Command.ActionType action = command.action();
             Locator locator = command.target() == null ? null : toLocator(command.target());
