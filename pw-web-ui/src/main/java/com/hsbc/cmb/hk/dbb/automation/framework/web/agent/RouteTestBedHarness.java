@@ -10,12 +10,12 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Route;
 
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * 隔离靶场 SPI 的 Playwright 实现（设计 §3.1.2.1 / R4 / R8）。
@@ -58,6 +58,19 @@ public final class RouteTestBedHarness implements IsolationHarness {
                 .launch(new BrowserType.LaunchOptions().setHeadless(true));
         BrowserContext context = browser.newContext();
         Page page = context.newPage();
+        // R3 每跳重定向校验（设计 §10.4 / 企业出站由网络层兜底）：
+        // 默认 WARN 模式<b>不</b>拦截任何请求 —— 登录 SSO、IdP 回调等合法流程本就会跨主机跳转，
+        // 硬阻断会误伤。仅当显式开启 strict 模式（且已把 auth/IdP 主机列入 allow-list）时，
+        // 才对命中非沙箱主机的请求 abort，用于在 CI 捕获"首跳沙箱、重定向逃逸生产"的绕过。
+        if (RedirectValidationPolicy.guardMode() == RedirectValidationPolicy.RedirectGuardMode.STRICT) {
+            page.route("**", (Route route) -> {
+                if (RedirectValidationPolicy.isSandboxUrl(route.request().url())) {
+                    route.resume();
+                } else {
+                    route.abort();
+                }
+            });
+        }
         page.navigate(targetUrl);
         this.lastPage = page;
         PlaywrightChannel channel = new PlaywrightChannel(page, browser, context, nls);
@@ -110,37 +123,17 @@ public final class RouteTestBedHarness implements IsolationHarness {
         if (targetUrl == null || targetUrl.isBlank()) {
             throw new TestBedTargetRejectedException("<blank>", ALLOWED_HOSTS_KEY);
         }
-        String scheme;
+        if (RedirectValidationPolicy.isSandboxUrl(targetUrl)) {
+            return;
+        }
         String host;
         try {
             URI uri = new URI(targetUrl);
-            scheme = uri.getScheme();
             host = stripBrackets(uri.getHost());
         } catch (URISyntaxException e) {
-            throw new TestBedTargetRejectedException(targetUrl, ALLOWED_HOSTS_KEY);
-        }
-        if ("file".equalsIgnoreCase(scheme) || isLoopback(host)) {
-            return;
-        }
-        String allowed = ConfigReader.getProperty(ALLOWED_HOSTS_KEY, "");
-        for (String h : allowed.split(",")) {
-            if (host != null && host.equalsIgnoreCase(h.trim())) {
-                return;
-            }
+            host = targetUrl;
         }
         throw new TestBedTargetRejectedException(host, ALLOWED_HOSTS_KEY);
-    }
-
-    private static boolean isLoopback(String host) {
-        if (host == null) {
-            return false;
-        }
-        String h = host.toLowerCase(Locale.ROOT);
-        if (h.startsWith("[") && h.endsWith("]")) {
-            h = h.substring(1, h.length() - 1);
-        }
-        return "localhost".equals(h) || "127.0.0.1".equals(h)
-                || "::1".equals(h) || "0:0:0:0:0:0:0:1".equals(h);
     }
 
     /** IPv6 字面量在 {@link URI#getHost()} 中带方括号，去掉以便与 allow-list / loopback 判定一致。 */
