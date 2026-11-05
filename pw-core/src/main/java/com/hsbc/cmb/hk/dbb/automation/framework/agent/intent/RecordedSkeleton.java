@@ -2,6 +2,8 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.intent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -208,6 +210,65 @@ public record RecordedSkeleton(int schemaVersion, String origin, String pageRef,
 
     private static IntentTranslationException reject(IntentTranslationException.Reason reason, String message) {
         return new IntentTranslationException(reason, message);
+    }
+
+    // ---- JSON 输出（与 parse 严格对称） ----
+
+    /**
+     * 序列化为 JSON（录制骨架的落盘/交接形态）。
+     *
+     * <p><b>与 {@link #parse(String)} 严格对称</b>：输出只含根白名单字段
+     * （{@code schemaVersion}/{@code origin}/{@code pageRef}/{@code steps}）与 step 白名单字段
+     * （{@code action}/{@code target}/{@code params}），因此 {@code parse(toJson())} 必成功且
+     * 不丢语义（见 {@code RecordedSkeletonTest#toJsonRoundTripsThroughParse}）。</p>
+     *
+     * <p><b>确定性</b>：字段顺序固定、{@code params} 按键排序、{@code target} 为 {@code null} 时
+     * 不输出该字段——同一骨架恒产出同一字符串，可直接入 git / 比对差异，不会因 Map 迭代顺序抖动。</p>
+     *
+     * <p><b>fail-closed</b>：空白 action、超 {@value #MAX_FIELD_LENGTH} 的 target / 参数键值一律拒绝
+     * （{@link IntentTranslationException.Reason#INVALID_INPUT}），不产出「自己都读不回来」的 JSON。</p>
+     *
+     * @return 紧凑单行 JSON（UTF-8 语义，不含任何额外字段）
+     */
+    public String toJson() {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("schemaVersion", schemaVersion);
+        root.put("origin", origin);
+        root.put("pageRef", pageRef);
+        ArrayNode stepsNode = root.putArray("steps");
+        for (RecordedStep step : steps) {
+            stepsNode.add(toJsonNode(step));
+        }
+        return root.toString();
+    }
+
+    private static ObjectNode toJsonNode(RecordedStep step) {
+        String action = step.action();
+        if (action.isBlank() || action.length() > MAX_FIELD_LENGTH) {
+            throw reject(IntentTranslationException.Reason.INVALID_INPUT,
+                    "action must be non-blank and bounded: " + action);
+        }
+        ObjectNode node = MAPPER.createObjectNode();
+        node.put("action", action);
+        String target = step.target();
+        if (target != null) {
+            if (target.length() > MAX_FIELD_LENGTH) {
+                throw reject(IntentTranslationException.Reason.INVALID_INPUT,
+                        "target exceeds bound " + MAX_FIELD_LENGTH + ": " + action);
+            }
+            node.put("target", target);
+        }
+        ObjectNode paramsNode = node.putObject("params");
+        // TreeMap：参数键排序，保证同一语义骨架的 JSON 逐字节一致
+        new TreeMap<>(step.params()).forEach((key, value) -> {
+            if (key.isBlank() || key.length() > MAX_FIELD_LENGTH
+                    || value.length() > MAX_FIELD_LENGTH) {
+                throw reject(IntentTranslationException.Reason.INVALID_INPUT,
+                        "param out of bounds: " + action + "/" + key);
+            }
+            paramsNode.put(key, value);
+        });
+        return node;
     }
 
     // ---- 确定性规范化 ----

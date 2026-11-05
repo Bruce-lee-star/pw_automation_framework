@@ -213,6 +213,19 @@ public class RecordedSkeletonConverterTest {
         assertTrue("产出的计划必须过统一门禁", IntentPlanValidator.inspect(plan).accepted());
     }
 
+    @Test
+    public void convertedSkeletonRoundTripsThroughJson() {
+        CodegenEntry button = entry("a", "button", "Logon", null, "#a");
+
+        RecordedSkeleton skeleton = convert(actions(click("a")), entries(button));
+        RecordedSkeleton reparsed = RecordedSkeleton.parse(skeleton.toJson());
+
+        // 录制 → 骨架 → 落盘 → 重读，语义不丢（管线交接的最小闭环）
+        assertEquals(skeleton.steps(), reparsed.steps());
+        assertEquals(ORIGIN, reparsed.origin());
+        assertEquals(PAGE_URL, reparsed.pageRef());
+    }
+
     // ------------------------------------------------------------------
     // 夹具
     // ------------------------------------------------------------------

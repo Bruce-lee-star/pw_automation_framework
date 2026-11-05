@@ -1,11 +1,17 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.intent;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -127,6 +133,83 @@ public class RecordedSkeletonTest {
         } catch (NullPointerException expected) {
             assertTrue(true);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // JSON 输出（toJson 与 parse 严格对称）
+    // ------------------------------------------------------------------
+
+    @Test
+    public void toJsonRoundTripsThroughParse() {
+        RecordedSkeleton original = new RecordedSkeleton(1, "codegen", "https://example.com/login",
+                List.of(RecordedStep.of("NAVIGATE", null, "url", "https://example.com/login"),
+                        new RecordedStep("FILL", "role=textbox;name=username", Map.of("value", "alice"))));
+
+        RecordedSkeleton reparsed = RecordedSkeleton.parse(original.toJson());
+
+        assertEquals(original.schemaVersion(), reparsed.schemaVersion());
+        assertEquals(original.origin(), reparsed.origin());
+        assertEquals(original.pageRef(), reparsed.pageRef());
+        assertEquals(original.steps(), reparsed.steps());
+    }
+
+    @Test
+    public void toJsonIsDeterministicAndSortsParams() {
+        Map<String, String> ordered = new LinkedHashMap<>();
+        ordered.put("alpha", "1");
+        ordered.put("beta", "2");
+        Map<String, String> reversed = new LinkedHashMap<>();
+        reversed.put("beta", "2");
+        reversed.put("alpha", "1");
+        RecordedSkeleton a = new RecordedSkeleton(1, "codegen", "p",
+                List.of(new RecordedStep("FILL", "role=textbox;name=u", ordered)));
+        RecordedSkeleton b = new RecordedSkeleton(1, "codegen", "p",
+                List.of(new RecordedStep("FILL", "role=textbox;name=u", reversed)));
+
+        // 参数插入顺序不同 ⇒ 同一 JSON（逐字节可比对，可安全入 git）
+        assertEquals(a.toJson(), b.toJson());
+        assertTrue(a.toJson().indexOf("\"alpha\"") < a.toJson().indexOf("\"beta\""));
+    }
+
+    @Test
+    public void toJsonOmitsNullTarget() {
+        RecordedSkeleton skeleton = new RecordedSkeleton(1, "codegen", "p",
+                List.of(RecordedStep.of("NAVIGATE", null, "url", "p")));
+
+        String json = skeleton.toJson();
+
+        assertFalse("target=null 时不应输出该字段: " + json, json.contains("\"target\""));
+        assertEquals(1, RecordedSkeleton.parse(json).steps().size());
+    }
+
+    @Test
+    public void toJsonRejectsBlankAction() {
+        RecordedSkeleton skeleton = new RecordedSkeleton(1, "codegen", "p",
+                List.of(RecordedStep.of("  ", null)));
+        assertReason(IntentTranslationException.Reason.INVALID_INPUT, skeleton::toJson);
+    }
+
+    @Test
+    public void toJsonRejectsOversizedParam() {
+        String huge = "x".repeat(RecordedSkeleton.MAX_FIELD_LENGTH + 1);
+        RecordedSkeleton skeleton = new RecordedSkeleton(1, "codegen", "p",
+                List.of(RecordedStep.of("FILL", "role=textbox;name=u", "value", huge)));
+        assertReason(IntentTranslationException.Reason.INVALID_INPUT, skeleton::toJson);
+    }
+
+    @Test
+    public void toJsonEmitsOnlyWhitelistedFields() throws Exception {
+        RecordedSkeleton skeleton = new RecordedSkeleton(1, "codegen", "p",
+                List.of(new RecordedStep("FILL", "role=textbox;name=u", Map.of("value", "alice"))));
+
+        JsonNode root = new ObjectMapper().readTree(skeleton.toJson());
+        Set<String> rootFields = new TreeSet<>();
+        root.fieldNames().forEachRemaining(rootFields::add);
+        assertEquals(Set.of("schemaVersion", "origin", "pageRef", "steps"), rootFields);
+
+        Set<String> stepFields = new TreeSet<>();
+        root.get("steps").get(0).fieldNames().forEachRemaining(stepFields::add);
+        assertEquals(Set.of("action", "target", "params"), stepFields);
     }
 
     private static void assertReason(IntentTranslationException.Reason expected, Runnable action) {
