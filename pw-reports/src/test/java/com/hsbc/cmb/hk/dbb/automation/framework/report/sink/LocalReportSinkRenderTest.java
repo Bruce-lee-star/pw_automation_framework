@@ -1,5 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.sink;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.LocatorHealthEntry;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.LocatorHealthReportData;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.LocatorHealthReportRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.LocatorHealthViolation;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.CaseFinishedEvent;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.RunFinishedEvent;
@@ -8,6 +12,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -62,6 +68,52 @@ class LocalReportSinkRenderTest {
         assertThat(dir.resolve("index.html")).exists();
         assertThat(dir.resolve("pw-summary.json")).exists();
         assertThat(sink.writtenIds()).isEmpty();
+    }
+
+    @Test
+    void writesLocatorHealthPageWithoutTouchingIndex() throws Exception {
+        LocatorHealthReportRegistry.install(() -> new LocatorHealthReportData(
+                List.of(new LocatorHealthEntry("#row", "css", 3L, 1L, 2)),
+                List.of(new LocatorHealthViolation("case-a", "#row", "css", "click", 2,
+                        "main", "2026-11-06T10:00:00Z")),
+                false));
+        try {
+            PwReportsConfig config = PwReportsConfig.builder().outputDir(dir).build();
+            LocalReportSink sink = new LocalReportSink(config);
+            sink.onRunStarted();
+            TestOutcome a = outcome("case-a", TestResult.SUCCESS);
+            sink.accept(new CaseFinishedEvent(a));
+            sink.accept(new RunFinishedEvent(List.of(a)));
+
+            // 独立页确实被收尾链路注册并落盘（防"忘记接任务"）
+            assertThat(dir.resolve("locator-health.html")).exists();
+            // index 不引入：既无内容也无入口链接
+            String index = Files.readString(dir.resolve("index.html"), StandardCharsets.UTF_8);
+            assertThat(index)
+                    .doesNotContain("locator-health.html")
+                    .doesNotContain("Strict violations");
+        } finally {
+            LocatorHealthReportRegistry.install(null);
+        }
+    }
+
+    @Test
+    void omitsLocatorHealthPageWhenNoData() throws Exception {
+        LocatorHealthReportRegistry.install(LocatorHealthReportData::empty);
+        try {
+            PwReportsConfig config = PwReportsConfig.builder().outputDir(dir).build();
+            LocalReportSink sink = new LocalReportSink(config);
+            sink.onRunStarted();
+            TestOutcome a = outcome("case-a", TestResult.SUCCESS);
+            sink.accept(new CaseFinishedEvent(a));
+            sink.accept(new RunFinishedEvent(List.of(a)));
+
+            assertThat(dir.resolve("locator-health.html")).doesNotExist();
+            assertThat(Files.readString(dir.resolve("index.html"), StandardCharsets.UTF_8))
+                    .doesNotContain("locator-health.html");
+        } finally {
+            LocatorHealthReportRegistry.install(null);
+        }
     }
 
     private static TestOutcome outcome(String id, TestResult result) {

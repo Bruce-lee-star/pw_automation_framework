@@ -200,6 +200,11 @@ a.row-link:focus-visible { outline:2px solid var(--primary); outline-offset:2px;
 .dropzone .big { font-size:32px; }
 .hint { font-size:12px; color:var(--text-2); margin-top:8px; }
 
+/* ---------- 定位健康度（locator-health.html）：复用 .card/.tbl，仅补选择器代码与告警样式 ---------- */
+.tbl .lh-code code { background:#f1f5f9; border:1px solid var(--border); padding:1px 6px;
+                     border-radius:4px; font-size:12px; word-break:break-all; }
+.lh-warn { color:#dc2626; font-weight:600; }
+
 /* ---------- 附件列表（支持复测结果标记） ---------- */
 ul.att-list { list-style:none; margin-top:14px; }
 .att-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border);

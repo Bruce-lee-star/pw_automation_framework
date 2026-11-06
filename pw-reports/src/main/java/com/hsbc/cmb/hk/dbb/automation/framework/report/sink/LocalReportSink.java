@@ -14,6 +14,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.report.render.EmailReportRendere
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.FeatureHtmlRenderer;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.HtmlRenderer;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.JsonWriter;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.render.LocatorHealthHtmlRenderer;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.OutlineAggregator;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.JunitXmlWriter;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.render.StaticAssets;
@@ -43,7 +44,8 @@ import java.util.concurrent.TimeUnit;
  *   <li>{@code RunFinished} → sweep 补写漏网 JSON → 逐用例渲染 HTML（失败降级最小页）
  *       → pw-summary.json → index.html → feature-*.html →
  *       email-report.html（邮件用单页自包含报告）→
- *       monitor-failures.html（无监控失败不落文件）→ assets；</li>
+ *       monitor-failures.html（无监控失败不落文件）→
+ *       locator-health.html（无定位健康度数据不落文件）→ assets；</li>
  *       <p>（{@code serenity-summary.html} 已于 2026-10-22 删除：与 index + feature 页信息重复。）</p>
  *   <li>每项独立 try/catch，单项失败不影响其余项与测试本身。</li>
  * </ol>
@@ -144,6 +146,10 @@ public final class LocalReportSink implements ReportSink {
                 () -> { EmailReportRenderer.writeEmailReport(dir(), aggregated); return null; })));
         tasks.add(Executors.callable(() -> runRender("monitor-failures.html", false,
                 () -> { SummaryHtmlRenderer.writeMonitorFailures(dir(), outcomes); return null; })));
+        //  定位健康度独立页（2026-11-06 用户要求：不进 index / email-report）。
+        //  无采集数据时 write() 返回 null 且不落文件，与 monitor-failures 同口径。
+        tasks.add(Executors.callable(() -> runRender("locator-health.html", false,
+                () -> { LocatorHealthHtmlRenderer.write(dir(), aggregated); return null; })));
         tasks.add(Executors.callable(() -> runRender("pw-summary.csv", false,
                 () -> { CsvWriter.writeCsv(dir(), aggregated); return null; })));
         tasks.add(Executors.callable(() -> runRender("pw-junit.xml", false,

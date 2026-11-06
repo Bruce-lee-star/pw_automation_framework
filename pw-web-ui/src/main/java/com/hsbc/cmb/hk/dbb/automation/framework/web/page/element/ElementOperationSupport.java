@@ -40,6 +40,7 @@ final class ElementOperationSupport {
     static <T> T executeSafely(Supplier<Locator> locatorFn, String selector,
                                BasePage page, Supplier<T> action, String operation) {
         awaitFrameQuiet(page, operation);
+        LocatorHealthRecorder.recordUse(selector);
         try {
             return action.get();
         } catch (TimeoutError e) {
@@ -47,6 +48,7 @@ final class ElementOperationSupport {
             captureDiagnosticsAndLog(locatorFn, selector, page, operation, ex);
             throw ex;
         } catch (PlaywrightException e) {
+            recordStrictViolation(e, selector, operation);
             if (isNavigationOrContextLoss(e)) {
                 // 检测到路由/导航变化：等 DOM 加载完毕（仅一次），再操作一次，吸收导航抖动
                 waitForDomSettled(page, operation, selector);
@@ -55,6 +57,7 @@ final class ElementOperationSupport {
                 } catch (RuntimeException e2) {
                     //  P1-8：与 executeWithRetry 对齐 —— 等 DOM 落定后仍失败（含非 Playwright 异常，如框架 NPE）
                     //  也收集 DOM 诊断并包装为 ElementOperationException，不再直接逃逸。
+                    recordStrictViolation(e2, selector, operation);
                     ElementOperationException ex = new ElementOperationException(operation, selector,
                         "Failed: " + operation, e2);
                     captureDiagnosticsAndLog(locatorFn, selector, page, operation, ex);
@@ -66,6 +69,15 @@ final class ElementOperationSupport {
             captureDiagnosticsAndLog(locatorFn, selector, page, operation, ex);
             throw ex;
         }
+    }
+
+    /**
+     * 定位健康度证据：只记 Playwright strict 违例（一次定位命中多个元素），不改执行语义。
+     *
+     * <p>放在异常路径而非每次操作前，是为了零额外 DOM 成本——strict 是否发生由 Playwright 自己判定。</p>
+     */
+    private static void recordStrictViolation(Throwable error, String selector, String operation) {
+        LocatorHealthRecorder.recordFailure(error, selector, operation);
     }
 
     /**
@@ -105,6 +117,7 @@ final class ElementOperationSupport {
                                  BasePage page, Supplier<Boolean> action,
                                  String operation, String testName) {
         awaitFrameQuiet(page, operation);
+        LocatorHealthRecorder.recordUse(selector);
         Boolean first;
         try {
             first = action.get();
@@ -162,6 +175,8 @@ final class ElementOperationSupport {
 
     private static RuntimeException buildRetryException(Supplier<Locator> locatorFn, String selector,
             BasePage page, String operation, String testName, RuntimeException lastEx, int retryCount) {
+        // 定位健康度证据：统一在「最终判定失败」处留证（首轮失败与导航后重试失败都汇于此）。
+        recordStrictViolation(lastEx, selector, operation);
         ElementDiagnosticsCollector diagnostics = new ElementDiagnosticsCollector(
                 locatorFn.get(), selector, page.getPageRaw(), page.getCurrentFrame());
         ElementOperationException.DiagnosticInfo info = diagnostics.collect();
