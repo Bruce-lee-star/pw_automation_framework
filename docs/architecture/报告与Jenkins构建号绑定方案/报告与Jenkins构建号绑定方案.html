@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>报告与 Jenkins 构建号绑定方案 · pw-reports</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2310233a'/%3E%3Cpath d='M7 22V10h4l5 7 5-7h4v12' stroke='%23e8a33d' stroke-width='2.4' fill='none' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --ink:#10233a;          /* 主文字/头部 */
+  --ink-soft:#3b4f68;
+  --muted:#66788c;
+  --paper:#f6f7f8;
+  --card:#ffffff;
+  --line:#dfe4ea;
+  --line-strong:#c4cdd8;
+  --amber:#b8621b;        /* 唯一强调色 */
+  --amber-soft:#fbf1e6;
+  --pass:#0f6b47;
+  --fail:#a92b23;
+  --code-bg:#0f1b2b;
+  --code-ink:#dbe6f1;
+  --mono:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Segoe UI","Microsoft YaHei","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  font-size:16px;
+  line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+
+/* ---------- masthead ---------- */
+.masthead{background:var(--ink);color:#eef3f8;padding:40px 0 32px;border-bottom:3px solid var(--amber)}
+.masthead .eyebrow{
+  font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+  color:#9fb2c6;margin:0 0 14px
+}
+.masthead h1{font-size:clamp(26px,3.4vw,42px);line-height:1.22;margin:0 0 14px;font-weight:700;letter-spacing:-.01em}
+.masthead .dek{max-width:72ch;color:#c9d6e4;font-size:15px;margin:0}
+.masthead .meta{
+  display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:22px;
+  font-family:var(--mono);font-size:12px;color:#9fb2c6
+}
+.masthead .meta span b{color:#eef3f8;font-weight:600}
+
+/* ---------- verdict ---------- */
+.verdict{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--amber);padding:26px 24px;margin:-26px auto 0;position:relative;max-width:1140px;box-shadow:0 12px 32px rgba(16,35,58,.08)}
+.verdict h2{font-size:13px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin:0 0 16px}
+.verdict ol{margin:0;padding-left:20px}
+.verdict li{margin:0 0 12px}
+.verdict li:last-child{margin-bottom:0}
+.verdict strong{color:var(--ink)}
+.verdict code{font-family:var(--mono);font-size:13px;background:#eff3f7;padding:1px 5px;border-radius:3px;color:#243b55}
+
+/* ---------- sections ---------- */
+main{padding:46px 0 20px}
+section{margin:0 0 54px}
+section h2{
+  font-size:clamp(21px,2.4vw,27px);margin:0 0 6px;letter-spacing:-.01em;
+  display:flex;align-items:baseline;gap:12px;flex-wrap:wrap
+}
+section h2 .num{
+  font-family:var(--mono);font-size:12px;color:var(--amber);letter-spacing:.08em;
+  border:1px solid #e2c6a8;background:var(--amber-soft);padding:2px 8px;border-radius:3px;font-weight:600
+}
+section .lede{color:var(--muted);margin:6px 0 24px;max-width:76ch;font-size:15px}
+h3{font-size:17px;margin:32px 0 10px;color:var(--ink)}
+h3::before{content:"";display:inline-block;width:6px;height:6px;background:var(--amber);margin-right:9px;vertical-align:2px}
+p{margin:0 0 14px;max-width:80ch}
+
+/* ---------- table ---------- */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);background:var(--card);margin:0 0 12px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px;table-layout:fixed}
+thead th{
+  background:#eef2f6;text-align:left;font-weight:600;color:var(--ink);
+  padding:11px 14px;border-bottom:1px solid var(--line-strong);white-space:nowrap;font-size:13px
+}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:nth-child(even){background:#fbfcfd}
+td code,th code{font-family:var(--mono);font-size:12.5px;color:#1f3a58;background:#eff3f7;padding:1px 5px;border-radius:3px;word-break:break-all}
+.tbl-note{font-size:12.5px;color:var(--muted);margin:0 0 26px;font-family:var(--mono)}
+
+/* ---------- status pills ---------- */
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.04em;padding:2px 7px;border-radius:3px;white-space:nowrap;font-weight:600}
+.p-have{background:#e6f4ec;color:var(--pass);border:1px solid #b9dfca}
+.p-gap{background:#fbeae8;color:var(--fail);border:1px solid #eec7c2}
+.p-new{background:var(--amber-soft);color:var(--amber);border:1px solid #e6c9a9}
+
+/* ---------- diagram ---------- */
+.diagram{background:var(--card);border:1px solid var(--line);padding:22px 18px;margin:0 0 10px;overflow-x:auto}
+.diagram svg{display:block;min-width:760px;width:100%;height:auto}
+.diagram .cap{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+
+/* ---------- code ---------- */
+.code{
+  background:var(--code-bg);color:var(--code-ink);border-radius:5px;
+  padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.8px;line-height:1.65;
+  margin:0 0 8px;white-space:pre;tab-size:2
+}
+.code .cm{color:#7f95ad}
+.code .st{color:#e8a33d}
+.code .ky{color:#8fc3ff}
+.code-title{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:0 0 6px;letter-spacing:.03em
+}
+.code-title .tag{color:var(--amber);border:1px solid #e6c9a9;background:var(--amber-soft);padding:1px 6px;border-radius:3px}
+
+/* ---------- cards ---------- */
+.grid{display:flex;flex-wrap:wrap;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);padding:18px 20px;flex:1 1 100%}
+.card h4{margin:0 0 8px;font-size:15px}
+.card p{margin:0;font-size:14px;color:var(--ink-soft)}
+.card.warn{border-left:3px solid var(--fail)}
+.card.good{border-left:3px solid var(--pass)}
+.card.note{border-left:3px solid var(--amber)}
+
+/* ---------- checklist ---------- */
+.check{background:var(--card);border:1px solid var(--line);padding:6px 20px 18px;margin:0 0 12px}
+.check li{margin:9px 0;font-size:14px;color:var(--ink-soft)}
+.check li b{color:var(--ink)}
+.check li code{font-family:var(--mono);font-size:12.5px;background:#eff3f7;padding:1px 5px;border-radius:3px}
+
+/* ---------- roadmap ---------- */
+.road{display:flex;flex-wrap:wrap;gap:14px}
+.road .col{background:var(--card);border:1px solid var(--line);padding:18px 20px;flex:1 1 100%}
+.road .col h4{margin:0 0 4px;font-size:14px;font-family:var(--mono);letter-spacing:.05em}
+.road .col .when{font-size:12px;color:var(--muted);margin:0 0 12px}
+.road .col ul{margin:0;padding-left:18px}
+.road .col li{font-size:14px;margin:7px 0;color:var(--ink-soft)}
+.road .p0{border-top:3px solid var(--fail)}
+.road .p1{border-top:3px solid var(--amber)}
+.road .p2{border-top:3px solid var(--line-strong)}
+
+footer{border-top:1px solid var(--line);margin-top:20px;padding:24px 0 48px;color:var(--muted);font-size:12.5px;font-family:var(--mono)}
+
+/* ---------- responsive ---------- */
+@media (min-width:720px){
+  .wrap{padding:0 28px}
+  .grid>.card{flex:1 1 calc(33.333% - 16px)}
+  .road>.col{flex:1 1 calc(33.333% - 14px)}
+}
+@media (max-width:520px){
+  body{font-size:15px}
+  .masthead{padding:30px 0 26px}
+  .verdict{margin:-20px 12px 0;padding:20px 18px}
+  .tbl-wrap{margin-left:-4px;margin-right:-4px}
+  section{margin-bottom:42px}
+  .code{font-size:12px;padding:14px}
+}
+@media print{
+  .masthead{background:#fff;color:#10233a}
+  .verdict{box-shadow:none}
+  .code{background:#f4f6f8;color:#10233a}
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Architecture Decision · pw-reports / DEV-V5</p>
+    <h1>报告与 Jenkins 构建号绑定方案</h1>
+    <p class="dek">让每一次 Jenkins 构建的报告、manual/auto 用例结论、失败补图与人工标记，都归属于同一个 <b>BUILD_NUMBER</b>——而不是散落在本地 target/reports 与某台电脑的浏览器里。</p>
+    <div class="meta">
+      <span>版本 <b>v1.0</b></span>
+      <span>日期 <b>2026-11-04</b></span>
+      <span>范围 <b>pw-reports · ReportServer · Jenkins</b></span>
+      <span>基线 <b>1406 测 / 0 失败 / 6 skipped</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="verdict">
+    <h2>结论先行</h2>
+    <ol>
+      <li>框架并不缺「拿到 build number」：<strong>ReportView 已解析 Jenkins 变量并渲染顶栏徽章</strong>，<strong>ReportServer 上传接口已支持 <code>?build=</code> 并以 build 号作 runId</strong>，<strong>补图 / 标记 / 撤销三个 API 已落盘且非破坏性可还原</strong>。零件齐了，缺的是把它们串起来的三步。</li>
+      <li>真正的断点在三处：<strong>报告元数据不带 build 身份</strong>、<strong>CI 侧没有「打包上传」这个动作</strong>、<strong>Jenkins 页面没有该 build 的报告入口与人工复核回写</strong>。</li>
+      <li>因此本方案不重写报告，只做一件事：<strong>把 BUILD_NUMBER 提升为报告运行键</strong>——报告内容落在 <code>/{project}/{BUILD_NUMBER}/</code>，对外可见的地址始终是 Jenkins 自己的 <code>${BUILD_URL}PW%20Report/</code>；人工补图与标记只写该 case 的 json，天然归属该次构建。</li>
+    </ol>
+  </div>
+</main>
+</div>
+
+<main class="wrap">
+
+<section id="s1">
+  <h2><span class="num">01</span>现状盘点：已经有 90%，缺的是闭环</h2>
+  <p class="lede">以下全部来自当前仓库源码（DEV-V5，提交 f9c8df90 之后的工作区），不是设计假设。先认清「已经有什么」，方案才不会重复造轮子。</p>
+
+  <h3>已具备的能力</h3>
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:22%"><col style="width:30%"><col style="width:48%"></colgroup>
+      <thead><tr><th>能力</th><th>实现位置</th><th>关键契约（可直接依赖）</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>CI 构建信息解析</td>
+          <td><code>render/ReportView.java</code> · <code>CiInfo</code></td>
+          <td>读 <code>JENKINS_URL / BUILD_NUMBER / BUILD_URL / GIT_COMMIT / NODE_NAME / BRANCH_NAME</code>；支持 <code>pw.report.ci.url</code> 覆盖与 <code>${BUILD_NUMBER}</code> 占位符；JENKINS_URL 有而 BUILD_URL 无时按约定拼构建页。</td>
+        </tr>
+        <tr>
+          <td>报告顶栏构建徽章</td>
+          <td><code>templates/index.ftl</code> <code>ci.present</code></td>
+          <td>仅当存在构建上下文时渲染，链接直指该次 build；无变量时整块不出现，本地跑不误伤。</td>
+        </tr>
+        <tr>
+          <td>build 号作运行键</td>
+          <td><code>cli/ReportServer.java</code> · <code>handleUpload</td>
+          <td><code>POST /{project}/runs?build=&lt;N&gt;</code>，runId 取 build（净化 <code>[^a-zA-Z0-9._-]</code>），否则回落 <code>yyyyMMdd-HHmmss-&lt;hex4&gt;</code>；解压目标做了 <code>normalize + startsWith</code> 越界防护。</td>
+        </tr>
+        <tr>
+          <td>失败补图 / 标记 / 撤销</td>
+          <td><code>ReportServer</code> 三个 API</td>
+          <td><code>/api/patch</code>（base64 落 screenshots，并追加步骤）；<code>/api/mark-success</code>（首次暂存 <code>original*</code> 后覆盖，可重复改备注）；<code>/api/mark-revert</code>（无损还原）。每次写后 <code>reindex()</code> 重渲染 HTML/summary/csv/junit/assets。</td>
+        </tr>
+        <tr>
+          <td>页面交互</td>
+          <td><code>templates/test-outcome.ftl</code> 内联脚本</td>
+          <td>同源 POST <code>api/patch / api/mark-success / api/mark-revert</code>；静态预览（file:// / IDE 63342 / CI 制品目录）降级为 localStorage + 下载 <code>&lt;outcomeId&gt;.patch.json</code>，可再由 CLI 回灌。</td>
+        </tr>
+        <tr>
+          <td>manual / auto 区分</td>
+          <td><code>TestOutcome.manual</code> · <code>PwReportPlugin</code> · <code>ManualCaseRecorder</code></td>
+          <td><code>@manual</code> 标签 → <code>markManual</code>；CLI 三模式：新建 manual case / 给失败 case 补图 / 消费 patch.json。</td>
+        </tr>
+        <tr>
+          <td>JUnit 与推送</td>
+          <td><code>JunitXmlWriter</code> · <code>HttpPushSink</code></td>
+          <td>产出 <code>pw-junit.xml</code>（按 feature 分 testsuite，Jenkins 可直接吃）；推送 <code>caseFinished</code> JSON（截图只带文件名，不内联字节，不重试）。</td>
+        </tr>
+        <tr>
+          <td>托管基址</td>
+          <td><code>PwReportsConfig.baseUrl()</code></td>
+          <td><code>pw.report.base.url</code> 非空即注入 <code>&lt;base href&gt;</code>，使相对链接在反代/子路径下仍可解析。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 1 · 现状能力清单（读自源码，未做改造）</p>
+
+  <h3>缺口：为什么「依附 build」这件事现在做不到</h3>
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:8%"><col style="width:26%"><col style="width:40%"><col style="width:26%"></colgroup>
+      <thead><tr><th>#</th><th>缺口</th><th>证据（当前代码事实）</th><th>后果</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="pill p-gap">G1</span></td>
+          <td>报告自身不带 build 身份</td>
+          <td><code>JsonWriter.writeSummary</code> 只写 <code>reportVersion / outcomes / totals</code>；<code>TestOutcome</code> 无 <code>buildNumber</code> 字段。构建信息只在 HTML 渲染瞬间从环境变量读取。</td>
+          <td>报告一旦离开那台机器（zip、artifact、邮件），就无法自证「我是第几次构建」，下游无法按 build 对账。</td>
+        </tr>
+        <tr>
+          <td><span class="pill p-gap">G2</span></td>
+          <td>有接收端，没有发送端</td>
+          <td><code>ReportServer</code> 实现了上传与归档，但仓库里没有任何「打包 + POST」的执行代码（无 ReportUploader、无 CI 上传步骤）。</td>
+          <td>build 号作 runId 的能力从未被真实使用，报告仍停在 <code>target/reports</code>。</td>
+        </tr>
+        <tr>
+          <td><span class="pill p-gap">G3</span></td>
+          <td>Jenkins 侧无归档编排</td>
+          <td>仓库只有 <code>.github/workflows</code>，无 Jenkinsfile；<code>pw-junit.xml</code> 已产出但无消费方。</td>
+          <td>Jenkins build 页面没有 test trend、没有报告入口、没有截图产物。</td>
+        </tr>
+        <tr>
+          <td><span class="pill p-gap">G4</span></td>
+          <td>静态快照下标记不落盘</td>
+          <td>前端注释即已说明：只有 ReportServer 托管时 API 才存在；HTML Publisher / artifact 目录里 POST 拿到 404 HTML，只能退到 localStorage + 下载 patch。</td>
+          <td>在 Jenkins 打开的报告上补图/标记，刷新即丢、换人不共享、不进 build 记录。</td>
+        </tr>
+        <tr>
+          <td><span class="pill p-gap">G5</span></td>
+          <td>无回写 Jenkins</td>
+          <td>标记只写 ReportServer 目录；没有任何调用 Jenkins API 的代码，build description 不含报告链接与复核结论。</td>
+          <td>评审人要在「Jenkins 构建页 → 报告站点 → 某个 run」三跳之间手工找，人工结论与 build 脱钩。</td>
+        </tr>
+        <tr>
+          <td><span class="pill p-gap">G6</span></td>
+          <td>manual case 未绑定 build</td>
+          <td><code>ManualCaseRecorder</code> 只接受 <code>--dir</code>（本地目录），无 <code>--project/--build/--server</code>。</td>
+          <td>人工执行结果无法出现在该 build 的报告里，manual/auto 并列统计只在单机成立。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 2 · G1–G6 缺口清单</p>
+</section>
+
+<section id="s2">
+  <h2><span class="num">02</span>绑定模型：BUILD_NUMBER 作为「报告运行键」</h2>
+  <p class="lede">不要为 Jenkins 单独造一套报告。只把已有的 runId 语义收紧为「一次 build = 一个 run」，三段落点自然对齐。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 1000 400" role="img" aria-label="三层绑定模型：采集、归档、回写">
+      <defs>
+        <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 z" fill="#10233a"/>
+        </marker>
+      </defs>
+      <!-- L1 -->
+      <rect x="20" y="26" width="300" height="150" rx="6" fill="#fbf1e6" stroke="#d8b083"/>
+      <text x="40" y="52" font-family="ui-monospace,Consolas,monospace" font-size="11" fill="#b8621b" letter-spacing="1.5">L1 · 采集</text>
+      <text x="40" y="78" font-family="Segoe UI,sans-serif" font-size="15" font-weight="700" fill="#10233a">BuildContext</text>
+      <text x="40" y="102" font-family="Consolas,monospace" font-size="11.5" fill="#3b4f68">BUILD_NUMBER, JOB_NAME, BUILD_URL</text>
+      <text x="40" y="120" font-family="Consolas,monospace" font-size="11.5" fill="#3b4f68">GIT_COMMIT, BRANCH_NAME, NODE_NAME</text>
+      <text x="40" y="148" font-family="Segoe UI,sans-serif" font-size="11.5" fill="#66788c">→ 写入 pw-summary.json 的 build 段</text>
+
+      <!-- L2 -->
+      <rect x="350" y="26" width="300" height="150" rx="6" fill="#eef3f8" stroke="#a9bccf"/>
+      <text x="370" y="52" font-family="ui-monospace,Consolas,monospace" font-size="11" fill="#10233a" letter-spacing="1.5">L2 · 归档（build 为键）</text>
+      <text x="370" y="78" font-family="Segoe UI,sans-serif" font-size="15" font-weight="700" fill="#10233a">ReportUploader</text>
+      <text x="370" y="102" font-family="Consolas,monospace" font-size="11.5" fill="#3b4f68">zip(target/reports)</text>
+      <text x="370" y="120" font-family="Consolas,monospace" font-size="11.5" fill="#3b4f68">POST /{project}/runs?build={N}</text>
+      <text x="370" y="148" font-family="Segoe UI,sans-serif" font-size="11.5" fill="#66788c">→ /{project}/{N}/ 成为该 build 的报告</text>
+
+      <!-- L3 -->
+      <rect x="680" y="26" width="300" height="150" rx="6" fill="#e6f4ec" stroke="#9ccbb1"/>
+      <text x="700" y="52" font-family="ui-monospace,Consolas,monospace" font-size="11" fill="#0f6b47" letter-spacing="1.5">L3 · 回写</text>
+      <text x="700" y="78" font-family="Segoe UI,sans-serif" font-size="15" font-weight="700" fill="#10233a">JenkinsDescriber</text>
+      <text x="700" y="102" font-family="Consolas,monospace" font-size="11.5" fill="#3b4f68">POST {BUILD_URL}submitDescription</text>
+      <text x="700" y="120" font-family="Consolas,monospace" font-size="11.5" fill="#3b4f68">通过率 · auto/manual · 失败数</text>
+      <text x="700" y="148" font-family="Segoe UI,sans-serif" font-size="11.5" fill="#66788c">→ build 页面直达该 build 报告</text>
+
+      <!-- arrows -->
+      <line x1="322" y1="101" x2="346" y2="101" stroke="#10233a" stroke-width="1.6" marker-end="url(#ar)"/>
+      <line x1="652" y1="101" x2="676" y2="101" stroke="#10233a" stroke-width="1.6" marker-end="url(#ar)"/>
+
+      <!-- pipeline band -->
+      <rect x="20" y="206" width="960" height="86" rx="6" fill="#ffffff" stroke="#dfe4ea"/>
+      <text x="40" y="230" font-family="ui-monospace,Consolas,monospace" font-size="11" fill="#66788c" letter-spacing="1.2">JENKINS PIPELINE</text>
+      <g font-family="Segoe UI,sans-serif" font-size="12.5" fill="#10233a">
+        <text x="40" y="262">mvn test</text>
+        <text x="150" y="262" fill="#9aa8b8">→</text>
+        <text x="170" y="262">报告落盘（含 build 段）</text>
+        <text x="340" y="262" fill="#9aa8b8">→</text>
+        <text x="360" y="262">上传 ?build=N</text>
+        <text x="480" y="262" fill="#9aa8b8">→</text>
+        <text x="500" y="262">junit / publishHTML / archiveArtifacts</text>
+        <text x="760" y="262" fill="#9aa8b8">→</text>
+        <text x="780" y="262">写 description</text>
+      </g>
+
+      <!-- manual loop -->
+      <rect x="20" y="312" width="620" height="64" rx="6" fill="#fbf1e6" stroke="#d8b083"/>
+      <text x="40" y="336" font-family="ui-monospace,Consolas,monospace" font-size="11" fill="#b8621b" letter-spacing="1.2">人工闭环（评审人在该 build 报告页上）</text>
+      <text x="40" y="360" font-family="Segoe UI,sans-serif" font-size="12.5" fill="#10233a">上传失败截图 → /api/patch　标记通过 → /api/mark-success　撤销 → /api/mark-revert</text>
+      <line x1="650" y1="344" x2="676" y2="344" stroke="#10233a" stroke-width="1.6" marker-end="url(#ar)"/>
+      <text x="686" y="340" font-family="Segoe UI,sans-serif" font-size="12" fill="#3b4f68">结果留存在该 build 目录</text>
+      <text x="686" y="358" font-family="Segoe UI,sans-serif" font-size="12" fill="#3b4f68">可选同步回 description</text>
+    </svg>
+    <p class="cap">图 1 · 三层绑定模型：采集（身份）→ 归档（归属）→ 回写（可见）</p>
+  </div>
+
+  <p>三层各自解决一个不同的问题，不能互相替代：<b>采集</b>解决「报告自证身份」，<b>归档</b>解决「报告归属哪次 build」，<b>回写</b>解决「人在 Jenkins 页面能不能看见」。少任何一层，都会退化成现在的手工搬运。</p>
+</section>
+
+<section id="s3">
+  <h2><span class="num">03</span>改造清单（文件级，按依赖顺序）</h2>
+  <p class="lede">共 6 个改动点，其中 3 个新增类、3 个既有文件小幅修改。全部不触碰 ReportBus 事件模型与渲染主流程，属于「接线」而非「重构」。</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:5%"><col style="width:30%"><col style="width:10%"><col style="width:43%"><col style="width:12%"></colgroup>
+      <thead><tr><th>#</th><th>文件</th><th>类型</th><th>改动要点</th><th>优先级</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td><code>report/config/BuildContext.java</code></td>
+          <td><span class="pill p-new">新增</span></td>
+          <td>不可变值对象：<code>buildNumber / jobName / buildUrl / commit / branch / node / project</code>。<code>static fromEnv()</code> 读环境变量（同时接受系统属性覆盖 <code>pw.report.build.number</code>）；<b>无 build 号时返回 empty()</b>，本地运行不伪造身份。另提供 <code>reportBaseUrl()</code> 生成 <code>{server}/{project}/{build}/</code>。</td>
+          <td>P0</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>report/render/JsonWriter.java</code></td>
+          <td>修改</td>
+          <td><code>writeSummary</code> 增 <code>"build"</code> 段与 <code>"manual"</code> 统计块：<code>total / auto / manual / passed / failed / overridden</code>。仅新增键，不改既有 <code>outcomes/totals</code> 结构——旧消费方零影响。</td>
+          <td>P0</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><code>report/cli/ReportUploader.java</code></td>
+          <td><span class="pill p-new">新增</span></td>
+          <td><code>--dir --server --project --build [--soft]</code>：目录 zip（跳过 <code>trace.zip</code> 可选）→ <code>POST {server}/{project}/runs?build={N}</code>；默认失败非 0 退出（让 Jenkins 变红），<code>--soft</code> 只告警不阻断。无鉴权、无额外校验，用 <code>java.net.http</code>，无第三方依赖。</td>
+          <td>P0</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><code>Jenkinsfile</code>（仓库根）</td>
+          <td><span class="pill p-new">新增</span></td>
+          <td>Declarative：test → junit → upload → publishHTML → archiveArtifacts → description。完整片段见 §4。</td>
+          <td>P0</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td><code>report/cli/JenkinsDescriber.java</code></td>
+          <td><span class="pill p-new">新增</span></td>
+          <td><b>可选</b>：只在「人工标记后要刷新 description」且调用发生在 Jenkins 之外时才用。Pipeline 内回写直接 <code>currentBuild.description = ...</code>，不产生 API 调用、不需要凭证。走 HTTP 时用<b>专用服务账号的 API Token</b>（非个人密码、非登录 session），最小权限，从 Credentials 注入；报告 URL 一律 <code>${BUILD_URL}PW%20Report/index.html</code>。</td>
+          <td>P1</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td><code>report/cli/ManualCaseRecorder.java</code></td>
+          <td>修改</td>
+          <td>增 <code>--project --build --server</code>：当三者齐备时，写入托管 run（等价于先落本地再上传）；保留 <code>--dir</code> 单机模式完全不变。</td>
+          <td>P1</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td><code>report/cli/ReportServer.java</code><br>（<code>reindex</code> 拆分）</td>
+          <td>修改</td>
+          <td>把全量 <code>reindex()</code> 拆成 <code>reindexCase</code>（只重渲染当前 case）+ <code>reindexAggregate</code>（只重写 summary/index/csv/junit）；同 run 加锁，所有渲染器改原子写。详见 §06 补图表。</td>
+          <td>P1</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 3 · 改造清单（P0 = 打通主链路；P1 = 回写与人工结果归 build、影响面收敛）</p>
+
+  <div class="grid" style="margin-top:22px">
+    <div class="card good">
+      <h4>不做什么</h4>
+      <p>不改 ReportBus 事件流、不动 sink fan-out、不替换 Thymeleaf/FreeMarker 模板、不给报告加数据库。build 绑定是「路径 + 元数据 + 一个 HTTP 调用」，不是新架构。</p>
+    </div>
+    <div class="card note">
+      <h4>为什么用 runId 而不是加字段</h4>
+      <p>ReportServer 的目录布局 <code>{root}/{project}/{runId}/</code> 本身就是最强的绑定：截图、trace、HTML、junit 全在同一目录下。以 build 号作 runId，物理归属即逻辑归属，不需要额外索引。</p>
+    </div>
+    <div class="card warn">
+      <h4>唯一不可妥协点</h4>
+      <p>报告必须由 ReportServer 托管才能标记落盘。HTML Publisher 只是静态快照，任何「在快照上标记并回写」的方案都会退化成 localStorage——这一点在 §6 展开。</p>
+    </div>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="num">04</span>Jenkinsfile：四步把 build 接上</h2>
+  <p class="lede">Windows agent + Declarative Pipeline。四件事缺一不可：喂 junit、上传报告、留静态快照与截图、写 description。命令全部可直接复制。</p>
+
+  <p class="code-title"><span>Jenkinsfile（仓库根，Windows agent）</span><span class="tag">可直接落地</span></p>
+  <pre class="code"><span class="cm">// Jenkinsfile — pw_automation_framework / DEV-V5</span>
+pipeline {
+  agent { label <span class="st">'windows &amp;&amp; jdk21'</span> }
+  options {
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: <span class="st">'50'</span>))
+    <span class="cm">// 同一 job 串行：避免两个构建同时写同一个 build 号目录</span>
+    disableConcurrentBuilds()
+  }
+  environment {
+    PW_PROJECT       = <span class="st">'pw-automation'</span>
+    <span class="cm">// 只在服务端用（上传 + 写 API）；对外链接一律用 BUILD_URL</span>
+    PW_REPORT_SERVER = <span class="st">'http://reports.internal:8080'</span>
+  }
+  stages {
+    stage(<span class="st">'Test'</span>) {
+      steps {
+        bat <span class="st">'mvn -f pom.xml test -Dcheckstyle.skip=true'</span>
+      }
+      post {
+        always {
+          <span class="cm">// ① Jenkins 原生测试趋势：吃框架已产出的 pw-junit.xml</span>
+          junit testResults: <span class="st">'pw-reports/target/reports/pw-junit.xml'</span>,
+                allowEmptyResults: true, skipPublishingChecks: true
+        }
+      }
+    }
+    stage(<span class="st">'Publish Report'</span>) {
+      steps {
+        <span class="cm">// ② 上传：runId = BUILD_NUMBER，得到 /{project}/{N}/</span>
+        bat <span class="st">'''java -cp pw-reports/target/pw-reports-1.0.1.jar ^
+          com.hsbc.cmb.hk.dbb.automation.framework.report.cli.ReportUploader ^
+          --dir pw-reports/target/reports ^
+          --server %PW_REPORT_SERVER% --project %PW_PROJECT% --build %BUILD_NUMBER%'''</span>
+
+        <span class="cm">// ③ 静态快照兜底 + 产物留档（Jenkins 页面直接可见）</span>
+        publishHTML target: [
+          reportDir: <span class="st">'pw-reports/target/reports'</span>,
+          reportFiles: <span class="st">'index.html'</span>,
+          reportName: <span class="st">'PW Report (snapshot)'</span>,
+          allowMissing: true, alwaysLinkToLastBuild: false, keepAll: true
+        ]
+        archiveArtifacts artifacts: <span class="st">'pw-reports/target/reports/**/screenshots/*.png,'</span> +
+          <span class="st">'pw-reports/target/reports/pw-summary.json,'</span> +
+          <span class="st">'pw-reports/target/reports/**/trace.zip'</span>,
+          allowEmptyArchive: true
+
+        <span class="cm">// ④ 回写 description：用 Jenkins 内置对象，不需要 HTTP、凭证或 crumb</span>
+        script {
+          def sum  = new groovy.json.JsonSlurper().parseText(
+                       readFile(<span class="st">'pw-reports/target/reports/pw-summary.json'</span>))
+          def t    = sum.totals
+          def text = <span class="st">"PASS ${t.passed} / FAIL ${t.failed} / SKIP ${t.skipped}"</span>
+          if (sum.manual) { text += <span class="st">" | manual ${sum.manual.total} (pass ${sum.manual.passed}, fail ${sum.manual.failed})"</span> }
+          text += <span class="st">"\n${env.BUILD_URL}PW%20Report/index.html"</span>
+          currentBuild.description = text
+        }
+      }
+    }
+  }
+}</pre>
+
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:16%"><col style="width:30%"><col style="width:54%"></colgroup>
+      <thead><tr><th>步骤</th><th>命令</th><th>不做的后果</th></tr></thead>
+      <tbody>
+        <tr><td>① junit</td><td><code>junit 'pw-reports/target/reports/pw-junit.xml'</code></td><td>没有 test trend、失败无法定位到用例、无法做 flaky 统计。</td></tr>
+        <tr><td>② 上传</td><td><code>ReportUploader ... --build %BUILD_NUMBER%</code></td><td>报告永远停在 agent 本地，build 号作 runId 的能力等于没启用。</td></tr>
+        <tr><td>③ 快照 + 产物</td><td><code>publishHTML</code>（入口 <code>${BUILD_URL}PW%20Report/</code>）+ <code>archiveArtifacts</code></td><td>Jenkins 页面无入口；截图、trace 无法在构建产物里追溯。</td></tr>
+        <tr><td>④ description</td><td><code>currentBuild.description = ...</code>（Pipeline 内置对象，无 HTTP、无凭证）</td><td>评审人要手工拼 URL，人工标记与 build 编号脱钩。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 4 · Jenkins 四步各自的不可替代性</p>
+
+  <div class="grid">
+    <div class="card good">
+      <h4>Jenkins 要登录，回写要不要凭证</h4>
+      <p><b>不需要。</b>Pipeline 本身就跑在 Jenkins 里，<code>currentBuild</code> 是内存对象，赋值不走 HTTP，也不校验登录态、不需要 crumb、不碰 CSRF。<code>currentBuild.description = text</code> 一行即完成。这也是为什么 ④ 段不用 <code>withCredentials</code>。</p>
+    </div>
+    <div class="card">
+      <h4>什么时候才真的需要凭证</h4>
+      <p>只有「Jenkins 之外的进程要改 description」时才需要：比如人工补图后由报告站刷新 build 描述。这时用<b>专用服务账号 + API Token</b>（不是密码、不是浏览器 session），存 Credentials 由 <code>withCredentials</code> 注入；个人 token 会随轮换/离职失效，不建议。</p>
+    </div>
+    <div class="card warn">
+      <h4>SSO 环境最容易踩的坑</h4>
+      <p>公司 Jenkins 前面常挂统一登录。若 <code>BUILD_URL</code> 是代理域名、而 token 属于直连端口，取 <code>crumb</code> 时会 401/403。规则：<b>取 crumb 与提交 description 必须用同一个 host、同一个端口</b>；代理域名下的 token 交给平台管理员开白名单。</p>
+    </div>
+  </div>
+
+  <h3>Freestyle / 脚本式替代（不用 Jenkinsfile）</h3>
+  <p>如果暂时不能改 Jenkinsfile，用「Execute Windows batch command」两个步骤即可达到同样效果：</p>
+  <pre class="code"><span class="cm">:: 步骤 1 — 打包报告目录</span>
+powershell -NoProfile -Command "Compress-Archive -Path 'pw-reports\target\reports\*' -DestinationPath 'report.zip' -Force"
+
+<span class="cm">:: 步骤 2 — 以 build 号为 runId 上传</span>
+curl -X POST "http://reports.internal:8080/pw-automation/runs?build=%BUILD_NUMBER%" --data-binary "@report.zip" -H "Content-Type: application/zip"
+
+<span class="cm">:: 然后照旧添加 Post-build Actions：Publish JUnit test result report（pw-reports/target/reports/pw-junit.xml）
+:: 以及 Publish HTML reports（pw-reports/target/reports / index.html）</span></pre>
+  <p class="tbl-note">表 4 补充 · 无 Jenkinsfile 的最小可用路径</p>
+</section>
+
+<section id="s5">
+  <h2><span class="num">05</span>手工验证命令（本地即可跑通）</h2>
+  <p class="lede">在把 Jenkinsfile 接上之前，先用本地命令验证「build 号 → 报告目录 → 标记落盘」这条链路，避免在 CI 里盲调。</p>
+
+  <p class="code-title"><span>① 启动报告服务</span><span class="tag">CMD</span></p>
+  <pre class="code">java -cp pw-reports\target\pw-reports-1.0.1.jar com.hsbc.cmb.hk.dbb.automation.framework.report.cli.ReportServer --root pw-reports\target\reports-server --port 8080</pre>
+
+  <p class="code-title"><span>② 以 build=42 归档一次报告</span><span class="tag">CMD</span></p>
+  <pre class="code">powershell -NoProfile -Command "Compress-Archive -Path 'pw-reports\target\reports\*' -DestinationPath '%TEMP%\pw-report.zip' -Force"
+curl -X POST "http://localhost:8080/pw-automation/runs?build=42" --data-binary "@%TEMP%\pw-report.zip" -H "Content-Type: application/zip"</pre>
+
+  <p class="code-title"><span>③ 打开该 build 的报告</span><span class="tag">URL</span></p>
+  <pre class="code">http://localhost:8080/pw-automation/42/</pre>
+
+  <p class="code-title"><span>④ 给失败 case 补图（patch.json 由页面导出或自行构造）</span><span class="tag">CMD</span></p>
+  <pre class="code">curl -X POST "http://localhost:8080/pw-automation/42/api/patch" -H "Content-Type: application/json" -d @patch.json</pre>
+
+  <p class="code-title"><span>⑤ 标记通过 / 撤销</span><span class="tag">CMD</span></p>
+  <pre class="code">curl -X POST "http://localhost:8080/pw-automation/42/api/mark-success" -H "Content-Type: application/json" -d "{\"outcomeId\":\"20261104-101500-ab12\",\"note\":\"人工复现通过\"}"
+curl -X POST "http://localhost:8080/pw-automation/42/api/mark-revert"  -H "Content-Type: application/json" -d "{\"outcomeId\":\"20261104-101500-ab12\"}"</pre>
+
+  <p class="code-title"><span>⑥ manual case 直接写进该 build</span><span class="tag">CMD</span></p>
+  <pre class="code">java -cp pw-reports\target\pw-reports-1.0.1.jar com.hsbc.cmb.hk.dbb.automation.framework.report.cli.ManualCaseRecorder --dir pw-reports\target\reports-server\pw-automation\42 --feature "Login" --scenario "手工验证-短信登录" --result PASS --screenshot shot.png --note "人工执行"</pre>
+  <p class="tbl-note">注：第 ⑥ 步是 P1 改造前的等价做法（直接写托管目录）；改造后可用 <code>--server/--project/--build</code> 一步完成。</p>
+</section>
+
+<section id="s6">
+  <h2><span class="num">06</span>人工补图与标记：为什么必须落在托管页上</h2>
+  <p class="lede">这是本方案唯一与「直觉做法」冲突的地方：把报告复制到 Jenkins workspace 并用 HTML Publisher 展示，看起来最省事，但它会让标记能力失效。</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:18%"><col style="width:27%"><col style="width:27%"><col style="width:28%"></colgroup>
+      <thead><tr><th>形态</th><th>报告位置</th><th>补图 / 标记写哪里</th><th>能否依附 build</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>静态快照</b><br>（HTML Publisher / artifact 目录）</td>
+          <td>Jenkins workspace 的 <code>target/reports</code></td>
+          <td>浏览器 localStorage；或下载 <code>&lt;outcomeId&gt;.patch.json</code> 再人工回灌</td>
+          <td><span class="pill p-gap">否</span> 刷新丢失、换人不共享、不进 build 记录</td>
+        </tr>
+        <tr>
+          <td><b>托管报告</b><br>（ReportServer，本方案）</td>
+          <td>对外 <code>${BUILD_URL}PW%20Report/</code><br>实际落盘 <code>/{project}/{BUILD_NUMBER}/</code></td>
+          <td>同源 <code>/api/patch、/api/mark-success、/api/mark-revert</code> → 只写该 case 的 <code>{pid}.json</code> 与 <code>screenshots/</code>；<b>json 是唯一数据源</b>，HTML 只是渲染产物</td>
+          <td><span class="pill p-have">是</span> 物理目录即 build 归属，可回写 description</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 5 · 静态快照与托管报告的差别（前者只适合留档，后者才支持人工闭环）</p>
+
+  <h3>API 契约（服务端已实现，前端已对接）</h3>
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:34%"><col style="width:26%"><col style="width:40%"></colgroup>
+      <thead><tr><th>端点</th><th>请求体</th><th>语义与副作用</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>POST /{project}/{runId}/api/patch</code></td>
+          <td><code>{outcomeId, note, screenshots:[{filename,dataBase64}]}</code></td>
+          <td>base64 解码写 <code>screenshots/yyyyMMdd-HHmmss-NN.png</code>，并作为步骤追加进该 case 的 <code>{pid}.json</code>；随后只重渲染该 case 的 HTML 并更新聚合，其他 case 不动。</td>
+        </tr>
+        <tr>
+          <td><code>POST .../api/mark-success</code></td>
+          <td><code>{outcomeId, note}</code></td>
+          <td>首次标记暂存 <code>originalResult / originalTestFailure*</code> 后覆盖为通过；可重复调用改备注，不清原始态。</td>
+        </tr>
+        <tr>
+          <td><code>POST .../api/mark-revert</code></td>
+          <td><code>{outcomeId}</code></td>
+          <td>用 <code>original*</code> 无损还原失败态并清空覆盖标记；未标记过时返回 409。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid" style="margin-top:20px">
+    <div class="card good">
+      <h4>幂等</h4>
+      <p>同一 build 重复上传使用 <code>REPLACE_EXISTING</code>，重跑即覆盖为该 build 的最终报告——语义正确：一个 build 只有一份结论。</p>
+    </div>
+    <div class="card note">
+      <h4>并发</h4>
+      <p>不同 build 落在不同目录，天然隔离；同一 job 由 <code>disableConcurrentBuilds()</code> 串行，避免同号并发。</p>
+    </div>
+    <div class="card warn">
+      <h4>不做额外验证</h4>
+      <p>补图与标记不引入 token、登录或二次确认，请求到达即写 <code>{pid}.json</code>。边界交给网络：服务只在内网、只监听内网网段。能连上这个端口的人就能改结论——这是明确的取舍，不是遗漏。</p>
+    </div>
+  </div>
+
+  <h3>补图与标记的影响面：只碰当前 case</h3>
+  <p><b>json 是唯一数据源。</b>补图与标记只改两样东西：该 case 的 <code>{pid}.json</code>（结论、<code>original*</code>、evidence、截图引用）和该 case 的 <code>screenshots/</code>；HTML 全部是渲染产物，删了也能由 json 重建。要求是「一次操作只影响当前那一个 case」，而代码里 <code>reindex()</code> 做的是<b>整个 run 的全量重建</b>：递归读全部 outcome → 逐个重渲染所有 case 的 HTML → 重写 summary / index / csv / junit。数据没串，但写入面被放大了。</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:21%"><col style="width:32%"><col style="width:15%"><col style="width:16%"><col style="width:16%"></colgroup>
+      <thead><tr><th>动作</th><th>写入的文件</th><th>其他 case 的 json</th><th>build 聚合统计</th><th>junit 原始结果</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>POST api/patch</code></td>
+          <td><code>{runId}/{pid}/{pid}.json</code>、<code>{pid}/screenshots/*.png</code>、以及 reindex 带来的全量 HTML</td>
+          <td><span class="pill p-have">不改</span> 字节不变</td>
+          <td>重算（manual 计数变）</td>
+          <td>现状会被重写</td>
+        </tr>
+        <tr>
+          <td><code>POST api/mark-success</code></td>
+          <td>同上，且只在该 case 上暂存 <code>original*</code></td>
+          <td><span class="pill p-have">不改</span></td>
+          <td>重算（pass 数 +1）</td>
+          <td><span class="pill p-gap">现状会被污染</span> 失败数被改小</td>
+        </tr>
+        <tr>
+          <td><code>POST api/mark-revert</code></td>
+          <td>同上，用 <code>original*</code> 还原并清覆盖标记</td>
+          <td><span class="pill p-have">不改</span></td>
+          <td>重算（回到原始）</td>
+          <td>同左</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">补图表 · 目标语义：数据层只碰当前 case，聚合层必须更新，junit 只反映机器执行</p>
+
+  <div class="grid" style="margin-top:20px">
+    <div class="card good">
+      <h4>已经隔离的：数据层</h4>
+      <p>三个 API 都只读写 <code>runDir/{pid}/{pid}.json</code> 与该 case 的 <code>screenshots/</code>。标记用 <code>original*</code> 暂存原始态，<code>mark-revert</code> 可无损还原——<b>不会串到别的 case</b>。</p>
+    </div>
+    <div class="card warn">
+      <h4>没有隔离的：渲染层</h4>
+      <p>一次标记会把该 run 下<b>所有</b> case 的 HTML 重写一遍。内容虽相同，但在 4 线程池并发下，其他 case 页可能被读到半截——因为除 <code>JsonWriter</code> 外，渲染器都是 <code>Files.writeString</code> 直接覆盖，没有临时文件 + 原子替换。</p>
+    </div>
+    <div class="card note">
+      <h4>必须扩散的：聚合层</h4>
+      <p><code>pw-summary.json</code> / <code>index.html</code> / <code>cases.csv</code> 必然要变——build 级结论必须反映人工复核，这不是污染。但要限定在<b>该 run</b>，不跨 build。</p>
+    </div>
+  </div>
+
+  <p style="margin-top:22px"><b>把影响面收回到当前 case（P1 代码改造，3 处）</b></p>
+  <p class="code-title"><span>① 拆分 reindex：case 级 / 聚合级 分开</span><span class="tag">JAVA</span></p>
+  <pre class="code"><span class="cm">//  现状：reindex(runDir) 遍历所有 json + 重渲染所有 case HTML</span>
+<span class="cm">//  改为：</span>
+<span class="ky">private void</span> reindexCase(Path runDir, TestOutcome outcome) {   <span class="cm">// 只碰当前 case</span>
+    HtmlRenderer.renderOutcome(runDir, outcome);               <span class="cm">// 只重渲染这一个 html</span>
+}
+<span class="ky">private void</span> reindexAggregate(Path runDir) <span class="ky">throws</span> IOException {  <span class="cm">// 只碰聚合产物</span>
+    List&lt;TestOutcome&gt; all = loadAll(runDir);                   <span class="cm">// 读，不渲染</span>
+    JsonWriter.writeSummary(runDir, all);
+    AggregateBuilder.writeIndex(runDir, all);
+    CsvWriter.writeCsv(runDir, all);
+    JunitXmlWriter.writeXml(runDir, all);                      <span class="cm">// 用 original* 还原后生成</span>
+}</pre>
+
+  <p class="code-title"><span>② 同 run 串行、异 run 并行（保住 4 线程吞吐）</span><span class="tag">JAVA</span></p>
+  <pre class="code"><span class="ky">private final</span> ConcurrentHashMap&lt;String, ReentrantLock&gt; runLocks = <span class="ky">new</span> ConcurrentHashMap&lt;&gt;();
+<span class="ky">private</span> ReentrantLock lockOf(String key) {                  <span class="cm">// key = project + "/" + runId</span>
+    <span class="ky">return</span> runLocks.computeIfAbsent(key, k -&gt; <span class="ky">new</span> ReentrantLock());
+}</pre>
+
+  <p class="code-title"><span>③ 所有渲染器统一原子写（tmp + ATOMIC_MOVE）</span><span class="tag">JAVA</span></p>
+  <pre class="code"><span class="ky">static void</span> writeString(Path target, String content) <span class="ky">throws</span> IOException {
+    Path tmp = target.resolveSibling(target.getFileName() + <span class="st">".tmp"</span>);
+    Files.writeString(tmp, content, StandardCharsets.UTF_8);
+    <span class="ky">try</span> { Files.move(tmp, target, REPLACE_EXISTING, ATOMIC_MOVE); }
+    <span class="ky">catch</span> (AtomicMoveNotSupportedException e) { Files.move(tmp, target, REPLACE_EXISTING); }
+}</pre>
+  <p class="tbl-note">顺序很重要：先写 case 级（最坏只影响自己），再在 run 锁内更新聚合层；junit 生成时优先取 <code>originalResult</code>，人工标记不进 junit。</p>
+
+  <p><b>两个语义边界，落地时别混：</b></p>
+  <ul class="check">
+    <li><b>标记≠执行</b>：<code>mark-success</code> 只改<b>结论层</b>（summary / index / csv / description），不改 <code>pw-junit.xml</code> 里的机器结果。否则 Jenkins 测试趋势会被人工操作篡改，审计时无法解释「为什么这次构建失败数突然变少」。</li>
+    <li><b>只影响本 run</b>：聚合重算的输入是 <code>runDir</code> 内的 case，不读其他 build 目录。第 42 次构建的标记永远不会改写第 41 次构建的任何文件。</li>
+  </ul>
+</section>
+
+<section id="s7">
+  <h2><span class="num">07</span>验收标准（逐条可执行）</h2>
+  <p class="lede">每条都能用一条命令或一次页面操作验证；全过才算方案落地，不以「代码写完」为完成。</p>
+
+  <ul class="check">
+    <li><b>V1 · 身份落盘</b>：<code>mvn test</code> 后 <code>pw-summary.json</code> 含 <code>build.number</code>，且与 <code>%BUILD_NUMBER%</code> 一致；本地无该变量时 <code>build</code> 段为 <code>null/absent</code>，不伪造。</li>
+    <li><b>V2 · 归属正确</b>：从 build 页点 <code>PW Report</code> 能打开，顶栏构建徽章即该 build 号；换一个 build 号再上传，两个目录互不覆盖。</li>
+    <li><b>V3 · Jenkins 可见</b>：build 页面出现 test trend（junit）、"PW Report (snapshot)" 链接、artifacts 中的失败截图。</li>
+    <li><b>V4 · 标记持久</b>：在托管页补图 + 标记通过 → 刷新仍生效；<code>mark-revert</code> 后恢复失败态；<code>pw-summary.json</code> 的 manual/overridden 计数同步变化。</li>
+    <li><b>V5 · 回写生效</b>：build description 显示「PASS/FAIL/SKIP + manual 统计 + 报告 URL」，链接可点开直达该 build。</li>
+    <li><b>V6 · 失败不阻断</b>：ReportServer 不可达时，测试本体仍为原结果（不为报告服务背锅）；<code>--soft</code> 模式下构建不因上传失败而变红，但日志有明确告警。</li>
+    <li><b>V7 · 影响面隔离</b>：标记 case A 后，<code>{runId}/</code> 下除 A 以外的 <code>{pid}.json</code> 与 <code>{pid}.html</code> 的 SHA-256 与 mtime 均未变化；<code>pw-summary.json</code> / <code>index.html</code> 有变化属预期。<code>pw-junit.xml</code> 中 A 的失败数<b>不应</b>因人工标记而减少。</li>
+  </ul>
+  <p class="tbl-note">表 6 · 验收矩阵（V1–V7）</p>
+</section>
+
+<section id="s8">
+  <h2><span class="num">08</span>风险与红线</h2>
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:20%"><col style="width:44%"><col style="width:36%"></colgroup>
+      <thead><tr><th>风险</th><th>触发条件</th><th>处置</th></tr></thead>
+      <tbody>
+        <tr><td>Jenkins CSRF 拦截</td><td>开启 CSRF 时直接 POST <code>submitDescription</code> 返回 403</td><td>先取 <code>crumbIssuer/api/json</code> 并带 <code>crumbRequestField/crumb</code>；§4 的 PowerShell 已内置。</td></tr>
+        <tr><td>API token 权限过大</td><td>用管理员 token 写 description</td><td>专用账号 + 最小权限（仅目标 job 的构建描述）；凭据走 Jenkins Credentials，不落仓库、不进日志。</td></tr>
+        <tr><td>报告站无鉴权</td><td>任何内网用户可调 <code>mark-success</code> 篡改结论</td><td>按现状不加验证：服务只监听内网/本机，用网络隔离兜底；将来要跨网暴露再补反代认证。</td></tr>
+        <tr><td>HTML Publisher CSP</td><td>新版 Jenkins 默认 CSP 拦截页内脚本，报告交互失效</td><td>报告作为「快照兜底」只读展示；交互一律走托管页。必要时给 publishHTML 配置放宽策略。</td></tr>
+        <tr><td>敏感信息外泄</td><td>报告含账号、票据、内部地址</td><td>沿用 <code>ScrubGate</code> 脱敏；上传前校验 <code>.sanitized</code> 标记（借鉴现有 workflow 的凭据扫描闸门）。</td></tr>
+        <tr><td>磁盘无限增长</td><td>每次 build 一份完整报告（含截图、trace）</td><td>ReportServer 侧按 project 保留最近 N 个 build（如 50）；trace.zip 单独 TTL；与 Jenkins <code>buildDiscarder</code> 对齐。</td></tr>
+        <tr><td>重跑覆盖语义</td><td>同一 build number 重跑（Rebuild）</td><td>默认覆盖（该 build 的最终结论）；若需保留历史，改用 <code>{build}-{attempt}</code> 并在 description 指向最新。</td></tr>
+        <tr><td>Windows 编码/路径</td><td>中文 feature 名、超长路径</td><td>zip 内路径保持 UTF-8；解压侧已做 <code>normalize + startsWith</code>；避免把 build 报告目录嵌到过深路径。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 7 · 风险登记（按触发概率排序）</p>
+
+  <h3>Node 机器重启 / 报告服务中断时会发生什么</h3>
+  <p>先把结论说清：<b>重启本身不会丢报告，数据是磁盘上的普通文件</b>。真正会丢的是三种组合——服务跟着 agent 同生共死、<code>--root</code> 落在 workspace、agent 是临时节点。下面这张表按「重启发生的时机 × 服务部署位置」拆开看。</p>
+
+  <div class="tbl-wrap">
+    <table>
+      <colgroup><col style="width:26%"><col style="width:38%"><col style="width:36%"></colgroup>
+      <thead><tr><th>场景</th><th>重启后实际发生什么</th><th>历史报告 / Jenkins 记录</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>构建进行中</b><br>服务与 agent 同机（root 在 workspace）</td>
+          <td>构建被判 <code>FAILED / ABORTED</code>；服务进程死；<code>mvn clean</code> 或 agent 重装把 <code>target/reports</code> 清掉。<b>本次报告为空</b>，若恰逢上传窗口还会留下半成品目录。</td>
+          <td><span class="pill p-gap">全丢</span> 已上传报告随 workspace 一起消失，description 里的链接全部 404</td>
+        </tr>
+        <tr>
+          <td><b>构建进行中</b><br>服务与 agent 同机（root 在 <code>D:\pw-report-data</code>）</td>
+          <td>构建中断、服务进程死；重启后磁盘数据还在，但服务必须自启，否则链接一直打不开直到手动拉起。<b>本次报告为空</b>。</td>
+          <td><span class="pill p-have">保留</span> 历史报告完好，服务恢复后即可访问</td>
+        </tr>
+        <tr>
+          <td><b>构建进行中</b><br>服务在独立常驻机</td>
+          <td>只有本次构建失败，报告站完全无感；下一次构建（新 build 号）正常归档。</td>
+          <td><span class="pill p-have">保留</span> 服务与 agent 解耦，重启不影响任何已有链接</td>
+        </tr>
+        <tr>
+          <td><b>构建已完成</b><br>agent 重启</td>
+          <td>已归档到报告站的报告不受影响；Jenkins 侧 junit 结果、description、archived artifacts 存在 <b>controller</b>，不在 agent，同样不受影响。</td>
+          <td><span class="pill p-have">保留</span> 仅 workspace 里的本地快照可能被清，属预期</td>
+        </tr>
+        <tr>
+          <td><b>agent 为临时节点</b><br>（Docker / K8s / 按需云主机）</td>
+          <td>实例销毁即磁盘销毁。无论重启与否，本地报告都留不下。</td>
+          <td><span class="pill p-gap">必丢</span> 必须把报告外置到独立服务或对象存储</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 8 · 节点重启影响矩阵（判据：服务是否与 agent 同生命周期、root 是否在持久盘）</p>
+
+  <div class="grid" style="margin-top:20px">
+    <div class="card good">
+      <h4>数据在磁盘，不在内存</h4>
+      <p>报告是 <code>root/{project}/{runId}/</code> 下的普通文件，进程重启不影响内容。所以「重启丢报告」几乎都是 root 放错了位置，而不是服务本身的问题。</p>
+    </div>
+    <div class="card warn">
+      <h4>上传不是原子的</h4>
+      <p><code>ReportServer</code> 先建 <code>runDir</code> 再逐条 <code>Files.copy</code>，中途被杀会留下缺 <code>index.html</code> 或半套截图的目录；同号再传只覆盖同名文件，上次多出来的脏文件不会被清。</p>
+    </div>
+    <div class="card note">
+      <h4>无优雅停机</h4>
+      <p>基于 <code>com.sun.net.httpserver</code>，没有 shutdown hook 与连接排空；重启会硬断正在处理的请求，客户端看到连接重置而不是 5xx。</p>
+    </div>
+  </div>
+
+  <p style="margin-top:22px"><b>加固清单（P0 前置，不做则方案在第一次重启时就失效）</b></p>
+  <p class="code-title"><span>① 把报告服务注册成 Windows 服务（NSSM，开机自启 + 崩溃 5s 重启）</span><span class="tag">CMD</span></p>
+  <pre class="code">nssm install PWReportServer "C:\Program Files\Java\jdk-21\bin\java.exe" "-cp D:\pw_automation_framework\pw-reports\target\pw-reports-1.0.1.jar com.hsbc.cmb.hk.dbb.automation.framework.report.cli.ReportServer --root D:\pw-report-data --port 8080"
+nssm set PWReportServer AppDirectory D:\pw-report-data
+nssm set PWReportServer AppExit Default Restart
+nssm set PWReportServer AppRestartDelay 5000
+nssm set PWReportServer Start SERVICE_AUTO_START
+nssm start PWReportServer</pre>
+  <p class="tbl-note">无 NSSM 时的替代：<code>schtasks /create /tn PWReportServer /tr "&lt;上面的 java 命令&gt;" /sc onstart /ru SYSTEM /rl HIGHEST</code></p>
+
+  <div class="tbl-wrap" style="margin-top:16px">
+    <table>
+      <colgroup><col style="width:24%"><col style="width:44%"><col style="width:32%"></colgroup>
+      <thead><tr><th>加固项</th><th>做法</th><th>不做会怎样</th></tr></thead>
+      <tbody>
+        <tr><td>数据目录</td><td><code>--root D:\pw-report-data</code>，绝对路径、独立盘、不进 workspace</td><td>一次 <code>mvn clean</code> 或 agent 重装就清空全部历史</td></tr>
+        <tr><td>服务自启</td><td>NSSM 服务 + <code>AppExit Default Restart</code></td><td>重启后所有报告链接 404，直到有人手动拉起进程</td></tr>
+        <tr><td>对外地址</td><td>description / 通知只用 <code>${BUILD_URL}PW%20Report</code>；服务地址仅服务端内部使用</td><td>agent 换 IP 或服务迁移后，已经发出去的链接集体失效</td></tr>
+        <tr><td>上传原子性</td><td>解压到 <code>{runId}.tmp-&lt;rand&gt;</code>，完成后 <code>Files.move(ATOMIC_MOVE)</code> 进最终目录；启动时清理残留 <code>*.tmp-*</code></td><td>重启撞上上传窗口 → 半成品报告，页面 404 或缺图</td></tr>
+        <tr><td>归档校验</td><td>上传后 <code>GET /{project}/{build}/pw-summary.json</code> 必须 200，才算归档成功</td><td>HTTP 200 不等于报告可用，失败被静默吞掉</td></tr>
+        <tr><td>失败不阻断</td><td><code>ReportUploader --soft</code> + 有限重试（3 次 / 5s 间隔）</td><td>报告服务抖动把整条流水线染红，测试结论被掩盖</td></tr>
+        <tr><td>构建中断语义</td><td>接受「中断的 build 没有报告」；重跑产生新 build 号，不复用旧目录</td><td>误以为要「补传」到同一个 build，反而覆盖掉下一次的结论</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tbl-note">表 9 · 重启相关的七项加固（前四项属 P0，后三项属 P1）</p>
+
+</section>
+
+<section id="s9">
+  <h2><span class="num">09</span>实施顺序</h2>
+  <p class="lede">P0 打通「报告能按 build 找到」；P1 补齐「人工结论能回到 build」；P2 才是体验与治理。</p>
+  <div class="road">
+    <div class="col p0">
+      <h4>P0 · 主链路（1–2 天）</h4>
+      <p class="when">验收 V1 / V2 / V6</p>
+      <ul>
+        <li>ReportServer 独立部署 + 服务自启（<code>--root D:\pw-report-data</code>），见 §8 表 9</li>
+        <li>新增 <code>BuildContext</code>，写入 <code>pw-summary.json</code> 的 build 段</li>
+        <li>新增 <code>ReportUploader</code>（zip + POST <code>?build=</code>）</li>
+        <li>新增 <code>Jenkinsfile</code>：junit + upload + publishHTML + archiveArtifacts</li>
+        <li>本地按 §5 跑通 ①–④，确认目录归属与重复上传幂等</li>
+      </ul>
+    </div>
+    <div class="col p1">
+      <h4>P1 · 人工闭环（2–3 天）</h4>
+      <p class="when">验收 V4 / V5</p>
+      <ul>
+        <li>新增 <code>JenkinsDescriber</code>，description 带统计与报告 URL</li>
+        <li><code>ManualCaseRecorder</code> 增 <code>--server/--project/--build</code></li>
+        <li><code>pw-summary.json</code> 补 manual / overridden 统计块</li>
+        <li><code>reindex</code> 拆 case 级 / 聚合级 + run 锁 + 原子写（§06 补图表）</li>
+      </ul>
+    </div>
+    <div class="col p2">
+      <h4>P2 · 治理（按需）</h4>
+      <p class="when">验收 V3 完整性</p>
+      <ul>
+        <li>ReportServer 保留策略（按 build 数 / 天数清理）</li>
+        <li>如需跨网访问，再上反代 + SSO（当前不做）</li>
+        <li>flaky 统计：跨 build 聚合 <code>pw-summary.json</code></li>
+        <li>邮件/IM 通知附该 build 报告深链</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="num">10</span>一句话回答你的问题</h2>
+  <p><b>「怎么依附当前 build number 的 Jenkins server」</b>——不是把报告塞进 Jenkins workspace，而是让 <b>BUILD_NUMBER 成为报告的目录键</b>：测试结束把 <code>target/reports</code> 上传到 <code>/{project}/{BUILD_NUMBER}/</code>，对外只暴露 Jenkins 自己的 <code>${BUILD_URL}PW%20Report/</code>；人工补图与标记只改该 case 的 <code>.json</code>（json 是唯一数据源），聚合统计随该 build 更新，最后把统计与这个链接写进 build description。这样「第 42 次构建的报告、第 42 次构建的人工结论」在物理路径上就是同一件事，对外地址也只有一套。</p>
+</section>
+
+<footer>
+  <div class="wrap" style="padding:0">
+    报告与 Jenkins 构建号绑定方案 · v1.0 · 2026-11-04 · 依据源码：ReportServer / ReportView / PwReportsConfig / ManualCaseRecorder / PwReportPlugin / JsonWriter / JunitXmlWriter / test-outcome.ftl<br>
+    本文为设计方案，未修改任何生产代码；落地以 §3 清单为准。
+  </div>
+</footer>
+
+</main>
+</body>
+</html>

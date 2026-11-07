@@ -1,0 +1,452 @@
+{
+  "src": "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\报告与Jenkins构建号绑定方案.html",
+  "url": "file:///D:/IdeaProject/pw_automation_framework/docs/architecture/%E6%8A%A5%E5%91%8A%E4%B8%8EJenkins%E6%9E%84%E5%BB%BA%E5%8F%B7%E7%BB%91%E5%AE%9A%E6%96%B9%E6%A1%88/%E6%8A%A5%E5%91%8A%E4%B8%8EJenkins%E6%9E%84%E5%BB%BA%E5%8F%B7%E7%BB%91%E5%AE%9A%E6%96%B9%E6%A1%88.html",
+  "outdir": "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots",
+  "include": [
+    "lint",
+    "screenshots",
+    "structure"
+  ],
+  "shots": {
+    "desktop": {
+      "slices": [
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p1of4.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p2of4.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p3of4.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p4of4.jpg"
+      ],
+      "sliceHint": "按顺序 Read slices 里的各分片。",
+      "truncated": false,
+      "structure": {
+        "title": "报告与 Jenkins 构建号绑定方案 · pw-reports",
+        "firstH1": "报告与 Jenkins 构建号绑定方案",
+        "viewport": {
+          "w": 1422,
+          "h": 748
+        },
+        "fullpage": {
+          "w": 1422,
+          "h": 14071
+        },
+        "counts": {
+          "section": 10,
+          "h1": 1,
+          "h2": 11,
+          "img": 0,
+          "canvas": 0,
+          "svg": 1,
+          "links": 0,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "misalignedBlocks": [
+        {
+          "tag": "h2",
+          "text": "01现状盘点：已经有 90%，缺的是闭环",
+          "rect": [
+            149,
+            497,
+            1124,
+            46
+          ],
+          "widthDeltaVsGrid": 509,
+          "gridWidth": 615,
+          "containerWidth": 1124,
+          "containerTag": "section#s1"
+        },
+        {
+          "tag": "h3",
+          "text": "已具备的能力",
+          "rect": [
+            149,
+            633,
+            1124,
+            29
+          ],
+          "widthDeltaVsGrid": 509,
+          "gridWidth": 615,
+          "containerWidth": 1124,
+          "containerTag": "section#s1"
+        },
+        {
+          "tag": "div.tbl-wrap",
+          "text": "能力实现位置关键契约（可直接依赖）\n      \n        \n          CI 构建信息解析\n      ",
+          "rect": [
+            149,
+            672,
+            1124,
+            718
+          ],
+          "widthDeltaVsGrid": 509,
+          "gridWidth": 615,
+          "containerWidth": 1124,
+          "containerTag": "section#s1"
+        },
+        {
+          "tag": "h3",
+          "text": "缺口：为什么「依附 build」这件事现在做不到",
+          "rect": [
+            149,
+            1456,
+            1124,
+            29
+          ],
+          "widthDeltaVsGrid": 509,
+          "gridWidth": 615,
+          "containerWidth": 1124,
+          "containerTag": "section#s1"
+        },
+        {
+          "tag": "div.tbl-wrap",
+          "text": "#缺口证据（当前代码事实）后果\n      \n        \n          G1\n          报告自身不",
+          "rect": [
+            149,
+            1495,
+            1124,
+            571
+          ],
+          "widthDeltaVsGrid": 509,
+          "gridWidth": 615,
+          "containerWidth": 1124,
+          "containerTag": "section#s1"
+        },
+        {
+          "tag": "h2",
+          "text": "02绑定模型：BUILD_NUMBER 作为「报告运行键」",
+          "rect": [
+            149,
+            2154,
+            1124,
+            46
+          ],
+          "widthDeltaVsGrid": 434,
+          "gridWidth": 690,
+          "containerWidth": 1124,
+          "containerTag": "section#s2"
+        },
+        {
+          "tag": "div.diagram",
+          "text": "L1 · 采集\n      BuildContext\n      BUILD_NUMBER, JOB_NAME, BUI",
+          "rect": [
+            149,
+            2282,
+            1124,
+            538
+          ],
+          "widthDeltaVsGrid": 434,
+          "gridWidth": 690,
+          "containerWidth": 1124,
+          "containerTag": "section#s2"
+        },
+        {
+          "tag": "h2",
+          "text": "03改造清单（文件级，按依赖顺序）",
+          "rect": [
+            149,
+            2967,
+            1124,
+            46
+          ],
+          "widthDeltaVsGrid": 509,
+          "gridWidth": 615,
+          "containerWidth": 1124,
+          "containerTag": "section#s3"
+        }
+      ],
+      "misalignedBlocksHint": "含义：section/main/article 直接子级里，个别元素撑到父容器全宽、其他兄弟明显更窄。widthDeltaVsGrid=比栅格宽多少 px、gridWidth=正常栅格宽度、containerWidth=父容器宽度。最常见根因：HTML 标签闭合错位（<p> 忘了 </p> 等）导致元素跳出 .wrap/.container 层级，浏览器容错解析、不报 console 错但布局层级已被打乱。 | 修法：从 containerTag 定位到出问题的 section，逐行检查该 section 内前面的 HTML 标签闭合。 | 豁免：(1) **full-bleed / breakout 布局**——故意做全宽 hero、全宽 gradient divider、文章里跳出正文栏的大图/引用块（杂志排版）。看截图确认是设计意图后忽略；(2) sticky/absolute 顶栏错放在 section 直接子级下（罕见）。",
+      "reportSource": "cdp"
+    },
+    "mobile": {
+      "slices": [
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p1of6.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p2of6.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p3of6.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p4of6.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p5of6.jpg",
+        "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p6of6.jpg"
+      ],
+      "sliceHint": "按顺序 Read slices 里的各分片。",
+      "truncated": false,
+      "structure": {
+        "title": "报告与 Jenkins 构建号绑定方案 · pw-reports",
+        "firstH1": "报告与 Jenkins 构建号绑定方案",
+        "viewport": {
+          "w": 500,
+          "h": 692
+        },
+        "fullpage": {
+          "w": 500,
+          "h": 18369
+        },
+        "counts": {
+          "section": 10,
+          "h1": 1,
+          "h2": 11,
+          "img": 0,
+          "canvas": 0,
+          "svg": 1,
+          "links": 0,
+          "buttons": 0
+        }
+      },
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "horizontalOverflow": [],
+      "resourceErrors": [],
+      "reportSource": "cdp"
+    }
+  },
+  "engine": "chrome_cli",
+  "chromiumExec": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "engineDegraded": true,
+  "engineDegradedReason": "playwright 未装",
+  "elapsedSec": 19.42,
+  "schemaVersion": 2,
+  "status": "warning",
+  "engineInfo": {
+    "name": "chrome_cli",
+    "degraded": true,
+    "degradedReasons": [
+      "playwright 未装"
+    ]
+  },
+  "input": {
+    "original": "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\报告与Jenkins构建号绑定方案.html",
+    "resolvedPath": "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\报告与Jenkins构建号绑定方案.html",
+    "baseUrl": "file:///D:/IdeaProject/pw_automation_framework/docs/architecture/%E6%8A%A5%E5%91%8A%E4%B8%8EJenkins%E6%9E%84%E5%BB%BA%E5%8F%B7%E7%BB%91%E5%AE%9A%E6%96%B9%E6%A1%88/%E6%8A%A5%E5%91%8A%E4%B8%8EJenkins%E6%9E%84%E5%BB%BA%E5%8F%B7%E7%BB%91%E5%AE%9A%E6%96%B9%E6%A1%88.html",
+    "protocol": "file",
+    "cwd": "C:\\Users\\12745\\Doubao\\chats\\2026-09-26\\new-chat",
+    "mediaMode": {
+      "reducedMotion": true
+    }
+  },
+  "artifacts": {
+    "screenshots": [
+      {
+        "viewport": "desktop",
+        "tiles": [
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p1of4.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p2of4.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p3of4.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_desktop_p4of4.jpg"
+        ],
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      },
+      {
+        "viewport": "mobile",
+        "tiles": [
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p1of6.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p2of6.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p3of6.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p4of6.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p5of6.jpg",
+          "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\报告与Jenkins构建号绑定方案_mobile_p6of6.jpg"
+        ],
+        "visualCoverage": {
+          "complete": true,
+          "reason": null
+        }
+      }
+    ]
+  },
+  "summary": {
+    "blocker": 0,
+    "error": 0,
+    "warning": 8,
+    "info": 0
+  },
+  "findings": [
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "h2",
+      "evidence": {
+        "tag": "h2",
+        "text": "01现状盘点：已经有 90%，缺的是闭环",
+        "rect": [
+          149,
+          497,
+          1124,
+          46
+        ],
+        "widthDeltaVsGrid": 509,
+        "gridWidth": 615,
+        "containerWidth": 1124,
+        "containerTag": "section#s1"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|h2|0"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "h3",
+      "evidence": {
+        "tag": "h3",
+        "text": "已具备的能力",
+        "rect": [
+          149,
+          633,
+          1124,
+          29
+        ],
+        "widthDeltaVsGrid": 509,
+        "gridWidth": 615,
+        "containerWidth": 1124,
+        "containerTag": "section#s1"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|h3|1"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "div.tbl-wrap",
+      "evidence": {
+        "tag": "div.tbl-wrap",
+        "text": "能力实现位置关键契约（可直接依赖）\n      \n        \n          CI 构建信息解析\n      ",
+        "rect": [
+          149,
+          672,
+          1124,
+          718
+        ],
+        "widthDeltaVsGrid": 509,
+        "gridWidth": 615,
+        "containerWidth": 1124,
+        "containerTag": "section#s1"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|div.tbl-wrap|2"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "h3",
+      "evidence": {
+        "tag": "h3",
+        "text": "缺口：为什么「依附 build」这件事现在做不到",
+        "rect": [
+          149,
+          1456,
+          1124,
+          29
+        ],
+        "widthDeltaVsGrid": 509,
+        "gridWidth": 615,
+        "containerWidth": 1124,
+        "containerTag": "section#s1"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|h3|3"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "div.tbl-wrap",
+      "evidence": {
+        "tag": "div.tbl-wrap",
+        "text": "#缺口证据（当前代码事实）后果\n      \n        \n          G1\n          报告自身不",
+        "rect": [
+          149,
+          1495,
+          1124,
+          571
+        ],
+        "widthDeltaVsGrid": 509,
+        "gridWidth": 615,
+        "containerWidth": 1124,
+        "containerTag": "section#s1"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|div.tbl-wrap|4"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "h2",
+      "evidence": {
+        "tag": "h2",
+        "text": "02绑定模型：BUILD_NUMBER 作为「报告运行键」",
+        "rect": [
+          149,
+          2154,
+          1124,
+          46
+        ],
+        "widthDeltaVsGrid": 434,
+        "gridWidth": 690,
+        "containerWidth": 1124,
+        "containerTag": "section#s2"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|h2|5"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "div.diagram",
+      "evidence": {
+        "tag": "div.diagram",
+        "text": "L1 · 采集\n      BuildContext\n      BUILD_NUMBER, JOB_NAME, BUI",
+        "rect": [
+          149,
+          2282,
+          1124,
+          538
+        ],
+        "widthDeltaVsGrid": 434,
+        "gridWidth": 690,
+        "containerWidth": 1124,
+        "containerTag": "section#s2"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|div.diagram|6"
+    },
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "kind": "layout",
+      "viewport": "desktop",
+      "selector": "h2",
+      "evidence": {
+        "tag": "h2",
+        "text": "03改造清单（文件级，按依赖顺序）",
+        "rect": [
+          149,
+          2967,
+          1124,
+          46
+        ],
+        "widthDeltaVsGrid": 509,
+        "gridWidth": 615,
+        "containerWidth": 1124,
+        "containerTag": "section#s3"
+      },
+      "dedupeKey": "misalignedBlocks|desktop|h2|7"
+    }
+  ],
+  "prioritizedActions": [
+    {
+      "ruleId": "misalignedBlocks",
+      "severity": "warning",
+      "viewport": "desktop",
+      "selector": "h2"
+    }
+  ],
+  "reportPath": "D:\\IdeaProject\\pw_automation_framework\\docs\\architecture\\报告与Jenkins构建号绑定方案\\_shots\\report.json"
+}
