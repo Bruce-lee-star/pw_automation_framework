@@ -1,5 +1,13 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.cli;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.CaseCatalog;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.CaseImpactScreener;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.ChangeSignal;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.CodeTargetScanner;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.ElementRef;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.FeatureCase;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.ImpactReport;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.impact.SelectorAnalyzer;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.IntentTranslationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.RecordedSkeleton;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.RuleBasedIntentTranslator;
@@ -29,6 +37,11 @@ import java.util.Set;
  * ② 校验助手回文（可整段粘贴，含代码围栏/说明文字）
  *    SkeletonCli check target/skeleton.json target/reply.md --origin www.example.com:8443
  *    type reply.md | SkeletonCli check target/skeleton.json - --origin www.example.com:8443
+ *
+ * ③ 变更影响分诊（本次改了什么 → 哪些存量用例必须改、哪些可以不动、代码改哪几行）
+ *    SkeletonCli impact --features src/test/resources/features --skeleton target/skeleton.json
+ *    SkeletonCli impact --features src/test/resources/features --keyword logon,@login --only-actionable
+ *    SkeletonCli impact --features ... --skeleton ... --sources src/test/java,src/test/resources
  * </pre>
  *
  * <p><b>职责边界</b>：本类只做「参数解析 + 文件/标准输入输出 + 退出码」，
@@ -53,9 +66,17 @@ public final class SkeletonCli {
 
     private static final String CMD_PROMPT = "prompt";
     private static final String CMD_CHECK = "check";
+    private static final String CMD_IMPACT = "impact";
     private static final String FLAG_OUT = "--out";
     private static final String FLAG_KEEP_VALUES = "--keep-values";
     private static final String FLAG_ORIGIN = "--origin";
+    private static final String FLAG_FEATURES = "--features";
+    private static final String FLAG_SOURCES = "--sources";
+    private static final String FLAG_SKELETON = "--skeleton";
+    private static final String FLAG_TAG = "--tag";
+    private static final String FLAG_KEYWORD = "--keyword";
+    private static final String FLAG_SELECTOR = "--selector";
+    private static final String FLAG_ONLY_ACTIONABLE = "--only-actionable";
     private static final String STDIN = "-";
 
     private SkeletonCli() {
@@ -82,6 +103,8 @@ public final class SkeletonCli {
                     return runPrompt(slice(args), out, err);
                 case CMD_CHECK:
                     return runCheck(slice(args), in, out, err);
+                case CMD_IMPACT:
+                    return runImpact(slice(args), out, err);
                 case "-h":
                 case "--help":
                 case "help":
@@ -206,6 +229,202 @@ public final class SkeletonCli {
     }
 
     // ------------------------------------------------------------------
+    // impact：本次变更 → 存量用例影响分诊
+    // ------------------------------------------------------------------
+
+    /**
+     * 变更影响分诊：由「变更后的新骨架」+ 人工补充的关键词/tag 派生信号，
+     * 对存量 feature 用例输出「必须维护 / 需复核 / 可不动」三级结论；
+     * 给 {@code --sources} 时再扫代码层落点（{@code @RoleElement}/{@code @Element} 与资源键值）。
+     *
+     * <p>信号来源至少一项（骨架 / --keyword / --tag），否则报错——
+     * 空信号会把全部用例判成「可不动」，属危险结论，故直接拒绝。</p>
+     *
+     * @return 存在「必须维护」用例时返回 {@link #EXIT_REJECTED}（便于 CI 拦门），否则 {@link #EXIT_OK}
+     */
+    private static int runImpact(List<String> args, PrintStream out, PrintStream err) throws IOException {
+        List<Path> roots = new ArrayList<>();
+        List<Path> sources = new ArrayList<>();
+        String skeletonPath = null;
+        String outputPath = null;
+        boolean onlyActionable = false;
+        Set<String> keywords = new LinkedHashSet<>();
+        Set<String> tags = new LinkedHashSet<>();
+        Set<String> selectors = new LinkedHashSet<>();
+        for (int i = 0; i < args.size(); i++) {
+            String arg = args.get(i);
+            if (FLAG_FEATURES.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_FEATURES + " 需要 feature 目录（逗号分隔可多个）");
+                    return EXIT_INPUT_ERROR;
+                }
+                for (String raw : args.get(++i).split(",")) {
+                    if (!raw.isBlank()) {
+                        roots.add(Paths.get(raw.trim()));
+                    }
+                }
+            } else if (FLAG_SOURCES.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_SOURCES + " 需要源码/资源目录（逗号分隔可多个）");
+                    return EXIT_INPUT_ERROR;
+                }
+                for (String raw : args.get(++i).split(",")) {
+                    if (!raw.isBlank()) {
+                        sources.add(Paths.get(raw.trim()));
+                    }
+                }
+            } else if (FLAG_SKELETON.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_SKELETON + " 需要一个骨架文件路径");
+                    return EXIT_INPUT_ERROR;
+                }
+                skeletonPath = args.get(++i);
+            } else if (FLAG_KEYWORD.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_KEYWORD + " 需要关键词（逗号分隔可多个）");
+                    return EXIT_INPUT_ERROR;
+                }
+                addCsv(keywords, args.get(++i));
+            } else if (FLAG_TAG.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_TAG + " 需要 tag（逗号分隔可多个）");
+                    return EXIT_INPUT_ERROR;
+                }
+                addTags(tags, args.get(++i));
+            } else if (FLAG_SELECTOR.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_SELECTOR + " 需要一个 CSS/XPath 选择器（可重复；不按逗号拆分，"
+                            + "以免破坏 a,b 并列选择器）");
+                    return EXIT_INPUT_ERROR;
+                }
+                String selector = args.get(++i);
+                try {
+                    SelectorAnalyzer.analyze(selector);
+                } catch (IllegalArgumentException e) {
+                    err.println("选择器不合法: " + e.getMessage());
+                    return EXIT_INPUT_ERROR;
+                }
+                selectors.add(selector);
+            } else if (FLAG_ONLY_ACTIONABLE.equals(arg)) {
+                onlyActionable = true;
+            } else if (FLAG_OUT.equals(arg)) {
+                if (i + 1 >= args.size()) {
+                    err.println(FLAG_OUT + " 需要一个文件路径");
+                    return EXIT_INPUT_ERROR;
+                }
+                outputPath = args.get(++i);
+            } else if (arg.startsWith("-")) {
+                err.println("未知选项: " + arg);
+                usage(err);
+                return EXIT_INPUT_ERROR;
+            } else if (roots.isEmpty()) {
+                // 允许把 feature 目录直接作为位置参数
+                roots.add(Paths.get(arg));
+            } else {
+                err.println("多余参数: " + arg);
+                usage(err);
+                return EXIT_INPUT_ERROR;
+            }
+        }
+
+        if (roots.isEmpty()) {
+            err.println("impact 需要 " + FLAG_FEATURES + " <feature 目录>");
+            usage(err);
+            return EXIT_INPUT_ERROR;
+        }
+        for (Path root : roots) {
+            if (!Files.isDirectory(root)) {
+                err.println("feature 目录不存在或不是目录: " + root);
+                return EXIT_INPUT_ERROR;
+            }
+        }
+        for (Path source : sources) {
+            if (!Files.isDirectory(source)) {
+                err.println(FLAG_SOURCES + " 目录不存在或不是目录: " + source);
+                return EXIT_INPUT_ERROR;
+            }
+        }
+        ChangeSignal signal = buildSignal(skeletonPath, keywords, tags).withSelectors(selectors);
+        if (signal.isEmpty()) {
+            err.println("变更信号为空：至少提供 " + FLAG_SKELETON + " / " + FLAG_KEYWORD + " / " + FLAG_TAG
+                    + " / " + FLAG_SELECTOR + " 之一（空信号会把全部用例误判为可不动）");
+            return EXIT_INPUT_ERROR;
+        }
+        List<FeatureCase> cases = new ArrayList<>();
+        for (Path root : roots) {
+            cases.addAll(CaseCatalog.scan(root));
+        }
+        if (cases.isEmpty()) {
+            err.println("给定目录下未找到 *.feature 用例: " + roots);
+            return EXIT_INPUT_ERROR;
+        }
+
+        if (!sources.isEmpty() && signal.elementRefs().isEmpty() && signal.selectors().isEmpty()) {
+            err.println("[提示] 本次信号不含元素/选择器（请用 " + FLAG_SKELETON + "、" + FLAG_SELECTOR
+                    + " 或元素名提供），代码层落点无法定位，仅输出用例侧分诊");
+        }
+        CaseImpactScreener.Report caseReport = CaseImpactScreener.screen(cases, signal);
+        CodeTargetScanner.ScanResult scan = sources.isEmpty()
+                ? new CodeTargetScanner.ScanResult(List.of(), 0, false)
+                : CodeTargetScanner.scan(sources, signal);
+        if (scan.truncated()) {
+            err.println("[警告] 源码文件数超过 " + CodeTargetScanner.MAX_FILES
+                    + " 上界，仅扫描前 " + CodeTargetScanner.MAX_FILES + " 个文件；请缩小 " + FLAG_SOURCES);
+        }
+        ImpactReport report = new ImpactReport(caseReport, scan.targets());
+        String markdown = report.toMarkdown(onlyActionable);
+        String counts = "（必须维护 " + caseReport.count(CaseImpactScreener.Verdict.MUST_MAINTAIN)
+                + " / 需复核 " + caseReport.count(CaseImpactScreener.Verdict.REVIEW)
+                + " / 可不动 " + caseReport.count(CaseImpactScreener.Verdict.NO_CHANGE)
+                + "；代码落点 " + scan.targets().size()
+                + (sources.isEmpty() ? "，未提供 " + FLAG_SOURCES : "，扫描 " + scan.scannedFiles() + " 文件")
+                + "）";
+        if (outputPath == null) {
+            out.println(markdown);
+        } else {
+            writeFile(outputPath, markdown);
+            out.println("影响报告已写入: " + outputPath + counts);
+        }
+        return caseReport.count(CaseImpactScreener.Verdict.MUST_MAINTAIN) > 0 ? EXIT_REJECTED : EXIT_OK;
+    }
+
+    /** 骨架（可选）派生信号 + 人工补充的关键词/tag，合并为一次筛选信号（保留元素角色）。 */
+    private static ChangeSignal buildSignal(String skeletonPath, Set<String> keywords, Set<String> tags)
+            throws IOException {
+        Set<String> pages = new LinkedHashSet<>();
+        Set<ElementRef> elementRefs = new LinkedHashSet<>();
+        Set<String> mergedKeywords = new LinkedHashSet<>(keywords);
+        Set<String> mergedTags = new LinkedHashSet<>(tags);
+        if (skeletonPath != null) {
+            ChangeSignal derived = ChangeSignal.fromSkeleton(readSkeleton(skeletonPath));
+            pages.addAll(derived.pages());
+            elementRefs.addAll(derived.elementRefs());
+            mergedKeywords.addAll(derived.keywords());
+            mergedTags.addAll(derived.tags());
+        }
+        return ChangeSignal.ofElementRefs(pages, elementRefs, mergedKeywords, mergedTags);
+    }
+
+    private static void addCsv(Set<String> target, String csv) {
+        for (String raw : csv.split(",")) {
+            if (!raw.isBlank()) {
+                target.add(raw.trim());
+            }
+        }
+    }
+
+    /** tag 统一补 {@code @} 前缀（{@link ChangeSignal} 按 {@code @xxx} 与用例标签比对）。 */
+    private static void addTags(Set<String> target, String csv) {
+        for (String raw : csv.split(",")) {
+            String tag = raw.trim();
+            if (tag.isEmpty()) {
+                continue;
+            }
+            target.add(tag.startsWith("@") ? tag : "@" + tag);
+        }
+    }
+
+    // ------------------------------------------------------------------
     // IO / 用法
     // ------------------------------------------------------------------
 
@@ -244,11 +463,22 @@ public final class SkeletonCli {
         stream.println("      生成可粘贴给 IDE 助手的提示词；默认把 value/option 换成 ${...} 占位符");
         stream.println("  SkeletonCli check <骨架.json> <建议文件|-> --origin <已批准来源[,更多]>");
         stream.println("      校验助手回文（可含代码围栏/说明文字）：门禁 + 与基线结构等价对账");
+        stream.println("  SkeletonCli impact --features <feature目录[,更多]> [--skeleton <新骨架.json>]");
+        stream.println("                    [--keyword <词[,更多]>] [--tag <@tag[,更多]>] [--sources <源码目录[,更多]>]");
+        stream.println("                    [--selector <css|xpath>]... [--only-actionable] [--out <报告.md>]");
+        stream.println("      变更影响分诊：存量用例「必须维护 / 需复核 / 可不动」；至少给 骨架/关键词/tag/选择器 之一");
+        stream.println("      --selector   role 定位不了时的兜底（可重复）；会自动剔除随机值并给稳定化建议");
+        stream.println("      --sources 额外扫页面对象(@RoleElement/@Element)与资源键值，给出真正要改的代码行");
         stream.println("  SkeletonCli --help");
         stream.println();
-        stream.println("退出码: 0=可采信 1=被拒/不等价 2=用法或解析失败");
+        stream.println("退出码: 0=可采信（impact: 无必须维护用例） 1=被拒/不等价（impact: 存在必须维护用例）");
+        stream.println("        2=用法、IO 或解析失败");
         stream.println("示例:");
         stream.println("  SkeletonCli prompt target/skeleton.json --out target/prompt.md");
         stream.println("  SkeletonCli check target/skeleton.json target/reply.md --origin www.example.com:8443");
+        stream.println("  SkeletonCli impact --features src/test/resources/features --skeleton target/skeleton.json "
+                + "--sources src/test/java,src/test/resources --only-actionable --out target/impact.md");
+        stream.println("  SkeletonCli impact --features ... --selector \"[data-i18n='button_next']\" "
+                + "--selector \"#userName\" --sources src/test/java");
     }
 }

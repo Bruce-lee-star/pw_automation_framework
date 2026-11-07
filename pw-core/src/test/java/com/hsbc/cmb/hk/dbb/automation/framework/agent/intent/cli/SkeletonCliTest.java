@@ -113,6 +113,149 @@ public class SkeletonCliTest {
     }
 
     // ------------------------------------------------------------------
+    // impact
+    // ------------------------------------------------------------------
+
+    @Test
+    public void impactMarksElementHitsAsMustMaintainAndExitsRejected() throws Exception {
+        Path features = writeFeatures();
+        Path skeletonFile = writeSkeleton(singleClickSkeleton());
+
+        int code = run(new String[]{"impact", "--features", features.toString(),
+                "--skeleton", skeletonFile.toString()});
+
+        assertEquals(out(), 1, code);
+        assertTrue(out(), out().contains("必须维护 1"));
+        assertTrue(out(), out().contains("正确密码登录"));
+        assertTrue(out(), out().contains("element:submit"));
+    }
+
+    @Test
+    public void impactOnlyActionableDropsNoChangeRows() throws Exception {
+        Path features = writeFeatures();
+        Path skeletonFile = writeSkeleton(singleClickSkeleton());
+        Path report = folder.getRoot().toPath().resolve("impact.md");
+
+        int code = run(new String[]{"impact", "--features", features.toString(),
+                "--skeleton", skeletonFile.toString(), "--only-actionable",
+                "--out", report.toString()});
+
+        assertEquals(1, code);
+        String markdown = Files.readString(report, StandardCharsets.UTF_8);
+        assertTrue(markdown, markdown.contains("正确密码登录"));
+        assertFalse(markdown, markdown.contains("切换 profile"));
+        assertTrue(markdown, markdown.contains("已过滤 1 条"));
+        assertTrue(out(), out().contains("影响报告已写入"));
+    }
+
+    @Test
+    public void impactWeakKeywordOnlyYieldsReviewAndSuccessExit() throws Exception {
+        Path features = writeFeatures();
+
+        int code = run(new String[]{"impact", "--features", features.toString(),
+                "--keyword", "登录"});
+
+        assertEquals(out(), 0, code);
+        assertTrue(out(), out().contains("需复核 2"));
+    }
+
+    @Test
+    public void impactTagAcceptsMissingAtPrefix() throws Exception {
+        Path features = writeFeatures();
+
+        int code = run(new String[]{"impact", "--features", features.toString(),
+                "--tag", "profile"});
+
+        assertEquals(out(), 1, code);
+        assertTrue(out(), out().contains("必须维护 1"));
+        assertTrue(out(), out().contains("切换 profile"));
+    }
+
+    @Test
+    public void impactWithSourcesReportsCodeTargets() throws Exception {
+        Path features = writeFeatures();
+        Path skeletonFile = writeSkeleton(singleClickSkeleton());
+        Path sources = writeSources();
+        Path report = folder.getRoot().toPath().resolve("impact-code.md");
+
+        int code = run(new String[]{"impact", "--features", features.toString(),
+                "--skeleton", skeletonFile.toString(),
+                "--sources", sources.toString(), "--out", report.toString()});
+
+        assertEquals(1, code);
+        String markdown = Files.readString(report, StandardCharsets.UTF_8);
+        assertTrue(markdown, markdown.contains("代码层落点"));
+        assertTrue(markdown, markdown.contains("LoginPage.java:2"));
+        assertTrue(markdown, markdown.contains("button_submit"));
+        assertTrue(out(), out().contains("代码落点 1"));
+    }
+
+    @Test
+    public void impactWithoutSourcesSaysNotProvided() throws Exception {
+        Path features = writeFeatures();
+        Path skeletonFile = writeSkeleton(singleClickSkeleton());
+        Path report = folder.getRoot().toPath().resolve("impact-nosrc.md");
+
+        assertEquals(1, run(new String[]{"impact", "--features", features.toString(),
+                "--skeleton", skeletonFile.toString(), "--out", report.toString()}));
+        String markdown = Files.readString(report, StandardCharsets.UTF_8);
+        assertTrue(markdown, markdown.contains("请确认 `--sources`"));
+    }
+
+    @Test
+    public void impactMissingSourcesDirIsInputError() throws Exception {
+        Path features = writeFeatures();
+
+        assertEquals(2, run(new String[]{"impact", "--features", features.toString(),
+                "--keyword", "登录", "--sources",
+                folder.getRoot().toPath().resolve("no-src").toString()}));
+        assertTrue(err(), err().contains("--sources"));
+    }
+
+    @Test
+    public void impactAcceptsSelectorSignalAndTracksStability() throws Exception {
+        Path features = writeFeatures();
+        Path sources = writeSelectorSources();
+        Path report = folder.getRoot().toPath().resolve("impact-selector.md");
+
+        int code = run(new String[]{"impact", "--features", features.toString(),
+                "--selector", "[data-i18n^='button_']", "--sources", sources.toString(),
+                "--out", report.toString()});
+
+        assertEquals(out(), 0, code);
+        String markdown = Files.readString(report, StandardCharsets.UTF_8);
+        assertTrue(markdown, markdown.contains("[data-i18n='button_next']"));
+        assertTrue(markdown, markdown.contains("稳定性"));
+        assertTrue(markdown, markdown.contains("含随机值"));
+        assertTrue(markdown, markdown.contains("建议"));
+    }
+
+    @Test
+    public void impactRejectsInvalidSelector() throws Exception {
+        Path features = writeFeatures();
+
+        assertEquals(2, run(new String[]{"impact", "--features", features.toString(),
+                "--selector", "   "}));
+        assertTrue(err(), err().contains("选择器不合法"));
+    }
+
+    @Test
+    public void impactEmptySignalIsInputError() throws Exception {
+        Path features = writeFeatures();
+
+        assertEquals(2, run(new String[]{"impact", "--features", features.toString()}));
+        assertTrue(err(), err().contains("变更信号为空"));
+    }
+
+    @Test
+    public void impactMissingFeaturesDirIsInputError() {
+        assertEquals(2, run(new String[]{"impact",
+                "--features", folder.getRoot().toPath().resolve("nope").toString(),
+                "--keyword", "logon"}));
+        assertTrue(err(), err().contains("不存在"));
+    }
+
+    // ------------------------------------------------------------------
     // 用法 / 输入错误
     // ------------------------------------------------------------------
 
@@ -173,6 +316,52 @@ public class SkeletonCliTest {
         File file = folder.newFile("skeleton-" + System.nanoTime() + ".json");
         Files.writeString(file.toPath(), skeleton.toJson(), StandardCharsets.UTF_8);
         return file.toPath();
+    }
+
+    /** 源码夹具：一行 @RoleElement 命中骨架元素名 Submit。 */
+    private Path writeSources() throws Exception {
+        File dir = folder.newFolder("src");
+        String content = String.join("\n",
+                "public class LoginPage {",
+                "    @RoleElement(role = AriaRole.BUTTON, key = \"button_submit\")",
+                "}");
+        Files.writeString(new File(dir, "LoginPage.java").toPath(), content, StandardCharsets.UTF_8);
+        return dir.toPath();
+    }
+
+    /** 选择器夹具：稳定属性 + 随机 id 混合，用于验证稳定性列与建议。 */
+    private Path writeSelectorSources() throws Exception {
+        File dir = folder.newFolder("src-selector");
+        String content = String.join("\n",
+                "public class LoginPage {",
+                "    @Element(\"[data-i18n='button_next']#a1b2c3d4\")",
+                "    public PageElement nextButton;",
+                "}");
+        Files.writeString(new File(dir, "LoginPage.java").toPath(), content, StandardCharsets.UTF_8);
+        return dir.toPath();
+    }
+
+    /** 存量用例夹具：一条命中元素信号、一条只命中 @profile 标签。 */
+    private Path writeFeatures() throws Exception {
+        File dir = folder.newFolder("features");
+        String content = String.join("\n",
+                "@login",
+                "Feature: DBB 登录",
+                "",
+                "  # 注释行不计入",
+                "  Scenario: 正确密码登录",
+                "    Given 打开登录页",
+                "    When 点击 Submit 按钮",
+                "    Then 看到首页",
+                "",
+                "  @profile",
+                "  Scenario: 切换 profile",
+                "    Given 打开登录页",
+                "    When 切换 profile",
+                "    Then 看到首页",
+                "");
+        Files.writeString(new File(dir, "login_dbb.feature").toPath(), content, StandardCharsets.UTF_8);
+        return dir.toPath();
     }
 
     private Path writeReply(String content) throws Exception {
