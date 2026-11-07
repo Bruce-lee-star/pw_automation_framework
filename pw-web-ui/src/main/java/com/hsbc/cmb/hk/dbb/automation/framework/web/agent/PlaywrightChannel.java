@@ -15,6 +15,9 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command.ActionType.*;
 
 import java.util.List;
@@ -40,6 +43,8 @@ import java.util.concurrent.locks.LockSupport;
  * 从而与回归环境逻辑隔离（R4/R8）。</p>
  */
 public final class PlaywrightChannel implements BrowserCommandChannel {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(PlaywrightChannel.class);
 
     private Page page;
     private final Browser browser;
@@ -154,8 +159,8 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
                 page.waitForLoadState(LoadState.LOAD,
                         new Page.WaitForLoadStateOptions().setTimeout(remainingMs));
             }
-        } catch (RuntimeException ignored) {
-            // 导航进行中 / 网络持续活动 / 超时：静默返回，已有「settle 后重新取快照」兜底（拿当前态）
+        } catch (RuntimeException t) {
+            LOGGER.debug("[settle] waitForLoadState interrupted (navigation in progress / network active / timeout), ignored: {}", t.toString());
         }
         // 静默窗口下限：补足到 budget（覆盖纯 JS 延迟渲染等无网络活动的稳定期）
         long stillNanos = deadlineNanos - System.nanoTime();
