@@ -8,7 +8,7 @@
 > `META-INF/services`、根 pom、设计稿 §11。**本文件的每条结论都给可复核的位置或搜索口径。**
 
 > **更新（2026-11-07）**：本文件已于 commit `fda59584` 提交入 git。本次更新把 **P0 五项（T0–T4）全部标记为已完成**，
-> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。P1 中 **T5（执行层接线）、T6（快照树+指纹）、T7（计划级幂等）、T8（审批绑定）已落地**（见 §二 P1 表对应行）；剩余 **T9（非功能基线）** 待起，依赖图未变。
+> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。**P1 五项（T5 执行层接线 / T6 快照树+指纹 / T7 计划级幂等 / T8 审批绑定 / T9 非功能基线）全部落地**（见 §二 P1 表对应行）；非功能阈值仍待项目负责人确认，设计稿 §8.1.1 只做基线测量、不宣称达标，依赖图未变。
 
 ---
 
@@ -87,7 +87,7 @@
 | **T6** | 快照树 + 指纹（I-05） | `ElementState` 补 children/depth；把 `SnapshotEnvelope` 已有的 `frameId` 下沉为 per-node 标记（UNSUPPORTED 保留信封级，per-node 字段已预留）；`snapshotDigest` 排除时间戳/序号，落到 `CommandResult` | T0 | 3d | 同页面两次快照 digest 相同；改一个属性后 digest 变化；有界性（深度/节点数上限）有测试 | ✅ 已落地（`93e7dfea`：ElementState 加 depth/children/frameId/unsupported；AriaSnapshotParser 按缩进建树 + per-node frameId；Snapshot 落树并扁平化 byRef；snapshotDigest SHA-256 排除信封元数据；CommandResult 透传；契约测试覆盖同页同指纹/改属性变化/截断差异/树结构/平铺兼容；pw-core+pw-web-ui 全量 571 测试 0 回归） |
 | **T7** | 计划级幂等 | 基于 `snapshotDigest` 跳过已通过步骤；失败输出 diff | **T6** | 2d | 重跑同一计划跳过 N-1 步，仅跑变更步 | ✅ 已落地（`d6b14e29`：新增 `StepIdempotency` 接口 + `InMemoryStepIdempotency` 实现（位置锚定 `step-N` + 命令内容 SHA-256 指纹，编辑计划后未变步跳过、变更步重跑）；`CommandResult` 透传 `snapshotDigestOverride`；`StepDriver`/`StepVerifier`/`StepPlanRunner` 无侵入接入幂等 seams，`none()` 默认零回归；pw-core+pw-agent-analysis+pw-reports+pw-web-ui 全量 573 测试 0 失败 0 错误） |
 | **T8** | 审批绑定（I-07，**修法已修正**） | 明确 `LocatorCandidate.planDigestOf()` 与 `StepPlan.planDigest()` 两套摘要的语义边界与映射；在 `AssetStepPlanExecutor.run` 前置校验批准摘要（**不是新建 `ApprovalGrant`**） | T0 | 2d | 篡改计划后执行被拒，错误信息含两侧 digest；定位器回注域原有 `ApprovalGrant.covers()` 行为零回归 | ✅ 已落地（`1e97639a`：新增 `StepPlanApprovalBinding` 作为「内容→执行域摘要 + 前置校验」单一来源；`StoredAsset` 加 `approvedDigest` 字段，两种 `AssetRepository` 在 `approve()` 记录、`activate`/`recordVerification` 保持、文件型仓库落盘重载无损；`AssetStepPlanExecutor.run` 前置 `verify`（未审批 DRAFT 无绑定→零回归）；两套摘要边界写入 `StepPlan`/绑定类/执行器 javadoc；验收测试覆盖篡改拒绝含两侧 digest、一致放行、DRAFT 零回归、`ApprovalGrant.covers()` 跨域不混用；全 reactor 7 模块 2108 测试 0 失败 0 错误） |
-| **T9** | 非功能基线（I-08） | 单步 / 10 步 / 100 步 p50/p95 采集；并发上限；canary 生产策略；失败恢复目标 | T1–T3 之后（否则测旧链路） | 3d | 一页基线数据；阈值与告警项写入设计稿；采集开关默认关 | 待起 |
+| **T9** | 非功能基线（I-08） | 单步 / 10 步 / 100 步 p50/p95 采集；并发上限；canary 生产策略；失败恢复目标 | T1–T3 之后（否则测旧链路） | 3d | 一页基线数据；阈值与告警项写入设计稿；采集开关默认关 | ✅ 已落地（`c30b24a2`：pw-core 新增 `agent.perf` 6 类——不可变样本 `AgentPerfSample`（失败类别归一、不落异常消息）、`AgentPerfSink` SPI + `AgentPerfRegistry`（双检锁 / `catch (Throwable)` / no-op 回落）、默认 `false` 的 `AgentPerfConfig`（`agent.perf.enabled` + canary `agent.perf.sample.rate`）与自研 nearest-rank `Percentiles`、唯一埋点门面 `AgentPerfProbe`（关闭时不取 nanoTime / 不解析 SPI / 不构造样本，配置每计划刷新一次、步骤级只读 volatile）；`StepDriver` 复用 R9 审计已有 nanoTime 上报单步，`StepVerifier` / `StepPlanRunner` 接线，后者产出 `plan-1/10/100/N` 端到端样本与并发 in-flight 观测，异常路径同样记录失败样本且计数严格配对；pw-reports 新增 `AgentPerfBaseline`（一页 Markdown + 结构化 JSON、`Locale.ROOT` 防漂移）与 `AgentPerfSinkImpl`（SPI 注册、200k 样本上限、`ShutdownCoordinator` 退出落盘、可 `-Dpw.agent.perf.dir=<绝对路径>` 落到工程外、无样本不生成文件、异常 fail-open）；设计稿 §8.1.1 写入阈值与告警项 / canary 三阶段灰度 / 失败恢复目标 / 未覆盖范围，§11.1 状态改「⚠️ 基线可测」并保留「不宣称达标」；31 例新增测试（含 1/10/100 步实产出 114 样本、德语 locale 不变性、SPI 可发现与落盘）；全 reactor 8 模块 2160 测试 0 失败 0 错误（4 skip 既有），0 lint） |
 
 ### P2 · 演进（4 项）
 
@@ -139,7 +139,7 @@ T10 与 T3 可并行开发，联调需等 T3 产物契约定型。
 
 - 未修评审 HTML 文档本身（位于工作区外 `C:\Users\12745\Doubao\...`），仅产出勘误清单 D1–D4。
 - 未对 `b1492a4b` 单独复跑 1959 例；当前结论基于工作区复核与 `39223c3d` 的静态取证。
-- 未做性能基线测量（T9 才有真实值）。
+- ~~未做性能基线测量（T9 才有真实值）~~ → 已由 T9（`c30b24a2`）落地采集与一页基线产物；但**真浏览器 / 靶场阈值仍待 CI 长跑与项目负责人确认**，本机护盾仅产出无浏览器 FakeHarness 的框架开销基线（见设计稿 §8.1.1）。
 - 已随 T0 提交 `agent/impact` 11 类 + `CurrentScenario` 2 类（见 §1.3），但其代码质量**未做独立设计评审**，仅按文件计入 T0。
 - 本任务列表已于 `fda59584` 提交 git；本次（2026-11-07）更新把 P0 五项（T0–T4）标记为已完成，并补列落地提交（见顶部更新说明与 §二 P0 表）。
-- P0 已全绿；P1 中 T5（执行层接线，`d029a2ee`）、T6（快照树+指纹）、T7（计划级幂等，`d6b14e29` + 补漏 `f7e5e1c1`）、T8（审批绑定，`1e97639a`）已落地，剩余 **T9（非功能基线）** 待起（见 §二 P1 表与 §三依赖图）。
+- P0 已全绿；**P1 五项全落地**——T5（`d029a2ee`）、T6（快照树+指纹）、T7（`d6b14e29` + 补漏 `f7e5e1c1`）、T8（`1e97639a`）、T9（`c30b24a2`）。剩余为 P2/P3 演进项，以及「非功能阈值待项目负责人确认」这一**非代码**事项（见 §二 与设计稿 §8.1.1）。

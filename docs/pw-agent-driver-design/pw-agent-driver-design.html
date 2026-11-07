@@ -949,6 +949,29 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><td>资产质量</td><td>需求覆盖度阈值、资产误报率/审批驳回率上限、定位器稳定性（N 次回归命中率）、审批时效；低于阈值触发补充分析或废弃（参考 §4.6.3）</td></tr>
     <tr><td>模型供应商</td><td>可用性/超时/成本配额、地区与数据驻留、训练/留存条款、故障降级；模型不可用时不得阻塞既有回归链路</td></tr>
   </table>
+
+  <h4>8.1.1 基线测量、阈值与告警项（T9 落地，v3.22 增量）</h4>
+  <p><b>状态：采集能力已落地，阈值仍待项目负责人确认。</b>本节严格沿用上方铁律「未定阈值前只做基线测量，不宣称达标」：
+  T9 交付的是<b>可复现的一页基线数据</b>与待确认的告警项，<b>不是</b>达标结论，也不产生任何阻断式门禁。</p>
+  <table>
+    <tr><th>项</th><th>落地口径</th></tr>
+    <tr><td>采集开关（默认关）</td><td><code>agent.perf.enabled</code>（默认 <code>false</code>）；关闭时 <code>AgentPerfProbe</code> 不取 nanoTime、不解析 SPI、不构造样本、不生成文件，<b>既有执行链行为与开销逐字不变</b>。灰度采样率 <code>agent.perf.sample.rate</code>（默认 <code>1.0</code>，越界/非法回落默认值），按样本独立随机抽样，不做跨步骤 ThreadLocal 状态。配置只在每个执行计划开始时解析一次，步骤级只读 volatile 缓存。</td></tr>
+    <tr><td>维度与分桶</td><td><code>step</code> = 单动作墙钟耗时（含该步有限重试，<b>幂等命中路径不产生样本</b>）；<code>plan-1 / plan-10 / plan-100 / plan-N</code> = N 步计划端到端（含 harness acquire/release 与运行时组合根作用域）。分位数口径固定 <b>nearest-rank</b>（恒取真实观测值、不插值，可被人工逐一复核），自研 <code>Percentiles</code>，无第三方直方图依赖。</td></tr>
+    <tr><td>并发上限</td><td>基线页同时记录<b>观测峰值 in-flight</b>（样本字段实测）与<b>配置上限</b> <code>framework.playwright.concurrent.max</code>（未显式配置时为自适应 CPU/2、clamp [2,32]）。实际钳制由 <code>ConcurrentContextOptions.resolvedParallelism = min(taskCount, parallelism, cap)</code> 执行；本基线只观测、不改写并发策略。</td></tr>
+    <tr><td>失败恢复目标</td><td>浏览器崩溃 / 超时 / 取消 / 网络中断一律 fail-fast 上抛，<code>AgentRuntimeContext</code> 逆序退出全部角色；写操作提交态不确定时停止并人工核对；收尾收敛受 <code>ShutdownCoordinator</code> 单任务 8s / 总预算 20s 约束。样本按 <code>BROWSER_CRASH / TIMEOUT / NETWORK / CANCELLED / ASSERTION / UNKNOWN</code> 归一，<b>只按异常类型与关键词分类、不落原始 message</b>。</td></tr>
+    <tr><td>一页基线数据</td><td><code>target/agent-perf-baseline.md</code> + 同名 <code>.json</code>（CI 可用 <code>-Dpw.agent.perf.dir=&lt;绝对路径&gt;</code> 落到工程目录之外）。单页含延迟分位数、并发、失败恢复与告警项四节；<b>只代表本次运行、不含历史趋势</b>；无样本时不生成文件。格式化显式 <code>Locale.ROOT</code>，跨机器不漂移。</td></tr>
+    <tr><td>canary 生产策略</td><td>此处 canary 指<b>采集灰度</b>，与 R1/R7 的「敏感令牌泄漏 canary」是两套语义，不可混淆。三阶段：<code>off</code>（默认，零开销）→ <code>canary</code>（<code>-Dagent.perf.enabled=true -Dagent.perf.sample.rate=0.01</code>，仅预发/CI 1% 抽样，观察窗口 ≥ 一周 nightly）→ <code>on</code>（采样率提到 1.0）。任一时点设回 <code>false</code> 即完全回滚；采集自身异常一律 fail-open 降级为 debug，不拖垮执行链。</td></tr>
+  </table>
+  <p><b>阈值与告警项（待确认，当前仅观测、不阻断）</b>：下表给出需要项目负责人按靶场与 CI 资源确认的<b>监控项</b>，不预设达标线；未确认前基线页只输出实测值，不输出 PASS/FAIL。</p>
+  <table>
+    <tr><th>告警项</th><th>建议判据（待确认）</th><th>确认前动作</th></tr>
+    <tr><td>延迟漂移</td><td>p95 相对 CI 保存的基线漂移 &gt; 50%</td><td>仅记录，不失败</td></tr>
+    <tr><td>步骤失败率</td><td>采集开启时任一步失败率 &gt; 0</td><td>仅记录，不失败</td></tr>
+    <tr><td>并发越界</td><td>观测峰值 in-flight &gt; 配置上限</td><td>仅记录，不失败</td></tr>
+    <tr><td>敏感 canary 泄漏</td><td>&gt; 0（R1/R7，既有 <code>CrossExitCanaryTest</code> 守卫）</td><td>既有测试仍强制红</td></tr>
+    <tr><td>采集自身异常</td><td>&gt; 0（探针已 fail-open）</td><td>仅 debug 日志</td></tr>
+  </table>
+  <p><b>如实披露的未覆盖范围</b>：本机护盾使用无浏览器 FakeHarness，产出的是<b>框架开销基线</b>，不含浏览器冷启动与网络往返；快照采集耗时、快照最大节点数/字节数、单执行内存上限、跨任务数据隔离压力测试、模型供应商配额与资产质量阈值仍未拆分测量，须由 CI 真浏览器长跑与项目负责人确认后补齐。<b>本轮不得据此宣称 §8.1 非功能验收达标。</b></p>
 </section>
 
 <!-- ===================== 9 任务清单 ===================== -->
@@ -1087,7 +1110,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><td>§3.1.2.1 资产驱动验证闭环</td><td>✅ 完成</td><td>双路径同构 → 指纹一致 → 落库往返 → 生产消费端 → 执行组件 + 报告回写 → 需求覆盖度聚合 → 端到端流锁 → 真实生产接线（含真浏览器冒烟），均有测试锁定。</td></tr>
     <tr><td>§3.1.4 资产仓库与存储</td><td>✅ 基本完成</td><td>JsonFileAssetRepository：资产 JSON 本体 + _index.json、原子写、重启重建、状态机、recordVerification 回写；流水线仅调 save，未接状态迁移/审批。</td></tr>
     <tr><td>§3.1.5 与现有资产集成映射 / §3.1.6 安全红线贯穿</td><td>⚠️ 部分</td><td>映射表多为「核验后复用」；StepDriver 未接 Route/SessionStore/ConcurrencyGate；R4/R5/R8 有落点，R1/R3/R9 缺。</td></tr>
-    <tr><td>§3.1.7 非功能设计 / §8.1 非功能验收</td><td>❌ 未量化</td><td>文档自述「未定阈值前只做基线测量，不宣称达标」；p50/p95、并发所有权、canary 零泄漏、恢复等阈值仍未确定。</td></tr>
+    <tr><td>§3.1.7 非功能设计 / §8.1 非功能验收</td><td>⚠️ 基线可测（T9，v3.22）</td><td>采集能力已落地且<b>默认关</b>：p50/p95（nearest-rank）、1/10/100 步分桶、并发峰值、失败分类与一页基线产物（<code>agent-perf-baseline.md/.json</code>），阈值与告警项已写入 §8.1.1。<b>阈值仍待项目负责人确认，故仍不宣称达标</b>；快照/内存上限、浏览器冷启动与真浏览器长跑未覆盖。</td></tr>
     <tr><td>§4.1 BrowserCommandChannel 原语集</td><td>✅ ~98%（v3.13）</td><td>10 个类型化 ActionType（含 SWITCH_TO_POPUP）+ 契约面无 evaluate/run_code；v3.10 新增 <code>ActionTypePolicy</code> 固化<b>逐动作</b> sideEffecting/idempotent/defaultTimeout/maxRetries（取代 <code>ParamScopePolicy</code> 硬编码 switch），<code>StepDriver</code> 对幂等动作应用 maxRetries 有限重试（写操作不重试）；<b>v3.11 把 defaultTimeout 真正施加到运行期</b>；<b>v3.12 把并发所有权地基落地</b>——<code>PlaywrightChannel.execute</code> 经 <code>SessionOwnership</code> 独占串行执行同一 page 会话；<b>v3.13 把 Frame 生命周期 · popup 捕获与切换落地</b>——<code>Command</code> 新增 <code>SWITCH_TO_POPUP</code> 原语 + <code>PlaywrightChannel</code> 注册 <code>onPopup</code> 捕获并切换驱动目标（真实浏览器验证）。<b>缺口</b>：iframe 句柄失效由 Locator 惰性解析天然耐住、iframe 穿透由 CSS &gt;&gt; 已支持（非阻塞）；Role-First 穿透 iframe 为可选增强。</td></tr>
     <tr><td>§4.2 SnapshotTree 快照协议</td><td>✅ ~75%（v3.8）</td><td><b>已落地</b>：SnapshotBounds 四道上界 + SnapshotEnvelope 协议头/版本绑定/三态 + AriaSnapshotParser 有界解析 + PlaywrightChannel UNSUPPORTED + SnapshotVerifier fail-closed，18 例测试。<b>缺口</b>：嵌套 children 树、跨域 Frame/Shadow DOM 自动标记、sensitivity 分级、快照指纹（详见 §4.2 note）。</td></tr>
     <tr><td>§4.3 意图翻译与 StepPlan / §4.3.1 参数范围授权</td><td>✅ / ⚠️（v3.20 ↑）</td><td>StepPlan.parse fail-closed、未知字段/动作拒绝、planDigest 已落地；<b>ParamScope* 门禁完整并接线</b>（7 测试）。<b>v3.17 补齐</b>：<code>IntentTranslator</code> SPI + <code>RuleBasedIntentTranslator</code> 规则引擎（结构化骨架 → StepPlan）、<code>IntentActionSchema</code> 按 ActionType 参数 schema + 动作授权白名单、<code>IntentPlanValidator</code> schema/策略/可执行性三合一门禁（独立于 translator，R6）、<code>PlanEquivalence</code> 结构化等价性对账（55 例测试）。<b>v3.18 补齐录制入口</b>：pw-codegen <code>RecordedSkeletonConverter</code> 把 <code>CodegenRecorder.Action</code> + <code>CodegenEntry</code> 转成 <code>RecordedSkeleton</code>（16 例，含转换→翻译→门禁的跨模块闭环），使「录制一侧」首次接通。<b>v3.19 补齐序列化出口</b>：<code>RecordedSkeleton.toJson()</code> 与 <code>parse</code> 严格对称、字段白名单、params 排序确定性、越界 fail-closed（6 例），打通「录制 → 骨架 → 落盘 → 重读」。<b>v3.20 补齐最后两处</b>：① <code>StepPlan.parse</code> 按 <code>ActionType</code> 校验参数键（未知键/必填缺失或空白拒绝、可选键可省），schema 单源下沉到通道侧 <code>ActionParamSchema</code>、<code>IntentActionSchema</code> 委托；② 「IDE 助手闭环」——<code>SkeletonPromptBundle</code>（提示词包，值默认占位化）+ <code>SuggestionIntake</code>（围栏容错解析 → 统一门禁 → 等价对账，10 例）。<b>仍缺</b>：<code>ApprovalGrant</code> 未接入；自然语言意图源与 LLM 网络适配层在「框架不调 LLM」形态下判定 <b>N/A</b>。</td></tr>
