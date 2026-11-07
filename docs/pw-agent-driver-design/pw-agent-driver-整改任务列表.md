@@ -8,7 +8,7 @@
 > `META-INF/services`、根 pom、设计稿 §11。**本文件的每条结论都给可复核的位置或搜索口径。**
 
 > **更新（2026-11-07）**：本文件已于 commit `fda59584` 提交入 git。本次更新把 **P0 五项（T0–T4）全部标记为已完成**，
-> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。**P1 五项（T5 执行层接线 / T6 快照树+指纹 / T7 计划级幂等 / T8 审批绑定 / T9 非功能基线）全部落地**，**P2 中 T10（统一门面，`5e637c8a`）已落地**（见 §二 对应表）；非功能阈值仍待项目负责人确认，设计稿 §8.1.1 只做基线测量、不宣称达标，依赖图未变。
+> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。**P1 五项（T5 执行层接线 / T6 快照树+指纹 / T7 计划级幂等 / T8 审批绑定 / T9 非功能基线）全部落地**，**P2 中 T10（统一门面，`5e637c8a`）与 T11（定位表示映射契约，`f572d295`）已落地**（见 §二 对应表）；非功能阈值仍待项目负责人确认，设计稿 §8.1.1 只做基线测量、不宣称达标，依赖图未变。
 
 ---
 
@@ -94,7 +94,7 @@
 | ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 | 状态 / 落地提交 |
 |---|---|---|---|---|---|---|
 | **T10** | 统一门面（I-10，评审 T9 前半） | `AgentDriver` 门面内部路由 `StepPlan`/`VerifiableStepPlan` 两套入口 | T5 | 3d | 调用方只依赖一个入口；两套执行语义无重复实现 | ✅ 已落地（`5e637c8a`：新增 `pw-web-ui/framework.web.agent.AgentDriver` 作为唯一生产执行入口，`StepPlan` / `VerifiableStepPlan` / `STEP_PLAN` 资产三类入口只做参数归一化，全部落到唯一 `withChannel` 编排模板（T5 运行时作用域 + T9 计时/并发观测 + acquire/引擎/release）；`StepPlanRunner` 3 构造器 7 公开方法退化为兼容薄委托，消除原 `run`/`execute` 各写一份 acquire-release 的重复实现；`AssetStepPlanExecutor` 改为注入 `AgentDriver.PlanExecution` 函数接口、不再自行 new 执行器，T8 审批前置 / `pageRef` 优先 / `repeat` 每轮一作用域 / 报告回写逐字保真；`AssetVerificationWiring.verify` 与 `executor()` 共用同一门面，`fromConfig()` 收敛到 `AgentDriver.fromConfig()` 单一组合根；`AgentDriverFacadeArchTest` 4 条 ArchUnit 固化「仅门面可驱动 `StepDriver`/`StepVerifier`」与兼容入口依赖方向，`AgentDriverTest` 9 例覆盖入口收敛 / 审批前置 / repeat / 写回 / 单一组合根；全 reactor 8 模块 2173 测试 0 失败 0 错误，0 lint。**如实披露**：pw-core `LinkageGraphVerifier` 与 web 侧资产执行器在 repeat/报告组装上仍有跨域相似逻辑，但前者无审批/无回写/一次 acquire 全程复用通道，且 core 不得反向依赖 web，本轮不强行收敛） |
-| **T11** | 定位表示映射契约（I-11，评审缺任务） | `LocatorSpec`（`role=button;name=…`）↔ codegen `getByRole(AriaRole.X, …)` 映射器 + 单测 + 契约测试 | T3 | 2d | 同一元素在两侧映射一致；任一侧漂移构建红 | 待起 |
+| **T11** | 定位表示映射契约（I-11，评审缺任务） | `LocatorSpec`（`role=button;name=…`）↔ codegen `getByRole(AriaRole.X, …)` 映射器 + 单测 + 契约测试 | T3 | 2d | 同一元素在两侧映射一致；任一侧漂移构建红 | ✅ 已落地（`f572d295`：新增 pw-core `framework.agent.channel.LocatorRoleVocabulary` 作**唯一纯字符串规范**（零 Playwright 依赖，冻结 82 个 `AriaRole` 常量名 + 别名/不可定位表 + `canonicalRole`/`requireAriaConstant`）；三条历史独立路径全部收敛——codegen `AriaRoles` 删反射白名单退化为薄委托、`RecordedSkeletonConverter` 把 canonical 的 `role=` 段写成规范常量名小写、pw-web-ui `LocatorResolver` 由裸 `valueOf(toUpperCase)` 改走 `requireAriaConstant`，修复 `image` / `menuitem-checkbox` 生成侧成功而执行侧抛异常的静默漂移；未知角色执行侧 fail-closed，历史资产别名按同一规范归一（幂等）。新增冻结基线 `aria-role-constants-playwright-1.62.0.txt`、`LocatorSpecGetByRoleContractTest` 7 例（基线文件↔core 词表↔真实枚举三方严格对账、82 项 canonical 无损往返、生成侧注解文本 vs 执行侧 `getByRole` 实参经 JDK 动态代理捕获逐项一致、录制写入侧与路径 C BDD 资产回读执行）、`LocatorRoleMappingArchTest` 4 条 ArchUnit（core 零 Playwright / 两侧共用单一规范 / web-ui 不反向依赖 codegen / codegen 适配器不得再反射枚举）；`LocatorRoleVocabularyTest` 8 例；设计稿补 §4.4.2。全 reactor 8 模块 2192 测试 0 失败 0 错误（4 skip 既有），0 lint。**如实披露**：① `LocatorSpec` 只承载 `role/name/nameKey/nth`，`@RoleElement` 的 `exact/level/disabled/pressed/expanded/checked/selected` 明确列为**不映射维度**，须走注解产物路径，本轮未加「存在这些维度时自动拒绝生成」的运行期闸门；② 存量历史资产若含 `StaticText` 等不可定位角色，执行侧会归一到 `GENERIC`（生成侧拒绝），本轮只保证生产写入侧不再产出该形态，未对存量资产加拒绝闸门以免破坏兼容；③ 工程里另有 `RoleLocatorFactory.describe()` / `PageElement` 两种 `role=` 诊断串，契约只锁 canonical 一种；④ Playwright 升级增删枚举常量会**有意构建红**，须同步更新 core 词表与基线文件并复核别名表） |
 | **T12** | 治理面（I-12，评审缺明确任务） | Jenkins 报告 + 邮件/IM 摘要 + 每周定位器健康复核调度；审批 UI / 工单对接另立排期 | T1、T9 | 3d | 每周自动产出定位器健康摘要；CLI 不再是唯一交互面 | 待起 |
 | **T13** | 入口协议桥 MCP（原 T10，**前提已修正**） | 把 `prompt` / `check` / **`impact`** 三个子命令封成 stdio MCP server；**先明确 `impact` 是否对外暴露**；框架仍零 LLM / 零凭据 / 零出网 | **T0**（接口定型），联调等 T3 产物契约 | 2d | IDE 内一次会话拿到可采信 `StepPlan`、手工复制 0 次；`LlmProtocolTest` 仍绿；`LlmGateways.resolveOrNull()` 仍为 null | 待起 |
 
@@ -142,4 +142,4 @@ T10 与 T3 可并行开发，联调需等 T3 产物契约定型。
 - ~~未做性能基线测量（T9 才有真实值）~~ → 已由 T9（`c30b24a2`）落地采集与一页基线产物；但**真浏览器 / 靶场阈值仍待 CI 长跑与项目负责人确认**，本机护盾仅产出无浏览器 FakeHarness 的框架开销基线（见设计稿 §8.1.1）。
 - 已随 T0 提交 `agent/impact` 11 类 + `CurrentScenario` 2 类（见 §1.3），但其代码质量**未做独立设计评审**，仅按文件计入 T0。
 - 本任务列表已于 `fda59584` 提交 git；本次（2026-11-07）更新把 P0 五项（T0–T4）标记为已完成，并补列落地提交（见顶部更新说明与 §二 P0 表）。
-- P0 已全绿；**P1 五项全落地**——T5（`d029a2ee`）、T6（快照树+指纹）、T7（`d6b14e29` + 补漏 `f7e5e1c1`）、T8（`1e97639a`）、T9（`c30b24a2`）；**P2 首项 T10（统一门面，`5e637c8a`）已落地**。剩余为 P2 的 T11/T12/T13 与 P3 演进项，以及「非功能阈值待项目负责人确认」这一**非代码**事项（见 §二 与设计稿 §8.1.1）。
+- P0 已全绿；**P1 五项全落地**——T5（`d029a2ee`）、T6（快照树+指纹）、T7（`d6b14e29` + 补漏 `f7e5e1c1`）、T8（`1e97639a`）、T9（`c30b24a2`）；**P2 首两项 T10（统一门面，`5e637c8a`）与 T11（定位表示映射契约，`f572d295`）已落地**。剩余为 P2 的 T12/T13 与 P3 演进项，以及「非功能阈值待项目负责人确认」这一**非代码**事项（见 §二 与设计稿 §8.1.1）。

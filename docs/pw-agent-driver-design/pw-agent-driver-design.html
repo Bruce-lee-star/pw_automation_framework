@@ -648,6 +648,36 @@ steps:
   </table>
   <div class="note ok"><b>「验证通过 ≠ 生产可用」是代码级强制，不是文档口号：</b><code>submitForValidation</code> 通过只到 <code>VALIDATED</code>，<code>productionLocator</code> 只认 <code>APPROVED</code>；测试用「验证通过后回注出口必须为空」直接钉住这条语义。审批记录（v3.1 起为授权凭据）含审批者、业务后果等级、origin、计划摘要、应用版本、有效期、证据与完整事件链，可回答"这条定位器凭什么可信、还能用多久"。</div>
 
+  <h4 id="s442">4.4.2 定位表示映射契约（T11，v3.24 增量）</h4>
+  <p><b>缺口</b>：<code>LocatorSpec.canonical()</code> 的 <code>role=button;name=…</code> 与 codegen 生成的
+  <code>@RoleElement(role = AriaRole.BUTTON, …)</code> 长期只靠注释口头约定「同义」，三处实现各持一套口径：
+  codegen <code>AriaRoles</code> 反射 <code>AriaRole.values()</code> 维护白名单与别名（<code>image → IMG</code>、
+  去连字符），codegen <code>RecordedSkeletonConverter</code> 把 CDP AX 原始词原样写进 canonical，
+  而 pw-web-ui <code>LocatorResolver</code> 用裸 <code>AriaRole.valueOf(role.toUpperCase())</code>。
+  结果是 <code>image</code> / <code>menuitem-checkbox</code> 在生成侧成功、执行侧直接抛异常——
+  「同一元素」在两侧不可判定。T11 把口径收敛为 <b>pw-core 的纯字符串规范</b>
+  <code>LocatorRoleVocabulary</code>（零 Playwright 依赖，遵守 R6 依赖方向），所有生产路径必须经它：</p>
+  <table>
+    <tr><th style="width:20%">层</th><th style="width:36%">唯一实现</th><th>契约</th></tr>
+    <tr><td>写入侧</td><td><code>RecordedSkeletonConverter.canonicalTargetOf</code> → <code>LocatorRoleVocabulary.canonicalRole</code></td><td>canonical 的 <code>role=</code> 段只写规范常量名的小写（<code>img</code> / <code>menuitemcheckbox</code>），不可定位角色回退 <code>css=</code>；不写 AX 原始词。</td></tr>
+    <tr><td>生成侧</td><td><code>AriaRoles</code>（core 规范的薄适配）→ <code>CodegenFieldPlanner</code> → <code>@RoleElement</code>；<code>CdpLocatorCounter</code> 复核</td><td><code>ariaConstant</code> 为 <code>null</code> 或 <code>isLocatable</code> 为假时回退 <code>@Element(css)</code>，绝不降级成 <code>AriaRole.GENERIC</code>（能编译但恒不命中）。</td></tr>
+    <tr><td>执行侧</td><td><code>LocatorResolver.resolve</code> → <code>requireAriaConstant</code> → <code>page.getByRole</code></td><td>历史资产里的别名/连字符按同一规范归一（幂等）；未知角色显式拒绝，不静默猜角色。</td></tr>
+  </table>
+  <div class="note warn"><b>映射范围不得越界</b>：本契约只覆盖 <code>role</code>、<code>name</code>/<code>nameKey</code>、
+  <code>nth</code> 三个维度（即 <code>LocatorSpec</code> 能无损承载的全部信息）。<code>@RoleElement</code> 另有
+  <code>exact/level/disabled/pressed/expanded/checked/selected</code> 等语义属性，<b>不在</b> core 表示内：
+  需要时必须走注解产物路径，禁止塞进 canonical 后静默丢弃。另外工程里还存在另两种 <code>role=</code> 串——
+  <code>RoleLocatorFactory.describe()</code> 的 <code>role=BUTTON[name:X,level:2]</code> 与
+  <code>PageElement</code> 的选择器描述串——它们是日志/诊断文本，本契约<b>只锁 canonical 一种</b>，
+  误纳入会把大量既有测试打成假红。</div>
+  <div class="note info"><b>冻结与可证伪验收</b>：core 冻结 82 个常量名（Playwright Java 客户端 1.62.0）+
+  <code>pw-codegen/src/test/resources/aria-role-constants-playwright-1.62.0.txt</code> 基线文件 +
+  反射 <code>AriaRole.values()</code>，三方严格相等；<code>LocatorSpecGetByRoleContractTest</code> 逐项验证
+  全量枚举的 canonical 无损往返、生成侧注解文本与执行侧 <code>getByRole</code> 实参（JDK 动态代理捕获）
+  对同一别名得到同一常量、录制写入侧与路径 C BDD 资产承载的 canonical 可回读执行；
+  <code>LocatorRoleMappingArchTest</code> 以 ArchUnit 锁 core 零 Playwright、两侧共用同一规范、web-ui 不反向依赖 codegen。
+  <b>Playwright 升级增删枚举常量会直接构建红</b>：必须同步更新 core 词表与基线文件并复核别名表，不得放宽断言。</div>
+
   <h4>操作面 · 候选库 CLI（P3 闭环）</h4>
   <p>状态机内核之外必须有可执行入口，否则「审批」只能靠手改 JSON——把 <code>state</code> 手工改成 <code>APPROVED</code> 就绕过了审批人、应用版本与事件链，治理立刻退化成一句口号。<code>CandidateCli</code> 是<b>唯一</b>写入口，所有变更都走库的状态机：</p>
   <table>
@@ -1116,7 +1146,7 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><td>§4.1 BrowserCommandChannel 原语集</td><td>✅ ~98%（v3.13）</td><td>10 个类型化 ActionType（含 SWITCH_TO_POPUP）+ 契约面无 evaluate/run_code；v3.10 新增 <code>ActionTypePolicy</code> 固化<b>逐动作</b> sideEffecting/idempotent/defaultTimeout/maxRetries（取代 <code>ParamScopePolicy</code> 硬编码 switch），<code>StepDriver</code> 对幂等动作应用 maxRetries 有限重试（写操作不重试）；<b>v3.11 把 defaultTimeout 真正施加到运行期</b>；<b>v3.12 把并发所有权地基落地</b>——<code>PlaywrightChannel.execute</code> 经 <code>SessionOwnership</code> 独占串行执行同一 page 会话；<b>v3.13 把 Frame 生命周期 · popup 捕获与切换落地</b>——<code>Command</code> 新增 <code>SWITCH_TO_POPUP</code> 原语 + <code>PlaywrightChannel</code> 注册 <code>onPopup</code> 捕获并切换驱动目标（真实浏览器验证）。<b>缺口</b>：iframe 句柄失效由 Locator 惰性解析天然耐住、iframe 穿透由 CSS &gt;&gt; 已支持（非阻塞）；Role-First 穿透 iframe 为可选增强。</td></tr>
     <tr><td>§4.2 SnapshotTree 快照协议</td><td>✅ ~75%（v3.8）</td><td><b>已落地</b>：SnapshotBounds 四道上界 + SnapshotEnvelope 协议头/版本绑定/三态 + AriaSnapshotParser 有界解析 + PlaywrightChannel UNSUPPORTED + SnapshotVerifier fail-closed，18 例测试。<b>缺口</b>：嵌套 children 树、跨域 Frame/Shadow DOM 自动标记、sensitivity 分级、快照指纹（详见 §4.2 note）。</td></tr>
     <tr><td>§4.3 意图翻译与 StepPlan / §4.3.1 参数范围授权</td><td>✅ / ⚠️（v3.20 ↑）</td><td>StepPlan.parse fail-closed、未知字段/动作拒绝、planDigest 已落地；<b>ParamScope* 门禁完整并接线</b>（7 测试）。<b>v3.17 补齐</b>：<code>IntentTranslator</code> SPI + <code>RuleBasedIntentTranslator</code> 规则引擎（结构化骨架 → StepPlan）、<code>IntentActionSchema</code> 按 ActionType 参数 schema + 动作授权白名单、<code>IntentPlanValidator</code> schema/策略/可执行性三合一门禁（独立于 translator，R6）、<code>PlanEquivalence</code> 结构化等价性对账（55 例测试）。<b>v3.18 补齐录制入口</b>：pw-codegen <code>RecordedSkeletonConverter</code> 把 <code>CodegenRecorder.Action</code> + <code>CodegenEntry</code> 转成 <code>RecordedSkeleton</code>（16 例，含转换→翻译→门禁的跨模块闭环），使「录制一侧」首次接通。<b>v3.19 补齐序列化出口</b>：<code>RecordedSkeleton.toJson()</code> 与 <code>parse</code> 严格对称、字段白名单、params 排序确定性、越界 fail-closed（6 例），打通「录制 → 骨架 → 落盘 → 重读」。<b>v3.20 补齐最后两处</b>：① <code>StepPlan.parse</code> 按 <code>ActionType</code> 校验参数键（未知键/必填缺失或空白拒绝、可选键可省），schema 单源下沉到通道侧 <code>ActionParamSchema</code>、<code>IntentActionSchema</code> 委托；② 「IDE 助手闭环」——<code>SkeletonPromptBundle</code>（提示词包，值默认占位化）+ <code>SuggestionIntake</code>（围栏容错解析 → 统一门禁 → 等价对账，10 例）。<b>仍缺</b>：<code>ApprovalGrant</code> 未接入；自然语言意图源与 LLM 网络适配层在「框架不调 LLM」形态下判定 <b>N/A</b>。</td></tr>
-    <tr><td>§4.4 定位器四梯队 + 4.4.1 / CLI / 取证 / 审批 / 审计</td><td>✅ ~95%</td><td>locator.candidate 26 类 + 13 测试全闭环：fail-closed 验证、版本化状态机、按业务后果授权、审计三级脱敏/角色鉴权/保留清除/不可重执行。缺治理 UI、工单/IM 对接、运行时复核调度。</td></tr>
+    <tr><td>§4.4 定位器四梯队 + 4.4.1 / 4.4.2 / CLI / 取证 / 审批 / 审计</td><td>✅ ~95%（v3.24 ↑）</td><td>locator.candidate 26 类 + 13 测试全闭环：fail-closed 验证、版本化状态机、按业务后果授权、审计三级脱敏/角色鉴权/保留清除/不可重执行。<b>v3.24 / T11</b> 补 §4.4.2 定位表示映射契约：<code>LocatorRoleVocabulary</code> 收敛生成侧/执行侧/写入侧三套口径，冻结枚举基线 + 跨模块契约测试 + ArchUnit 使任一侧漂移构建红（<code>image</code> / <code>menuitem-checkbox</code> 历史漂移已修）。缺治理 UI、工单/IM 对接、运行时复核调度。</td></tr>
     <tr><td>§4.5 稳定代码生成</td><td>⚠️ ~55%</td><td>四层模板分两产线齐；缺生成→checkstyle→编译→冒烟→落库管线命令、生成物 trace javadoc、PO 自定义原子方法、两产线接线。</td></tr>
     <tr><td>§4.6 LLM 页面理解与资产生产</td><td>⚠️ ~50%</td><td>五段 SPI + 确定性流水线 + 四类资产落库 + 需求回链 + 覆盖度齐；<b>v3.16 新增 LLM 网关协议层</b>（pw-core <code>framework.agent.llm</code>：请求/响应协议 + SPI + 可用性降级 + ServiceLoader 可选发现，12 例测试）；但<b>仍零 LLM 网络实现</b>（无供应商客户端/凭据注入，需治理审查后启用）、networkSummary 恒 null、联动图谱差分提取与 Feature 需求源解析缺、RuleBasedUnderstandingEngine 固定产空图谱。</td></tr>
     <tr><td>§4.7 多语言 NLS</td><td>✅ 完成</td><td>NlsText / NlsCatalog / JsonNlsCatalog + LocatorSpec.nameKey + 全链路可注入 + 跨语言资产测试。</td></tr>
