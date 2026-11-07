@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.recorder;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.Command;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorRoleVocabulary;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.IntentActionSchema;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.IntentTranslationException;
@@ -8,7 +9,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.RecordedSkeleton;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.intent.RecordedStep;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenFieldPlanner;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.AriaRoles;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
 
 import java.net.URI;
@@ -190,17 +190,24 @@ public final class RecordedSkeletonConverter {
      * <p>不把 {@link CodegenEntry#index} 塞进 {@code nth}：它是 codegen 的「List 分组序号」
      * （同级兄弟位置），与 Playwright {@code getByRole(...).nth()} 的过滤口径不同源，
      * 混用会定位漂移。</p>
+     *
+     * <p><b>映射契约（T11）</b>：canonical 的 {@code role=} 段写
+     * {@link LocatorRoleVocabulary#canonicalRole(String)} 的规范常量名（小写），而不是 CDP AX
+     * 原始词。否则 {@code image} / {@code menuitem-checkbox} 会在生成侧映射成
+     * {@code AriaRole.IMG} / {@code MENUITEMCHECKBOX}，执行侧却拿着原始词解析失败——
+     * 同一元素在两侧不一致。不可定位/不可映射的角色一律回退 CSS。</p>
      */
     private static String canonicalTargetOf(CodegenEntry entry) {
         String role = entry.role;
-        if (AriaRoles.isLocatable(role)) {
+        String canonicalRole = LocatorRoleVocabulary.canonicalRole(role);
+        if (canonicalRole != null && LocatorRoleVocabulary.isLocatable(role)) {
             String nameKey = trimToNull(entry.nlsKey);
             if (nameKey != null) {
-                return bounded(entry, LocatorSpec.roleOfKey(role, nameKey).canonical());
+                return bounded(entry, LocatorSpec.roleOfKey(canonicalRole, nameKey).canonical());
             }
             String name = trimToNull(entry.name);
             if (name != null) {
-                return bounded(entry, LocatorSpec.role(role, name).canonical());
+                return bounded(entry, LocatorSpec.role(canonicalRole, name).canonical());
             }
         }
         String css = trimToNull(entry.cssSelector);

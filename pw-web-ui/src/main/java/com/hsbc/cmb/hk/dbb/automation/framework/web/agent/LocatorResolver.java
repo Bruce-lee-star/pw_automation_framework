@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.agent;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorRoleVocabulary;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.LocatorSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsText;
@@ -7,7 +8,6 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
 
-import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -21,6 +21,12 @@ import java.util.regex.Pattern;
  * <p><b>多语言</b>：ROLE 梯队的名若以 NLS key 表达（{@code nameKey}），先按当前语言解析成文案
  * 再 {@code getByRole(role,{name})}；值含模板（{@code {{var}}}）时改用 {@code setName(Pattern)}。
  * 这与 codegen 的 {@code Nls.t(key)} 完全同义，故资产可跨语言复用。</p>
+ *
+ * <p><b>映射契约（T11）</b>：ROLE 分支的 {@link AriaRole} 常量名一律经
+ * {@link LocatorRoleVocabulary#requireAriaConstant(String)} 取得，与 codegen 生成
+ * {@code @RoleElement(role = AriaRole.X)} 的口径同源。这里的 {@code require} 是刻意选择的
+ * fail-closed：历史资产里带 CDP AX 别名（{@code image}）或连字符（{@code menuitem-checkbox}）
+ * 时按同一规范归一，未知角色则显式拒绝——静默换成另一种角色会定位到错误元素且无从对账。</p>
  */
 public final class LocatorResolver {
 
@@ -44,7 +50,7 @@ public final class LocatorResolver {
         }
         switch (spec.strategy()) {
             case ROLE: {
-                AriaRole role = AriaRole.valueOf(spec.role().toUpperCase(Locale.ROOT));
+                AriaRole role = AriaRole.valueOf(LocatorRoleVocabulary.requireAriaConstant(spec.role()));
                 Page.GetByRoleOptions opts = new Page.GetByRoleOptions();
                 Pattern namePattern = null;
                 String name = spec.name();
