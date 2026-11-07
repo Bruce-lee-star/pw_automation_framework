@@ -92,7 +92,7 @@ public final class SnapshotVerifier {
                 passed++;
             }
         }
-        return new SnapshotVerificationResult(failures.isEmpty(), failures, expectations.size(), passed);
+        return new SnapshotVerificationResult(failures.isEmpty(), failures, expectations.size(), passed, snapshot.snapshotDigest());
     }
 
     /** 便捷入口：直接从命令执行结果取快照断言。 */
