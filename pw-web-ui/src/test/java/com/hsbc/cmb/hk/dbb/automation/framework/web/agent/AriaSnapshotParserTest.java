@@ -106,4 +106,27 @@ public class AriaSnapshotParserTest {
         assertEquals(1L, a.envelope().snapshotVersion());
         assertEquals(2L, b.envelope().snapshotVersion());
     }
+
+    @Test
+    public void nestedAriaBuildsDepthTreeWithPerNodeFrameId() {
+        // 缩进 0/2/4 → 深度 1/2/3
+        String raw = "- button \"A\"\n  - button \"B\"\n    - button \"C\"\n";
+        Snapshot s = parse(raw, SnapshotBounds.DEFAULT, 1L).snapshot();
+        assertEquals("顶层仅一个根", 1, s.roots().size());
+        Snapshot.ElementState root = s.roots().get(0);
+        assertEquals("role=button;name=A", root.ref());
+        assertEquals(1, root.depth());
+        assertEquals("main", root.frameId());
+        assertEquals(1, root.children().size());
+        Snapshot.ElementState mid = root.children().get(0);
+        assertEquals("role=button;name=B", mid.ref());
+        assertEquals(2, mid.depth());
+        assertEquals(1, mid.children().size());
+        Snapshot.ElementState leaf = mid.children().get(0);
+        assertEquals("role=button;name=C", leaf.ref());
+        assertEquals(3, leaf.depth());
+        // 后代仍可按 ref 索引（全树扁平）
+        assertNotNull(s.byRef("role=button;name=C"));
+        assertEquals(3, s.elements().size());
+    }
 }

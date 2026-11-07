@@ -88,7 +88,7 @@ public final class AriaSnapshotParser {
                     break; // 深度上界：停止收录，避免把深层子树误当完整
                 }
 
-                Snapshot.ElementState state = toState(t, counters);
+                Snapshot.ElementState state = toState(t, counters, depth, frameId);
                 if (state == null) {
                     continue; // 纯文本节点等非元素行
                 }
@@ -101,11 +101,56 @@ public final class AriaSnapshotParser {
             }
         }
 
+        // 平铺列表按缩进深度还原为有界树（per-node 携带 depth 与 frameId），供结构指纹与联动分析。
+        List<Snapshot.ElementState> roots = nest(states);
+
         SnapshotEnvelope envelope = reason == null
                 ? SnapshotEnvelope.complete(contextId, pageId, frameId, version, nodes, bytes)
                 : SnapshotEnvelope.truncated(contextId, pageId, frameId, version, reason, nodes, bytes);
-        return new Result(new Snapshot(pageRef, states, envelope), reason);
+        return new Result(new Snapshot(pageRef, roots, envelope), reason);
     }
+
+    /**
+     * 把先序平铺的节点列表还原为树。使用深度栈：每个节点的父节点是栈中最近的深度更小的节点，
+     * 即使源文本存在「跨级缩进」（中间层是非元素行）也能正确归位。
+     */
+    private static List<Snapshot.ElementState> nest(List<Snapshot.ElementState> flat) {
+        java.util.Deque<TreeNode> path = new java.util.ArrayDeque<>();
+        List<TreeNode> roots = new java.util.ArrayList<>();
+        for (Snapshot.ElementState s : flat) {
+            TreeNode node = new TreeNode(s);
+            while (!path.isEmpty() && path.peek().depth >= node.depth) {
+                path.pop();
+            }
+            if (path.isEmpty()) {
+                roots.add(node);
+            } else {
+                path.peek().children.add(node);
+            }
+            path.push(node);
+        }
+        return roots.stream().map(AriaSnapshotParser::toElement).toList();
+    }
+
+    private static Snapshot.ElementState toElement(TreeNode n) {
+        List<Snapshot.ElementState> kids = n.children.stream().map(AriaSnapshotParser::toElement).toList();
+        Snapshot.ElementState s = n.state;
+        return new Snapshot.ElementState(s.ref(), s.role(), s.name(), s.visible(), s.enabled(), s.text(),
+                s.depth(), s.frameId(), kids, s.unsupported(), s.unsupportedReason());
+    }
+
+    /** 树构建中间节点（持有 ElementState 与可变子列表）。 */
+    private static final class TreeNode {
+        final Snapshot.ElementState state;
+        final int depth;
+        final List<TreeNode> children = new java.util.ArrayList<>();
+
+        TreeNode(Snapshot.ElementState state) {
+            this.state = state;
+            this.depth = state.depth();
+        }
+    }
+
 
     private static int leadingSpaces(String line) {
         int i = 0;
@@ -116,7 +161,8 @@ public final class AriaSnapshotParser {
     }
 
     /** 单行 ARIA 节点 → 元素状态；非元素行（text / 属性）返回 null。 */
-    private static Snapshot.ElementState toState(String trimmed, Map<String, Integer> counters) {
+    private static Snapshot.ElementState toState(String trimmed, Map<String, Integer> counters,
+                                                int depth, String frameId) {
         String body = trimmed.substring(2).trim();
         if (body.startsWith("/")) {
             return null;
@@ -147,6 +193,7 @@ public final class AriaSnapshotParser {
         counters.put(key, nth + 1);
         LocatorSpec spec = LocatorSpec.role(role, name, nth);
         String safeName = name == null ? "" : name;
-        return new Snapshot.ElementState(spec.canonical(), role, safeName, true, !disabled, safeName);
+        return new Snapshot.ElementState(spec.canonical(), role, safeName, true, !disabled, safeName,
+                depth, frameId, java.util.List.of(), false, null);
     }
 }

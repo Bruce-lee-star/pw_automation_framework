@@ -16,6 +16,14 @@ public final class CommandResult {
     public Snapshot snapshot() { return snapshot; }
     public String message() { return message; }
 
+    /**
+     * 执行后快照的稳定结构指纹（见 {@link Snapshot#snapshotDigest}）。
+     * 快照为 {@code null}（失败结果）时返回 {@code null}。
+     */
+    public String snapshotDigest() {
+        return snapshot == null ? null : snapshot.snapshotDigest();
+    }
+
     public static CommandResult ok(Snapshot snapshot) {
         return new CommandResult(true, snapshot, null);
     }
