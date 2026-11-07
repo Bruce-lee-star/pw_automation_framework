@@ -3,5 +3,8 @@
 *.ftl text eol=lf
 *.ftlh text eol=lf
 # 报表内联样式：作为静态资源原样注入 ${css}，同样参与 golden 逐字节比对
-reporting/src/main/resources/templates/summary/*.css text eol=lf
-reporting/src/test/resources/golden/*.html text eol=lf
+pw-reports/src/main/resources/templates/summary/*.css text eol=lf
+pw-reports/src/test/resources/golden/*.html text eol=lf
+# 渲染快照门禁 golden（SnapshotGateTest）：git archive 导出会做 CRLF 转换，
+# 钉死 LF 才能与 FreeMarker 渲染输出（恒为 LF）逐字节一致，避免全新检出误报漂移
+pw-reports/src/test/resources/render/*.html text eol=lf

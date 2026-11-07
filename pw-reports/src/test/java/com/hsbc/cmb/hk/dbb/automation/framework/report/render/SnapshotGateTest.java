@@ -60,7 +60,7 @@ class SnapshotGateTest {
         assertThat(SNAPSHOT).as("snapshot file missing — generate with "
                         + "-Dpw.report.test.write-snapshot=true (first run or intentional reset)")
                 .exists();
-        normalizedSnapshot = Files.readString(SNAPSHOT, StandardCharsets.UTF_8);
+        normalizedSnapshot = normalize(Files.readString(SNAPSHOT, StandardCharsets.UTF_8));
     }
 
     @Test
@@ -78,6 +78,10 @@ class SnapshotGateTest {
     }
 
     private static String normalize(String html) {
+        // 行尾归一化：git archive 导出的测试资源与本地 checkout 行尾可能不同
+        // （archive 会做 CRLF 转换，而 FreeMarker 渲染输出恒为 LF），比对前统一到 LF，
+        // 避免「内容一致却因行尾不同而误报漂移」。真实内容差异仍会被下方规则捕获。
+        html = html.replace("\r\n", "\n").replace("\r", "\n");
         return REPORT_VERSION.matcher(
                 SCREENSHOT_NAME.matcher(
                         HUMAN_TIMESTAMP.matcher(
