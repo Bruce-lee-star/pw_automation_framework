@@ -36,6 +36,12 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
  * （SHA-256 取前 8 字节十六进制，前缀 {@code stepplan-v1}），把「被批准的内容」压成可比较指纹，
  * 供后续参数范围授权绑定（v3.7 下一层）。</p>
  *
+ * <p><b>摘要体系边界（T8）</b>：本指纹是<b> StepPlan 执行域</b>指纹，与 pw-codegen 中
+ * {@code LocatorCandidate.planDigestOf()}（前缀 {@code locator-v1}，覆盖定位器回注域的
+ * targetRef/spec/expectedRole）是<b>两套互不相通</b>的体系。两者前缀不同、覆盖域不同、用途不同
+ * （前者是执行链审批绑定校验，后者是定位器回注域的 {@code ApprovalGrant#covers()} 比对），
+ * 切勿混用或相互派生。</p>
+ *
  * <p><b>参数范围</b>：可选的 {@code scope} 字段（参数名 → 取值域约束）随资产分发，
  * 并被 {@link #planDigest()} 绑定——scope 变化即指纹变化，使参数取值域与「被批准的内容」对齐；
  * 运行期由 {@code ParamScopeGate} 在 execute(Command) 边界落实 fail-closed 门禁。

@@ -65,7 +65,7 @@ public final class JsonFileAssetRepository implements AssetRepository {
         AssetId id = new AssetId("asset:" + draft.type().name().toLowerCase() + ":" + n, 1);
         long now = System.currentTimeMillis();
         StoredAsset asset = new StoredAsset(id, draft.type(), draft.requirementId(), AssetState.DRAFT,
-                draft.provenance(), draft.contentJson(), null, now, now);
+                draft.provenance(), draft.contentJson(), null, now, now, null);
         store.put(id, asset);
         persist(asset);
         LOG.debug("Asset saved as DRAFT: {}", id);
@@ -116,8 +116,13 @@ public final class JsonFileAssetRepository implements AssetRepository {
             throw new IllegalArgumentException("Unknown asset: " + id);
         }
         AssetState next = stateMachine.transition(current.state(), event);
+        // T8 审批绑定：审批通过时经单一来源记录 STEP_PLAN 的内容指纹；其它迁移沿用既有绑定。
+        String approvedDigest = (event == AssetStateMachine.Event.APPROVE)
+                ? StepPlanApprovalBinding.digestOf(current.type(), current.contentJson())
+                : current.approvedDigest();
         StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), next,
-                current.provenance(), current.contentJson(), current.report(), current.createdAt(), System.currentTimeMillis());
+                current.provenance(), current.contentJson(), current.report(), current.createdAt(),
+                System.currentTimeMillis(), approvedDigest);
         store.put(id, updated);
         persist(updated);
         LOG.info("Asset {} transition {} -> {} by {}", id, current.state(), next, actor);
@@ -131,7 +136,8 @@ public final class JsonFileAssetRepository implements AssetRepository {
             throw new IllegalArgumentException("Unknown asset: " + id);
         }
         StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), current.state(),
-                current.provenance(), current.contentJson(), report, current.createdAt(), System.currentTimeMillis());
+                current.provenance(), current.contentJson(), report, current.createdAt(),
+                System.currentTimeMillis(), current.approvedDigest());
         store.put(id, updated);
         persist(updated);
         LOG.info("Asset {} verification recorded (status={}, stability={})", id, report.status(), report.stability());
@@ -180,6 +186,9 @@ public final class JsonFileAssetRepository implements AssetRepository {
         }
         node.put("createdAt", asset.createdAt());
         node.put("updatedAt", asset.updatedAt());
+        if (asset.approvedDigest() != null) {
+            node.put("approvedDigest", asset.approvedDigest());
+        }
         // 回写的验证报告（§4.6 量化验收）手动序列化，避免对 VerificationReport 施加 Jackson 绑定
         if (asset.report() != null) {
             node.set("verification", toReportJson(asset.report()));
@@ -210,7 +219,9 @@ public final class JsonFileAssetRepository implements AssetRepository {
         long createdAt = node.get("createdAt").asLong();
         long updatedAt = node.get("updatedAt").asLong();
         VerificationReport report = node.has("verification") ? fromReportJson((ObjectNode) node.get("verification")) : null;
-        return new StoredAsset(id, type, requirementId, state, provenance, contentJson, report, createdAt, updatedAt);
+        String approvedDigest = node.has("approvedDigest") ? node.get("approvedDigest").asText(null) : null;
+        return new StoredAsset(id, type, requirementId, state, provenance, contentJson, report,
+                createdAt, updatedAt, approvedDigest);
     }
 
     /** 手动序列化验证报告（避免对 VerificationReport 施加 Jackson 绑定契约）。 */

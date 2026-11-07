@@ -29,7 +29,7 @@ public final class InMemoryAssetRepository implements AssetRepository {
         AssetId id = new AssetId("asset:" + draft.type().name().toLowerCase() + ":" + n, 1);
         long now = System.currentTimeMillis();
         StoredAsset asset = new StoredAsset(id, draft.type(), draft.requirementId(), AssetState.DRAFT,
-                draft.provenance(), draft.contentJson(), null, now, now);
+                draft.provenance(), draft.contentJson(), null, now, now, null);
         store.put(id, asset);
         LOG.debug("Asset saved as DRAFT: {}", id);
         return id;
@@ -61,8 +61,14 @@ public final class InMemoryAssetRepository implements AssetRepository {
             throw new IllegalArgumentException("Unknown asset: " + id);
         }
         AssetState next = stateMachine.transition(current.state(), event);
+        // T8 审批绑定：审批通过时经单一来源记录 STEP_PLAN 的内容指纹；
+        // 非审批迁移（submit/activate/deprecate）沿用既有绑定；重验回路再次 APPROVE 会重新计算。
+        String approvedDigest = (event == AssetStateMachine.Event.APPROVE)
+                ? StepPlanApprovalBinding.digestOf(current.type(), current.contentJson())
+                : current.approvedDigest();
         StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), next,
-                current.provenance(), current.contentJson(), current.report(), current.createdAt(), System.currentTimeMillis());
+                current.provenance(), current.contentJson(), current.report(), current.createdAt(),
+                System.currentTimeMillis(), approvedDigest);
         store.put(id, updated);
         LOG.info("Asset {} transition {} -> {} by {}", id, current.state(), next, actor);
         return updated;
@@ -86,7 +92,8 @@ public final class InMemoryAssetRepository implements AssetRepository {
             throw new IllegalArgumentException("Unknown asset: " + id);
         }
         StoredAsset updated = new StoredAsset(id, current.type(), current.requirementId(), current.state(),
-                current.provenance(), current.contentJson(), report, current.createdAt(), System.currentTimeMillis());
+                current.provenance(), current.contentJson(), report, current.createdAt(),
+                System.currentTimeMillis(), current.approvedDigest());
         store.put(id, updated);
         LOG.info("Asset {} verification recorded (status={}, stability={})", id, report.status(), report.stability());
         return updated;
