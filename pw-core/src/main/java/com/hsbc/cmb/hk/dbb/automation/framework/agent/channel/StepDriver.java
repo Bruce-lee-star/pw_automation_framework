@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.perf.AgentPerfProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.AgentTraceEvent;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.AgentTraceRegistry;
 
@@ -58,6 +59,7 @@ public final class StepDriver {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(idempotency, "idempotency");
+        AgentPerfProbe.refresh(); // T9：每计划刷新一次采集开关（默认关），步骤级只读缓存
         ParamScopePolicy.validatePlan(plan); // 治理预检（副作用动作须声明 scope）
         List<CommandResult> results = new ArrayList<>(plan.steps().size());
         for (int i = 0; i < plan.steps().size(); i++) {
@@ -116,6 +118,8 @@ public final class StepDriver {
             attempts++;
         }
         recordTrace(plan, step, index, startedAt, result);
+        // T9：复用 R9 审计已有的 nanoTime 起点，关闭时立即返回（不额外取时间、不构造样本）
+        AgentPerfProbe.recordStep(startedAt, result.success(), null);
         if (result.success()) {
             idem.recordPass(plan, index, step, resolvedScope, result.snapshotDigest());
         }

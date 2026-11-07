@@ -10,12 +10,14 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerificationResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.perf.AgentPerfProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.runtime.AgentRuntimeContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.runtime.AgentRuntimeContexts;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.runtime.AgentRuntimeScope;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * 把 pw-core 的「授权执行 + 执行后联动断言」闭环接到真实浏览器执行底座（完整驱动引擎专项）。
@@ -82,7 +84,7 @@ public final class StepPlanRunner {
     /** 带登录会话身份的重载（T5）：身份透传给并发闸门，无身份时传 {@code null}。 */
     public StepVerificationResult run(StepPlan plan, List<List<SnapshotExpectation>> expectations,
                                       String targetUrl, String sessionKey) {
-        return runtime.runInScope(scopeOf(plan, targetUrl, sessionKey), () -> {
+        return inRuntimeScope(plan, targetUrl, sessionKey, () -> {
             BrowserCommandChannel channel = null;
             try {
                 channel = harness.acquire(targetUrl);
@@ -118,7 +120,7 @@ public final class StepPlanRunner {
 
     /** 带登录会话身份的仅执行重载（T5）。 */
     public List<CommandResult> execute(StepPlan plan, String targetUrl, String sessionKey) {
-        return runtime.runInScope(scopeOf(plan, targetUrl, sessionKey), () -> {
+        return inRuntimeScope(plan, targetUrl, sessionKey, () -> {
             BrowserCommandChannel channel = null;
             try {
                 channel = harness.acquire(targetUrl);
@@ -126,6 +128,38 @@ public final class StepPlanRunner {
             } finally {
                 if (channel != null) {
                     harness.release(channel);
+                }
+            }
+        });
+    }
+
+    /**
+     * T9：把每次执行包进 {@link AgentRuntimeContext} 作用域，并在其中完成「整计划」端到端
+     * 计时与并发观测。采集默认关闭时仅多一次 volatile 读与一次 {@code refresh()}，
+     * 不改变既有执行、异常与释放语义；异常路径同样记录失败样本，且并发计数严格配对。
+     *
+     * <p>计时覆盖 harness acquire / release 与运行时组合根作用域，故 1 / 10 / 100 步
+     * 计划得到的是<b>端到端</b>分布，与单步分布分桶统计、互不混算。</p>
+     */
+    private <T> T inRuntimeScope(StepPlan plan, String targetUrl, String sessionKey,
+                                 Supplier<T> action) {
+        Objects.requireNonNull(plan, "plan");
+        AgentPerfProbe.refresh();
+        return runtime.runInScope(scopeOf(plan, targetUrl, sessionKey), () -> {
+            long startedAt = AgentPerfProbe.start();
+            int inFlight = AgentPerfProbe.enterScope();
+            Throwable failure = null;
+            try {
+                return action.get();
+            } catch (RuntimeException | Error e) {
+                failure = e;
+                throw e;
+            } finally {
+                try {
+                    AgentPerfProbe.recordPlan(startedAt, plan.steps().size(),
+                            failure == null, failure, inFlight);
+                } finally {
+                    AgentPerfProbe.exitScope(inFlight);
                 }
             }
         });

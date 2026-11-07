@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.perf.AgentPerfProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.AssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
@@ -70,6 +71,7 @@ public final class StepVerifier {
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(expectationsPerStep, "expectationsPerStep");
         StepIdempotency idem = (idempotency == null) ? StepIdempotency.none() : idempotency;
+        AgentPerfProbe.refresh(); // T9：覆盖不经 StepDriver.execute 的逐步验证路径
 
         long settleWindowMs = resolveSettleWindowMs();
         // 治理预检（副作用动作须声明 scope）；逐步执行 + 每步执行后、断言前 settle + 重新采集稳定态快照，
