@@ -7,6 +7,9 @@
 > **本文件基线**：HEAD `39223c3d`（DEV-V6），2026-11-06。复核范围：全仓 `src/main` / `src/test` Java、
 > `META-INF/services`、根 pom、设计稿 §11。**本文件的每条结论都给可复核的位置或搜索口径。**
 
+> **更新（2026-11-07）**：本文件已于 commit `fda59584` 提交入 git。本次更新把 **P0 五项（T0–T4）全部标记为已完成**，
+> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。P1（T5–T9）尚待起，未改依赖图。
+
 ---
 
 ## 一、对评审文档的判定
@@ -48,7 +51,8 @@
 - 评审声明基线 `HEAD b1492a4b`；当前 HEAD 为 **`39223c3d`**（`835ed34c` 门禁功能 + `39223c3d` 补模板）。
 - 因此以下表述已失效：§01「+90 例差额来自未提交的 LocatorHealth 改动」、§06.2「LocatorHealth 门禁/基线/HTML 报表已成型（未提交）」、§09「未提交项包含 LocatorHealth 十余类与 `locator-health-baseline.json`」。
 - `locator-health-baseline.json` 属**运行时产物**，本就不应纳入版本控制（已清理）。
-- 仍未提交：`agent/impact` 主 11 类 + 测试 3 类、`SkeletonCli.java` / `SkeletonCliTest.java` 的修改、`CurrentScenario.java` / `CurrentScenarioTest.java`、若干 docs 资源。
+- 上述「仍未提交」项（`agent/impact` 主 11 类 + 测试 3 类、`SkeletonCli*`、`CurrentScenario*`、docs 资源）**已于 T0 定型并提交**（`f4566f5a` `153db525` `09b1241f` `fda59584`，见 §二 P0 表 T0 行）；提交前仍属未评审代码质量（见 §四）。
+- 后续补充（2026-11-07）：基线从 `39223c3d` 再前进至 `b9393aea`，期间 T0–T4 全部完成（见 §二 P0 表与顶部更新说明）。
 
 ### 1.4 一个评审后引入、评审未覆盖的真实缺陷（已修）
 
@@ -65,15 +69,15 @@
 **优先级定义**：P0 = 进生产流水线前必须闭环；P1 = 可靠性/治理硬缺口；P2 = 规模化与可维护性演进；D = 文档勘误（不占代码估时）。
 估时为单人投入，验收标准均为可判定条件。
 
-### P0 · 阻断（4 项 + 1 项前置）
+### P0 · 阻断（已全部完成 ✅，5 项）
 
-| ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 |
-|---|---|---|---|---|---|
-| **T0** | 工作区增量提交 + **HEAD 全新检出回归** | 把 `agent/impact`(11+3)、`SkeletonCli*`、`CurrentScenario*` 定型并提交；从 HEAD 全新 checkout 跑 7 模块全量回归 | — | 0.5d | `git status --short` 无本 feature 残留；全新检出全量回归 0 失败 0 错误；产出模块级例数清单 |
-| **T1** | R9 审计接线（I-01） | **`AgentTraceSink` 接口放 pw-core + pw-reports 实现（SPI，与既有 `LocatorHealthReportSink` / `MonitorFailureReportSink` 同构）**，`StepDriver` 逐步写 action/target/digest/耗时/结果，`StepPlanRunner` 落 trace；无实现时 no-op。**不依赖 `AgentRuntimeContext`**（那是 T5），避免把审计链阻塞在执行层重构上 | T0 | 3d | 一次 N 步计划产出 N 条 trace；报告可见 Agent 区块；脱敏后无凭据原文；破坏性用例（越权/过期/未审计导出）构建红 |
-| **T2** | D3 稳定语义（I-03） | 在 `StepVerifier.verify` **之前**加静默窗口（配置键，默认 500ms）+ 导航感知 + 超时兜底；`Verify` 阶段统一收口，不放进 `StepDriver` | T0 | 2d | 含 200ms 延迟渲染的靶场页面连跑 30 次全绿；配置关闭时行为与现状逐字一致 |
-| **T3** | 路径 C 闭环（I-02） | 新增 `StepPlanCodegenAdapter`（`StepPlan` → `FeatureGluePlan`）；**复用** `BindingCodegenPipeline` 的 3 段落盘，扩展为 checkstyle → 编译 → 冒烟 → `AssetRepository` 落库；一条命令 + 语义化退出码 | T0，**不依赖 T6** | 5d | 给定已验证 `StepPlan`，一条命令产出四层产物并通过冒烟；产物出现在资产库；退出码 0/1/2 有契约测试 |
-| **T4** | R1/R2/R6 门禁（I-04） | ① 凭据原文扫描测试；② `BrowserCommandChannel` 契约面测试（禁 `evaluate`/`run_code_unsafe` **仅约束契约面与 `agent.*` 包**，不误伤 13 处框架内部合法用法）；③ ArchUnit 断言 `agent.*` 零浏览器类型依赖 | T0 | 2d | 三条红线各有失败用例，注入破坏后构建红；现有 17 个含 `evaluate` 的文件不需改动 |
+| ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 | 状态 / 落地提交 |
+|---|---|---|---|---|---|---|
+| **T0** | 工作区增量提交 + **HEAD 全新检出回归** | 把 `agent/impact`(11+3)、`SkeletonCli*`、`CurrentScenario*` 定型并提交；从 HEAD 全新 checkout 跑 7 模块全量回归 | — | 0.5d | `git status --short` 无本 feature 残留；全新检出全量回归 0 失败 0 错误；产出模块级例数清单 | ✅ 已落地（`f4566f5a` `153db525` `09b1241f` `fda59584`：WIP 按逻辑单元分 4 提交，含 driver 设计文档；HEAD 全新检出 7 模块全量回归 `BUILD SUCCESS`） |
+| **T1** | R9 审计接线（I-01） | `AgentTraceSink` 接口（pw-core）+ pw-reports SPI 实现；`StepDriver.recordTrace` 经 `AgentTraceRegistry` 写 trace；无实现时 no-op | T0 | 3d | 一次 N 步计划产出 N 条 trace；报告可见 Agent 区块；脱敏后无凭据原文 | ✅ 已落地（`efd8dd6c` 接线 `AgentTraceSink` SPI + `9f902afb` 最小审计字段与跨数据出口 canary） |
+| **T2** | D3 稳定语义（I-03） | 在 `StepVerifier.verify` **之前**加静默窗口（配置键，默认 500ms）+ 导航感知 + 超时兜底；`Verify` 阶段统一收口，不放进 `StepDriver` | T0 | 2d | 含 200ms 延迟渲染的靶场页面连跑 30 次全绿；配置关闭时行为与现状逐字一致 | ✅ 已落地（`56098073` 静默窗口 + 导航感知；`ed69d3c1` 修复批量执行逐步 settle + 重快照，消除中间态错位回归） |
+| **T3** | 路径 C 闭环（I-02） | 新增 `StepPlanCodegenAdapter`（`StepPlan` → `FeatureGluePlan` + 配套 Steps 类）；**复用** `BindingCodegenPipeline` 3 段落盘，叠加冲突守卫 → Glue/Steps 一致性校验 → `AssetRepository.save(DRAFT)`；单命令入口 + 退出码 0/1/2；编译/冒烟标记委托 CI 真实执行（不伪造编译结论，守 `BindingCodegenPipeline` 既有铁律） | T0，**不依赖 T6** | 5d | 给定已验证 `StepPlan`，一条命令产出四层产物并落库；退出码 0/1/2 有契约测试 | ✅ 已落地（`b9393aea`：pw-codegen 新增 `StepPlanCodegenAdapter`/`StepPlanCodegenPipeline`/`StepPlanCodegenCli`；pw-core 新增 `AssetType.BINDING` 与 `StepPlanActionSink/Sinks` 执行接缝；契约测试覆盖生成+落库 / 手写冲突→2 / 空计划→1；pw-core+pw-codegen 全量 350 测试 0 回归） |
+| **T4** | R1/R2/R6 门禁（I-04） | 凭据原文扫描测试；`BrowserCommandChannel` 契约面测试（禁 `evaluate`/`run_code_unsafe` **仅约束契约面与 `agent.*` 包**，不误伤 13 处框架内部合法用法）；ArchUnit 断言 `agent.*` 零浏览器类型依赖 | T0 | 2d | 三条红线各有失败用例，注入破坏后构建红；现有 17 个含 `evaluate` 的文件不需改动 | ✅ 已落地（`3ba6b0db`：凭据原文 / 契约面禁 `evaluate` / `agent.*` 零浏览器依赖 三条红线均有失败护栏，注入破坏构建红） |
 
 ### P1 · 重要（5 项）
 
@@ -136,5 +140,6 @@ T10 与 T3 可并行开发，联调需等 T3 产物契约定型。
 - 未修评审 HTML 文档本身（位于工作区外 `C:\Users\12745\Doubao\...`），仅产出勘误清单 D1–D4。
 - 未对 `b1492a4b` 单独复跑 1959 例；当前结论基于工作区复核与 `39223c3d` 的静态取证。
 - 未做性能基线测量（T9 才有真实值）。
-- 未评审未提交的 `agent/impact` 11 类、`CurrentScenario` 2 类的代码质量，仅按文件计入 T0。
-- 本任务列表未提交 git，待确认后提交。
+- 已随 T0 提交 `agent/impact` 11 类 + `CurrentScenario` 2 类（见 §1.3），但其代码质量**未做独立设计评审**，仅按文件计入 T0。
+- 本任务列表已于 `fda59584` 提交 git；本次（2026-11-07）更新把 P0 五项（T0–T4）标记为已完成，并补列落地提交（见顶部更新说明与 §二 P0 表）。
+- P0 已全绿，下一步为 P1（T5–T9），相互无依赖、可任意起（见 §二 P1 表与 §三依赖图）。
