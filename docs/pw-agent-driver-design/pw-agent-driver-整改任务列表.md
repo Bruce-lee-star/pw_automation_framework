@@ -8,7 +8,7 @@
 > `META-INF/services`、根 pom、设计稿 §11。**本文件的每条结论都给可复核的位置或搜索口径。**
 
 > **更新（2026-11-07）**：本文件已于 commit `fda59584` 提交入 git。本次更新把 **P0 五项（T0–T4）全部标记为已完成**，
-> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。**P1 五项（T5 执行层接线 / T6 快照树+指纹 / T7 计划级幂等 / T8 审批绑定 / T9 非功能基线）全部落地**（见 §二 P1 表对应行）；非功能阈值仍待项目负责人确认，设计稿 §8.1.1 只做基线测量、不宣称达标，依赖图未变。
+> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。**P1 五项（T5 执行层接线 / T6 快照树+指纹 / T7 计划级幂等 / T8 审批绑定 / T9 非功能基线）全部落地**，**P2 中 T10（统一门面，`5e637c8a`）已落地**（见 §二 对应表）；非功能阈值仍待项目负责人确认，设计稿 §8.1.1 只做基线测量、不宣称达标，依赖图未变。
 
 ---
 
@@ -91,12 +91,12 @@
 
 ### P2 · 演进（4 项）
 
-| ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 |
-|---|---|---|---|---|---|
-| **T10** | 统一门面（I-10，评审 T9 前半） | `AgentDriver` 门面内部路由 `StepPlan`/`VerifiableStepPlan` 两套入口 | T5 | 3d | 调用方只依赖一个入口；两套执行语义无重复实现 |
-| **T11** | 定位表示映射契约（I-11，评审缺任务） | `LocatorSpec`（`role=button;name=…`）↔ codegen `getByRole(AriaRole.X, …)` 映射器 + 单测 + 契约测试 | T3 | 2d | 同一元素在两侧映射一致；任一侧漂移构建红 |
-| **T12** | 治理面（I-12，评审缺明确任务） | Jenkins 报告 + 邮件/IM 摘要 + 每周定位器健康复核调度；审批 UI / 工单对接另立排期 | T1、T9 | 3d | 每周自动产出定位器健康摘要；CLI 不再是唯一交互面 |
-| **T13** | 入口协议桥 MCP（原 T10，**前提已修正**） | 把 `prompt` / `check` / **`impact`** 三个子命令封成 stdio MCP server；**先明确 `impact` 是否对外暴露**；框架仍零 LLM / 零凭据 / 零出网 | **T0**（接口定型），联调等 T3 产物契约 | 2d | IDE 内一次会话拿到可采信 `StepPlan`、手工复制 0 次；`LlmProtocolTest` 仍绿；`LlmGateways.resolveOrNull()` 仍为 null |
+| ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 | 状态 / 落地提交 |
+|---|---|---|---|---|---|---|
+| **T10** | 统一门面（I-10，评审 T9 前半） | `AgentDriver` 门面内部路由 `StepPlan`/`VerifiableStepPlan` 两套入口 | T5 | 3d | 调用方只依赖一个入口；两套执行语义无重复实现 | ✅ 已落地（`5e637c8a`：新增 `pw-web-ui/framework.web.agent.AgentDriver` 作为唯一生产执行入口，`StepPlan` / `VerifiableStepPlan` / `STEP_PLAN` 资产三类入口只做参数归一化，全部落到唯一 `withChannel` 编排模板（T5 运行时作用域 + T9 计时/并发观测 + acquire/引擎/release）；`StepPlanRunner` 3 构造器 7 公开方法退化为兼容薄委托，消除原 `run`/`execute` 各写一份 acquire-release 的重复实现；`AssetStepPlanExecutor` 改为注入 `AgentDriver.PlanExecution` 函数接口、不再自行 new 执行器，T8 审批前置 / `pageRef` 优先 / `repeat` 每轮一作用域 / 报告回写逐字保真；`AssetVerificationWiring.verify` 与 `executor()` 共用同一门面，`fromConfig()` 收敛到 `AgentDriver.fromConfig()` 单一组合根；`AgentDriverFacadeArchTest` 4 条 ArchUnit 固化「仅门面可驱动 `StepDriver`/`StepVerifier`」与兼容入口依赖方向，`AgentDriverTest` 9 例覆盖入口收敛 / 审批前置 / repeat / 写回 / 单一组合根；全 reactor 8 模块 2173 测试 0 失败 0 错误，0 lint。**如实披露**：pw-core `LinkageGraphVerifier` 与 web 侧资产执行器在 repeat/报告组装上仍有跨域相似逻辑，但前者无审批/无回写/一次 acquire 全程复用通道，且 core 不得反向依赖 web，本轮不强行收敛） |
+| **T11** | 定位表示映射契约（I-11，评审缺任务） | `LocatorSpec`（`role=button;name=…`）↔ codegen `getByRole(AriaRole.X, …)` 映射器 + 单测 + 契约测试 | T3 | 2d | 同一元素在两侧映射一致；任一侧漂移构建红 | 待起 |
+| **T12** | 治理面（I-12，评审缺明确任务） | Jenkins 报告 + 邮件/IM 摘要 + 每周定位器健康复核调度；审批 UI / 工单对接另立排期 | T1、T9 | 3d | 每周自动产出定位器健康摘要；CLI 不再是唯一交互面 | 待起 |
+| **T13** | 入口协议桥 MCP（原 T10，**前提已修正**） | 把 `prompt` / `check` / **`impact`** 三个子命令封成 stdio MCP server；**先明确 `impact` 是否对外暴露**；框架仍零 LLM / 零凭据 / 零出网 | **T0**（接口定型），联调等 T3 产物契约 | 2d | IDE 内一次会话拿到可采信 `StepPlan`、手工复制 0 次；`LlmProtocolTest` 仍绿；`LlmGateways.resolveOrNull()` 仍为 null | 待起 |
 
 ### D 类 · 文档勘误（不占代码估时）
 
@@ -142,4 +142,4 @@ T10 与 T3 可并行开发，联调需等 T3 产物契约定型。
 - ~~未做性能基线测量（T9 才有真实值）~~ → 已由 T9（`c30b24a2`）落地采集与一页基线产物；但**真浏览器 / 靶场阈值仍待 CI 长跑与项目负责人确认**，本机护盾仅产出无浏览器 FakeHarness 的框架开销基线（见设计稿 §8.1.1）。
 - 已随 T0 提交 `agent/impact` 11 类 + `CurrentScenario` 2 类（见 §1.3），但其代码质量**未做独立设计评审**，仅按文件计入 T0。
 - 本任务列表已于 `fda59584` 提交 git；本次（2026-11-07）更新把 P0 五项（T0–T4）标记为已完成，并补列落地提交（见顶部更新说明与 §二 P0 表）。
-- P0 已全绿；**P1 五项全落地**——T5（`d029a2ee`）、T6（快照树+指纹）、T7（`d6b14e29` + 补漏 `f7e5e1c1`）、T8（`1e97639a`）、T9（`c30b24a2`）。剩余为 P2/P3 演进项，以及「非功能阈值待项目负责人确认」这一**非代码**事项（见 §二 与设计稿 §8.1.1）。
+- P0 已全绿；**P1 五项全落地**——T5（`d029a2ee`）、T6（快照树+指纹）、T7（`d6b14e29` + 补漏 `f7e5e1c1`）、T8（`1e97639a`）、T9（`c30b24a2`）；**P2 首项 T10（统一门面，`5e637c8a`）已落地**。剩余为 P2 的 T11/T12/T13 与 P3 演进项，以及「非功能阈值待项目负责人确认」这一**非代码**事项（见 §二 与设计稿 §8.1.1）。
