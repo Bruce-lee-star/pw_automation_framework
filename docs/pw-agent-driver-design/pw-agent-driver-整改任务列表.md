@@ -81,13 +81,13 @@
 
 ### P1 · 重要（5 项）
 
-| ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 |
-|---|---|---|---|---|---|
-| **T5** | 执行层接线 / 消除孤岛（I-06，评审未单列） | 引入 `AgentRuntimeContext` 承载 Route / SessionStore / ConcurrencyGate / MonitorSink，静态工具类改实例方法 | T1 之后（SPI 已解耦） | 4d | 同一进程内执行链与业务链路由/并发语义一致；ArchUnit 断言依赖方向；全量回归零回归 |
-| **T6** | 快照树 + 指纹（I-05） | `ElementState` 补 children/depth；把 `SnapshotEnvelope` 已有的 `frameId`/`UNSUPPORTED` 下沉为 per-node 标记；`snapshotDigest` 排除时间戳/序号，落到 `CommandResult` | T0 | 3d | 同页面两次快照 digest 相同；改一个属性后 digest 变化；有界性（深度/节点数上限）有测试 |
-| **T7** | 计划级幂等 | 基于 `snapshotDigest` 跳过已通过步骤；失败输出 diff | **T6** | 2d | 重跑同一计划跳过 N-1 步，仅跑变更步 |
-| **T8** | 审批绑定（I-07，**修法已修正**） | 明确 `LocatorCandidate.planDigestOf()` 与 `StepPlan.planDigest()` 两套摘要的语义边界与映射；在 `AssetStepPlanExecutor.run` 前置校验批准摘要（**不是新建 `ApprovalGrant`**） | T0 | 2d | 篡改计划后执行被拒，错误信息含两侧 digest；定位器回注域原有 `ApprovalGrant.covers()` 行为零回归 |
-| **T9** | 非功能基线（I-08） | 单步 / 10 步 / 100 步 p50/p95 采集；并发上限；canary 生产策略；失败恢复目标 | T1–T3 之后（否则测旧链路） | 3d | 一页基线数据；阈值与告警项写入设计稿；采集开关默认关 |
+| ID | 任务 | 关键动作 | 依赖 | 估时 | 验收标准 | 状态 / 落地提交 |
+|---|---|---|---|---|---|---|
+| **T5** | 执行层接线 / 消除孤岛（I-06，评审未单列） | 引入 `AgentRuntimeContext` 承载 Route / SessionStore / ConcurrencyGate / MonitorSink，静态工具类改实例方法 | T1 之后（SPI 已解耦） | 4d | 同一进程内执行链与业务链路由/并发语义一致；ArchUnit 断言依赖方向；全量回归零回归 | 待起 |
+| **T6** | 快照树 + 指纹（I-05） | `ElementState` 补 children/depth；把 `SnapshotEnvelope` 已有的 `frameId` 下沉为 per-node 标记（UNSUPPORTED 保留信封级，per-node 字段已预留）；`snapshotDigest` 排除时间戳/序号，落到 `CommandResult` | T0 | 3d | 同页面两次快照 digest 相同；改一个属性后 digest 变化；有界性（深度/节点数上限）有测试 | ✅ 已落地（`93e7dfea`：ElementState 加 depth/children/frameId/unsupported；AriaSnapshotParser 按缩进建树 + per-node frameId；Snapshot 落树并扁平化 byRef；snapshotDigest SHA-256 排除信封元数据；CommandResult 透传；契约测试覆盖同页同指纹/改属性变化/截断差异/树结构/平铺兼容；pw-core+pw-web-ui 全量 571 测试 0 回归） |
+| **T7** | 计划级幂等 | 基于 `snapshotDigest` 跳过已通过步骤；失败输出 diff | **T6** | 2d | 重跑同一计划跳过 N-1 步，仅跑变更步 | 待起（T6 已就绪，可起） |
+| **T8** | 审批绑定（I-07，**修法已修正**） | 明确 `LocatorCandidate.planDigestOf()` 与 `StepPlan.planDigest()` 两套摘要的语义边界与映射；在 `AssetStepPlanExecutor.run` 前置校验批准摘要（**不是新建 `ApprovalGrant`**） | T0 | 2d | 篡改计划后执行被拒，错误信息含两侧 digest；定位器回注域原有 `ApprovalGrant.covers()` 行为零回归 | 待起 |
+| **T9** | 非功能基线（I-08） | 单步 / 10 步 / 100 步 p50/p95 采集；并发上限；canary 生产策略；失败恢复目标 | T1–T3 之后（否则测旧链路） | 3d | 一页基线数据；阈值与告警项写入设计稿；采集开关默认关 | 待起 |
 
 ### P2 · 演进（4 项）
 
