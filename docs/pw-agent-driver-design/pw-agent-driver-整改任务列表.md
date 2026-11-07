@@ -8,7 +8,7 @@
 > `META-INF/services`、根 pom、设计稿 §11。**本文件的每条结论都给可复核的位置或搜索口径。**
 
 > **更新（2026-11-07）**：本文件已于 commit `fda59584` 提交入 git。本次更新把 **P0 五项（T0–T4）全部标记为已完成**，
-> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。P1（T5–T9）尚待起，未改依赖图。
+> 并补列各任务落地提交；基线已从 `39223c3d` 前进至 `b9393aea`（T3）。P1 中 **T6（快照树+指纹）、T7（计划级幂等）、T8（审批绑定）已落地**（见 §二 P1 表对应行）；剩余 T5（执行层接线）/T9（非功能基线）待起，依赖图未变。
 
 ---
 
@@ -85,8 +85,8 @@
 |---|---|---|---|---|---|---|
 | **T5** | 执行层接线 / 消除孤岛（I-06，评审未单列） | 引入 `AgentRuntimeContext` 承载 Route / SessionStore / ConcurrencyGate / MonitorSink，静态工具类改实例方法 | T1 之后（SPI 已解耦） | 4d | 同一进程内执行链与业务链路由/并发语义一致；ArchUnit 断言依赖方向；全量回归零回归 | 待起 |
 | **T6** | 快照树 + 指纹（I-05） | `ElementState` 补 children/depth；把 `SnapshotEnvelope` 已有的 `frameId` 下沉为 per-node 标记（UNSUPPORTED 保留信封级，per-node 字段已预留）；`snapshotDigest` 排除时间戳/序号，落到 `CommandResult` | T0 | 3d | 同页面两次快照 digest 相同；改一个属性后 digest 变化；有界性（深度/节点数上限）有测试 | ✅ 已落地（`93e7dfea`：ElementState 加 depth/children/frameId/unsupported；AriaSnapshotParser 按缩进建树 + per-node frameId；Snapshot 落树并扁平化 byRef；snapshotDigest SHA-256 排除信封元数据；CommandResult 透传；契约测试覆盖同页同指纹/改属性变化/截断差异/树结构/平铺兼容；pw-core+pw-web-ui 全量 571 测试 0 回归） |
-| **T7** | 计划级幂等 | 基于 `snapshotDigest` 跳过已通过步骤；失败输出 diff | **T6** | 2d | 重跑同一计划跳过 N-1 步，仅跑变更步 | 待起（T6 已就绪，可起） |
-| **T8** | 审批绑定（I-07，**修法已修正**） | 明确 `LocatorCandidate.planDigestOf()` 与 `StepPlan.planDigest()` 两套摘要的语义边界与映射；在 `AssetStepPlanExecutor.run` 前置校验批准摘要（**不是新建 `ApprovalGrant`**） | T0 | 2d | 篡改计划后执行被拒，错误信息含两侧 digest；定位器回注域原有 `ApprovalGrant.covers()` 行为零回归 | 待起 |
+| **T7** | 计划级幂等 | 基于 `snapshotDigest` 跳过已通过步骤；失败输出 diff | **T6** | 2d | 重跑同一计划跳过 N-1 步，仅跑变更步 | ✅ 已落地（`d6b14e29`：新增 `StepIdempotency` 接口 + `InMemoryStepIdempotency` 实现（位置锚定 `step-N` + 命令内容 SHA-256 指纹，编辑计划后未变步跳过、变更步重跑）；`CommandResult` 透传 `snapshotDigestOverride`；`StepDriver`/`StepVerifier`/`StepPlanRunner` 无侵入接入幂等 seams，`none()` 默认零回归；pw-core+pw-agent-analysis+pw-reports+pw-web-ui 全量 573 测试 0 失败 0 错误） |
+| **T8** | 审批绑定（I-07，**修法已修正**） | 明确 `LocatorCandidate.planDigestOf()` 与 `StepPlan.planDigest()` 两套摘要的语义边界与映射；在 `AssetStepPlanExecutor.run` 前置校验批准摘要（**不是新建 `ApprovalGrant`**） | T0 | 2d | 篡改计划后执行被拒，错误信息含两侧 digest；定位器回注域原有 `ApprovalGrant.covers()` 行为零回归 | ✅ 已落地（`1e97639a`：新增 `StepPlanApprovalBinding` 作为「内容→执行域摘要 + 前置校验」单一来源；`StoredAsset` 加 `approvedDigest` 字段，两种 `AssetRepository` 在 `approve()` 记录、`activate`/`recordVerification` 保持、文件型仓库落盘重载无损；`AssetStepPlanExecutor.run` 前置 `verify`（未审批 DRAFT 无绑定→零回归）；两套摘要边界写入 `StepPlan`/绑定类/执行器 javadoc；验收测试覆盖篡改拒绝含两侧 digest、一致放行、DRAFT 零回归、`ApprovalGrant.covers()` 跨域不混用；全 reactor 7 模块 2108 测试 0 失败 0 错误） |
 | **T9** | 非功能基线（I-08） | 单步 / 10 步 / 100 步 p50/p95 采集；并发上限；canary 生产策略；失败恢复目标 | T1–T3 之后（否则测旧链路） | 3d | 一页基线数据；阈值与告警项写入设计稿；采集开关默认关 | 待起 |
 
 ### P2 · 演进（4 项）
@@ -142,4 +142,4 @@ T10 与 T3 可并行开发，联调需等 T3 产物契约定型。
 - 未做性能基线测量（T9 才有真实值）。
 - 已随 T0 提交 `agent/impact` 11 类 + `CurrentScenario` 2 类（见 §1.3），但其代码质量**未做独立设计评审**，仅按文件计入 T0。
 - 本任务列表已于 `fda59584` 提交 git；本次（2026-11-07）更新把 P0 五项（T0–T4）标记为已完成，并补列落地提交（见顶部更新说明与 §二 P0 表）。
-- P0 已全绿，下一步为 P1（T5–T9），相互无依赖、可任意起（见 §二 P1 表与 §三依赖图）。
+- P0 已全绿；P1 中 T6（快照树+指纹）、T7（计划级幂等，`d6b14e29` + 补漏 `f7e5e1c1`）、T8（审批绑定，`1e97639a`）已落地，剩余 T5（执行层接线）/T9（非功能基线）待起，相互无依赖、可任意起（见 §二 P1 表与 §三依赖图）。
