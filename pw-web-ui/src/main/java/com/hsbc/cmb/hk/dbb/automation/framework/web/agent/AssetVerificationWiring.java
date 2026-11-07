@@ -11,6 +11,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.VerificationReport;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.asset.VerificationScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.runtime.AgentRuntimeContext;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.runtime.AgentRuntimeContexts;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 
 import java.nio.file.Path;
@@ -70,12 +72,21 @@ public final class AssetVerificationWiring implements AutoCloseable {
      * @param harness    隔离靶场（生产为 {@link RouteTestBedHarness}）
      */
     public AssetVerificationWiring(AssetRepository repository, IsolationHarness harness) {
+        this(repository, harness, AgentRuntimeContext.empty());
+    }
+
+    /**
+     * 完整装配（T5）：显式注入运行时组合根；{@code null} 视为 {@link AgentRuntimeContext#empty()}。
+     * 供宿主/测试精确控制角色实现，避免隐式 SPI 解析。
+     */
+    public AssetVerificationWiring(AssetRepository repository, IsolationHarness harness,
+                                   AgentRuntimeContext runtime) {
         if (repository == null || harness == null) {
             throw new IllegalArgumentException("repository and harness are required");
         }
         this.repository = repository;
         this.harness = harness;
-        this.executor = new AssetStepPlanExecutor(repository, harness);
+        this.executor = new AssetStepPlanExecutor(repository, harness, runtime);
         this.coverageService = new VerificationCoverageService(repository);
     }
 
@@ -92,9 +103,12 @@ public final class AssetVerificationWiring implements AutoCloseable {
     public static AssetVerificationWiring fromConfig(NlsCatalog nls) {
         String root = ConfigReader.getProperty(ASSET_ROOT_KEY, DEFAULT_ASSET_ROOT);
         Path assetRoot = Paths.get(root == null || root.isBlank() ? DEFAULT_ASSET_ROOT : root);
+        // T5：生产组合根装配 SPI 聚合的运行时角色（Route/Session/Concurrency/Monitor），
+        // 使落库资产执行与业务链共享同一份状态；显式 2/3 参构造不受影响（零回归）。
         return new AssetVerificationWiring(
                 new JsonFileAssetRepository(assetRoot),
-                new RouteTestBedHarness(nls));
+                new RouteTestBedHarness(nls),
+                AgentRuntimeContexts.current());
     }
 
     /** 执行指定 {@code STEP_PLAN} 资产并回写报告（委托生产执行组件）。 */

@@ -12,6 +12,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotVerificati
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerificationResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.runtime.AgentRuntimeContext;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.AssertionFailure;
 
 import java.util.ArrayList;
@@ -44,15 +45,32 @@ import java.util.List;
  * {@code LocatorCandidate.planDigestOf()}（前缀 {@code locator-v1}，覆盖定位器回注域的 targetRef/spec/expectedRole）
  * 是<b>两套互不相通</b>的体系。二者不可混用：本执行器只认 StepPlan 摘要，定位器回注域仍由
  * {@code ApprovalGrant#covers()} 把关，互不干扰。</p>
+ *
+ * <h2>运行时接线（T5）</h2>
+ * <p>可注入 {@link AgentRuntimeContext}，使落库资产执行与业务链共享同一份路由/会话/并发/监控状态；
+ * 默认 {@link AgentRuntimeContext#empty()}（四槽 no-op）保证既有调用方零回归。生产组合根
+ * {@link AssetVerificationWiring#fromConfig()} 注入 SPI 聚合结果。</p>
  */
 public final class AssetStepPlanExecutor {
 
     private final AssetRepository repo;
     private final IsolationHarness harness;
+    private final AgentRuntimeContext runtime;
 
+    /** 默认装配：不接业务链运行时，行为与 T5 之前一致。 */
     public AssetStepPlanExecutor(AssetRepository repo, IsolationHarness harness) {
+        this(repo, harness, AgentRuntimeContext.empty());
+    }
+
+    /**
+     * 完整装配（T5）。
+     *
+     * @param runtime 运行时角色组合；{@code null} 视为 {@link AgentRuntimeContext#empty()}
+     */
+    public AssetStepPlanExecutor(AssetRepository repo, IsolationHarness harness, AgentRuntimeContext runtime) {
         this.repo = repo;
         this.harness = harness;
+        this.runtime = (runtime == null) ? AgentRuntimeContext.empty() : runtime;
     }
 
     /**
@@ -81,7 +99,7 @@ public final class AssetStepPlanExecutor {
         StepPlanApprovalBinding.verify(id, asset.approvedDigest(), asset.contentJson());
 
         VerifiableStepPlan vsp = VerifiableStepPlan.fromJson(asset.contentJson());
-        StepPlanRunner runner = new StepPlanRunner(harness);
+        StepPlanRunner runner = new StepPlanRunner(harness, null, runtime);
         int repeat = scope.repeat();
         int passRuns = 0;
         StepVerificationResult last = null;
