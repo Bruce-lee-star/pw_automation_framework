@@ -2,12 +2,16 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.AgentTraceEvent;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.AgentTraceRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.ActionTypePolicy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 确定性步骤执行编排（v3.7，pw-core，浏览器无关）。
@@ -22,6 +26,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.ActionTypePolicy;
  * 门禁失败（{@link ParamScopeViolationException}）fail-fast 向上传播，不静默吞。</p>
  */
 public final class StepDriver {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(StepDriver.class);
 
     private StepDriver() {
     }
@@ -41,6 +47,7 @@ public final class StepDriver {
         for (int i = 0; i < plan.steps().size(); i++) {
             Command step = plan.steps().get(i);
             // 门禁边界：channel.execute(Command, ParamScope) 默认方法先 ParamScopeGate.check 再 execute(Command)
+            long startedAt = System.nanoTime();
             CommandResult result = channel.execute(step, plan.resolvedScope(i));
             // 重试策略（P0 第 3 项）：仅幂等动作允许有限重试；写操作一次失败即停，避免 trace 重放二次提交
             ActionTypePolicy.ActionPolicy policy = ActionTypePolicy.of(step.action());
@@ -50,8 +57,30 @@ public final class StepDriver {
                 result = channel.execute(step, plan.resolvedScope(i));
                 attempts++;
             }
+            recordTrace(plan, step, i, startedAt, result);
             results.add(result);
         }
         return results;
+    }
+
+    /**
+     * R9 审计埋点：逐步写最小元数据轨迹。经 {@link AgentTraceRegistry} 走 SPI，无实现时 no-op，
+     * 且本方法自身吞掉一切异常——审计失败绝不能影响主执行链路。
+     */
+    private static void recordTrace(StepPlan plan, Command step, int index, long startedAt, CommandResult result) {
+        try {
+            long durationMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            AgentTraceRegistry.get().record(new AgentTraceEvent(
+                    plan.planId() + "#" + index,
+                    String.valueOf(plan.schemaVersion()),
+                    step.action().name(),
+                    step.params() == null ? null : step.params().get("url"),
+                    durationMs,
+                    result.success(),
+                    plan.planDigest(),
+                    null));
+        } catch (Throwable t) {
+            LOGGER.debug("[agent-trace] record skipped: {}", t.toString());
+        }
     }
 }
