@@ -23,6 +23,19 @@ public interface BrowserCommandChannel {
     /** 采集有界 a11y 感知快照（role/name/ref + 元素状态）。 */
     Snapshot snapshot();
 
+    /**
+     * 验证前静默窗口（D3 稳定语义，I-03）：等待当前页面稳定（网络/导航收敛），供 Verify 阶段断言前调用。
+     *
+     * <p>默认 no-op（无浏览器能力或无需 settle 的通道，行为与现状一致）；Playwright 实现覆写为
+     * {@code waitForLoadState} + 导航感知 + 超时兜底。实现不得暴露 {@code evaluate}（R2 红线），
+     * 且必须带超时上限（不无限等待）。本方法只做「稳定等待」，不构成断言本身。</p>
+     *
+     * @param windowMs 静默窗口下限（毫秒）；实现可在此之上叠加导航等待，但总时长受自身超时上限约束
+     */
+    default void settle(long windowMs) {
+        // no-op by default
+    }
+
     /** 执行一个类型化命令，返回结果（含执行后快照，供联动断言）。 */
     CommandResult execute(Command command);
 

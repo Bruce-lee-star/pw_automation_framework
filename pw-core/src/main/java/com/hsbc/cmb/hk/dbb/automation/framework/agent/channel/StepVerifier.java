@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.AssertionFailure;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
 
 import java.util.ArrayList;
@@ -23,17 +24,25 @@ import java.util.Objects;
  *
  * <p>门禁 fail-closed 贯穿：若任一步参数越界，{@code StepDriver} 抛
  * {@link ParamScopeViolationException}，本方法不捕获、不静默降级——未授权的执行不会进入联动断言。</p>
+ *
+ * <p><b>D3 稳定语义（I-03）</b>：逐行走联动断言前，若静默窗口配置开启（{@code >0}），先经
+ * {@link BrowserCommandChannel#settle(long)} 等页面稳定，再<b>重新采集</b>快照后断言；关闭时（{@code <=0}）
+ * 直接复用执行时快照，与改动前行为逐字一致。settle / 重新取快照失败一律回退执行时快照，辅助动作绝不拖垮断言——
+ * 从而闭环「同元素快速重复断言抖动」红线。</p>
  */
 public final class StepVerifier {
 
     private StepVerifier() {
     }
 
+    /** D3 稳定语义（I-03）：验证前静默窗口配置键（默认 500ms；{@code <=0} 视为关闭，行为与现状一致）。 */
+    private static final String AGENT_STEP_VERIFY_SETTLE_WINDOW_MS = "agent.step.verify.settle.window.ms";
+
     /**
      * 执行计划并对每步结果做联动断言。
      *
      * @param plan                    待执行的步骤计划（须通过参数范围治理预检）
-     * @param channel                 命令通道（含门禁边界）
+     * @param channel                 命令通道（含门禁边界 + settle 能力）
      * @param expectationsPerStep     每步的快照字段期望；少于 steps 时，缺省步视为「无断言」
      * @return 每步的校验结果聚合（见 {@link StepVerificationResult}）
      * @throws ParamScopeViolationException 任一步参数越界（来自 StepDriver，fail-fast）
@@ -45,6 +54,7 @@ public final class StepVerifier {
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(expectationsPerStep, "expectationsPerStep");
 
+        long settleWindowMs = resolveSettleWindowMs();
         List<CommandResult> results = StepDriver.execute(plan, channel);
         List<SnapshotVerificationResult> perStep = new ArrayList<>(results.size());
         for (int i = 0; i < results.size(); i++) {
@@ -57,7 +67,8 @@ public final class StepVerifier {
                                 + (r.message() != null ? " (" + r.message() + ")" : ""), "present", "absent")),
                         1, 0));
             } else {
-                perStep.add(SnapshotVerifier.verify(r, exps));
+                Snapshot snap = resolveVerificationSnapshot(channel, r, settleWindowMs);
+                perStep.add(SnapshotVerifier.verify(snap, exps));
             }
         }
         return new StepVerificationResult(perStep);
@@ -72,11 +83,49 @@ public final class StepVerifier {
      * 都经 {@code StepDriver}（门禁执行）+ {@code SnapshotVerifier}（断言）验证。</p>
      *
      * @param vsp     可验证步骤计划（含执行计划、逐步期望、页面引用）
-     * @param channel 命令通道（含门禁边界）
+     * @param channel 命令通道（含门禁边界 + settle 能力）
      * @return 每步的校验结果聚合
      * @throws ParamScopeViolationException 任一步参数越界（来自 StepDriver，fail-fast）
      */
     public static StepVerificationResult verify(VerifiableStepPlan vsp, BrowserCommandChannel channel) {
         return verify(vsp.plan(), channel, vsp.expectationsPerStep());
+    }
+
+    /**
+     * D3 稳定语义（I-03）：解析验证前静默窗口配置。默认 500ms；{@code <=0} 视为关闭。
+     * 键经 {@link ConfigReader} 解析（系统属性 / 文件 / 默认值），解析失败回退默认 500ms。
+     */
+    private static long resolveSettleWindowMs() {
+        // 系统属性优先（实时覆写，便于运行期调参与测试隔离），再回落到 ConfigReader 文件/默认解析
+        String raw = System.getProperty(AGENT_STEP_VERIFY_SETTLE_WINDOW_MS);
+        if (raw == null) {
+            raw = ConfigReader.resolve(AGENT_STEP_VERIFY_SETTLE_WINDOW_MS, "500");
+        }
+        if (raw == null) {
+            return 500L;
+        }
+        try {
+            return Long.parseLong(raw.trim());
+        } catch (NumberFormatException e) {
+            return 500L;
+        }
+    }
+
+    /**
+     * D3 稳定语义（I-03）：验证前先 settle 再取稳定态快照，消除「同元素快速重复断言抖动」。
+     * 窗口关闭（{@code <=0}）时直接用执行时快照，与现状逐字一致；settle / 重新取快照失败一律回退执行时快照，
+     * 辅助动作绝不拖垮断言。
+     */
+    private static Snapshot resolveVerificationSnapshot(BrowserCommandChannel channel, CommandResult r, long settleWindowMs) {
+        if (settleWindowMs <= 0) {
+            return r.snapshot();
+        }
+        try {
+            channel.settle(settleWindowMs);
+            Snapshot stable = channel.snapshot();
+            return stable != null ? stable : r.snapshot();
+        } catch (Throwable t) {
+            return r.snapshot();
+        }
     }
 }

@@ -135,6 +135,35 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
         return AriaSnapshotParser.parse(raw, url, contextId, pageId, "main", version, bounds).snapshot();
     }
 
+    /**
+     * 验证前静默窗口（D3 稳定语义，I-03）：等待页面稳定（导航感知 + 网络稳定）+ 静默窗口下限 + 超时预算兜底。
+     * 总时长受 {@code budget} 约束（不无限等待）；不暴露 {@code evaluate}（R2 红线）；异常静默——
+     * 已有「settle 后重新取快照」兜底（拿当前态）。实现核心为 Playwright 原语 {@code waitForLoadState}。
+     */
+    @Override
+    public void settle(long windowMs) {
+        long budget = Math.max(windowMs, 0L);
+        if (budget <= 0L) {
+            return; // 关闭：no-op，与现状一致
+        }
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budget);
+        try {
+            long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+            if (remainingMs > 0L) {
+                // 导航感知 + 网络稳定：等待 load state 收敛，超时受剩余预算约束（总时长有上限，不无限等待）
+                page.waitForLoadState(LoadState.LOAD,
+                        new Page.WaitForLoadStateOptions().setTimeout(remainingMs));
+            }
+        } catch (RuntimeException ignored) {
+            // 导航进行中 / 网络持续活动 / 超时：静默返回，已有「settle 后重新取快照」兜底（拿当前态）
+        }
+        // 静默窗口下限：补足到 budget（覆盖纯 JS 延迟渲染等无网络活动的稳定期）
+        long stillNanos = deadlineNanos - System.nanoTime();
+        if (stillNanos > 0L) {
+            LockSupport.parkNanos(stillNanos);
+        }
+    }
+
     @Override
     public CommandResult execute(Command command) {
         // 并发所有权（P0 第 4 项）：同一 page 会话的命令经所有权契约独占串行执行，
