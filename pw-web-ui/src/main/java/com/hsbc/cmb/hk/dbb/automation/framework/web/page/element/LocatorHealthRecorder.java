@@ -1,9 +1,10 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.element;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.core.lifecycle.ShutdownCoordinator;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.listener.CurrentScenario;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.lang.reflect.Method;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -109,7 +110,7 @@ public final class LocatorHealthRecorder {
         health.violations.incrementAndGet();
         health.maxMatchCount.accumulateAndGet(matchCount, Math::max);
 
-        String scenario = CurrentScenario.nameOrUnknown();
+        String scenario = currentScenarioName();
         String dedupe = scenario + '|' + key + '|' + operation + '|' + matchCount;
         if (!VIOLATION_KEYS.add(dedupe)) {
             return;
@@ -123,6 +124,36 @@ public final class LocatorHealthRecorder {
                 Thread.currentThread().getName(), Instant.now()));
         LOGGER.debug("[locator-health] strict violation: '{}' resolved to {} elements ({})",
                 key, matchCount, operation);
+    }
+
+    /**
+     * 当前场景名（可选增强）。优先通过反射取宿主工程的
+     * {@code web.listener.CurrentScenario#nameOrUnknown()}——该类属未提交 WIP，不应成为本框架的编译期
+     * 硬依赖；类或方法缺失/不可调用时降级为 {@code "unknown"}（与 {@code nameOrUnknown()} 的非场景语义一致），
+     * 不影响门禁核心语义。
+     */
+    private static final Method CURRENT_SCENARIO_NAME;
+    static {
+        Method m = null;
+        try {
+            m = Class.forName(
+                    "com.hsbc.cmb.hk.dbb.automation.framework.web.listener.CurrentScenario")
+                    .getMethod("nameOrUnknown");
+        } catch (Throwable t) {
+            LOGGER.debug("[locator-health] CurrentScenario unavailable; scenario defaults to unknown");
+        }
+        CURRENT_SCENARIO_NAME = m;
+    }
+
+    private static String currentScenarioName() {
+        if (CURRENT_SCENARIO_NAME == null) {
+            return "unknown";
+        }
+        try {
+            return (String) CURRENT_SCENARIO_NAME.invoke(null);
+        } catch (Throwable t) {
+            return "unknown";
+        }
     }
 
     /** 解析 strict 违例消息里的命中数；非 strict 违例返回 0。 */
