@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.assertion.AssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan;
@@ -55,12 +56,14 @@ public final class StepVerifier {
         Objects.requireNonNull(expectationsPerStep, "expectationsPerStep");
 
         long settleWindowMs = resolveSettleWindowMs();
-        List<CommandResult> results = StepDriver.execute(plan, channel);
-        List<SnapshotVerificationResult> perStep = new ArrayList<>(results.size());
-        for (int i = 0; i < results.size(); i++) {
+        // 治理预检（副作用动作须声明 scope）；逐步执行 + 每步执行后、断言前 settle + 重新采集稳定态快照，
+        // 从而避免「批量执行后统一重快照」读到最终页面态、错位各步中间态的回归（D3 稳定语义）。
+        ParamScopePolicy.validatePlan(plan);
+        List<SnapshotVerificationResult> perStep = new ArrayList<>(plan.steps().size());
+        for (int i = 0; i < plan.steps().size(); i++) {
             List<SnapshotExpectation> exps = (i < expectationsPerStep.size())
                     ? expectationsPerStep.get(i) : List.of();
-            CommandResult r = results.get(i);
+            CommandResult r = StepDriver.executeStep(plan, i, channel);
             if (r.snapshot() == null) {
                 perStep.add(new SnapshotVerificationResult(false,
                         List.of(new AssertionFailure("no snapshot for step " + i

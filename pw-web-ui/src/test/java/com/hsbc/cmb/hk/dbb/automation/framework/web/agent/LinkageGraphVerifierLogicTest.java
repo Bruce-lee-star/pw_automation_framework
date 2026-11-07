@@ -56,7 +56,10 @@ public class LinkageGraphVerifierLogicTest {
 
         @Override
         public Snapshot snapshot() {
-            return snapshotFor(false);
+            // 验证阶段重新采集的快照必须反映「最近一次 execute 的动作结果」，
+            // 与 execute() 产出的序列状态保持一致（D3 稳定语义：settle 后重新取快照）。
+            int idx = call <= 0 ? 0 : (call - 1) % reasonEnabled.size();
+            return snapshotFor(reasonEnabled.get(idx));
         }
 
         @Override
