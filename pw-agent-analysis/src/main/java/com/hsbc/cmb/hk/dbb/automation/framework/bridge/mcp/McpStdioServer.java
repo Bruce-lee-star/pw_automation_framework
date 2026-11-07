@@ -64,12 +64,13 @@ public final class McpStdioServer {
         int handled = 0;
         String line;
         while ((line = reader.readLine()) != null) {
-            if (line.isBlank()) {
+            String frameLine = stripBom(line);
+            if (frameLine.isBlank()) {
                 continue;
             }
             JsonNode frame;
             try {
-                JsonNode request = MAPPER.readTree(line);
+                JsonNode request = MAPPER.readTree(frameLine);
                 if (request == null || !request.isObject()) {
                     frame = McpProtocol.parseError("request must be a JSON object");
                 } else {
@@ -89,5 +90,14 @@ public final class McpStdioServer {
             }
         }
         return handled;
+    }
+
+    /**
+     * 逐行剥离 UTF-8 BOM：Windows 上的 PowerShell 7 默认 {@code $OutputEncoding} 带
+     * {@code EF-BB-BF}，管道写入 native stdin 时首帧会带 BOM；MCP 的 {@code initialize}
+     * 恰好是第一帧，若不剥离会直接回 {@code -32700} 并丢掉握手。
+     */
+    private static String stripBom(String line) {
+        return !line.isEmpty() && line.charAt(0) == '\uFEFF' ? line.substring(1) : line;
     }
 }

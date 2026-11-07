@@ -56,6 +56,18 @@ public class McpStdioServerTest {
     }
 
     @Test
+    public void utf8BomOnFirstFrameDoesNotBreakHandshake() throws Exception {
+        List<JsonNode> frames = exchange(
+                "\uFEFF{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+
+        assertEquals(2, frames.size());
+        assertFalse("带 BOM 的 initialize 首帧不得回 parse error", frames.get(0).has("error"));
+        assertEquals(McpProtocol.PROTOCOL_VERSION,
+                frames.get(0).at("/result/protocolVersion").asText());
+    }
+
+    @Test
     public void notificationDoesNotProduceFrame() throws Exception {
         assertTrue(exchange("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}")
                 .isEmpty());
