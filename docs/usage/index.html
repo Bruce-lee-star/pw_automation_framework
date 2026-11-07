@@ -110,6 +110,8 @@
   <a href="#crypto-and-redaction">12 · 加解密与脱敏</a>
   <a href="#security">13 · 安全基线</a>
   <a href="#faq">14 · FAQ</a>
+  <div class="grp">IDE 助手</div>
+  <a href="#mcp-bridge">15 · MCP 协议桥（IDE 助手）</a>
 </nav>
 <main>
 
@@ -120,6 +122,7 @@
     <span class="badge">JDK 21</span><span class="badge">Maven 多模块</span>
     <span class="badge">Playwright 1.62</span><span class="badge">Serenity 4.3.4</span>
     <span class="badge">Cucumber 7.34</span><span class="badge">JUnit 4</span>
+    <span class="badge">MCP 协议桥</span>
   </div>
 </header>
 
@@ -1296,8 +1299,105 @@ sensitive.data.extra.query.keys   = sign, ts</code></pre>
   </details>
 </section>
 
+<!-- ============ 15 IDE 助手协议桥 ============ -->
+<section id="mcp-bridge">
+  <h2><span class="n">15</span>IDE 助手协议桥（MCP / stdio）</h2>
+  <p class="lead">把「录制骨架 → 提示词 → 助手建议 → 门禁校验 → StepPlan」从手工复制升级为 <b>IDE 内一次会话</b>。桥是 <code>pw-agent-analysis</code> 里的独立 stdio 进程，手写 JSON-RPC、<b>零 MCP SDK</b>；框架不调用 LLM、不读凭据、不发起网络连接——文本补全由 IDE 助手负责，判定权始终在框架门禁。</p>
+
+  <h3>15.1 能力一览</h3>
+  <table>
+    <thead><tr><th style="width:16%">Tool</th><th style="width:34%">入参</th><th>产出</th></tr></thead>
+    <tbody>
+      <tr><td><code>prompt</code></td><td><code>skeletonJson</code>（录制骨架 JSON 文本）</td><td>可交给助手的提示词，值默认占位化为 <code>${value}</code>；与 <code>SkeletonCli prompt</code> 逐字一致。</td></tr>
+      <tr><td><code>check</code></td><td><code>skeletonJson</code> + <code>suggestionText</code>（助手回文，可含 Markdown 围栏）</td><td>统一门禁 + 与确定性基线的等价对账；通过时把 <b>StepPlan JSON 作为 <code>plan</code> 对象原样回传</b>，可直接喂路径 C 的 <code>StepPlanCodegenCli --plan</code>。</td></tr>
+      <tr><td><code>impact</code></td><td colspan="2"><b>不注册为 tool</b>，调用返回 <code>-32601</code>。该子命令可读任意绝对路径并把源码命中行原文写进报告，IDE client 通常由第三方模型驱动，暴露即「任意文件读 + 内容出域」；保留在<b>本地 CLI</b> 由人显式执行。</td></tr>
+    </tbody>
+  </table>
+  <div class="note">协议版本 <code>2024-11-05</code>；实现 <code>initialize</code> / <code>tools/list</code> / <code>tools/call</code> / <code>ping</code>，并对 <code>resources/list</code> / <code>prompts/list</code> 回空列表。stdin 一行一帧、stdout 一行一帧，notification（无 <code>id</code>）不回帧。设计依据见 <a href="../pw-agent-driver-design/pw-agent-driver-design.html#s114">设计稿 §11.4</a>。</div>
+
+  <h3>15.2 一次性准备：生成 classpath</h3>
+  <pre><code>cd D:\IdeaProject\pw_automation_framework
+mvn -o -q -pl pw-agent-analysis dependency:build-classpath "-Dmdep.outputFile=D:\IdeaProject\pw_automation_framework\pw-agent-analysis\target\cp.txt"</code></pre>
+  <p>生成的是单行 classpath（pw-core、Jackson、slf4j、logback 等）。<code>target/</code> 会被 <code>mvn clean</code> 清掉，清理后重跑本步；改过框架源码后先 <code>mvn -o -pl pw-agent-analysis -am compile</code>。</p>
+
+  <h3>15.3 启动方式 A：IDE MCP 配置（推荐）</h3>
+  <p>先在仓库根放一个启动脚本 <code>mcp-server.cmd</code>（<code>@echo off</code> 保证不往 stdout 打额外内容）：</p>
+  <pre><code>@echo off
+set "ROOT=D:\IdeaProject\pw_automation_framework"
+set /p CP=&lt;"%ROOT%\pw-agent-analysis\target\cp.txt"
+java "-Dpw.mcp.approved.origins=codegen" -cp "%ROOT%\pw-agent-analysis\target\classes;%CP%" com.hsbc.cmb.hk.dbb.automation.framework.bridge.mcp.McpStdioServer</code></pre>
+  <p>再在 IDE 的 MCP 配置里注册（Cursor / Claude Desktop 等用 <code>mcpServers</code>，VS Code 用 <code>mcp.servers</code>，字段大同小异）：</p>
+  <pre><code>{
+  "mcpServers": {
+    "pw-agent": {
+      "command": "D:\\IdeaProject\\pw_automation_framework\\mcp-server.cmd",
+      "args": []
+    }
+  }
+}</code></pre>
+  <p>也可以直接把 <code>java</code> 作为 <code>command</code>：<code>args</code> 依次填 <code>-Dpw.mcp.approved.origins=codegen</code>、<code>-cp</code>、<code>本模块 target\classes;cp.txt 的内容</code>、主类全名 <code>com.hsbc.cmb.hk.dbb.automation.framework.bridge.mcp.McpStdioServer</code>。Windows 的 classpath 分隔符是分号 <code>;</code>。</p>
+  <div class="warn"><b><code>-Dpw.mcp.approved.origins</code> 或环境变量 <code>PW_MCP_APPROVED_ORIGINS</code> 必填</b>，取值要覆盖骨架里的 <code>origin</code>（示例为 <code>codegen</code>）；未配置时 <code>check</code> 直接 fail-closed 返回 <code>-32602</code>。白名单是校验基准，<b>只能由服务端注入</b>，client 传 <code>origins</code> 会被拒绝。</div>
+
+  <h3>15.4 启动方式 B：手工 smoke（不装 IDE 也能验）</h3>
+  <pre><code>cd D:\IdeaProject\pw_automation_framework
+$cp = "D:\IdeaProject\pw_automation_framework\pw-agent-analysis\target\classes;" + (Get-Content ".\pw-agent-analysis\target\cp.txt" -Raw -Encoding UTF8).Trim()
+$OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+'{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | java -cp $cp "-Dpw.mcp.approved.origins=codegen" com.hsbc.cmb.hk.dbb.automation.framework.bridge.mcp.McpStdioServer</code></pre>
+  <p>应回一帧含 <code>protocolVersion</code> / <code>capabilities.tools</code> / <code>serverInfo</code> 的 JSON。把最后一行换成 <code>tools/list</code> 请求即可看到两个 tool 的 schema。</p>
+  <div class="warn"><b>不要用 <code>mvn exec:java</code> 或任何会往 stdout 打日志的包装</b>：stdout 被协议独占，混入日志会破坏 JSON 帧。诊断一律走 stderr。PowerShell 7 的 <code>$OutputEncoding</code> 默认带 UTF-8 BOM，服务端已做逐行 BOM 容忍，但建议仍按上面显式设为无 BOM。</div>
+
+  <h3>15.5 两个 tool 怎么调</h3>
+  <p>IDE 助手看到的是 tool 参数对象（不必自己拼 JSON-RPC 帧）。<code>prompt</code>：</p>
+  <pre><code>{
+  "name": "prompt",
+  "arguments": {
+    "skeletonJson": "{\"schemaVersion\":1,\"origin\":\"codegen\",\"pageRef\":\"https://www.example.com/logon\",\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\",\"params\":{}}]}"
+  }
+}</code></pre>
+  <p><code>check</code>（<code>skeletonJson</code> 同上，另加助手回文）：</p>
+  <pre><code>{
+  "name": "check",
+  "arguments": {
+    "skeletonJson": "{\"schemaVersion\":1,\"origin\":\"codegen\",\"pageRef\":\"https://www.example.com/logon\",\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\",\"params\":{}}]}",
+    "suggestionText": "{\"schemaVersion\":1,\"planId\":\"plan-suggested\",\"scope\":{\"url\":{\"allow\":[\"https://www.example.com/logon\"]}},\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\"}]}"
+  }
+}</code></pre>
+  <p><code>result.content[0].text</code> 是 JSON 字符串：</p>
+  <pre><code>{"ok":true,"exitCode":0,"summary":"accepted=true, equivalent=true","plan":{"schemaVersion":1,"planId":"plan-suggested","steps":[{"action":"CLICK","target":"role=button;name=Submit"}]}}</code></pre>
+  <details><summary>需要直接发 JSON-RPC 帧时（脚本 / 调试）</summary>
+    <div class="body"><pre><code>{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"prompt","arguments":{"skeletonJson":"{\"schemaVersion\":1,\"origin\":\"codegen\",\"pageRef\":\"https://www.example.com/logon\",\"steps\":[{\"action\":\"CLICK\",\"target\":\"role=button;name=Submit\"}]}"}}}</code></pre>每个请求单独一行，<code>id</code> 会原样回显。</div>
+  </details>
+
+  <h3>15.6 IDE 内的完整流程</h3>
+  <ol>
+    <li>把录制骨架 JSON（<code>RecordedSkeleton</code>）贴给助手，让它调 <code>prompt</code>；</li>
+    <li>助手按提示词产出 <b>StepPlan JSON</b>（只输出一个 JSON 对象、不改写 target、不编造占位符真值）；</li>
+    <li>让助手把「原骨架 + 回文」交给 <code>check</code>；</li>
+    <li><code>ok=true</code> 时直接取 <code>plan</code>，<b>无需手工复制</b>；<code>isError=true</code> 时读 <code>summary</code> 让助手改后重试；</li>
+    <li>把 <code>plan</code> 落盘，交给 <code>StepPlanCodegenCli --plan</code> 生成路径 C 产物。</li>
+  </ol>
+
+  <h3>15.7 结果与错误码速查</h3>
+  <table>
+    <thead><tr><th style="width:30%">现象</th><th>含义 / 处理</th></tr></thead>
+    <tbody>
+      <tr><td><code>isError=false</code>、<code>ok=true</code></td><td>统一门禁与等价对账通过，<code>plan</code> 可采信。</td></tr>
+      <tr><td><code>isError=true</code>、<code>plan=null</code></td><td>建议被拒或与确定性基线不等价（CLI 退出码 1，属正常结果）；读 <code>summary</code> 修正后重试。</td></tr>
+      <tr><td>JSON-RPC <code>-32602</code></td><td>输入用法/IO/解析失败（CLI 退出码 2）：检查 <code>origins</code> 配置、参数名、空白输入与 1M 字符上限。</td></tr>
+      <tr><td><code>-32601</code></td><td>未知方法/工具；调 <code>impact</code> 会命中此项（明确不暴露）。</td></tr>
+      <tr><td><code>-32700</code></td><td>该行不是合法 JSON 对象（例如混入日志）。</td></tr>
+      <tr><td>请求后没有回帧</td><td>notification（无 <code>id</code>），如 <code>notifications/initialized</code>，属正常。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>15.8 安全边界与常见坑</h3>
+  <div class="warn"><b>安全边界</b>：① 框架仍零 LLM / 零凭据 / 零出网，生产装配面不注册 <code>LlmGateway</code>（<code>LlmGateways.resolveOrNull()</code> 为 null）；② <code>impact</code> 不进协议面；③ <code>inputSchema</code> 不接受 <code>origins</code> / <code>sources</code> / <code>out</code> / <code>features</code> / <code>keepValues</code>，额外字段服务端二次拒绝；④ 提示词里的值默认占位化；⑤ 桥只调 <code>SkeletonCli.run</code>，不调含 <code>System.exit</code> 的 <code>main</code>，临时骨架文件即用即删。</div>
+  <div class="tip"><b>排查顺序</b>：先确认 stdout 没有被 Maven/脚本日志污染 → 再确认 <code>-Dpw.mcp.approved.origins</code> 与骨架 <code>origin</code> 一致 → 再确认 <code>target/classes</code> 与 <code>cp.txt</code> 存在且是最新构建 → 最后看 <code>-32602</code> 的诊断。若本地仓库的 <code>pw-core-1.0.1.jar</code> 陈旧，可把 <code>pw-core\target\classes</code> 放在 <code>-cp</code> 最前面。</div>
+  <div class="note"><b>想在 Java 里内嵌？</b>可测入口是 <code>McpStdioServer.run(InputStream, PrintStream, PrintStream)</code>（不触碰全局 <code>System.out</code>），协议编解码在 <code>McpProtocol.handle(...)</code>；正常路径仍建议由 IDE MCP client 启动独立进程。</div>
+</section>
+
 <footer>
-  DBB 自动化测试框架 · 使用指南 &nbsp;|&nbsp; Route API 以 <code>pw-route/…/dsl/RouteDsl.java</code> 为准，页面 API 以 <code>pw-web-ui/…/page/base/AbstractManagedPage.java</code> 为准。
+  DBB 自动化测试框架 · 使用指南 &nbsp;|&nbsp; Route API 以 <code>pw-route/…/dsl/RouteDsl.java</code> 为准，页面 API 以 <code>pw-web-ui/…/page/base/AbstractManagedPage.java</code> 为准，MCP 入口以 <code>pw-agent-analysis/…/bridge/mcp/McpStdioServer.java</code> 为准。
 </footer>
 
 </main>
