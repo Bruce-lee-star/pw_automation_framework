@@ -44,4 +44,27 @@ public final class StepVerificationResult {
         }
         return Collections.unmodifiableList(all);
     }
+
+    /**
+     * 可读 diff（T7：失败输出 diff）：逐步行给出通过结论与后态指纹，并对失败步列出
+     * 每条断言的「期望 vs 实际」，便于在重跑 / 幂等跳过后快速定位状态漂移。
+     */
+    public String diff() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("step-verification: allPassed=").append(allPassed)
+                .append(", steps=").append(steps)
+                .append(", passedSteps=").append(passedSteps).append('\n');
+        for (int i = 0; i < perStep.size(); i++) {
+            SnapshotVerificationResult s = perStep.get(i);
+            sb.append("  [").append(i).append("] passed=").append(s.allPassed());
+            if (s.actualDigest() != null) {
+                sb.append(" actualDigest=").append(s.actualDigest());
+            }
+            sb.append('\n');
+            for (AssertionFailure f : s.failures()) {
+                sb.append("      FAIL ").append(f.describe()).append('\n');
+            }
+        }
+        return sb.toString();
+    }
 }

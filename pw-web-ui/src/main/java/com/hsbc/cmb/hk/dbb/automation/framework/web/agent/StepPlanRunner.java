@@ -4,6 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.BrowserCommandChan
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.CommandResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.SnapshotExpectation;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepDriver;
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepIdempotency;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerifier;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepPlan;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.StepVerificationResult;
@@ -11,6 +12,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.VerifiableStepPlan
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 把 pw-core 的「授权执行 + 执行后联动断言」闭环接到真实浏览器执行底座（完整驱动引擎专项）。
@@ -30,9 +32,22 @@ import java.util.List;
 public final class StepPlanRunner {
 
     private final IsolationHarness harness;
+    private final StepIdempotency idempotency;
 
+    /** 默认构造：不做幂等记忆（每次都执行），零回归。 */
     public StepPlanRunner(IsolationHarness harness) {
-        this.harness = harness;
+        this(harness, StepIdempotency.none());
+    }
+
+    /**
+     * 带步骤级幂等上下文的构造（T7）：同一计划重跑时，此前已通过且命令内容未变的步骤会被跳过。
+     *
+     * @param idempotency 幂等记忆（如 {@link com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.InMemoryStepIdempotency}）；
+     *                     {@code null} 视为 {@link StepIdempotency#none()}
+     */
+    public StepPlanRunner(IsolationHarness harness, StepIdempotency idempotency) {
+        this.harness = Objects.requireNonNull(harness, "harness");
+        this.idempotency = (idempotency == null) ? StepIdempotency.none() : idempotency;
     }
 
     /** 授权执行 + 执行后联动断言（单次执行、自带断言；推荐入口）。 */
@@ -40,7 +55,7 @@ public final class StepPlanRunner {
         BrowserCommandChannel channel = null;
         try {
             channel = harness.acquire(targetUrl);
-            return StepVerifier.verify(plan, channel, expectations);
+            return StepVerifier.verify(plan, channel, expectations, idempotency);
         } finally {
             if (channel != null) {
                 harness.release(channel);
@@ -64,7 +79,7 @@ public final class StepPlanRunner {
         BrowserCommandChannel channel = null;
         try {
             channel = harness.acquire(targetUrl);
-            return StepDriver.execute(plan, channel);
+            return StepDriver.execute(plan, channel, idempotency);
         } finally {
             if (channel != null) {
                 harness.release(channel);

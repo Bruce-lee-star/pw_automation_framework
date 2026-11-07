@@ -51,9 +51,25 @@ public final class StepVerifier {
      */
     public static StepVerificationResult verify(StepPlan plan, BrowserCommandChannel channel,
                                                 List<List<SnapshotExpectation>> expectationsPerStep) {
+        return verify(plan, channel, expectationsPerStep, StepIdempotency.none());
+    }
+
+    /**
+     * 执行计划并对每步结果做联动断言（带步骤级幂等上下文）。
+     *
+     * <p>逐步走 {@link StepDriver#executeStep(StepPlan, int, BrowserCommandChannel, StepIdempotency)}：
+     * 若某步被幂等跳过（命中缓存的通过结果），其快照为 {@code null} 但携带后态指纹，
+     * 视为已通过、不再做字段断言。{@code idempotency} 为 {@link StepIdempotency#none()} 时与改造前逐字一致。</p>
+     *
+     * @param idempotency 幂等上下文；{@code null} 视为 {@link StepIdempotency#none()}
+     */
+    public static StepVerificationResult verify(StepPlan plan, BrowserCommandChannel channel,
+                                                List<List<SnapshotExpectation>> expectationsPerStep,
+                                                StepIdempotency idempotency) {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(channel, "channel");
         Objects.requireNonNull(expectationsPerStep, "expectationsPerStep");
+        StepIdempotency idem = (idempotency == null) ? StepIdempotency.none() : idempotency;
 
         long settleWindowMs = resolveSettleWindowMs();
         // 治理预检（副作用动作须声明 scope）；逐步执行 + 每步执行后、断言前 settle + 重新采集稳定态快照，
@@ -63,12 +79,17 @@ public final class StepVerifier {
         for (int i = 0; i < plan.steps().size(); i++) {
             List<SnapshotExpectation> exps = (i < expectationsPerStep.size())
                     ? expectationsPerStep.get(i) : List.of();
-            CommandResult r = StepDriver.executeStep(plan, i, channel);
+            CommandResult r = StepDriver.executeStep(plan, i, channel, idem);
             if (r.snapshot() == null) {
-                perStep.add(new SnapshotVerificationResult(false,
-                        List.of(new AssertionFailure("no snapshot for step " + i
-                                + (r.message() != null ? " (" + r.message() + ")" : ""), "present", "absent")),
-                        1, 0));
+                if (r.snapshotDigest() != null) {
+                    // T7 幂等跳过：已通过步以缓存指纹作为通过证据，无快照可断言 → 视为通过
+                    perStep.add(SnapshotVerificationResult.pass(0, r.snapshotDigest()));
+                } else {
+                    perStep.add(new SnapshotVerificationResult(false,
+                            List.of(new AssertionFailure("no snapshot for step " + i
+                                    + (r.message() != null ? " (" + r.message() + ")" : ""), "present", "absent")),
+                            1, 0));
+                }
             } else {
                 Snapshot snap = resolveVerificationSnapshot(channel, r, settleWindowMs);
                 perStep.add(SnapshotVerifier.verify(snap, exps));
@@ -91,7 +112,7 @@ public final class StepVerifier {
      * @throws ParamScopeViolationException 任一步参数越界（来自 StepDriver，fail-fast）
      */
     public static StepVerificationResult verify(VerifiableStepPlan vsp, BrowserCommandChannel channel) {
-        return verify(vsp.plan(), channel, vsp.expectationsPerStep());
+        return verify(vsp.plan(), channel, vsp.expectationsPerStep(), StepIdempotency.none());
     }
 
     /**

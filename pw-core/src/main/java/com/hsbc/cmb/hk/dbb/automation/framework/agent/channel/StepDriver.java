@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.agent.channel;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScope;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopePolicy;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.scope.ParamScopeViolationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.AgentTraceEvent;
@@ -33,32 +34,34 @@ public final class StepDriver {
     }
 
     /**
-     * 执行整份 StepPlan：先治理预检，再逐步过门禁边界执行。
+     * 执行整份 StepPlan：先治理预检，再逐步过门禁边界执行。等价于
+     * {@link #execute(StepPlan, BrowserCommandChannel, StepIdempotency)} 传入 {@link StepIdempotency#none()}。
      *
      * @return 每步的 {@link CommandResult}（与 steps 顺序一致；门禁失败会在对应步前抛异常，后续步不执行）
      * @throws ParamScopeViolationException 任一步参数越界，或治理预检不通过（fail-fast）
      * @throws NullPointerException       plan / channel 为 null
      */
     public static List<CommandResult> execute(StepPlan plan, BrowserCommandChannel channel) {
+        return execute(plan, channel, StepIdempotency.none());
+    }
+
+    /**
+     * 执行整份 StepPlan（带步骤级幂等上下文）。
+     *
+     * <p>逐步走 {@link #executeStep(StepPlan, int, BrowserCommandChannel, StepIdempotency)}：
+     * 若该步此前已通过且命令内容未变，则复用缓存结果、不驱动浏览器；否则执行并在成功后记录后态指纹。</p>
+     *
+     * @param idempotency 幂等上下文；{@link StepIdempotency#none()} 即退化为「每次都执行」
+     * @throws NullPointerException idempotency 为 null
+     */
+    public static List<CommandResult> execute(StepPlan plan, BrowserCommandChannel channel, StepIdempotency idempotency) {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(channel, "channel");
+        Objects.requireNonNull(idempotency, "idempotency");
         ParamScopePolicy.validatePlan(plan); // 治理预检（副作用动作须声明 scope）
         List<CommandResult> results = new ArrayList<>(plan.steps().size());
         for (int i = 0; i < plan.steps().size(); i++) {
-            Command step = plan.steps().get(i);
-            // 门禁边界：channel.execute(Command, ParamScope) 默认方法先 ParamScopeGate.check 再 execute(Command)
-            long startedAt = System.nanoTime();
-            CommandResult result = channel.execute(step, plan.resolvedScope(i));
-            // 重试策略（P0 第 3 项）：仅幂等动作允许有限重试；写操作一次失败即停，避免 trace 重放二次提交
-            ActionTypePolicy.ActionPolicy policy = ActionTypePolicy.of(step.action());
-            int attempts = 1;
-            while (!result.success() && policy.idempotent() && policy.maxRetries() > 0
-                    && attempts <= policy.maxRetries()) {
-                result = channel.execute(step, plan.resolvedScope(i));
-                attempts++;
-            }
-            recordTrace(plan, step, i, startedAt, result);
-            results.add(result);
+            results.add(executeStep(plan, i, channel, idempotency));
         }
         return results;
     }
@@ -78,20 +81,44 @@ public final class StepDriver {
      * @throws NullPointerException       plan / channel 为 null，或 index 越界
      */
     public static CommandResult executeStep(StepPlan plan, int index, BrowserCommandChannel channel) {
+        return executeStep(plan, index, channel, StepIdempotency.none());
+    }
+
+    /**
+     * 执行单步（带步骤级幂等上下文）。
+     *
+     * <p>若该步此前已通过且命令内容未变（{@link StepIdempotency#cachedPass} 命中），直接复用缓存的通过结果，
+     * 不调用通道、不重试、不重放审计；否则执行（门禁 + 重试），成功后经 {@link StepIdempotency#recordPass}
+     * 记录后态指纹。{@code idempotency} 为 {@link StepIdempotency#none()} 时与改造前逐字一致。</p>
+     *
+     * @param idempotency 幂等上下文（{@code null} 视为 {@link StepIdempotency#none()}）
+     * @throws NullPointerException plan / channel 为 null，或 index 越界
+     */
+    public static CommandResult executeStep(StepPlan plan, int index, BrowserCommandChannel channel, StepIdempotency idempotency) {
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(channel, "channel");
+        StepIdempotency idem = (idempotency == null) ? StepIdempotency.none() : idempotency;
         Command step = plan.steps().get(index);
+        ParamScope resolvedScope = plan.resolvedScope(index);
+        // T7 幂等：若此前已通过且命令内容未变，复用缓存结果，跳过浏览器驱动
+        CommandResult cached = idem.cachedPass(plan, index, step, resolvedScope);
+        if (cached != null) {
+            return cached;
+        }
         long startedAt = System.nanoTime();
-        CommandResult result = channel.execute(step, plan.resolvedScope(index));
+        CommandResult result = channel.execute(step, resolvedScope);
         // 重试策略（P0 第 3 项）：仅幂等动作允许有限重试；写操作一次失败即停，避免 trace 重放二次提交
         ActionTypePolicy.ActionPolicy policy = ActionTypePolicy.of(step.action());
         int attempts = 1;
         while (!result.success() && policy.idempotent() && policy.maxRetries() > 0
                 && attempts <= policy.maxRetries()) {
-            result = channel.execute(step, plan.resolvedScope(index));
+            result = channel.execute(step, resolvedScope);
             attempts++;
         }
         recordTrace(plan, step, index, startedAt, result);
+        if (result.success()) {
+            idem.recordPass(plan, index, step, resolvedScope, result.snapshotDigest());
+        }
         return result;
     }
 
