@@ -1154,13 +1154,14 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><td>§6 落地映射 / §7 路线图 / §8 风险</td><td>规范 / 见 11.2</td><td>模块依赖方向已核对；路线图完成度见下表；风险表为设计缓解，非交付物。</td></tr>
     <tr><td>§9 任务清单</td><td>✅ v3.19 已校准</td><td>按代码事实逐项改为 [x]/[~]/[ ] 并写明边界；[~] 表示部分落地，不以勾选代替验收。v3.8 将 P0 第 2 项、v3.9 将 P0 第 7 项、v3.11 将 P0 第 3 项、v3.12 将 P0 第 4 项的「并发所有权地基」转落地、v3.13 将 P0 第 4 项「Frame 生命周期 · popup 捕获与切换」转落地（iframe 句柄失效由 Locator 惰性耐住、iframe 穿透 CSS &gt;&gt; 已达）、v3.14 将 R3「每跳重定向策略」转落地、v3.15 将 R3 修订为默认 WARN（strict 模式才拦截）+ R9「AgentTrace」与 R1/R7「跨数据出口 canary」转落地（pw-reports AgentTrace + CrossExitCanaryTest）；<b>v3.16 将 P1「LLM 网关」由 [ ] 上调为 [~]</b>（pw-core 协议层已落地，适配层网络客户端仍待治理审查）；<b>v3.17 将 P1「IntentTranslator SPI + 规则引擎」「最小化上下文 → StepPlan 建议 + schema/策略/可执行性校验」「等价性测试」三项由 [ ] 上调为 [x]</b>（<code>framework.agent.intent</code>，55 例），并把 P0「pw-route/部署层每跳重定向策略」由 [ ] 校正为 [~]（v3.14 起已在 pw-web-ui 靶场侧落地，pw-route 生产侧仍无拒绝逻辑）；<b>v3.18 将 P1「pw-codegen 录制产物 → 结构化骨架转换器」由 [ ] 上调为 [x]</b>（<code>RecordedSkeletonConverter</code>，15 例，含跨模块闭环）；<b>v3.19 补 P1 序列化出口</b>（<code>RecordedSkeleton.toJson()</code>，6 例，与 <code>parse</code> 严格对称）；<b>v3.20 按「IDE 助手」形态收口 P1</b>（<code>SkeletonPromptBundle</code> / <code>SuggestionIntake</code> / <code>StepPlan.parse</code> 参数键校验，LLM 适配层与自然语言源判 N/A）；其余 P0 项状态不变。</td></tr>
     <tr><td>§10 项目适配 / 10.4 红线守门矩阵</td><td>⚠️ 部分</td><td>D1–D5 部分验证；<b>v3.9 已补齐 10.3 点名的 <code>AgentDriverDslAcceptanceTest</code></b>（8 例，验收命令真实可执行，见 §10.3）；<b>v3.14 已补齐 R3 每跳重定向策略</b>（RedirectValidationPolicy + RouteTestBedHarness 拦截，v3.15 修订为默认 WARN + strict 可选）；<b>v3.15 已补齐 R1/R7 跨数据出口 canary</b>（CrossExitCanaryTest 8 例，逐通道验证 ScrubGate 脱敏）；<b>v3.16 已补齐 §10.4「LLM 网关 SPI · pw-core 只定义稳定请求/响应协议」一侧</b>（framework.agent.llm + 12 例契约测试）。<b>仍缺</b>：生产 RouteRuntimeImpl 出站拒绝门禁、可选 LLM 适配层（治理审查后启用）、靶场 strict 模式 e2e 浏览器验证。</td></tr>
+    <tr><td>§11.4 入口协议桥 MCP（T13，v3.25）</td><td>✅ 完成</td><td>pw-agent-analysis <code>framework.bridge.mcp</code>：手写 stdio JSON-RPC（零 MCP SDK）、<code>prompt</code>/<code>check</code> 两 tool 复用 CLI 统一门禁、<code>check</code> 回传可采信 StepPlan；<code>impact</code> 按安全决策不暴露；白名单服务端注入、stdout 协议独占、生产装配面零 LlmGateway（详见 §11.4）。</td></tr>
   </table>
 
   <h3>11.2 分阶段量化（§7 验收口径，等权估算 ≈ 79%，v3.21 补 CLI 入口）</h3>
   <table class="map-table">
     <tr><th style="width:16%">阶段</th><th style="width:12%">完成度</th><th>主要缺口</th></tr>
     <tr><td>P0 确定性垂直切片</td><td>~95%（v3.17 ↑）</td><td>SnapshotTree 有界协议（§4.2 / P0 第 2 项）、隔离靶场 DSL 验收（§10.3 / P0 第 7 项）、逐动作策略元数据 + 幂等重试 + defaultTimeout 运行期施加（§4.1 / P0 第 3 项）、并发所有权地基 + Frame 生命周期 popup 捕获切换（§4.1 / P0 第 4 项）、每跳重定向策略（§10.4 / R3，v3.15 修订为默认 WARN）均已落地：7 项中 5 项 [x]、2 项 [~]（pw-core「按 ActionType 区的参数 schema」仅外部输入侧收敛、<code>StepPlan.parse</code> 自身仍缺；pw-route 生产侧仍无重定向拒绝逻辑）。<b>剩余</b>：P0 第 4 项的 Role-First 穿透 iframe 可选增强（非阻塞）；R9 AgentTrace 与 R1/R7 跨出口 canary 已在 v3.15 于红线维度落地（见 §10.4）。</td></tr>
-    <tr><td>P1 意图翻译</td><td>~98%（v3.21 ↑）</td><td><b>v3.17 落地核心三件</b>：<code>IntentTranslator</code> SPI + <code>RuleBasedIntentTranslator</code> 规则引擎（录制骨架结构化 → StepPlan）、<code>IntentPlanValidator</code> 三合一门禁（schema/策略/可执行性）、<code>PlanEquivalence</code> 等价性对账（55 例测试，含反射级「SPI 无浏览器类型 + 无 ServiceLoader 发现」护栏）；<b>v3.18 打通录制入口</b>：pw-codegen <code>RecordedSkeletonConverter</code>（<code>CodegenRecorder.Action</code> + <code>CodegenEntry</code> → <code>RecordedSkeleton</code>，16 例含跨模块闭环）；<b>v3.19 补齐序列化出口</b>：<code>RecordedSkeleton.toJson()</code>（与 <code>parse</code> 严格对称、字段白名单、params 排序确定性、越界 fail-closed，6 例）；<b>v3.20 按真实形态收口</b>：<code>SkeletonPromptBundle</code>（提示词包，值默认占位化）+ <code>SuggestionIntake</code>（围栏容错 → 门禁 → 等价对账）+ <code>StepPlan.parse</code> 按动作参数键校验（<code>ActionParamSchema</code> 单源，<code>IntentActionSchema</code> 委托），10 例 + <code>StepPlanTest</code> +4；v3.16 落地 <b>LLM 网关协议层</b>（pw-core framework.agent.llm：请求/响应协议 + SPI + 可用性降级 + ServiceLoader 可选发现，12 例测试）。<b>v3.21 补命令行入口</b>：<code>SkeletonCli</code>（<code>prompt</code> / <code>check</code> 两条子命令、语义化退出码 0/1/2、stdin 支持、文件 UTF-8），使「录制骨架 → 贴 Copilot → 贴回校验」全程可在终端/IDEA Run Configuration 内完成（10 例，含真实 <code>java -cp</code> 跑通）。<b>判定 N/A</b>：LLM 网络适配层与自然语言意图源——使用形态是开发者用 IDE 助手（Copilot）翻译，框架侧不发起 LLM 调用即满足治理门槛，无适配层需求。</td></tr>
+    <tr><td>P1 意图翻译</td><td>~98%（v3.21 ↑）</td><td><b>v3.17 落地核心三件</b>：<code>IntentTranslator</code> SPI + <code>RuleBasedIntentTranslator</code> 规则引擎（录制骨架结构化 → StepPlan）、<code>IntentPlanValidator</code> 三合一门禁（schema/策略/可执行性）、<code>PlanEquivalence</code> 等价性对账（55 例测试，含反射级「SPI 无浏览器类型 + 无 ServiceLoader 发现」护栏）；<b>v3.18 打通录制入口</b>：pw-codegen <code>RecordedSkeletonConverter</code>（<code>CodegenRecorder.Action</code> + <code>CodegenEntry</code> → <code>RecordedSkeleton</code>，16 例含跨模块闭环）；<b>v3.19 补齐序列化出口</b>：<code>RecordedSkeleton.toJson()</code>（与 <code>parse</code> 严格对称、字段白名单、params 排序确定性、越界 fail-closed，6 例）；<b>v3.20 按真实形态收口</b>：<code>SkeletonPromptBundle</code>（提示词包，值默认占位化）+ <code>SuggestionIntake</code>（围栏容错 → 门禁 → 等价对账）+ <code>StepPlan.parse</code> 按动作参数键校验（<code>ActionParamSchema</code> 单源，<code>IntentActionSchema</code> 委托），10 例 + <code>StepPlanTest</code> +4；v3.16 落地 <b>LLM 网关协议层</b>（pw-core framework.agent.llm：请求/响应协议 + SPI + 可用性降级 + ServiceLoader 可选发现，12 例测试）。<b>v3.21 补命令行入口</b>：<code>SkeletonCli</code>（<code>prompt</code> / <code>check</code> / <code>impact</code> 三条子命令、语义化退出码 0/1/2、stdin 支持、文件 UTF-8；其中 <code>impact</code> 仅本地 CLI 使用，T13 协议桥按安全决策不暴露），使「录制骨架 → 贴 Copilot → 贴回校验」全程可在终端/IDEA Run Configuration 内完成（10 例，含真实 <code>java -cp</code> 跑通）。<b>判定 N/A</b>：LLM 网络适配层与自然语言意图源——使用形态是开发者用 IDE 助手（Copilot）翻译，框架侧不发起 LLM 调用即满足治理门槛，无适配层需求。</td></tr>
     <tr><td>P1.5 页面理解与资产生产</td><td>~60%</td><td>整块 LLM 链路、图谱差分提取、Feature 需求源解析、需求文本实际脱敏。</td></tr>
     <tr><td>P2 稳定代码生成</td><td>~55%</td><td>管线命令、trace javadoc、PO 原子方法、资产落库接线。</td></tr>
     <tr><td>P3 定位器治理</td><td>~95%</td><td>治理 UI / 工单 IM 对接 / 运行时复核调度。</td></tr>
@@ -1182,6 +1183,50 @@ new LinkageGraphVerifier(new RouteTestBedHarness(nls), nls)
     <tr><td>R9</td><td>✅ 运行期 + 测试</td><td>CandidateAuditReport（候选库侧）三级脱敏/角色鉴权/保留清除/不可重执行 + 6 测试；<b>v3.15 落地 pw-reports AgentTrace</b>（新增 AgentTrace/AgentTraceStore/AgentTraceWriter：最小审计字段——策略版本/动作类别/目标 host（仅 host）/耗时/结果/审批引用/异常类名（仅 simpleName）/时间戳/step 引用；绝不保存原始敏感值；导出物不可重执行；线程安全收集 + 容量上限环形淘汰 + 保留期限删除）；AgentTraceTest 8 例 + AgentTraceStoreTest 5 例 + AgentTraceWriterTest 4 例 + 跨出口 canary 8 例（含 AgentTrace 无泄漏）全绿。</td></tr>
   </table>
   <div class="note warn"><b>下一步技术优先级（§10.4 硬约束门禁）</b>：<s>① SnapshotTree 有界协议（§4.2 / P0 第 2 项）</s> —— <b>v3.8 已落地</b>；<s>② <code>AgentDriverDslAcceptanceTest</code>（§10.3 / P0 第 7 项）</s> —— <b>v3.9 已落地</b>；<s>③ 逐动作副作用/超时/失败/重试策略与幂等（P0 第 3 项：sideEffecting/idempotent/defaultTimeout/maxRetries 元数据 + StepDriver 幂等重试接线 + v3.11 defaultTimeout 运行期施加）</s> —— <b>v3.11 已落地</b>；<s>① P0 第 4 项并发所有权地基（通道级并发串行化）</s> —— <b>v3.12 已落地</b>；<s>② P0 第 4 项 Frame 生命周期（popup 捕获切换 + iframe 句柄失效由 Locator 惰性耐住 + iframe 穿透由 CSS &gt;&gt; 已达）</s> —— <b>v3.13 已落地</b>；<s>③ 每跳重定向策略（R3）：RedirectValidationPolicy + RouteTestBedHarness 拦截（v3.15 修订为默认 WARN）</s> —— <b>v3.14 已落地</b>；<s><code>AgentTrace</code>（R9）与跨数据出口 canary 泄漏测试（R1/R7）：pw-reports AgentTrace + CrossExitCanaryTest</s> —— <b>v3.15 已落地</b>；<s>④ P1.5 LLM 网关 · pw-core 侧稳定请求/响应协议 + SPI + 可用性降级（framework.agent.llm，12 例契约测试）</s> —— <b>v3.16 已落地</b>；<s>⑤ P1 意图翻译 · <code>IntentTranslator</code> SPI + 规则引擎 + schema/策略/可执行性三合一门禁 + 等价性对账（<code>framework.agent.intent</code>，55 例）</s> —— <b>v3.17 已落地</b>；<s>⑥ P1 录制入口 · pw-codegen <code>RecordedSkeletonConverter</code>（<code>CodegenRecorder.Action</code> + <code>CodegenEntry</code> → <code>RecordedSkeleton</code>，15 例含跨模块闭环）</s> —— <b>v3.18 已落地</b>；<s>⑦ P1 序列化出口 · <code>RecordedSkeleton.toJson()</code>（字段白名单 + params 排序确定性 + 越界 fail-closed，6 例）</s> —— <b>v3.19 已落地</b>。现优先级：<s>① 可选适配层 LLM 网络客户端（Ollama/云端）、供应商配置与 secret 注入</s> / <s>② 自然语言意图源</s> —— <b>v3.20 判定 N/A</b>：真实使用形态是开发者用 IDE 助手（Copilot）翻译，框架侧零 LLM 调用、零凭据即已满足治理门槛，故不做适配层；改由 <code>SkeletonPromptBundle</code> + <code>SuggestionIntake</code> 承担「交出去 / 收回来」。P1 在该形态下已收口，剩余仅 <b><code>ApprovalGrant</code> 未接入</b>（审批闭环，属 P1 之外）；IDE 助手形态的命令行入口已于 <b>v3.21</b> 落地（<code>SkeletonCli</code>：<code>prompt</code> 生成提示词、<code>check</code> 校验回文，退出码 0/1/2）。以上均属资产生成期，不进入回归运行路径。</div>
+  <h3 id="s114">11.4 入口协议桥 MCP（T13，v3.25 增量）</h3>
+  <p>把 <code>SkeletonCli</code> 的「录制骨架 → 提示词 → 助手建议 → 门禁校验 → StepPlan」闭环从
+  手工复制升级为 IDE 内一次会话：<code>pw-agent-analysis</code> 新增
+  <code>framework.bridge.mcp</code> 包，手写 <b>stdio JSON-RPC（newline-delimited JSON）</b>，
+  <b>零 MCP SDK</b>（官方 SDK 通常带 HTTP/SSE transport 与网络客户端，与零出网铁律冲突）。
+  协议层只实现 <code>initialize</code> / <code>tools/list</code> / <code>tools/call</code> /
+  <code>ping</code>，并对 <code>resources/list</code> / <code>prompts/list</code> 回空列表以兼容会探测
+  全部能力的 client。stdout 被协议独占（显式 UTF-8 绑定 <code>FileDescriptor.out</code>，main 构造后
+  把全局 <code>System.out</code> 指向 stderr），诊断一律走 stderr，CLI 输出被内存流截获。</p>
+  <table class="map-table">
+    <tr><th style="width:16%">Tool</th><th style="width:30%">入参（服务端二次校验）</th><th>行为与结论</th></tr>
+    <tr><td><code>prompt</code></td><td><code>skeletonJson</code></td><td>复用 CLI 生成提示词，值默认占位化；不暴露 <code>--keep-values / --out</code>。</td></tr>
+    <tr><td><code>check</code></td><td><code>skeletonJson</code>、<code>suggestionText</code></td><td>走 CLI 的统一门禁（<code>IntentPlanValidator</code>）+ 等价对账（<code>PlanEquivalence</code>）；<b>通过时把建议中的 StepPlan JSON 作为 <code>plan</code> 对象原样回传</b>，补齐 CLI「只回 accepted/equivalent、不回计划本体」的缺口，实现手工复制 0 次、且可直接喂给路径 C 的 <code>StepPlanCodegenCli --plan</code>。</td></tr>
+    <tr><td><code>impact</code></td><td colspan="2"><b>不注册为 tool，调用返回 <code>-32601</code></b>（见下方决策）。</td></tr>
+  </table>
+  <div class="note warn"><b>前置决策：<code>impact</code> 不对外暴露，且不提供开关。</b>
+  该子命令的 <code>--sources</code> 只校验目录存在、可用 <code>Files.walk</code> 读任意绝对路径下的
+  <code>*.java/json/properties</code>，<code>ImpactReport</code> 会把 feature 路径/行号、业务场景名、
+  定位符原文及源码命中行（<code>CodeTarget.snippet</code>，160 字符、无脱敏）写进 Markdown，
+  <code>--out</code> 还可写任意路径。IDE 的 MCP client 通常由第三方模型驱动，tool result 会进入远端
+  上下文——暴露即开出「任意文件读 + 内容出域」通道；且它与 T13 验收（一次会话拿到可采信 StepPlan）
+  无关。保留在<b>本地 CLI</b> 由人显式执行即可满足原用途；若将来必须暴露，须另立专项：
+  路径白名单、禁 <code>--sources/--out</code>、snippet 脱敏、只回计数。</div>
+  <div class="note warn"><b>客户端不可自定校验基准</b>：<code>--origin</code>（已批准来源白名单）只从启动进程的
+  <code>-Dpw.mcp.approved.origins</code> 或 <code>PW_MCP_APPROVED_ORIGINS</code> 读取，未配置时
+  <code>check</code> fail-closed 拒绝；inputSchema 不含 <code>origins</code> 及任何路径类参数，
+  <code>additionalProperties=false</code> 由服务端二次强制。字符串参数有 1M 字符上限。退出码语义：
+  <code>0</code>=可采信、<code>1</code>=被拒/不等价（正常 tool result，<code>isError=true</code>，模型可读诊断重试）、
+  <code>2</code>=输入错误（JSON-RPC <code>-32602</code>）；桥只调 <code>SkeletonCli.run</code>，
+  绝不调含 <code>System.exit</code> 的 <code>main</code>，临时骨架文件即用即删。</div>
+  <div class="note info"><b>框架仍零 LLM / 零凭据 / 零出网</b>：服务端不发起补全、不读凭据、不创建网络连接，
+  main 产物不注册 <code>LlmGateway</code>（生产 <code>LlmGateways.resolveOrNull()</code> 仍为 null；
+  <code>LlmProtocolTest</code> 9 例绿）。IDE 侧助手只负责补全文本，判定权始终在框架门禁。
+  注意 <code>pw-agent-analysis</code> 的 <b>test-classes</b> 里有 <code>StubLlmGateway</code>
+  （<code>LlmGatewayContractTest</code> 用），故契约测试按 SPI 资源 URL 区分 main/test 装配面来验证，
+  不能在本模块测试 JVM 里直接断言 <code>resolveOrNull()==null</code>。
+  <b>启动示例</b>（IDE MCP client 的 command/args）：
+  <code>java -cp "&lt;本模块 jar&gt;:&lt;pw-core jar&gt;:&lt;jackson jars&gt;:&lt;slf4j jars&gt;"
+  -Dpw.mcp.approved.origins=codegen
+  com.hsbc.cmb.hk.dbb.automation.framework.bridge.mcp.McpStdioServer</code>。
+  验收由 <code>McpStdioServerTest</code>(6) + <code>McpToolContractTest</code>(9) 锁定：帧纯净、
+  notification 静默、工具目录边界、plan 回传可被 <code>StepPlan.parse</code> 消费、白名单注入、
+  <code>impact</code> 拒绝、临时文件清理与零 LLM 装配。</div>
+
 </section>
 
 <footer>
