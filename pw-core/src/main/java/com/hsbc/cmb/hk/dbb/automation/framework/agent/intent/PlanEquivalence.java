@@ -115,9 +115,9 @@ public final class PlanEquivalence {
         if (!ap.keySet().equals(bp.keySet())) {
             divergences.add(at + " param keys differ: " + ap.keySet() + " vs " + bp.keySet());
         } else {
-            for (String k : ap.keySet()) {
-                if (!java.util.Objects.equals(ap.get(k), bp.get(k))) {
-                    divergences.add(at + " param '" + k + "' differs");
+            for (Map.Entry<String, String> entry : ap.entrySet()) {
+                if (!java.util.Objects.equals(entry.getValue(), bp.get(entry.getKey()))) {
+                    divergences.add(at + " param '" + entry.getKey() + "' differs");
                 }
             }
         }

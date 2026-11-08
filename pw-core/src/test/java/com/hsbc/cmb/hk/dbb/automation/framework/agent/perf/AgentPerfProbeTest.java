@@ -138,12 +138,9 @@ public class AgentPerfProbeTest {
         } catch (IllegalArgumentException expected) {
             assertNotNull(expected.getMessage());
         }
-        try {
-            new AgentPerfSample(null, 1, 1L, true, null, 1, 0L);
-            fail("null bucket must be rejected");
-        } catch (NullPointerException expected) {
-            assertNotNull(expected.getMessage());
-        }
+        NullPointerException npe = org.junit.Assert.assertThrows(NullPointerException.class,
+                () -> new AgentPerfSample(null, 1, 1L, true, null, 1, 0L));
+        assertNotNull(npe.getMessage());
     }
 
     @Test

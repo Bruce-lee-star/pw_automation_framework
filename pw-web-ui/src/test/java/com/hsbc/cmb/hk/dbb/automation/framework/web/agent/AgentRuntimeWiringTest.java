@@ -172,7 +172,7 @@ public class AgentRuntimeWiringTest {
                 Provenance.manual("p")));
 
         List<String> events = new ArrayList<>();
-        AgentRuntimeContext runtime = new AgentRuntimeContext(
+        AgentRuntimeContext runtime = AgentRuntimeContext.of(
                 recordingRoute(events, "route"), recordingSession(events, "session"),
                 recordingConcurrency(events, "concurrency"), recordingMonitor(events, "monitor"));
         FakeHarness harness = new FakeHarness(satisfyingSnapshot());
@@ -192,7 +192,7 @@ public class AgentRuntimeWiringTest {
     @Test
     public void runtimeEnterFailureRejectsExecutionBeforeChannelAcquire() {
         FakeHarness harness = new FakeHarness(satisfyingSnapshot());
-        AgentRuntimeContext runtime = new AgentRuntimeContext(
+        AgentRuntimeContext runtime = AgentRuntimeContext.of(
                 AgentRouteControl.NO_OP, AgentSessionControl.NO_OP,
                 new AgentConcurrencyControl() {
                     @Override
@@ -220,7 +220,7 @@ public class AgentRuntimeWiringTest {
             }
         };
         List<String> events = new ArrayList<>();
-        AgentRuntimeContext runtime = new AgentRuntimeContext(
+        AgentRuntimeContext runtime = AgentRuntimeContext.of(
                 recordingRoute(events, "route"), recordingSession(events, "session"),
                 recordingConcurrency(events, "concurrency"), recordingMonitor(events, "monitor"));
 

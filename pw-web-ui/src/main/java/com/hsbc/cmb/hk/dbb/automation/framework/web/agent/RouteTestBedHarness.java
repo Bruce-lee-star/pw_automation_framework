@@ -4,7 +4,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.agent.channel.BrowserCommandChan
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.observation.PageObservationProvider;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.harness.IsolationHarness;
 import com.hsbc.cmb.hk.dbb.automation.framework.agent.nls.NlsCatalog;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;

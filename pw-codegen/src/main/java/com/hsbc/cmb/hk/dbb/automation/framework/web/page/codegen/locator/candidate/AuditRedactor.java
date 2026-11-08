@@ -28,7 +28,6 @@ public final class AuditRedactor {
 
     private final AuditExposure exposure;
     private final Map<String, String> pseudonyms = new LinkedHashMap<>();
-    private int counter;
 
     public AuditRedactor(AuditExposure exposure) {
         this.exposure = Objects.requireNonNull(exposure, "exposure");

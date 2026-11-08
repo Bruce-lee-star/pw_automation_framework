@@ -230,7 +230,7 @@ public class LocatorHealthRecorderTest {
         LocatorHealthReportRegistry.install(null);
         try {
             assertTrue("pw-web-ui 应经 SPI 暴露 LocatorHealthSink",
-                    LocatorHealthReportRegistry.get() instanceof LocatorHealthSink);
+                    LocatorHealthSink.class.isInstance(LocatorHealthReportRegistry.get()));
         } finally {
             LocatorHealthReportRegistry.install(null);
         }

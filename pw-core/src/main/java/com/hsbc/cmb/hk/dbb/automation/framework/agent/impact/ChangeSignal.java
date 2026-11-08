@@ -167,30 +167,30 @@ public final class ChangeSignal {
     }
 
     public Set<String> pages() {
-        return pages;
+        return Collections.unmodifiableSet(pages);
     }
 
     /** 元素名集合（由 {@link #elementRefs()} 派生，供用例文本匹配使用）。 */
     public Set<String> elements() {
-        return elements;
+        return Collections.unmodifiableSet(elements);
     }
 
     /** 元素引用（含角色，供代码层落点匹配使用）。 */
     public Set<ElementRef> elementRefs() {
-        return elementRefs;
+        return Collections.unmodifiableSet(elementRefs);
     }
 
     public Set<String> keywords() {
-        return keywords;
+        return Collections.unmodifiableSet(keywords);
     }
 
     public Set<String> tags() {
-        return tags;
+        return Collections.unmodifiableSet(tags);
     }
 
     /** CSS/XPath 选择器信号（role 定位不了时的兜底通道）。 */
     public Set<String> selectors() {
-        return selectors;
+        return Collections.unmodifiableSet(selectors);
     }
 
     /** 信号是否为空（全空时筛选无意义，应显式报错而不是把全部用例判 NO_CHANGE）。 */

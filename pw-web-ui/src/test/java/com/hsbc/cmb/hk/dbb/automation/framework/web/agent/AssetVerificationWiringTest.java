@@ -128,9 +128,9 @@ public class AssetVerificationWiringTest {
         AssetVerificationWiring wiring = AssetVerificationWiring.fromConfig();
         try {
             assertTrue("repository must be the real file-backed one",
-                    wiring.repository() instanceof JsonFileAssetRepository);
+                    JsonFileAssetRepository.class.isInstance(wiring.repository()));
             assertTrue("harness must be the real Playwright test bed",
-                    wiring.harness() instanceof RouteTestBedHarness);
+                    RouteTestBedHarness.class.isInstance(wiring.harness()));
             assertNotNull(wiring.executor());
             assertTrue("file repository root must be created on assembly",
                     java.nio.file.Files.isDirectory(root.resolve("assets")));

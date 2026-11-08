@@ -219,7 +219,10 @@ public final class CodeTargetScanner {
                 return root.toAbsolutePath().normalize().relativize(file).toString().replace('\\', '/');
             }
         }
-        return file.getFileName().toString();
+        // 根路径（如 "/"）没有 fileName 段，getFileName() 返回 null；回退到完整路径字符串，
+        // 避免对可能为空的返回值直接解引用（NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE）。
+        Path fileName = file.getFileName();
+        return fileName == null ? file.toString() : fileName.toString();
     }
 
     // ------------------------------------------------------------------

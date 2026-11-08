@@ -69,6 +69,9 @@ public final class PlaywrightEvidenceProbe implements EvidenceProbe {
     /**
      * @param nls 多语言目录（可空）；用于把 {@code nameKey} 解析为当前语言文案后再比较可访问名
      */
+    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings(
+            value = "EI_EXPOSE_REP2",
+            justification = "Playwright Page 是运行期驱动句柄，按设计必须持有；无法做防御性拷贝")
     public PlaywrightEvidenceProbe(Page page, NlsCatalog nls) {
         if (page == null) {
             throw new IllegalArgumentException("page 不可为空：取证需要真实页面");

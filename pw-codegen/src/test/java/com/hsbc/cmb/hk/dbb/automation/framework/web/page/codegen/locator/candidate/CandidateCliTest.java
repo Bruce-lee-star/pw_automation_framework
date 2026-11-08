@@ -414,7 +414,7 @@ public class CandidateCliTest {
         Instant past = Instant.parse("2026-09-01T00:00:00Z"); // 相对 now 远超 30 天
         Clock clock = Clock.fixed(past, ZoneOffset.UTC);
         CandidateLibrary lib0 = new CandidateLibrary(new CandidateValidator(), clock);
-        CandidateRecord expired = lib0.propose(LocatorCandidate.of("old.submit",
+        lib0.propose(LocatorCandidate.of("old.submit",
                 LocatorSpec.role("button", "Old")).withExpectedRole("button").withProposedBy("recorder"));
         CandidateRecord usable = lib0.propose(LocatorCandidate.of("live.submit",
                 LocatorSpec.role("button", "Live")).withExpectedRole("button").withProposedBy("recorder"));

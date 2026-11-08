@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * {@link AssetRepository} 的**文件型 JSON** 实现（设计 §3.1.3 资产层 / P1.5 剩余项
@@ -47,7 +48,8 @@ public final class JsonFileAssetRepository implements AssetRepository {
     private final AssetStateMachine stateMachine = new AssetStateMachine.DefaultAssetStateMachine();
 
     private final Map<AssetId, StoredAsset> store = new ConcurrentHashMap<>();
-    private long seq = 1;
+    /** 序号本身用原子量承载：loadIndex（构造期）与 writeIndex 的读取不再依赖方法级锁，消除锁不一致。 */
+    private final AtomicLong seq = new AtomicLong(1);
 
     public JsonFileAssetRepository(Path root) {
         this.root = root;
@@ -61,7 +63,7 @@ public final class JsonFileAssetRepository implements AssetRepository {
 
     @Override
     public synchronized AssetId save(AssetDraft draft) {
-        long n = seq++;
+        long n = seq.getAndIncrement();
         AssetId id = new AssetId("asset:" + draft.type().name().toLowerCase() + ":" + n, 1);
         long now = System.currentTimeMillis();
         StoredAsset asset = new StoredAsset(id, draft.type(), draft.requirementId(), AssetState.DRAFT,
@@ -262,7 +264,7 @@ public final class JsonFileAssetRepository implements AssetRepository {
 
     private void writeIndex() throws IOException {
         ObjectNode index = mapper.createObjectNode();
-        index.put("seq", seq);
+        index.put("seq", seq.get());
         ArrayNode assets = mapper.createArrayNode();
         ObjectNode byRequirement = mapper.createObjectNode();
         for (StoredAsset a : store.values()) {
@@ -294,7 +296,7 @@ public final class JsonFileAssetRepository implements AssetRepository {
         }
         ObjectNode index = (ObjectNode) mapper.readTree(Files.readString(indexFile, StandardCharsets.UTF_8));
         if (index.has("seq")) {
-            seq = index.get("seq").asLong(1);
+            seq.set(index.get("seq").asLong(1));
         }
         Path assetsDir = root.resolve(ASSETS_DIR);
         if (index.has("assets")) {

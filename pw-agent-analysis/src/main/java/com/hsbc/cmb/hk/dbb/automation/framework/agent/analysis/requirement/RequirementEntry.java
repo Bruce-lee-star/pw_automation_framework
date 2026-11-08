@@ -18,6 +18,26 @@ public record RequirementEntry(RequirementId id, String title,
                                List<String> acceptanceCriteria, List<String> businessRules,
                                String sourceRef) {
 
+    public RequirementEntry {
+        acceptanceCriteria = immutable(acceptanceCriteria);
+        businessRules = immutable(businessRules);
+    }
+
+    private static List<String> immutable(List<String> values) {
+        return values == null ? List.of()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(values));
+    }
+
+    @Override
+    public List<String> acceptanceCriteria() {
+        return java.util.Collections.unmodifiableList(acceptanceCriteria);
+    }
+
+    @Override
+    public List<String> businessRules() {
+        return java.util.Collections.unmodifiableList(businessRules);
+    }
+
     /** 用于关键词匹配的全文（标题 + 验收 + 规则拼接，小写）。 */
     public String corpus() {
         StringBuilder sb = new StringBuilder();

@@ -22,6 +22,6 @@ public record PageObservation(String url, String pageRef,
     }
 
     public List<ObservedElement> elements() {
-        return elements;
+        return Collections.unmodifiableList(elements);
     }
 }

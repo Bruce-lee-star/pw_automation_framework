@@ -225,7 +225,7 @@ public class ClosedLoopAssetFlowTest {
 
         // 第 1、3 次跑满足期望，第 2、4 次不满足 → 命中率 0.5 → FLAKY
         ScriptedHarness harness = new ScriptedHarness(
-                r -> (r % 2 == 1) ? satisfyingSnapshot(restored) : emptySnapshot());
+                r -> (r % 2 != 0) ? satisfyingSnapshot(restored) : emptySnapshot());
         VerificationReport report = new AssetStepPlanExecutor(repo, harness)
                 .run(asset.id(), new VerificationScope(PAGE, 4));
 

@@ -65,7 +65,7 @@ public class AgentRuntimeContextTest {
     private static AgentRuntimeContext contextOf(AgentRouteControl route, AgentSessionControl session,
                                                  AgentConcurrencyControl concurrency,
                                                  AgentMonitorControl monitor) {
-        return new AgentRuntimeContext(route, session, concurrency, monitor);
+        return AgentRuntimeContext.of(route, session, concurrency, monitor);
     }
 
     @Test
@@ -190,26 +190,17 @@ public class AgentRuntimeContextTest {
 
     @Test
     public void nullRolesAndArgumentsAreRejected() {
-        try {
-            new AgentRuntimeContext(null, AgentSessionControl.NO_OP,
-                    AgentConcurrencyControl.NO_OP, AgentMonitorControl.NO_OP);
-            fail("null route must be rejected");
-        } catch (NullPointerException expected) {
-            assertTrue(expected.getMessage().contains("route"));
-        }
+        NullPointerException e1 = org.junit.Assert.assertThrows(NullPointerException.class,
+                () -> AgentRuntimeContext.of(null, AgentSessionControl.NO_OP,
+                        AgentConcurrencyControl.NO_OP, AgentMonitorControl.NO_OP));
+        assertTrue(e1.getMessage().contains("route"));
         AgentRuntimeContext ctx = AgentRuntimeContext.empty();
-        try {
-            ctx.runInScope(null, () -> "x");
-            fail("null scope must be rejected");
-        } catch (NullPointerException expected) {
-            assertTrue(expected.getMessage().contains("scope"));
-        }
-        try {
-            new AgentRuntimeScope(null, null, null);
-            fail("null targetUrl must be rejected");
-        } catch (NullPointerException expected) {
-            assertTrue(expected.getMessage().contains("targetUrl"));
-        }
+        NullPointerException e2 = org.junit.Assert.assertThrows(NullPointerException.class,
+                () -> ctx.runInScope(null, () -> "x"));
+        assertTrue(e2.getMessage().contains("scope"));
+        NullPointerException e3 = org.junit.Assert.assertThrows(NullPointerException.class,
+                () -> new AgentRuntimeScope(null, null, null));
+        assertTrue(e3.getMessage().contains("targetUrl"));
     }
 
     @Test

@@ -14,6 +14,16 @@ import java.util.List;
  */
 public record ValidationReport(boolean passed, List<Issue> issues, String summary) {
 
+    public ValidationReport {
+        issues = issues == null ? List.of()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(issues));
+    }
+
+    @Override
+    public List<Issue> issues() {
+        return java.util.Collections.unmodifiableList(issues);
+    }
+
     public static ValidationReport ok(String summary) {
         return new ValidationReport(true, List.of(), summary);
     }

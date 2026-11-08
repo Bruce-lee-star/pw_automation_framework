@@ -100,12 +100,7 @@ public class StepDriverTest {
     }
 
     private static void assertThrowsNpe(ThrowingRunnable r) {
-        try {
-            r.run();
-            fail("expected NullPointerException");
-        } catch (NullPointerException expected) {
-            // 期望的 null 守卫
-        }
+        org.junit.Assert.assertThrows(NullPointerException.class, r::run);
     }
 
     @FunctionalInterface

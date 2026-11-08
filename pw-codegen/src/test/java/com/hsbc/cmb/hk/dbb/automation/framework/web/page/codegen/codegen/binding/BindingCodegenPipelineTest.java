@@ -93,7 +93,10 @@ public class BindingCodegenPipelineTest {
     @Test
     public void plan_file_entry_reads_utf8_json() throws Exception {
         Path planFile = tmp.getRoot().toPath().resolve("plans/role_element_login.json");
-        Files.createDirectories(planFile.getParent());
+        Path parent = planFile.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         Files.writeString(planFile, fixture(), StandardCharsets.UTF_8);
 
         BindingCodegenResult r = BindingCodegenPipeline.run(planFile, featureDir, glueDir);

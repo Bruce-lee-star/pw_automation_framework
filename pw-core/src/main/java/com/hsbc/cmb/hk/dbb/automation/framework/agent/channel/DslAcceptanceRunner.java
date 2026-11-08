@@ -38,6 +38,16 @@ public final class DslAcceptanceRunner {
      * @param diagnostics    脱敏后的中断诊断；未中断时为 {@code null}
      */
     public record Outcome(List<CommandResult> results, int executedSteps, boolean stopped, String diagnostics) {
+
+        public Outcome {
+            results = results == null ? List.of()
+                    : java.util.Collections.unmodifiableList(new ArrayList<>(results));
+        }
+
+        @Override
+        public List<CommandResult> results() {
+            return java.util.Collections.unmodifiableList(results);
+        }
     }
 
     public static Outcome run(StepPlan plan, BrowserCommandChannel channel) {

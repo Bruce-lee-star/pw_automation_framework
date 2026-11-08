@@ -37,6 +37,16 @@ public record ObservedElement(String role, String name, String text,
         nameKey = (nameKey == null || nameKey.isBlank()) ? null : nameKey;
     }
 
+    @Override
+    public List<LocatorSpec> locatorCandidates() {
+        return Collections.unmodifiableList(locatorCandidates);
+    }
+
+    @Override
+    public Map<String, String> attributes() {
+        return Collections.unmodifiableMap(attributes);
+    }
+
     /** 单语言环境（无 NLS）便捷构造：不带 key。 */
     public ObservedElement(String role, String name, String text, boolean enabled, boolean visible,
                           List<LocatorSpec> locatorCandidates, Map<String, String> attributes) {

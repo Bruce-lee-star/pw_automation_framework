@@ -77,7 +77,7 @@ public final class WebAgentRuntimeContextProvider implements AgentRuntimeContext
 
     @Override
     public AgentRuntimeContext contribute() {
-        return new AgentRuntimeContext(
+        return AgentRuntimeContext.of(
                 new RouteAdapter(lifecycleSupplier), new SessionAdapter(),
                 new ConcurrencyAdapter(), new MonitorAdapter(lifecycleSupplier));
     }

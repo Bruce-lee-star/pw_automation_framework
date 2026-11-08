@@ -17,4 +17,14 @@ import java.util.List;
  */
 public record PipelineResult(AssetDraftBundle bundle, ValidationReport report,
                             List<AssetId> savedIds, VerifiableStepPlan plan) {
+
+    public PipelineResult {
+        savedIds = savedIds == null ? List.of()
+                : java.util.Collections.unmodifiableList(new java.util.ArrayList<>(savedIds));
+    }
+
+    @Override
+    public List<AssetId> savedIds() {
+        return java.util.Collections.unmodifiableList(savedIds);
+    }
 }

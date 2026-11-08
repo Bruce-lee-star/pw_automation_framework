@@ -81,8 +81,10 @@ public class LlmProtocolTest {
 
     @Test
     public void unavailableIsGatewayExceptionSubtype() {
-        assertTrue(new LlmGatewayException("base") instanceof RuntimeException);
-        assertTrue(new LlmUnavailableException("down") instanceof LlmGatewayException);
+        // 断言类层次而非对实例做恒真 instanceof（后者会被 SpotBugs 判为
+        // BC_VACUOUS_INSTANCEOF / JUA_DONT_ASSERT_INSTANCEOF_IN_TESTS）
+        assertTrue(RuntimeException.class.isAssignableFrom(LlmGatewayException.class));
+        assertTrue(LlmGatewayException.class.isAssignableFrom(LlmUnavailableException.class));
     }
 
     @Test

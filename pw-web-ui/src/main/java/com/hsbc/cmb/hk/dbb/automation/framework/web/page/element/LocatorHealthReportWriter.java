@@ -164,7 +164,9 @@ public final class LocatorHealthReportWriter {
     }
 
     private static Path siblingMarkdown(Path jsonFile) {
-        String name = jsonFile.getFileName().toString();
+        // 根路径没有 fileName 段；回退为固定基名，避免对可能为空的返回值解引用
+        Path fileName = jsonFile.getFileName();
+        String name = fileName == null ? "report" : fileName.toString();
         String base = name.toLowerCase(Locale.ROOT).endsWith(".json")
                 ? name.substring(0, name.length() - ".json".length()) : name;
         return jsonFile.resolveSibling(base + ".md");

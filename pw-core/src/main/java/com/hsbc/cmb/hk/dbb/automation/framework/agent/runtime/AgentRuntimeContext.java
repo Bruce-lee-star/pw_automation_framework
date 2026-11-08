@@ -43,13 +43,25 @@ public final class AgentRuntimeContext {
     private final AgentRouteControl route;
     private final AgentMonitorControl monitor;
 
-    /** 四个角色槽位显式注入；任一为 {@code null} 抛 {@link NullPointerException}。 */
-    public AgentRuntimeContext(AgentRouteControl route, AgentSessionControl session,
-                               AgentConcurrencyControl concurrency, AgentMonitorControl monitor) {
+    /**
+     * 四个角色槽位显式注入；任一为 {@code null} 抛 {@link NullPointerException}。
+     *
+     * <p>刻意私有：本类持有静态 {@link #empty()} 单例，公开构造器会被 SpotBugs 判为
+     * 「单例类暴露非私有构造器」（SING_SINGLETON_HAS_NONPRIVATE_CONSTRUCTOR）；语义上
+     * 「显式注入组合根」也应由工厂表达，而不是 new 一个无状态对象。</p>
+     */
+    private AgentRuntimeContext(AgentRouteControl route, AgentSessionControl session,
+                                AgentConcurrencyControl concurrency, AgentMonitorControl monitor) {
         this.route = Objects.requireNonNull(route, "route");
         this.session = Objects.requireNonNull(session, "session");
         this.concurrency = Objects.requireNonNull(concurrency, "concurrency");
         this.monitor = Objects.requireNonNull(monitor, "monitor");
+    }
+
+    /** 显式构造四角色实例（组合根 / 测试 seam）；参数校验与私有构造器一致。 */
+    public static AgentRuntimeContext of(AgentRouteControl route, AgentSessionControl session,
+                                         AgentConcurrencyControl concurrency, AgentMonitorControl monitor) {
+        return new AgentRuntimeContext(route, session, concurrency, monitor);
     }
 
     /** 全 no-op 实例（默认、零回归）。 */

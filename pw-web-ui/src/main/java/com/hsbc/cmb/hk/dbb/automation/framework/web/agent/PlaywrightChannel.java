@@ -248,8 +248,13 @@ public final class PlaywrightChannel implements BrowserCommandChannel {
      */
     private Page switchToPopup() {
         Page popup = awaitPopup();
-        this.page = popup;
-        this.pageId = "page-" + Integer.toHexString(System.identityHashCode(popup));
+        // pageId 的读取发生在 synchronized snapshot() 内；写入必须持同一把锁，
+        // 否则 SpotBugs IS2_INCONSISTENT_SYNC 且并发下可见性无保证。
+        // 只把赋值收进临界区，awaitPopup() 的等待不持锁，避免与 snapshot() 互等。
+        synchronized (this) {
+            this.page = popup;
+            this.pageId = "page-" + Integer.toHexString(System.identityHashCode(popup));
+        }
         // popup 由 window.open 异步加载，给一点 load 等待（失败不阻断切页）
         try {
             popup.waitForLoadState(LoadState.LOAD,

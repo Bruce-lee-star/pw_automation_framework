@@ -104,6 +104,6 @@ public final class AgentRuntimeContexts {
                 monitor = ctx.monitor();
             }
         }
-        return new AgentRuntimeContext(route, session, concurrency, monitor);
+        return AgentRuntimeContext.of(route, session, concurrency, monitor);
     }
 }

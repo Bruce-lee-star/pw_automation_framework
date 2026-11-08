@@ -29,7 +29,7 @@ public record RequirementContext(List<RequirementEntry> entries, String sourceNa
     }
 
     public List<RequirementEntry> entries() {
-        return entries;
+        return Collections.unmodifiableList(entries);
     }
 
     /** 取指定元素的权威测试值（无则返回 null）。 */

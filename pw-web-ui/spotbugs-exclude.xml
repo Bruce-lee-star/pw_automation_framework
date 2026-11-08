@@ -105,4 +105,11 @@
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult"/><Bug pattern="EI_EXPOSE_REP"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult$Builder"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
 
+    <!-- ===== web.agent PlaywrightPageObservationProvider（EI_EXPOSE_REP2, 1 条）| owner: @web-core
+         | 性质: 设计性豁免（非债务），与上文 D6-2「设计内共享引用」同族
+         | 说明: Playwright Page 是运行期驱动句柄（远程对象引用），provider 的职责就是持有它执行
+         |       page.evaluate 采集页面观测；它不可复制，也不应被当作可变数据容器做防御性拷贝，
+         |       删除该引用即破坏观测能力。故按架构决定登记，而非当作未处理的封装缺陷。 -->
+    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.agent.PlaywrightPageObservationProvider"/><Bug pattern="EI_EXPOSE_REP2"/></Match>
+
 </FindBugsFilter>

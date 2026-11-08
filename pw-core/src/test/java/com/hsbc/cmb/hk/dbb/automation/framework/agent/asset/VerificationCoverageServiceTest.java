@@ -13,11 +13,12 @@ public class VerificationCoverageServiceTest {
         InMemoryAssetRepository repo = new InMemoryAssetRepository();
         AssetId a1 = repo.save(new AssetDraft(AssetType.STEP_PLAN, "REQ-1", "{}", Provenance.manual("p")));
         AssetId a2 = repo.save(new AssetDraft(AssetType.STEP_PLAN, "REQ-1", "{}", Provenance.manual("p")));
-        AssetId a3 = repo.save(new AssetDraft(AssetType.LINKAGE_GRAPH, "REQ-1", "{}", Provenance.manual("p")));
+        // 第三个资产（LINKAGE_GRAPH）刻意不验证；只保留落库副作用，不声明未使用的局部变量
+        repo.save(new AssetDraft(AssetType.LINKAGE_GRAPH, "REQ-1", "{}", Provenance.manual("p")));
         // 不相关需求
         repo.save(new AssetDraft(AssetType.STEP_PLAN, "REQ-2", "{}", Provenance.manual("p")));
 
-        // REQ-1：a1 PASS(稳定1.0)、a2 FLAKY(稳定0.5)、a3 未验证
+        // REQ-1：a1 PASS(稳定1.0)、a2 FLAKY(稳定0.5)、第三个资产未验证
         repo.recordVerification(a1, new VerificationReport(VerificationReport.Status.PASS, 1.0, List.of(), "t1"));
         repo.recordVerification(a2, new VerificationReport(VerificationReport.Status.FLAKY, 0.5, List.of(), "t2"));
 

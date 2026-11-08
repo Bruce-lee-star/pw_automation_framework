@@ -118,7 +118,7 @@ public final class ApprovalRequest {
         }
 
         public Builder approvers(List<String> approvers) {
-            this.approvers = approvers;
+            this.approvers = approvers == null ? null : new java.util.ArrayList<>(approvers);
             return this;
         }
 

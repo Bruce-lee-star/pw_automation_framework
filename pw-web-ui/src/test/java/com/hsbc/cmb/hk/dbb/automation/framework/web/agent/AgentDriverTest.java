@@ -198,8 +198,8 @@ public class AgentDriverTest {
 
         AgentDriver driver = AgentDriver.fromConfig();
         try {
-            assertTrue(driver.repository() instanceof JsonFileAssetRepository);
-            assertTrue(driver.harness() instanceof RouteTestBedHarness);
+            assertTrue(JsonFileAssetRepository.class.isInstance(driver.repository()));
+            assertTrue(RouteTestBedHarness.class.isInstance(driver.harness()));
             assertNotNull(driver.runtime());
         } finally {
             driver.close();

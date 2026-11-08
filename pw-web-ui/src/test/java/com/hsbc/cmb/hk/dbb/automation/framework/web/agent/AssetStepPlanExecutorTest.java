@@ -150,7 +150,7 @@ public class AssetStepPlanExecutorTest {
         InMemoryAssetRepository repo = new InMemoryAssetRepository();
         AssetId id = saveStepPlanAsset(repo);
         // 第 1、3 次跑满足，第 2、4 次失败 -> 命中率 0.5 -> FLAKY
-        ScriptedHarness harness = new ScriptedHarness(r -> (r % 2 == 1) ? satisfyingSnapshot() : failingSnapshot());
+        ScriptedHarness harness = new ScriptedHarness(r -> (r % 2 != 0) ? satisfyingSnapshot() : failingSnapshot());
 
         VerificationReport report = new AssetStepPlanExecutor(repo, harness).run(id, new VerificationScope("https://app/p", 4));
 

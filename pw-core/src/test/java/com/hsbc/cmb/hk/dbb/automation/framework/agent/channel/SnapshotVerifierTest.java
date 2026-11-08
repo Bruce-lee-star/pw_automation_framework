@@ -88,10 +88,10 @@ public class SnapshotVerifierTest {
 
     @Test
     public void nullArgsRejected() {
-        try { SnapshotVerifier.verify((Snapshot) null, List.of()); fail(); }
-        catch (NullPointerException expected) { /* snapshot 守卫 */ }
-        try { SnapshotVerifier.verify(sample(), null); fail(); }
-        catch (NullPointerException expected) { /* expectations 守卫 */ }
+        org.junit.Assert.assertThrows(NullPointerException.class,
+                () -> SnapshotVerifier.verify((Snapshot) null, List.of()));
+        org.junit.Assert.assertThrows(NullPointerException.class,
+                () -> SnapshotVerifier.verify(sample(), null));
     }
 
     @Test

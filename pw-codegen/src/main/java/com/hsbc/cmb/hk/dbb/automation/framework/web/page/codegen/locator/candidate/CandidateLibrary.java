@@ -266,7 +266,10 @@ public final class CandidateLibrary {
             Files.createDirectories(parent);
         }
         String json = GSON.toJson(toDto());
-        Path tmp = Files.createTempFile(parent, "candidates-", ".json.tmp");
+        // 根路径没有 parent；createTempFile 的目录参数不接受 null（High: NP_NULL_PARAM_DEREF）
+        Path tmp = parent == null
+                ? Files.createTempFile("candidates-", ".json.tmp")
+                : Files.createTempFile(parent, "candidates-", ".json.tmp");
         Files.writeString(tmp, json, StandardCharsets.UTF_8);
         try {
             Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -480,6 +483,9 @@ public final class CandidateLibrary {
         String proposedBy;
         String state;
         String approvedBy;
+        @edu.umd.cs.findbugs.annotations.SuppressFBWarnings(
+                value = "URF_UNREAD_FIELD",
+                justification = "Gson 反射序列化的落盘兼容字段：供旧版本工具链读取，本版本只读 approval 块")
         String approvalAppVersion;
         ApprovalDto approval;
         String retireReason;
@@ -509,6 +515,9 @@ public final class CandidateLibrary {
     }
 
     private static final class ValidationDto {
+        @edu.umd.cs.findbugs.annotations.SuppressFBWarnings(
+                value = "URF_UNREAD_FIELD",
+                justification = "Gson 反射序列化的落盘字段：写盘供外部工具读取，加载时由 details/findings 复核")
         boolean passed;
         List<FindingDto> findings;
     }

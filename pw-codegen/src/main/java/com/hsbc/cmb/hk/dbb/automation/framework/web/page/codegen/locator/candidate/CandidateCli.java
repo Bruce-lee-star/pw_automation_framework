@@ -445,8 +445,9 @@ public final class CandidateCli {
             return EXIT_OK;
         }
         Path path = Path.of(outFile).toAbsolutePath();
-        if (path.getParent() != null) {
-            Files.createDirectories(path.getParent());
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
         }
         Files.writeString(path, md, StandardCharsets.UTF_8);
         out.println("审计报告（" + exposure.name() + "）已写入 " + path);

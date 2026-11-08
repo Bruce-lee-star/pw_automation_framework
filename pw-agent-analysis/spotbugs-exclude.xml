@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+      根 pom 的 spotbugs-maven-plugin 强制 ${project.basedir}/spotbugs-exclude.xml，
+      缺文件会使 verify 在该模块抛 ResourceNotFoundException（reactor 直接中断）。
+      本模块遵循 T1-3「baseline freeze，新代码零容忍」：当前无任何豁免项；
+      新增违规必须修代码，不得在本文件冻结式留存。
+    -->
+</FindBugsFilter>

@@ -127,12 +127,7 @@ public class RecordedSkeletonTest {
 
     @Test
     public void nullJsonRejected() {
-        try {
-            RecordedSkeleton.parse(null);
-            fail("expected NullPointerException");
-        } catch (NullPointerException expected) {
-            assertTrue(true);
-        }
+        org.junit.Assert.assertThrows(NullPointerException.class, () -> RecordedSkeleton.parse(null));
     }
 
     // ------------------------------------------------------------------
