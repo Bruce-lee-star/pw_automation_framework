@@ -77,9 +77,15 @@ public final class LocatorSpec {
             case CSS:      sb.append("css=").append(css()); break;
             default:       throw new IllegalStateException("unknown strategy");
         }
-        if (name() != null) sb.append(";name=").append(name());
-        if (nameKey() != null) sb.append(";nameKey=").append(nameKey());
-        if (nth() != 0) sb.append(";nth=").append(nth());
+        if (name() != null) {
+            sb.append(";name=").append(name());
+        }
+        if (nameKey() != null) {
+            sb.append(";nameKey=").append(nameKey());
+        }
+        if (nth() != 0) {
+            sb.append(";nth=").append(nth());
+        }
         return sb.toString();
     }
 
@@ -88,8 +94,12 @@ public final class LocatorSpec {
     public static LocatorSpec role(String role, String name, int nth) {
         Map<String, String> m = new LinkedHashMap<>();
         m.put("role", role);
-        if (name != null) m.put("name", name);
-        if (nth != 0) m.put("nth", Integer.toString(nth));
+        if (name != null) {
+            m.put("name", name);
+        }
+        if (nth != 0) {
+            m.put("nth", Integer.toString(nth));
+        }
         return new LocatorSpec(Strategy.ROLE, m);
     }
 
@@ -104,8 +114,12 @@ public final class LocatorSpec {
     public static LocatorSpec roleOfKey(String role, String nameKey, int nth) {
         Map<String, String> m = new LinkedHashMap<>();
         m.put("role", role);
-        if (nameKey != null) m.put("nameKey", nameKey);
-        if (nth != 0) m.put("nth", Integer.toString(nth));
+        if (nameKey != null) {
+            m.put("nameKey", nameKey);
+        }
+        if (nth != 0) {
+            m.put("nth", Integer.toString(nth));
+        }
         return new LocatorSpec(Strategy.ROLE, m);
     }
     public static LocatorSpec testId(String id) {
