@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,7 +38,11 @@ public final class FrameworkLifecycleBus {
      *   <li>{@link ConsoleScenarioListener} —— 纯控制台彩色输出（场景开始/结果），置首使其在慢速浏览器初始化前即打印"正在执行哪条 case"；</li>
      *   <li>{@link LifecycleOrchestrator} —— 先做"跨 feature 清理 + 轮次横幅"，须在场景初始化之前；</li>
      *   <li>{@link com.hsbc.cmb.hk.dbb.automation.framework.web.listener.PlaywrightListener} —— 场景初始化/截图/失败聚合；</li>
-     *   <li>{@link com.hsbc.cmb.hk.dbb.automation.framework.web.listener.AxeCoreListener} —— 无障碍扫描汇总。</li>
+     *   <li>{@link com.hsbc.cmb.hk.dbb.automation.framework.web.listener.AxeCoreListener} —— 无障碍扫描汇总；</li>
+     *   <li>{@link SemanticSinkLifecycleListener} —— <b>条件注册</b>：仅当
+     *       {@link WebFrameworkConfig#AGENT_SEMANTIC_ENABLED} 为真（默认关闭）时加入，做生成 case 的 sink 按场景收口
+     *       （仅清理 ThreadLocal，绑定由 {@code StepPlanActionSinks} 的 SPI 惰性完成，业务零钩子）。
+     *       默认关闭时集合保持 4 个监听器，日常用例零影响；置末以避免干扰初始化与截图。</li>
      * </ol>
      * 由 {@code FrameworkCucumberEventListener.setEventPublisher} 在进入 Cucumber 运行时时调用一次。
      */
@@ -53,12 +58,28 @@ public final class FrameworkLifecycleBus {
             register(LifecycleOrchestrator.INSTANCE);
             register(PLAYWRIGHT_LISTENER);
             register(com.hsbc.cmb.hk.dbb.automation.framework.web.listener.AxeCoreListener.INSTANCE);
+            if (WebFrameworkConfig.AGENT_SEMANTIC_ENABLED.getBooleanValue()) {
+                register(new SemanticSinkLifecycleListener());
+            }
             defaultListenersRegistered = true;
         }
     }
 
     public static boolean isDefaultListenersRegistered() {
         return defaultListenersRegistered;
+    }
+
+    /** 诊断 / 单测用：当前监听器集合是否包含指定类型（不触发任何生命周期副作用）。 */
+    public static boolean isRegistered(Class<? extends FrameworkLifecycleListener> type) {
+        if (type == null) {
+            return false;
+        }
+        for (FrameworkLifecycleListener listener : LISTENERS) {
+            if (type.isInstance(listener)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

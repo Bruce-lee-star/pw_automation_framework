@@ -2,13 +2,10 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.junit;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.PwReportPlugin;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwReportObjectFactory;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkCucumberEventListener;
 import io.cucumber.junit.Cucumber;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.junit.runner.Description;
 import org.junit.runner.Runner;
 import org.junit.runner.manipulation.Filter;
@@ -16,12 +13,10 @@ import org.junit.runner.manipulation.Filterable;
 import org.junit.runner.manipulation.NoTestsRemainException;
 import org.junit.runner.notification.RunNotifier;
 import org.junit.runners.model.InitializationError;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 框架自带的 Cucumber JUnit4 Runner——业务把 {@code @RunWith(Cucumber.class)} 换成

@@ -1135,7 +1135,16 @@ public enum ConfigRegistry {
 
     /** 文件存储是否按场景分组。 */
     MONITOR_FILE_STORE_GROUP_BY_SCENARIO(
-            "monitor.file.store.group.by.scenario", "true", "文件存储是否按场景分组");
+            "monitor.file.store.group.by.scenario", "true", "文件存储是否按场景分组"),
+
+    /**
+     * 语义 Agent（零定位输入 / 按业务描述自主导航）的<b>按需启用开关</b>。
+     *
+     * <p>默认关闭：日常 Cucumber 用例不加载 agent SPI、不注册 agent 生命周期监听器；
+     * 仅在使用 agent 按需求操作时显式开启。键与默认值由本注册表统一定义。</p>
+     */
+    AGENT_SEMANTIC_ENABLED(
+            "pw.agent.semantic.enabled", "false", "语义 Agent 按需启用开关（默认关闭）");
 
     private final String key;
     private final String defaultValue;
@@ -1194,6 +1203,22 @@ public enum ConfigRegistry {
 
     public String description() {
         return description;
+    }
+
+    /**
+     * 按本条目的声明层序<b>实时</b>解析布尔开关（不缓存，支持同一 JVM 内按需开关）。
+     *
+     * <p>与 {@code WebFrameworkConfig#getBooleanValue()} 同义：{@code true/yes/1}
+     * （大小写不敏感）视为开启，其余一律 fail-closed 按关闭处理。core 侧不依赖 Web 门面，
+     * 故布尔解析由注册表统一提供，避免各模块各写一份。</p>
+     */
+    public boolean booleanValue() {
+        String raw = ConfigReader.resolve(key, defaultValue);
+        if (raw == null) {
+            return false;
+        }
+        String value = raw.trim();
+        return "true".equalsIgnoreCase(value) || "yes".equalsIgnoreCase(value) || "1".equals(value);
     }
 
     /**

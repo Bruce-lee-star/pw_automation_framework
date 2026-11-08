@@ -989,7 +989,18 @@ public enum WebFrameworkConfig {
     PLAYWRIGHT_PAGE_EVENTS_REQUEST_FAILED_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_REQUEST_FAILED_ENABLED),
 
     /** 是否订阅 {@code page.onCrash}（页面崩溃诊断）。<b>默认关闭</b>。 */
-    PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED);
+    PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED),
+
+    // ==================== 语义 Agent（pw.agent.semantic.*）====================
+
+    /**
+     * 语义 Agent 按需启用开关（<b>默认关闭</b>）。
+     *
+     * <p>仅在使用 agent 按业务描述自主导航/操作时开启；关闭时框架不装配 sink、不注册
+     * agent 生命周期监听器，日常用例零影响。开启方式：{@code -Dpw.agent.semantic.enabled=true}、
+     * 环境变量 {@code PW_AGENT_SEMANTIC_ENABLED=true} 或 {@code pw.conf} 同名键。</p>
+     */
+    AGENT_SEMANTIC_ENABLED(ConfigRegistry.AGENT_SEMANTIC_ENABLED);
 
     // ==================== Serenity 兼容性回填（DEV-V5 去 Serenity 适配器）====================
     // 框架已把 serenity.* 配置命名空间收敛到 framework.*（见 core ConfigRegistry 中的 framework.* 键）。
