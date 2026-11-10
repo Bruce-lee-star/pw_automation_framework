@@ -344,7 +344,7 @@ final class SanitizerRules {
 
     /**
      * 读取附加敏感键配置：优先取 {@code -D} 系统属性（保留运行时 {@code System.setProperty} 即时生效能力），
-     * 回退到 core 统一配置源 {@link ConfigReader#resolve}（合并 serenity.properties / serenity.conf / 环境变量）。
+     * 回退到 core 统一配置源 {@link ConfigReader#resolve}（合并 pw.properties / pw.conf / 环境变量）。
      * 两条路径均经 {@code SecretValue.decryptIfNeeded} 透明解密，与框架其它配置读取一致。
      */
     private static String readExtraConfig(String key) {

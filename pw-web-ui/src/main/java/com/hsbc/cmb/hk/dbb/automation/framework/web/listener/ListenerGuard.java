@@ -79,6 +79,8 @@ final class ListenerGuard {
         private boolean scenarioActive;
         private boolean scenarioFinished;
         private int stepDepth;
+        /** 本场景是否已出现失败步骤：失败后剩余步骤由 Cucumber 标为 SKIPPED，框架不再产生步骤级副作用。 */
+        private boolean scenarioFailed;
 
         boolean isFailureScreenshotsAlreadySent() {
             return failureScreenshotsAlreadySent;
@@ -124,6 +126,7 @@ final class ListenerGuard {
             scenarioActive = true;
             scenarioFinished = false;
             stepDepth = 0;
+            scenarioFailed = false;
             return false;
         }
 
@@ -176,6 +179,17 @@ final class ListenerGuard {
             scenarioActive = false;
             scenarioFinished = false;
             stepDepth = 0;
+            scenarioFailed = false;
+        }
+
+        /** 本场景是否已出现失败步骤（失败后的 SKIPPED 步骤一律不再由框架产生副作用）。 */
+        boolean isScenarioFailed() {
+            return scenarioFailed;
+        }
+
+        /** 标记本场景已失败；由首个失败步骤调用，必须在后续任何步骤事件之前生效。 */
+        void markScenarioFailed() {
+            scenarioFailed = true;
         }
     }
 }

@@ -140,7 +140,7 @@ public final class ConcurrencyGate {
     private ConcurrencyGate() {
     }
 
-    /** 闸门是否启用（读取配置，运行期可经系统属性 / serenity.conf 切换）。 */
+    /** 闸门是否启用（读取配置，运行期可经系统属性 / pw.conf 切换）。 */
     public static boolean isEnabled() {
         return isEnabledLive();
     }
@@ -148,8 +148,8 @@ public final class ConcurrencyGate {
     /**
      * 实时解析启用开关：优先读 {@code ConfigReader.getProperty}（系统属性 → 环境变量 → 配置文件；
      * 命令行 {@code -D} 与单测即时切换仍即时生效），
-     * 回退 {@link WebFrameworkConfig}（经 框架 配置体系，含 serenity.conf）。
-     * 双重读取规避 框架 {@code SystemEnvironmentVariables} 单例缓存导致的运行期不可见问题。
+     * 回退 {@link WebFrameworkConfig}（经框架配置体系，含 pw.conf / pw.properties）。
+     * 双重读取规避配置源缓存导致的运行期不可见问题。
      */
     private static boolean isEnabledLive() {
         String override = ConfigReader.getProperty(WebFrameworkConfig.CONCURRENCY_PARTITION_ENABLED.getKey());

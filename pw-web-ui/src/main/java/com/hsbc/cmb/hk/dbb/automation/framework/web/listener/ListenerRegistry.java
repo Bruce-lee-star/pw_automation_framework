@@ -7,7 +7,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.InitializationExc
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.annotation.Annotation;
 import java.net.URL;
 import java.util.*;
 import java.util.ServiceLoader;
@@ -25,10 +24,6 @@ public class ListenerRegistry {
     private static final List<Object> registeredListeners = new CopyOnWriteArrayList<>();
     private static final Set<Class<?>> listenerClasses = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static volatile boolean initialized = false;
-
-    // 缓存反射查找的监听器相关注解类（避免每次 isListenerClass() 都执行 Class.forName）
-    private static volatile List<Class<? extends Annotation>> cachedListenerAnnotations;
-    private static final Object annotationCacheLock = new Object();
 
     /**
      * 初始化监听器注册表
@@ -213,80 +208,15 @@ public class ListenerRegistry {
      */
     @SuppressWarnings("unchecked")
     private static boolean isListenerClass(Class<?> clazz) {
-        // 1. 检查 @Listen 注解（使用缓存）
-        List<Class<? extends Annotation>> annotations = getOrCreateCachedAnnotations();
-        for (Class<? extends Annotation> annotation : annotations) {
-            if (clazz.isAnnotationPresent(annotation)) {
-                logger.debug("{} is a listener (has {} annotation)", clazz.getName(), annotation.getName());
-                return true;
-            }
-        }
-
-        // 2. 检查是否实现了监听器接口
+        // 扫描路径只负责发现 Cucumber 插件接口实现；框架自有 FrameworkListener 由 SPI 统一发现，
+        // 在 initialize 中已跳过，避免出现重复登记。
         for (Class<?> iface : clazz.getInterfaces()) {
-            if (iface.getPackage() != null &&
-                (iface.getPackage().getName().startsWith("net.thucydides.core.events") ||
-                 iface.getPackage().getName().startsWith("net.thucydides.core.steps") ||
-                 iface.getPackage().getName().startsWith("net.thucydides.core.annotations") ||
-                 iface.getName().equals("io.cucumber.plugin.EventListener"))) {
+            if ("io.cucumber.plugin.EventListener".equals(iface.getName())) {
                 logger.debug("{} is a listener (implements: {})", clazz.getName(), iface.getName());
                 return true;
             }
         }
-
-        // 3. 检查方法上是否有监听器注解（使用缓存）
-        for (java.lang.reflect.Method method : clazz.getDeclaredMethods()) {
-            for (Class<? extends Annotation> annotation : annotations) {
-                // 跳过已检查过的 @Listen 注解
-                if ("net.thucydides.core.annotations.Listen".equals(annotation.getName()))  {continue;} 
-                try {
-                    if (method.isAnnotationPresent(annotation)) {
-                        logger.debug("{} is a listener (has {} on method)", clazz.getName(), annotation.getName());
-                        return true;
-                    }
-                } catch (Exception ignored) {
-                    logger.debug("Skipping annotation check on method: {}", method.getName());
-                }
-            }
-        }
-
         return false;
-    }
-
-    /**
-     * 延迟初始化并缓存监听器相关注解类引用
-     * 避免每次调用 isListenerClass() 都执行 7 次 Class.forName 反射
-     */
-    private static List<Class<? extends Annotation>> getOrCreateCachedAnnotations() {
-        if (cachedListenerAnnotations != null) {
-            return cachedListenerAnnotations;
-        }
-        synchronized (annotationCacheLock) {
-            if (cachedListenerAnnotations != null) {
-                return cachedListenerAnnotations;
-            }
-            List<Class<? extends Annotation>> result = new ArrayList<>();
-            String[] annotationNames = {
-                "net.thucydides.core.annotations.Listen",
-                "net.thucydides.core.annotations.BeforeScenario",
-                "net.thucydides.core.annotations.AfterScenario",
-                "net.thucydides.core.annotations.BeforeStep",
-                "net.thucydides.core.annotations.AfterStep",
-                "net.thucydides.core.annotations.BeforeFeature",
-                "net.thucydides.core.annotations.AfterFeature"
-            };
-            for (String name : annotationNames) {
-                try {
-                    result.add(Class.forName(name).asSubclass(Annotation.class));
-                } catch (ClassNotFoundException e) {
-                    // 某些 框架 版本可能没有全部注解 → 预期降级，但不得静默（D7-3）
-                    logger.debug("[ListenerRegistry] annotation not present in this 框架 version: {}",
-                            e.toString());
-                }
-            }
-            cachedListenerAnnotations = result;
-            return result;
-        }
     }
 
     /**

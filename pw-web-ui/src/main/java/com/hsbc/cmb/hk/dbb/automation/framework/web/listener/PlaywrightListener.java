@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.listener;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.logging.LogContext;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.MonitorAssertionCheckpoint;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.PlaywrightLifecycleBridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.CapturedScreenshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.reporting.ReportingBridge;
@@ -168,6 +169,14 @@ public class PlaywrightListener implements
             return;
         }
 
+        // 场景已失败：Cucumber 会把剩余步骤标为 SKIPPED 且不再执行 glue，框架同步跳过这些
+        // 步骤的全部步骤级副作用（beforeStep / 截图 / 面包屑 / 步骤状态重置）。
+        // stepDepth 已由上面的 stepStarted() 记账，由 onStepFinished 的跳过分支配对释放，
+        // 保证闩锁不泄漏到下一场景。
+        if (ListenerGuard.guards().isScenarioFailed()) {
+            return;
+        }
+
         try {
             // 重置步骤级状态（截图计数 / 失败截图标记 / 步骤处理标记）
             TestContextHolder.get().set(CURRENT_STEP_KEY, stepTitle);
@@ -206,6 +215,22 @@ public class PlaywrightListener implements
         boolean isSuccess = status == LifecycleStatus.PASSED || status == LifecycleStatus.SKIPPED
                 || status == LifecycleStatus.IGNORED || status == LifecycleStatus.PENDING;
 
+        // 失败后抑制：Cucumber 在首个失败步骤之后把剩余步骤标为 SKIPPED，其 glue 从未执行。
+        // 旧实现把 SKIPPED/IGNORED 计入 isSuccess，于是仍走 AFTER_EACH_STEP 截图、afterStep
+        // 桥接与报告挂载，报告里看起来像「后续步骤仍然执行过」。这里按场景级闩锁短路，
+        // 首个失败步骤的失败截图保留，其余步骤一律不产生任何框架级副作用。
+        // 同时兜住「框架级断言失败被总线隔离、Cucumber 仍按 PASSED 派发」的边缘场景。
+        boolean skippedByCucumber = status == LifecycleStatus.SKIPPED
+                || status == LifecycleStatus.IGNORED;
+        if (skippedByCucumber || ListenerGuard.guards().isScenarioFailed()) {
+            if (ListenerGuard.guards().isStepActive()) {
+                ListenerGuard.guards().stepFinished();
+            }
+            logger.debug("Step skipped after scenario failure: {} (status={})",
+                    stepResult.stepName(), status);
+            return;
+        }
+
         //  failure 截图只需发一次（lastStepFailed 与 stepFailed 都会触发），防止重复
         if (!isSuccess && Boolean.TRUE.equals(
                 TestContextHolder.get().get(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY))) {
@@ -235,11 +260,19 @@ public class PlaywrightListener implements
 
             //  失败：补截图 + 记录失败诊断 + 聚合框架级失败
             if (!isSuccess) {
+                // 立即置场景级闩锁：即使后续聚合抛 AssertionError（由总线隔离），
+                // 剩余步骤也已被抑制，不会继续截图。
+                ListenerGuard.guards().markScenarioFailed();
                 TestContextHolder.get().set(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY, Boolean.TRUE);
                 captureScreenshotOnFailure(stepResult.error());
                 logInteractionDiagnosticsOnFailure();
                 aggregateStepLevelFailures();
             } else {
+                //  MONITOR 断言失败此处<b>不消费</b>：失败仍留在按 BrowserContext 归属的
+                //  settledFailures 队列中，由本 case 下一个业务操作检查点在 glue 线程立即抛出；
+                //  若已是最后一步，则由 onScenarioFinished 的 drainForEvidence 收口。
+                //  不在事件回调里取走/暂存，避免引入第二套（线程维度的）状态归属。
+
                 //  成功：AFTER_EACH_STEP / BEFORE_AND_AFTER_EACH_STEP 步骤结束截图
                 if (screenshotStrategy.shouldTakeScreenshotFor(LifecycleStepInfo.builder()
                         .stepName(stepTitle).build())) {
@@ -305,8 +338,15 @@ public class PlaywrightListener implements
                 logInteractionDiagnosticsOnFailure();
             }
 
-            //  场景级失败聚合（API / 路由 / 软断言 / 页面错误）—— 在步骤级已抛错的兜底证据上报
-            aggregateScenarioLevelFailures(scenarioName);
+            //  场景级失败聚合（API / 路由 / 软断言 / 页面错误）：由 StepFailureAggregator 先按
+            //  context 消费并写 step 级证据；它若抛错 / 提前返回，finally 里的 drainForEvidence
+            //  兜底消费剩余失败，避免遗留到复用同一 Context 的下一条 case。
+            //  两者都必须在 cleanupForScenario 关闭 Context 之前执行，否则 runtime 已从 RUNTIMES 摘除。
+            try {
+                aggregateScenarioLevelFailures(scenarioName);
+            } finally {
+                MonitorAssertionCheckpoint.drainForEvidence();
+            }
 
             //  桥接业务监听器（afterScenario 带 failed 标志）
             FrameworkListenerBridge.afterScenario(scenarioName, status == LifecycleStatus.FAILED);
@@ -482,7 +522,8 @@ public class PlaywrightListener implements
         }
     }
 
-    private void captureScreenshotAtStepLevel(String stepTitle) {
+    /** 包级可见：框架内部步骤截图入口（同包单测经 spy 验证失败后不再调用）。 */
+    void captureScreenshotAtStepLevel(String stepTitle) {
         takeScreenshotAndRegister(stepTitle);
     }
 
@@ -492,7 +533,8 @@ public class PlaywrightListener implements
         }
     }
 
-    private void captureScreenshotOnFailure(Throwable throwable) {
+    /** 包级可见：框架内部失败截图入口（同包单测经 spy 验证仅首个失败步骤调用一次）。 */
+    void captureScreenshotOnFailure(Throwable throwable) {
         try {
             String uniqueName = String.format("%s-failure-%d",
                     FailureScreenshotHandler.sanitizeFilename(
@@ -591,6 +633,10 @@ public class PlaywrightListener implements
         TestContextHolder.get().set(CURRENT_TEST_START_TIME_KEY, null);
         TestContextHolder.get().set(CURRENT_STEP_START_TIME_KEY, null);
         TestContextHolder.get().set(CURRENT_STEP_SCREENSHOTS_TAKEN_KEY, 0);
+        // 场景边界统一复位步骤级闩锁，避免上一场景的「已处理 / 已发失败截图」标记
+        // 串到新场景的首个步骤（尤其失败后剩余 SKIPPED 步骤不再走 onStepStarted 的重置）。
+        TestContextHolder.get().set(FAILURE_SCREENSHOTS_ALREADY_SENT_KEY, Boolean.FALSE);
+        TestContextHolder.get().set(STEP_FINISH_PROCESSED_KEY, Boolean.FALSE);
         if (testName != null) {
             recordTestData("testName", testName);
         }

@@ -29,7 +29,7 @@ class ScrubGateTest {
         @Test
         void masksSensitiveParamValues() {
             String out = gate.scrubLine("GET https://api.example.com/v1/users?token=abc123&page=2&sig=zzz");
-            assertThat(out).contains("token=***").contains("sig=***");
+            assertThat(out).contains("token=*****").contains("sig=*****");
             assertThat(out).contains("page=2"); // 非敏感参数原样
         }
 
@@ -39,10 +39,10 @@ class ScrubGateTest {
                     "password", "pwd", "code", "state")) {
                 // 参数名含敏感词即 masking（contains 语义）；相对路径与绝对 URL 双形态
                 String relative = "GET /v1/items?" + param + "=supersecret&page=2";
-                assertThat(gate.scrubLine(relative)).contains(param + "=***");
+                assertThat(gate.scrubLine(relative)).contains(param + "=*****");
                 assertThat(gate.scrubLine(relative)).contains("page=2");
                 String absolute = "POST https://api.example.com/v1/items?" + param + "=supersecret";
-                assertThat(gate.scrubLine(absolute)).contains(param + "=***");
+                assertThat(gate.scrubLine(absolute)).contains(param + "=*****");
             }
         }
 
@@ -50,13 +50,13 @@ class ScrubGateTest {
         void relativeRequestLineScrubbed() {
             // 无 scheme 的请求行是证据线的常见形态（Playwright 请求记录）
             assertThat(gate.scrubLine("GET /api/orders?page=1&sig=abc123"))
-                    .isEqualTo("GET /api/orders?page=1&sig=***");
+                    .isEqualTo("GET /api/orders?page=1&sig=*****");
         }
 
         @Test
         void caseInsensitiveParamMatch() {
             assertThat(gate.scrubLine("https://x.test/a?AccessToken=abc&Keep=1"))
-                    .contains("AccessToken=***").contains("Keep=1");
+                    .contains("AccessToken=*****").contains("Keep=1");
         }
 
         @Test
@@ -67,7 +67,7 @@ class ScrubGateTest {
 
         @Test
         void fragmentAndTrailingAmpHandled() {
-            assertThat(gate.scrubLine("https://x.test/a?token=abc&")).contains("token=***");
+            assertThat(gate.scrubLine("https://x.test/a?token=abc&")).contains("token=*****");
         }
     }
 
@@ -80,7 +80,7 @@ class ScrubGateTest {
         bus.attachEvidence(handle, "GET https://api.example.test/items?token=raw-secret-value&page=1");
 
         String persisted = String.join("\n", bus.outcomeSnapshots().get(0).getEvidence());
-        assertThat(persisted).contains("token=***").contains("page=1");
+        assertThat(persisted).contains("token=*****").contains("page=1");
         assertThat(persisted).doesNotContain("raw-secret-value");
     }
 
@@ -91,13 +91,13 @@ class ScrubGateTest {
         @Test
         void masksHeaderValues() {
             assertThat(gate.scrubLine("Authorization: Bearer xyz"))
-                    .isEqualTo("Authorization: ***");
+                    .isEqualTo("Authorization: *****");
             assertThat(gate.scrubLine("Set-Cookie: session=abc"))
-                    .isEqualTo("Set-Cookie: ***");
+                    .isEqualTo("Set-Cookie: *****");
             assertThat(gate.scrubLine("X-Api-Key: 12345"))
-                    .isEqualTo("X-Api-Key: ***");
+                    .isEqualTo("X-Api-Key: *****");
             assertThat(gate.scrubLine("X-CSRF-Token: t0ken"))
-                    .isEqualTo("X-CSRF-Token: ***");
+                    .isEqualTo("X-CSRF-Token: *****");
         }
 
         @Test
@@ -109,7 +109,7 @@ class ScrubGateTest {
         @Test
         void quotedHeaderValuesMasked() {
             assertThat(gate.scrubLine("Authorization: \"Bearer abc\""))
-                    .isEqualTo("Authorization: ***");
+                    .isEqualTo("Authorization: *****");
         }
     }
 
@@ -120,25 +120,25 @@ class ScrubGateTest {
         @Test
         void bearerTokenScrubbed() {
             assertThat(gate.scrubLine("sending Bearer abc.def-ghi_jkl"))
-                    .isEqualTo("sending [SCRUBBED]");
+                    .isEqualTo("sending *****");
         }
 
         @Test
         void jwtScrubbed() {
             String jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.dozjgNryP4J3jVmNHl0w5N";
-            assertThat(gate.scrubLine("token=" + jwt)).isEqualTo("token=[SCRUBBED]");
+            assertThat(gate.scrubLine("token=" + jwt)).isEqualTo("token=*****");
         }
 
         @Test
         void skKeyScrubbed() {
             assertThat(gate.scrubLine("sk-abcdefghijklmnopqrst"))
-                    .isEqualTo("[SCRUBBED]");
+                    .isEqualTo("*****");
         }
 
         @Test
         void longBase64Scrubbed() {
             String b64 = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWZnaGlqa2xtbm9wcXJz";
-            assertThat(gate.scrubLine("data=" + b64)).isEqualTo("data=[SCRUBBED]");
+            assertThat(gate.scrubLine("data=" + b64)).isEqualTo("data=*****");
         }
 
         @Test
@@ -149,7 +149,7 @@ class ScrubGateTest {
         @Test
         void extraPatternsFromConfigApplied() {
             ScrubGate custom = new ScrubGate(List.of(Pattern.compile("PII-\\d+")), 2048, 256);
-            assertThat(custom.scrubLine("record PII-12345 done")).isEqualTo("record [SCRUBBED] done");
+            assertThat(custom.scrubLine("record PII-12345 done")).isEqualTo("record ***** done");
         }
     }
 
@@ -160,10 +160,10 @@ class ScrubGateTest {
         @Test
         void longLineTruncatedWithMarker() {
             // 注意：内容必须是「不构成泄漏形态」的长文本（如带空格的句子）。
-            // 5000 个连续 x 会被 base64 规则整体 [SCRUBBED]——那是正确行为，另见 Patterns 测试。
+            // 5000 个连续 x 会被 base64 规则整体打码成掩码——那是正确行为，另见 Patterns 测试。
             String raw = "user input payload ".repeat(500);
             String out = gate.scrubLine(raw);
-            assertThat(out).endsWith("…[truncated]");
+            assertThat(out).endsWith("*****");
             assertThat(out.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(2048);
         }
 
@@ -182,6 +182,25 @@ class ScrubGateTest {
         }
 
         @Test
+        @DisplayName("展示层 scrubText 只脱敏不再二次截断")
+        void scrubTextKeepsFullLineButStillScrubs() {
+            //  纯小写 hex 长串被白名单放行（traceId），不会被 base64 规则整体打码
+            String raw = "Bearer abc.def.ghi " + "a".repeat(3000);
+            String scrubbed = gate.scrubText(raw);
+            assertThat(scrubbed).startsWith("***** ");
+            assertThat(scrubbed).endsWith("a");
+            assertThat(scrubbed.length()).isGreaterThan(3000);
+            //  入库通道仍然按配置有界截断（两条路径共用同一套脱敏规则）
+            assertThat(gate.scrubLine(raw)).endsWith("*****");
+        }
+
+        @Test
+        void scrubTextNullAndEmptySafe() {
+            assertThat(gate.scrubText(null)).isEmpty();
+            assertThat(gate.scrubText("")).isEmpty();
+        }
+
+        @Test
         void nullAndEmptySafe() {
             assertThat(gate.scrubLine(null)).isEmpty();
             assertThat(gate.scrubLine("")).isEmpty();
@@ -190,7 +209,7 @@ class ScrubGateTest {
         @Test
         void stackTraceScrubbed() {
             assertThat(gate.scrubStackTrace("AssertionError: expected https://x.test/a?token=secret to be 200"))
-                    .contains("token=***");
+                    .contains("token=*****");
         }
     }
 
@@ -240,7 +259,7 @@ class ScrubGateTest {
                 .build();
         ScrubGate configured = new ScrubGate(config.getExtraScrubPatterns(),
                 config.getMaxEvidenceLineBytes(), 256);
-        assertThat(configured.scrubLine("SECRET-99")).isEqualTo("[SCRUBBED]");
+        assertThat(configured.scrubLine("SECRET-99")).isEqualTo("*****");
         assertThat(configured.scrubLine("y".repeat(500))
                 .getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(128);
     }

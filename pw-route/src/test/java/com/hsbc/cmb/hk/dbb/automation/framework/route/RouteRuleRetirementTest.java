@@ -14,6 +14,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -156,6 +158,33 @@ public class RouteRuleRetirementTest {
 
         RouteEngine.shutdown(ctx);
         verify(nativeHandle, Mockito.never()).close(); // teardown 不再 flush unroute，句柄随 context.close() 释放
+    }
+
+    /**
+     * 需求终态守护：{@code timeout} 是<b>持续监控的最长时间</b> —— 窗口到期后
+     * ① 规则退役，不再监控；② 不产生任何断言失败，不报错。
+     *
+     * <p>sink 层已由 {@code MonitorSinkTest.monitorTimeoutWithoutResponseStopsWithoutFailure} /
+     * {@code MonitorSinkAssertionSettlementTest.timedOutRequestStopsWithoutFailure} 覆盖 ②，
+     * 本例从 runtime 出口再锁一次，防止将来把超时重新接回结算队列（历史上曾稳定产出
+     * {@code [timeout] ...} 把正常场景判红）。</p>
+     */
+    @Test
+    public void windowExpiryStopsMonitoringWithoutAnyAssertionFailure() throws Exception {
+        GuardedDriverCallRegistry.setInstance(new StubGuardedDriverCall());
+        RouteRuntime runtime = RouteEngine.runtimeOf(mockContext());
+        runtime.register(ApiSpec.builder("/api/window-expiry", RouteCapability.MONITOR)
+                .expectStatus(200).monitorTimeoutMs(80).build());
+
+        assertNotNull("窗口内规则必须 armed（正在监控）",
+                runtime.ruleSnapshot().specFor("/api/window-expiry"));
+        awaitRetired(runtime);
+
+        assertNull("窗口到期后必须停止监控（规则退役）",
+                runtime.ruleSnapshot().specFor("/api/window-expiry"));
+        assertTrue("超时不得产出任何断言失败（不报错）",
+                runtime.drainSettledAssertionFailures().isEmpty());
+        assertTrue("超时退役不得产生未确证撤销", runtime.isClean());
     }
 
     /**

@@ -124,7 +124,8 @@ cucumber.object-factory=com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwR
 **脱敏（ScrubGate，fail-open）**：敏感头（Authorization/Cookie/Set-Cookie 等
 按名匹配）值整体打码；URL query 参数按名打码（绝对 URL 与无 scheme 请求行
 双形态，对已脱敏内容幂等）；请求体按 key 名打码（密码/token/secret 等）；
-超长行截断（`…[TRUNCATED]`）。任何脱敏异常只记日志不阻断采集。
+超长行截断。所有隐藏与省略位置统一显示 `*****`，报告里不出现框架内部占位词。
+任何脱敏异常只记日志不阻断采集。
 
 ## 5. 产物布局
 

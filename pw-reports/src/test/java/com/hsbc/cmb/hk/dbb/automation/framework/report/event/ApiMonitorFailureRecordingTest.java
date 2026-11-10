@@ -52,7 +52,7 @@ class ApiMonitorFailureRecordingTest {
         assertThat(json).exists();
         TestOutcome o = JsonWriter.mapper().readValue(json.toFile(), TestOutcome.class);
         assertThat(o.getApiMonitorFailures()).hasSize(1);
-        assertThat(o.getApiMonitorFailures().get(0)).contains("[SCRUBBED]");
+        assertThat(o.getApiMonitorFailures().get(0)).contains("*****");
         assertThat(o.getApiMonitorFailures().get(0)).doesNotContain("1234567890123456");
         // 不串入 apiOperations（独立通道）
         assertThat(o.getApiOperations()).isEmpty();

@@ -48,7 +48,7 @@ import java.util.regex.Pattern;
  * 信用卡轨道数据），见 {@link SensitiveValueRecognizer} 与 {@link BuiltinValueRecognizers}。
  * 银行卡 CVV 无校验位，按<b>字段名</b>识别，避免裸 3~4 位数字值级误报。识别器经 SPI 可扩展；
  * 全部脱敏为定长掩码，不泄露原值亦不泄露长度。</p>
- * <p><b>配置项</b>（系统属性优先，回退 框架 配置源 {@code serenity.conf}）：</p>
+ * <p><b>配置项</b>（系统属性优先，回退框架配置文件 {@code pw.conf} / {@code pw.properties}）：</p>
  * <ul>
  *   <li>{@code sensitive.data.rules.profile}：市场 profile 名（默认 {@code defaults}）。</li>
  *   <li>{@code sensitive.data.profile.<P>.{header,body,query}.keys}：某 profile 下附加敏感键

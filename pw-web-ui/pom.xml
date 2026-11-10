@@ -48,9 +48,9 @@
             <artifactId>guava</artifactId>
         </dependency>
 
-        <!-- M1a：FileConfigResolver 读取 HOCON 配置（serenity.conf / pw.conf）。
-             版本由根 dependencyManagement 统一管理（与 pw-api-core 同）；显式声明而非依赖
-             serenity-core 的传递链（去 Serenity 后仍成立）。 -->
+        <!-- M1a：FileConfigResolver 读取 HOCON 配置（pw.conf / pw.properties）。
+             版本由根 dependencyManagement 统一管理（与 pw-api-core 同）；显式声明，
+             不依赖任何报告框架的传递链。 -->
         <dependency>
             <groupId>com.typesafe</groupId>
             <artifactId>config</artifactId>

@@ -16,10 +16,10 @@ import java.util.regex.Pattern;
  *
  * <p>规则（方案 v3 §6）：
  * <ol>
- *   <li>URL query 敏感参数名（token/sig/signature/key/secret/password/pwd/code/state）值 → {@code ***}；</li>
- *   <li>敏感头名（Authorization/Cookie/Set-Cookie/X-Api-Key/X-CSRF-Token/Proxy-Authorization）值 → {@code ***}；</li>
- *   <li>模式匹配：{@code Bearer <token>}、JWT（{@code eyJ…}）、{@code sk-…}、长 base64 串 → {@code [SCRUBBED]}；</li>
- *   <li>行长 ≤ maxLineBytes（UTF-8 边界安全截断 + 标记）；</li>
+ *   <li>URL query 敏感参数名（token/sig/signature/key/secret/password/pwd/code/state）值 → {@link #MASK}；</li>
+ *   <li>敏感头名（Authorization/Cookie/Set-Cookie/X-Api-Key/X-CSRF-Token/Proxy-Authorization）值 → {@link #MASK}；</li>
+ *   <li>模式匹配：{@code Bearer <token>}、JWT（{@code eyJ…}）、{@code sk-…}、长 base64 串 → {@link #MASK}；</li>
+ *   <li>行长 ≤ maxLineBytes（UTF-8 边界安全截断，尾部同样追加 {@link #MASK}）；</li>
  *   <li>body 永不内联：sha256 摘要 + 脱敏后 256B 预览。</li>
  * </ol>
  *
@@ -28,7 +28,25 @@ import java.util.regex.Pattern;
  */
 public final class ScrubGate {
 
-    private static final String SCRUBBED = "[SCRUBBED]";
+    /**
+     * 报告里统一的掩码文本：敏感值、query/header 值、超长行的省略尾部一律用它。
+     *
+     * <p>刻意<b>不</b>再用框架内部占位词 / 截断词：它们会混在数据值里被读者误当成
+     * 业务内容或调试残留。所有出口（HTML / JSON / CSV / 日志）共用这一个字面量，
+     * 展示层无需任何翻译。
+     */
+    public static final String MASK = "*****";
+
+    /** 敏感值（Bearer / JWT / sk- / 长 base64 / 扩展模式）整段替换后的占位符。 */
+    public static final String PATTERN_MASK = MASK;
+
+    /** 敏感 query 参数 / 敏感头值替换后的占位符。 */
+    public static final String MASK_MARKER = MASK;
+
+    /** 行超过 {@code maxLineBytes} 时追加的截断标记（UTF-8 边界安全）。 */
+    public static final String TRUNCATION_MARKER = MASK;
+
+    private static final byte[] MARKER_BYTES = TRUNCATION_MARKER.getBytes(StandardCharsets.UTF_8);
 
     /** query 参数名敏感词（大小写不敏感，contains 匹配）。 */
     private static final List<String> SENSITIVE_PARAM_TOKENS = List.of(
@@ -77,17 +95,33 @@ public final class ScrubGate {
      * 脱敏 + 截断单行文本。null 安全（→ 空串）。
      *
      * <p>顺序固定：URL query → 敏感头 → 模式匹配（Bearer/JWT/sk-/base64/扩展）→ 截断。
-     * URL 先行保证 query 里的 token 先被参数名规则吃掉，避免被 base64 规则误伤成 [SCRUBBED]
+     * URL 先行保证 query 里的 token 先被参数名规则吃掉，避免被 base64 规则误伤成掩码
      * （两种结果都安全，但参数名规则信息量更高）。
      */
     public String scrubLine(String raw) {
+        String s = scrubText(raw);
+        return s.isEmpty() ? "" : truncateUtf8(s, maxLineBytes);
+    }
+
+    /**
+     * 只脱敏、不截断（展示层专用）。
+     *
+     * <p>证据入 bus 时已经过 {@link #scrubLine(String)} 按 <b>配置的</b>
+     * {@code maxEvidenceLineBytes} 做过一次有界截断；渲染时若再调 {@code scrubLine}
+     * 会用 {@link #defaults()} 的 2048B <b>二次截断</b>，把本该完整可见的堆栈/消息
+     * 再砍一刀（配置放宽后尤其明显）。
+     * 本方法保留全部脱敏规则（不绕过闸门）、只去掉长度裁剪，供 FreeMarker 的
+     * {@code scrub(...)} 与失败消息分段使用：展示层绝不能改变已入库数据的信息量。
+     *
+     * <p>null / 空串安全返回空串；与 {@link #scrubLine(String)} 同规则同幂等。
+     */
+    public String scrubText(String raw) {
         if (raw == null || raw.isEmpty()) {
             return "";
         }
         String s = scrubUrls(raw);
         s = scrubHeaders(s);
-        s = applyPatterns(s);
-        return truncateUtf8(s, maxLineBytes);
+        return applyPatterns(s);
     }
 
     /** 堆栈脱敏——断言消息里也可能带 token/URL，与 scrubLine 同规则同上限。 */
@@ -146,7 +180,7 @@ public final class ScrubGate {
             String k = pair.substring(0, eq);
             String v = pair.substring(eq + 1);
             out.append(k).append('=');
-            out.append(isSensitiveParam(k) ? "***" : v);
+            out.append(isSensitiveParam(k) ? MASK_MARKER : v);
         }
         return out.toString();
     }
@@ -166,7 +200,7 @@ public final class ScrubGate {
         StringBuilder sb = new StringBuilder();
         while (m.find()) {
             String name = m.group(1);
-            String replacement = name + ": " + "***";
+            String replacement = name + ": " + MASK_MARKER;
             m.appendReplacement(sb, Matcher.quoteReplacement(replacement));
         }
         m.appendTail(sb);
@@ -174,18 +208,18 @@ public final class ScrubGate {
     }
 
     private String applyPatterns(String s) {
-        String r = BEARER_PATTERN.matcher(s).replaceAll(SCRUBBED);
-        r = JWT_PATTERN.matcher(r).replaceAll(SCRUBBED);
-        r = SK_KEY_PATTERN.matcher(r).replaceAll(SCRUBBED);
-        r = BASE64_PATTERN.matcher(r).replaceAll(SCRUBBED);
+        String r = BEARER_PATTERN.matcher(s).replaceAll(PATTERN_MASK);
+        r = JWT_PATTERN.matcher(r).replaceAll(PATTERN_MASK);
+        r = SK_KEY_PATTERN.matcher(r).replaceAll(PATTERN_MASK);
+        r = BASE64_PATTERN.matcher(r).replaceAll(PATTERN_MASK);
         for (Pattern extra : extraPatterns) {
-            r = extra.matcher(r).replaceAll(SCRUBBED);
+            r = extra.matcher(r).replaceAll(PATTERN_MASK);
         }
         return r;
     }
 
     /**
-     * UTF-8 边界安全截断：不把多字节字符切成乱码；超限时追加 {@code …[truncated]} 标记。
+     * UTF-8 边界安全截断：不把多字节字符切成乱码；超限时追加 {@link #MASK} 标记。
      */
     static String truncateUtf8(String s, int maxBytes) {
         byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
@@ -201,11 +235,8 @@ public final class ScrubGate {
             cut--; // 回退到字符边界（不落在 continuation byte 上）
         }
         String out = new String(bytes, 0, cut, StandardCharsets.UTF_8);
-        return limit == maxBytes ? out : out + MARKER;
+        return limit == maxBytes ? out : out + TRUNCATION_MARKER;
     }
-
-    private static final String MARKER = "…[truncated]";
-    private static final byte[] MARKER_BYTES = MARKER.getBytes(StandardCharsets.UTF_8);
 
     private static String sha256(byte[] body) {
         try {

@@ -10,8 +10,8 @@ import static org.junit.Assert.assertTrue;
 /**
  * 截图策略解析验证。
  *
- * <p><b>本类钉住的回归</b>：配置 {@code serenity.screenshot.strategy} 同时被 框架 生态使用，
- * 官方名 {@code AFTER_FAILING_STEP}（只失败时截图）不在框架枚举名里。原实现 {@code valueOf} 抛异常后
+ * <p><b>本类钉住的回归</b>：配置 {@code framework.screenshot.strategy} 仍兼容历史策略名
+ * {@code AFTER_FAILING_STEP}（只失败时截图），它不在框架枚举名里。原实现 {@code valueOf} 抛异常后
  * <b>静默</b>退回 {@code AFTER_EACH_STEP}，于是「只失败时截图」实际变成「每步都截」——
  * 一轮 E2E 因此产出 85 张截图，且因兜底值与 {@code ConfigRegistry} 默认值相同而长期无人察觉。</p>
  */

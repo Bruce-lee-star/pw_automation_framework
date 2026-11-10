@@ -12,7 +12,6 @@
   · 布局一律 table + inline style，禁用 flex/grid/SVG（环形图退化为分段条）；
   · 无交互：筛选/折叠一律不做，服务端渲染完成。
 -->
-
 <#-- 结果徽章底色：由展示标签反查（避免模板里再依赖 resultKey） -->
 <#function badgeBg label>
   <#switch label>

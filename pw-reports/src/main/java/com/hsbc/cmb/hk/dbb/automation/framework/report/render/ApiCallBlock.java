@@ -395,8 +395,8 @@ public final class ApiCallBlock {
     /**
      * 体分区：整体带缩进展示，是 JSON 时自动美化并打 {@code json} 标记。
      *
-     * <p>响应体<b>不再截断</b>（2026-10-22 用户要求），采集侧已无 {@code [truncated]} /
-     * {@code [evidence limited ...]} 标记，故这里也不再渲染说明行。
+     * <p>响应体<b>不再截断</b>（2026-10-22 用户要求），采集侧已无占位/省略标记，
+     * 故这里也不再渲染说明行；真被限长时由采集侧统一追加 {@code *****} 掩码。
      */
     private static void putBodyRow(List<Map<String, String>> rows, String label, Section section) {
         String raw = String.join("\n", section.lines());

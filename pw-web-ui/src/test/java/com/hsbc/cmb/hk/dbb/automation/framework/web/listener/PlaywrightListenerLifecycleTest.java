@@ -23,12 +23,18 @@ import java.lang.reflect.Field;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -135,5 +141,93 @@ public class PlaywrightListenerLifecycleTest {
     public void successfulStepFinish_recordsNoClose() {
         listener.onStepFinished(LifecycleStepResult.builder().stepName("ok").status(LifecycleStatus.PASSED).build());
         verify(contextRegistry, never()).closeContext();
+    }
+
+    // ══════════════ 失败后跳过后续步骤（回归护栏） ══════════════
+
+    /** 首个失败步骤仍保留且仅保留一张失败截图（不抑制本步骤的失败证据）。 */
+    @Test
+    public void failedStep_capturesExactlyOneFailureScreenshot() throws Exception {
+        PlaywrightListener spy = spyListener(ScreenshotStrategy.AFTER_EACH_STEP);
+        beginStep(spy, "failing step");
+
+        spy.onStepFinished(failedStep());
+
+        verify(spy, times(1)).captureScreenshotOnFailure(any());
+        verify(spy, never()).captureScreenshotAtStepLevel(anyString());
+    }
+
+    /** 失败后 Cucumber 派发的 SKIPPED 步骤不得再截图、不得再产生步骤级副作用。 */
+    @Test
+    public void skippedStepsAfterFailure_areNotProcessedByTheFramework() throws Exception {
+        PlaywrightListener spy = spyListener(ScreenshotStrategy.AFTER_EACH_STEP);
+        beginStep(spy, "failing step");
+        spy.onStepFinished(failedStep());
+        clearInvocations(spy);
+
+        for (String name : new String[]{"skipped-1", "skipped-2"}) {
+            spy.onStepStarted(LifecycleStepInfo.builder().stepName(name).build());
+            spy.onStepFinished(skippedStep(name));
+        }
+
+        verify(spy, never()).captureScreenshotAtStepLevel(anyString());
+        verify(spy, never()).captureScreenshotOnFailure(any());
+        assertFalse("失败后的跳过步骤必须释放 stepDepth，避免闩锁泄漏到下一场景",
+                ListenerGuard.guards().isStepActive());
+    }
+
+    /** 正常场景的成功步骤仍按 AFTER_EACH_STEP 截图（零回归）。 */
+    @Test
+    public void passedStep_stillCapturesScreenshotWhenScenarioIsHealthy() throws Exception {
+        PlaywrightListener spy = spyListener(ScreenshotStrategy.AFTER_EACH_STEP);
+        beginStep(spy, "ok");
+        clearInvocations(spy);
+
+        spy.onStepFinished(passedStep("ok"));
+
+        verify(spy, times(1)).captureScreenshotAtStepLevel("ok");
+    }
+
+    /** 新场景复位失败闩锁，截图能力恢复（防跨场景抑制）。 */
+    @Test
+    public void newScenario_resetsFailureLatchAndResumesScreenshots() throws Exception {
+        PlaywrightListener spy = spyListener(ScreenshotStrategy.AFTER_EACH_STEP);
+        beginStep(spy, "failing step");
+        spy.onStepFinished(failedStep());
+
+        ListenerGuard.guards().endScenario();
+        ListenerGuard.guards().scenarioStarted();
+        beginStep(spy, "fresh");
+        clearInvocations(spy);
+
+        spy.onStepFinished(passedStep("fresh"));
+
+        verify(spy, times(1)).captureScreenshotAtStepLevel("fresh");
+    }
+
+    /** 构造可观测截图调用的 spy：真实截图入口被 stub，避免触碰浏览器。 */
+    private PlaywrightListener spyListener(ScreenshotStrategy strategy) throws Exception {
+        PlaywrightListener fresh = new PlaywrightListener();
+        Field field = PlaywrightListener.class.getDeclaredField("screenshotStrategy");
+        field.setAccessible(true);
+        field.set(fresh, strategy);
+        PlaywrightListener spy = spy(fresh);
+        doNothing().when(spy).captureScreenshotAtStepLevel(anyString());
+        doNothing().when(spy).captureScreenshotOnFailure(any());
+        return spy;
+    }
+
+    /** 抵消 setUp 预置的 stepDepth，再按真实顺序派发一次步骤开始。 */
+    private void beginStep(PlaywrightListener target, String name) {
+        ListenerGuard.guards().stepFinished();
+        target.onStepStarted(LifecycleStepInfo.builder().stepName(name).build());
+    }
+
+    private LifecycleStepResult skippedStep(String name) {
+        return LifecycleStepResult.builder().stepName(name).status(LifecycleStatus.SKIPPED).build();
+    }
+
+    private LifecycleStepResult passedStep(String name) {
+        return LifecycleStepResult.builder().stepName(name).status(LifecycleStatus.PASSED).build();
     }
 }

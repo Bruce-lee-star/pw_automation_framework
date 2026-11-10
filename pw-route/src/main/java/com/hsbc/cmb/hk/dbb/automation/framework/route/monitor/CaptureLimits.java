@@ -11,6 +11,13 @@ final class CaptureLimits {
     private CaptureLimits() {
     }
 
+    /**
+     * 预览被限长时追加的报告掩码（与 {@code ScrubGate.MASK} 一致）。
+     * pw-route 不依赖 pw-reports，故字面量在此声明；两处必须同为 {@code *****}，
+     * 报告里不出现任何框架内部的占位/截断字样。
+     */
+    static final String PREVIEW_MASK = "*****";
+
     /** 响应体采集截断上限默认值（字节，64 KiB）。 */
     static final int DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 

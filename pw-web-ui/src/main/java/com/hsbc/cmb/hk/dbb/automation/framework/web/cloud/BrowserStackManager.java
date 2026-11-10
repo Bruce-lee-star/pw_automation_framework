@@ -45,7 +45,7 @@ import java.util.Locale;
  * 
  * <h2>使用方式</h2>
  * <pre>
- * // 方式1：在 serenity.properties 中配置后自动启用
+ * // 方式1：在 pw.properties 中配置后自动启用
  * browserstack.enabled=true
  * browserstack.username=xxx
  * browserstack.access_key=yyy

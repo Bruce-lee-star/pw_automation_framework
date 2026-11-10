@@ -67,7 +67,7 @@ public class CapturedApiCallBodyTest {
                 big, false, 1L, false, 2L);
         String detail = call.detailWith();
         assertFalse("证据不得再有有界化标记", detail.contains("[evidence limited"));
-        assertFalse("证据不得再有截断标记", detail.contains("[truncated]"));
+        assertFalse("证据不得再有省略掩码", detail.contains("*****"));
         assertTrue("证据必须包含整份 5000 字符响应体", detail.contains(big));
         // 存储侧同样整响应保留
         assertEquals(5000, call.responseBody().length());

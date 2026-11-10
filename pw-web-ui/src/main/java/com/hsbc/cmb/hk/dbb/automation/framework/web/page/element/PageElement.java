@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.element;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementNotFoundException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.MonitorAssertionCheckpoint;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.PageInteractions;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.utils.TextNormalizer;
@@ -1049,6 +1050,8 @@ public class PageElement {
     private PageElement waitForState(WaitForSelectorState expect, int timeoutSec, boolean negate,
             BiFunction<TimeoutError, Integer, RuntimeException> onTimeout,
             BiFunction<PlaywrightException, Integer, RuntimeException> onOther) {
+        // 全部 waitFor* 的公共入口：等待前先结算本 case 的 MONITOR 断言，避免被长等待拖住。
+        MonitorAssertionCheckpoint.checkNow();
         if (!NAV_RETRY_ENABLED) {
             return waitForStateOnce(expect, timeoutSec, onTimeout, onOther);
         }
@@ -1087,6 +1090,7 @@ public class PageElement {
     private PageElement waitForStateOnce(WaitForSelectorState expect, int timeoutSec,
             BiFunction<TimeoutError, Integer, RuntimeException> onTimeout,
             BiFunction<PlaywrightException, Integer, RuntimeException> onOther) {
+        MonitorAssertionCheckpoint.checkNow();
         try {
             locatorInternal().waitFor(new Locator.WaitForOptions()
                     .setState(expect).setTimeout((long) timeoutSec * 1000));
@@ -1110,6 +1114,7 @@ public class PageElement {
      */
     private PageElement waitForPredicate(Function<Locator, Boolean> check,
             boolean expectTrue, int timeoutSec, String op, String failMsg) {
+        MonitorAssertionCheckpoint.checkNow();
         try {
             boolean actual = Boolean.TRUE.equals(check.apply(locatorInternal()));
             if (actual != expectTrue) {

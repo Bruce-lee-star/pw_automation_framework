@@ -15,6 +15,8 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import static org.junit.Assert.assertEquals;
@@ -104,6 +106,36 @@ public class ApiCaptureContextTest {
         assertSame("隔离维度必须是当前线程的 Context", context, stub.lastContext);
     }
 
+    /** getStoredResponse（老版兼容）：返回最近一次记录的 body，且隔离维度/匹配口径与 getLastApiCall 一致。 */
+    @Test
+    public void getStoredResponse_returnsResponseBodyOfLastCall() {
+        ApiCaptureQueryRegistry.register(stub);
+        stub.lastView = viewWithBody("{\"ok\":true}");
+
+        assertEquals("{\"ok\":true}", ApiCaptureContext.getCurrent().getStoredResponse("/api/login"));
+        assertSame("必须按当前线程 Context 隔离", context, stub.lastContext);
+        assertEquals("endpoint 必须原样传递", "/api/login", stub.lastArg);
+    }
+
+    /** 无记录 / 未采集 body / SPI 缺席三种降级都返回 null，绝不抛异常。 */
+    @Test
+    public void getStoredResponse_degradesToNullWithoutRecordBodyOrSpi() {
+        ApiCaptureQueryRegistry.register(stub);
+        assertNull("无采集记录", ApiCaptureContext.getCurrent().getStoredResponse("/api/login"));
+
+        stub.lastView = viewWithBody(null);
+        assertNull("记录存在但 body 未采集", ApiCaptureContext.getCurrent().getStoredResponse("/api/login"));
+
+        ApiCaptureQueryRegistry.clear();
+        assertNull("pw-route 缺席（SPI 未注册）", ApiCaptureContext.getCurrent().getStoredResponse("/api/login"));
+    }
+
+    private static CapturedApiCallView viewWithBody(String body) {
+        return new CapturedApiCallView("/api/login", "GET", "https://host/api/login",
+                Map.of(), null, 200, Map.of(), body, false, 1L, false, 0L,
+                Set.of(), "application/json", null, null);
+    }
+
     /** 记录型 SPI 桩：断言门面是否把调用与参数原样转发（返回哨兵对象以验证透传）。 */
     private static final class StubQuery implements ApiCaptureQuery {
 
@@ -115,6 +147,7 @@ public class ApiCaptureContextTest {
         private String lastArg;
         private Predicate<CapturedApiCallView> lastPredicate;
         private long lastTimeoutMs = -1L;
+        private CapturedApiCallView lastView;
 
         @Override
         public List<CapturedApiCallView> getAllApiCalls(Object context) {
@@ -132,7 +165,7 @@ public class ApiCaptureContextTest {
         public CapturedApiCallView getLastApiCall(Object context, String endpoint) {
             this.lastContext = context;
             this.lastArg = endpoint;
-            return null;
+            return lastView;
         }
 
         @Override

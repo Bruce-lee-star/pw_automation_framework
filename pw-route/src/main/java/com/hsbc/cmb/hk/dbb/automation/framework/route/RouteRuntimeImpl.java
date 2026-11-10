@@ -40,6 +40,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -104,6 +105,21 @@ public final class RouteRuntimeImpl implements RouteRuntime {
      */
     private final java.util.concurrent.ConcurrentLinkedQueue<Runnable> mainActions =
             new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+    /**
+     * per-runtime drain 互斥（并发加固）：把上面 javadoc 里「协议调用 100% 在 main」这条
+     * <b>纪律性不变式</b>变成<b>代码约束</b>。收尾 seam（{@code close()} 可能由
+     * {@code context.onClose} 事件线程或 {@code close-bounded-*} 守护线程触发）与业务线程
+     * 可能同时进入 drain；MONITOR 断言检查点又把业务侧 drain 频率提高到每个元素操作一次。
+     *
+     * <p>用 {@code tryLock()} 而非 {@code lock()}：并发到来时直接让出（队列由持有者排空），
+     * 既不阻塞业务线程，也不与 {@code close()} 形成互等；{@link ReentrantLock} 可重入，
+     * 同一线程在协议动作回调里再次 drain 仍保持既有串行语义。</p>
+     */
+    private final ReentrantLock mainActionLock = new ReentrantLock();
+
+    /** 并发 drain 一次性告警，避免高频检查点刷屏。 */
+    private final AtomicBoolean concurrentDrainWarned = new AtomicBoolean();
 
     private RouteRuntimeImpl(BrowserContext context, RouteConfig config,
                              ConcurrentMap<BrowserContext, RouteRuntime> ownerRegistry) {
@@ -361,26 +377,34 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public List<CapturedApiCall> lastCapturedPerPattern() {
+        drainMainThreadActions(); // 采集查询 seam：先执行在途协议动作 / 物化已到达 body
         return capture.allLastPerPattern();
     }
 
     @Override
     public CapturedApiCall lastCapturedApi(String endpoint) {
+        // 与 waitForCapturedApi（等待期间周期 drain）对齐：即时查询也必须先在业务线程 drain 一次，
+        // 否则 DELAY 到点后入队的 resume/fulfill 与已到达未物化的 body 都不会被处理，
+        // 读到的会是"上一次 drain 之前"的陈旧快照。接口契约见 RouteRuntime#drainMainThreadActions。
+        drainMainThreadActions();
         return capture.lastOf(endpoint);
     }
 
     @Override
     public List<CapturedApiCall> capturedApisByUrl(String url) {
+        drainMainThreadActions(); // 采集查询 seam
         return capture.byUrl(url);
     }
 
     @Override
     public List<CapturedApiCall> capturedApisByChannel(String channel) {
+        drainMainThreadActions(); // 采集查询 seam
         return capture.byChannel(channel);
     }
 
     @Override
     public long capturedApiSequence() {
+        drainMainThreadActions(); // 序号是"动作前取基准"的入口，必须先结清在途动作
         return capture.captureSequence();
     }
 
@@ -414,7 +438,37 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public void drainMainThreadActions() {
-        // main 业务线程串行执行：协议调用（resume/fulfillWithBody）在 main 发生 ⇒ 零并发写 Connection。
+        drainMainThreadActions(false);
+    }
+
+    /**
+     * @param waitForLock {@code true} 仅用于 {@link #close()} 收尾：必须排空最后一批
+     *                    DELAY 协议动作，故阻塞等锁；业务路径用 {@code false}，
+     *                    竞争即让出，避免高频检查点阻塞业务线程或与收尾互等。
+     */
+    private void drainMainThreadActions(boolean waitForLock) {
+        // 同一 runtime 任意时刻只允许一个线程执行队列里的协议调用 / body 物化。
+        // 竞争失败即返回：队列由持有者排空，本线程随后的断言读取仍可消费已定案的失败，
+        // 且绝不产生「两个线程同时写 Connection」的对象表级联损坏。
+        if (waitForLock) {
+            mainActionLock.lock();
+        } else if (!mainActionLock.tryLock()) {
+            if (concurrentDrainWarned.compareAndSet(false, true)) {
+                LOGGER.warn("[Route] concurrent main-thread drain skipped on context@{} (thread={}); "
+                                + "protocol calls stay single-threaded",
+                        System.identityHashCode(context), Thread.currentThread().getName());
+            }
+            return;
+        }
+        try {
+            doDrainMainActions();
+        } finally {
+            mainActionLock.unlock();
+        }
+    }
+
+    /** 锁内主体：队列里的协议调用 + 已到达 body 物化。调用方必须持有 {@link #mainActionLock}。 */
+    private void doDrainMainActions() {
         // 异常绝不逃逸（单条失败不影响其余；fail-open）。
         Runnable action;
         while ((action = mainActions.poll()) != null) {
@@ -434,21 +488,30 @@ public final class RouteRuntimeImpl implements RouteRuntime {
 
     @Override
     public List<RouteAssertionFailure> drainSettledAssertionFailures() {
-        drainMainThreadActions(); // 方案 B：业务 seam 先执行延迟协议动作（DELAY resume/fulfill）
+        // 失败消费链路（含 MonitorSink 里可能触发的 Response.body() 协议读取）与 close() /
+        // 业务 drain 共用同一把 per-runtime 锁：RUNTIMES.get 之后即便该 Context 被另一线程关闭，
+        // 也不会出现「业务线程读 body」与「收尾线程执行协议动作」并发写 Connection。
         List<RouteAssertionFailure> result = new ArrayList<>();
-        for (CapturedExchange e : monitor.drainSettledFailures()) {
-            result.add(new RouteAssertionFailure(
-                    e.pattern(), e.method(), e.url(), e.expectStatus(), e.responseStatus(),
-                    e.bodyAssertionFailures(), e.responseTimedOut(), e.monitorTimeoutMs(),
-                    e.responseBodyPreview() == null ? "" : e.responseBodyPreview(),
-                    e.postDataPreview() == null ? "" : e.postDataPreview(),
-                    formatHeaders(e.requestHeaders()),
-                    formatHeaders(e.responseHeaders())));
+        mainActionLock.lock();
+        try {
+            doDrainMainActions(); // 方案 B：业务 seam 先执行延迟协议动作（DELAY resume/fulfill）
+            for (CapturedExchange e : monitor.drainSettledFailures()) {
+                result.add(new RouteAssertionFailure(
+                        e.pattern(), e.method(), e.url(), e.expectStatus(), e.responseStatus(),
+                        e.bodyAssertionFailures(), e.responseTimedOut(), e.monitorTimeoutMs(),
+                        e.responseBodyPreview() == null ? "" : e.responseBodyPreview(),
+                        e.postDataPreview() == null ? "" : e.postDataPreview(),
+                        formatHeaders(e.requestHeaders()),
+                        formatHeaders(e.responseHeaders())));
+            }
+        } finally {
+            mainActionLock.unlock();
         }
         //  2026-10-10：失败数据一份两用 —— 消费方（web 侧抛错/glue 断言/聚合器）拿到原列表之外，
         //  顺带复制进 monitor 失败报告归集器（喂入即落盘 target/monitor-failures-by-owner.json +
         //  HTML 报告显示区）。挂在本【唯一 drain 出口】：任何消费路径（RouteEngine 聚合、
         //  glue 直调 runtime）最终都走本方法，天然无重复、无遗漏。不做二次消费：原列表原样返回。
+        //  报告归集放在锁外（不触碰 Connection），缩短临界区。
         if (!result.isEmpty()) {
             try {
                 RouteMonitorFailureReportSink.recordFailures(result);
@@ -703,7 +766,9 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
-        drainMainThreadActions(); // 方案 B：收尾 seam —— 最后一批 DELAY 协议动作（resume/fulfill）先执行
+        // 方案 B：收尾 seam —— 最后一批 DELAY 协议动作（resume/fulfill）必须排空，
+        // 故用阻塞等锁版本；与业务线程 drain 共用同一把 per-runtime 锁，杜绝并发写 Connection。
+        drainMainThreadActions(true);
         LOGGER.debug("[Route] closing runtime for context @{}",
                 System.identityHashCode(context));
         sweeper.shutdownNow();

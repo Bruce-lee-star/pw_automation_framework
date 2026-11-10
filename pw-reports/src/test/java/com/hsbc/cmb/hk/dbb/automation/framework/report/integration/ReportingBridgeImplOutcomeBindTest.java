@@ -55,13 +55,13 @@ class ReportingBridgeImplOutcomeBindTest {
             bus.finishCase(bus.captureHandle(), TestResult.SUCCESS, null, 1);
 
             assertThat(bus.outcomeSnapshots().get(0).getApiOperations())
-                    .containsExactly("response contained [SCRUBBED]")
+                    .containsExactly("response contained *****")
                     .doesNotContain("CUSTOM_SECRET-123");
             String json = Files.readString(
                     dir.resolve("scrub-case").resolve("scrub-case.json"), StandardCharsets.UTF_8);
-            assertThat(json).contains("[SCRUBBED]").doesNotContain("CUSTOM_SECRET-123");
+            assertThat(json).contains("*****").doesNotContain("CUSTOM_SECRET-123");
             assertThat(pushed.await(10, TimeUnit.SECONDS)).isTrue();
-            assertThat(pushedJson.get()).contains("[SCRUBBED]").doesNotContain("CUSTOM_SECRET-123");
+            assertThat(pushedJson.get()).contains("*****").doesNotContain("CUSTOM_SECRET-123");
         } finally {
             ReportBus.installDefault(previous);
             server.stop(0);

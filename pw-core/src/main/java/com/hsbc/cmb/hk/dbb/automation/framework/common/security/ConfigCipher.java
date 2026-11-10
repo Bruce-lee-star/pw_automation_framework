@@ -15,7 +15,7 @@ import java.util.Base64;
  * 配置值对称加密工具（AES-256-GCM）。
  *
  * <p>用于"加密原始串入库、用时解密"：把敏感配置（密码 / token / API key）以
- * {@code ENC(<base64>)} 形式存入配置（{@code serenity.properties} / {@code application.conf} /
+ * {@code ENC(<base64>)} 形式存入配置（{@code pw.properties} / {@code pw.conf} / {@code application.conf} /
  * 环境变量），运行时经 {@link SecretValue#decryptIfNeeded(String)} 透明解密。
  * 明文值（非密文形态）原样返回，故对既有配置零侵入。读取端同时接受 {@code ENC(<base64>)}
  * 与裸 {@code <base64>} 密文（见 {@link #looksLikeCiphertext}）。

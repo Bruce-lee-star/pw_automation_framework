@@ -16,7 +16,7 @@ import java.util.Locale;
  * </ol>
  *
  * <p><b>适用范围</b>：框架自身的开关位（诊断 / 安全 / 基础设施）。
- * 业务配置（如 {@code environment}、数据源地址等仍可能写在 {@code serenity.conf} 里）
+ * 业务配置（如 {@code environment}、数据源地址等仍可能写在 {@code pw.conf} 里）
  * 请继续用 {@link ConfigReader} —— 那里需要 SPI 合并源的能力。
  *
  * <p>优先级：系统属性 → 环境变量 → 默认值（与 {@link ConfigReader} 前两级一致）。

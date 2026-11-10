@@ -37,4 +37,16 @@ public final class RouteAssertionProbeImpl implements RouteAssertionProbe {
         //  此处不再重复 record，避免同一批失败被双份归集。
         return failures;
     }
+
+    /**
+     * case 级消费：只取当前 BrowserContext 对应 runtime 的失败，绝不跨并行 case 取数。
+     * 非 BrowserContext / null 直接返回空列表，保持探针缺席时零行为变化。
+     */
+    @Override
+    public List<RouteAssertionFailure> drainAndResolveFailures(Object context) {
+        if (!(context instanceof com.microsoft.playwright.BrowserContext browserContext)) {
+            return List.of();
+        }
+        return RouteEngine.drainSettledAssertionFailures(browserContext);
+    }
 }

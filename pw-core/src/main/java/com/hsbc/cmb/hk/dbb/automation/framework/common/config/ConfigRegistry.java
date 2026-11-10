@@ -868,12 +868,12 @@ public enum ConfigRegistry {
     /**
      * 并发执行器硬上限（HARD CAP）：同时运行任务数的绝对上限。
      * <p>默认为<b>运行期自适应值</b>——CPU 核数 / 2，钳制于 [2, 32]（见 {@link #adaptiveConcurrentMaxValue()}），
-     * 可经 {@code -Dframework.playwright.concurrent.max} / serenity.properties 覆盖。
+     * 可经 {@code -Dframework.playwright.concurrent.max} / pw.conf 覆盖。
      */
     WEB_PLAYWRIGHT_CONCURRENT_MAX(
         "framework.playwright.concurrent.max",
         adaptiveConcurrentMaxValue(),
-        "并发执行器硬上限（HARD CAP）：同时运行任务数的绝对上限，按 CPU 核数自适应，可经 -D / serenity.properties 覆盖"
+        "并发执行器硬上限（HARD CAP）：同时运行任务数的绝对上限，按 CPU 核数自适应，可经 -D / pw.conf 覆盖"
     ),
 
     /**
@@ -1216,7 +1216,7 @@ public enum ConfigRegistry {
     /**
      * 并发硬上限自适应默认值：CPU 核数 / 2，下限 2、上限 32。
      * <p>作为 {@link #WEB_PLAYWRIGHT_CONCURRENT_MAX} 的默认值，使「零配置」时按运行机核数自适应，
-     * 同时保留经 -D / serenity.properties 显式覆盖的能力。类加载时求值一次。
+     * 同时保留经 -D / pw.conf 显式覆盖的能力。类加载时求值一次。
      */
     private static String adaptiveConcurrentMaxValue() {
         int cores = Runtime.getRuntime().availableProcessors();

@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <h3>使用方式</h3>
  * <pre>
  * // 1. 下载 BrowserStackLocal 二进制 → 放到指定路径
- * // 2. 配置 serenity.properties:
+ * // 2. 配置 pw.properties:
  * //    browserstack.local=true
  * //    browserstack.local.path=D:/tools/BrowserStackLocal.exe
  *

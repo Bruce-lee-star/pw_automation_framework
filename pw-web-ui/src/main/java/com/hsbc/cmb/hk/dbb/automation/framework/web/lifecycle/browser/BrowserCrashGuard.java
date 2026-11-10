@@ -60,7 +60,7 @@ public final class BrowserCrashGuard {
      */
     /**
      * 崩溃消息特征白名单：由 {@code WebFrameworkConfig.PLAYWRIGHT_CONCURRENT_CRASH_SIGNATURES} 配置，
-     * 可经 -D / serenity.properties 运行时覆盖（W-10：签名可配置）。
+     * 可经 -D / pw.conf 运行时覆盖（W-10：签名可配置）。
      * <p>缓存于 volatile 字段，解析廉价；配置变更后下次读取自动刷新（{@link #refreshCrashSignatures()} 供测试/动态刷新）。
      * 列表元素已统一小写、去空白，匹配时直接 {@code contains}。</p>
      */
@@ -114,7 +114,7 @@ public final class BrowserCrashGuard {
 
     /**
      * 守卫是否启用。经 {@code WebFrameworkConfig} → {@code ConfigReader} 统一解析链
-     * （实时 {@code System.getProperty} → 环境变量 → 框架(serenity.conf/properties) → 默认值），
+     * （实时 {@code System.getProperty} → 环境变量 → 框架(pw.conf/pw.properties) → 默认值），
      * 故系统属性与环境变量均可覆盖，与框架其它配置一致。默认 {@code true}（纯韧性增强）。
      */
     public static boolean isEnabled() {

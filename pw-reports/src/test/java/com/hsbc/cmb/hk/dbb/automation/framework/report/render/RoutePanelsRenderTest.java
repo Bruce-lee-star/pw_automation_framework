@@ -88,7 +88,7 @@ class RoutePanelsRenderTest {
     @Test
     @DisplayName("同路径的 控制台镜像 + 结构化上报 + 用例级残留 → 步骤内只留结构化一份，用例级不再出现")
     void sameRouteFromMultipleSourcesIsShownOnce() throws Exception {
-        String structured = "[Route MONITOR RESULT] https://host/api/v2/auth/assert?*** - {\n"
+        String structured = "[Route MONITOR RESULT] https://host/api/v2/auth/assert?***** - {\n"
                 + "  pattern : auth/assert\n}";
         String consoleMirror = "NET POST https://host/api/v2/auth/assert -> 200 (86 ms)";
 

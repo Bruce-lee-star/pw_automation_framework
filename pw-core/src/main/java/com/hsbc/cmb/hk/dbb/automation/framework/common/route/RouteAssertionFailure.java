@@ -47,7 +47,13 @@ public record RouteAssertionFailure(String pattern, String method, String url,
         return List.copyOf(bodyFailures);
     }
 
-    /** 单行摘要（供日志/报告首行展示）。 */
+    /**
+     * 单行摘要（供日志/报告首行展示）。
+     *
+     * <p>{@code timedOut} 分支为<b>历史遗留渲染</b>：自「timeout = 持续监控最长时间、超时不报错」定稿后，
+     * 生产路径不再构造 {@code timedOut=true} 的失败（{@code MonitorSink} 超时分支只标记观察状态，
+     * 不入结算队列）。保留仅为 DTO 序列化兼容与既有测试，勿据此认为超时会判红。</p>
+     */
     public String summary() {
         if (timedOut) {
             return "[timeout] " + method + " " + url + " (pattern=" + pattern

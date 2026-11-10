@@ -321,7 +321,7 @@ public enum WebFrameworkConfig {
      * 并发执行器硬上限（HARD CAP）。
      * 与 {@link #PLAYWRIGHT_CONCURRENT_PARALLELISM} 同为并发度闸门：
      * {@code ConcurrentContextOptions#resolvedParallelism} 取 min(taskCount, parallelism, max)。
-     * <p>默认按 CPU 核数自适应（核/2，下限 2、上限 32），可经 serenity.properties 或
+     * <p>默认按 CPU 核数自适应（核/2，下限 2、上限 32），可经 pw.conf / pw.properties 或
      * -Dframework.playwright.concurrent.max 覆盖；CI 低核机应显式调小以防资源耗尽。
      */
     PLAYWRIGHT_CONCURRENT_MAX(ConfigRegistry.WEB_PLAYWRIGHT_CONCURRENT_MAX),
@@ -855,7 +855,7 @@ public enum WebFrameworkConfig {
     //   monitor.file.store.enabled、monitor.file.store.dir、monitor.file.store.pretty、
     //   monitor.file.store.group.by.scenario
     // 原因：route 需读取这些键，但不依赖 web（ArchUnit L6），故统一收敛至 core；此处不再重复定义。
-    // 键名 / 默认值与 core 完全一致，经 ConfigReader 统一解析，对既有 serenity.properties 配置零影响；
+    // 键名 / 默认值与 core 完全一致，经 ConfigReader 统一解析，对既有 pw.properties 配置零影响；
     // 运行时读取入口：{@code com.hsbc.cmb.hk.dbb.automation.framework.common.config.MonitorConfig}。
 
     // ==================== 统一代理配置 ====================
@@ -990,65 +990,6 @@ public enum WebFrameworkConfig {
 
     /** 是否订阅 {@code page.onCrash}（页面崩溃诊断）。<b>默认关闭</b>。 */
     PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED(ConfigRegistry.WEB_PLAYWRIGHT_PAGE_EVENTS_CRASH_ENABLED);
-
-    // ==================== Serenity 兼容性回填（DEV-V5 去 Serenity 适配器）====================
-    // 框架已把 serenity.* 配置命名空间收敛到 framework.*（见 core ConfigRegistry 中的 framework.* 键）。
-    // 但 Serenity-core 仍经 CucumberWithSerenity 生成 index.html，并直接读取 serenity.* 系统属性
-    // （如 serenity.browser 默认 firefox、serenity.project.name 默认 "Serenity"），故报告/浏览器行为
-    // 会回落到 Serenity 原生默认值。为避免回归，初始化时把 framework.* 的解析值回填给 serenity.*
-    // 系统属性；仅当 serenity.* 未被 -D 显式覆盖时回填，保留运维手动 override 的能力。
-    private static final java.util.Map<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry, String> SERENITY_COMPAT_KEYS =
-            java.util.Map.ofEntries(
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME, "serenity.project.name"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_SCREENSHOT_STRATEGY, "serenity.screenshot.strategy"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_LOGGING, "serenity.logging"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_FEATURES_ROOT, "serenity.features.root"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_BROWSER, "serenity.browser"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RERUN_FAILURES_WAIT_TIME, "serenity.rerun.failures.wait.time"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_STRATEGY, "serenity.retry.delay.strategy"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_BASE, "serenity.retry.delay.base"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MAX, "serenity.retry.delay.max"),
-                    java.util.Map.entry(ConfigRegistry.WEB_FRAMEWORK_RETRY_DELAY_MULTIPLIER, "serenity.retry.delay.multiplier")
-            );
-
-    /**
-     * 把 framework.* 配置回填给 Serenity-core 使用的 serenity.* 系统属性（见 {@link #SERENITY_COMPAT_KEYS}）。
-     * 解析值优先级：{@code -D framework.*} / 环境变量 / {@code serenity.properties} 中对应 framework.* 条目 /
-     * {@link com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry} 内置默认值；
-     * 仅当 serenity.* 未被 -D 显式覆盖时回填。
-     */
-    public static void publishSerenityCompatibility() {
-        java.util.Properties fileProps = loadSerenityProperties();
-        for (java.util.Map.Entry<com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry, String> e : SERENITY_COMPAT_KEYS.entrySet()) {
-            com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry fwKey = e.getKey();
-            String serenityKey = e.getValue();
-            if (System.getProperty(serenityKey) != null) {
-                continue;
-            }
-            String frameworkKey = fwKey.key();
-            String fallback = (fileProps != null && fileProps.containsKey(frameworkKey))
-                    ? fileProps.getProperty(frameworkKey)
-                    : fwKey.defaultValue();
-            String value = ConfigReader.resolve(frameworkKey, fallback);
-            if (value != null && !value.isEmpty()) {
-                System.setProperty(serenityKey, value);
-            }
-        }
-    }
-
-    private static java.util.Properties loadSerenityProperties() {
-        try (java.io.InputStream in = WebFrameworkConfig.class.getClassLoader()
-                .getResourceAsStream("serenity.properties")) {
-            if (in == null) {
-                return null;
-            }
-            java.util.Properties p = new java.util.Properties();
-            p.load(in);
-            return p;
-        } catch (java.io.IOException | java.lang.SecurityException ex) {
-            return null;
-        }
-    }
 
     private final String key;
     private final String defaultValue;

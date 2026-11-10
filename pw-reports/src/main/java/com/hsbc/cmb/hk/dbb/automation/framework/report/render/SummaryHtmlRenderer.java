@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
+import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ScrubGate;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import freemarker.template.Configuration;
 import freemarker.template.Template;
@@ -60,7 +61,7 @@ public final class SummaryHtmlRenderer {
         FREEMARKER.setDefaultEncoding(StandardCharsets.UTF_8.name());
         FREEMARKER.setLogTemplateExceptions(false);
         FREEMARKER.setLocale(Locale.ROOT);
-    }
+   }
 
     private SummaryHtmlRenderer() {
     }
@@ -222,13 +223,19 @@ public final class SummaryHtmlRenderer {
         return rows;
     }
 
+    /**
+     * 失败概览行只取首行并限长 300 字符。
+     *
+     * <p>省略位置刻意复用 {@link ScrubGate#TRUNCATION_MARKER}（即报告掩码 {@code *****}）
+     * 而不是裸的 {@code …}：裸省略号看不出是内容被省略，统一掩码则读者一眼可辨。
+     */
     private static String firstLine(String s) {
         if (s == null) {
             return "";
         }
         int nl = s.indexOf('\n');
         String line = nl >= 0 ? s.substring(0, nl) : s;
-        return line.length() > 300 ? line.substring(0, 300) + "…" : line;
+        return line.length() > 300 ? line.substring(0, 300) + ScrubGate.TRUNCATION_MARKER : line;
     }
 
     /** 成功占比（0–100，保留 1 位小数）；空跑记 0。 */

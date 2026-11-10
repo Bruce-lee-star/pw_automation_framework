@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.element;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementNotFoundException;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementOperationException;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.MonitorAssertionCheckpoint;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.microsoft.playwright.Locator;
@@ -40,6 +41,9 @@ final class ElementOperationSupport {
     static <T> T executeSafely(Supplier<Locator> locatorFn, String selector,
                                BasePage page, Supplier<T> action, String operation) {
         awaitFrameQuiet(page, operation);
+        // MONITOR 断言安全点：等待期间入队的响应轮询在此 drain 并结算，失败立即抛错，
+        // 不让元素取值/状态查询把断言拖到步骤或场景末尾。
+        MonitorAssertionCheckpoint.checkNow();
         try {
             return action.get();
         } catch (TimeoutError e) {
@@ -105,6 +109,8 @@ final class ElementOperationSupport {
                                  BasePage page, Supplier<Boolean> action,
                                  String operation, String testName) {
         awaitFrameQuiet(page, operation);
+        // MONITOR 断言安全点：所有 click/fill/check/... 动作前统一检查（见 executeSafely 注释）。
+        MonitorAssertionCheckpoint.checkNow();
         Boolean first;
         try {
             first = action.get();

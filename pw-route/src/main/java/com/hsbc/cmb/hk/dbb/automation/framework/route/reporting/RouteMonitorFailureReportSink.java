@@ -97,7 +97,12 @@ public final class RouteMonitorFailureReportSink implements MonitorFailureReport
         writeFileQuietly();
     }
 
-    /** 失败快照 → 跨模块安全载体（owner=pattern；body 不携带，见类 javadoc 脱敏说明）。 */
+    /**
+     * 失败快照 → 跨模块安全载体（owner=pattern；body 不携带，见类 javadoc 脱敏说明）。
+     *
+     * <p>{@code TIMEOUT} 渲染为历史遗留分支：生产路径的超时只停止观测、不进结算队列，
+     * 因此不会产出 {@code timedOut=true} 的失败；保留仅为兼容旧报告数据与既有测试。</p>
+     */
     private static MonitorFailureItem toItem(RouteAssertionFailure f) {
         String status;
         if (f.timedOut()) {

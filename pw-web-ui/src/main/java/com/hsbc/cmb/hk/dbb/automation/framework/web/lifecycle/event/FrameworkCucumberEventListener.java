@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionVerdict;
 import io.cucumber.plugin.ConcurrentEventListener;
 import io.cucumber.plugin.event.EventPublisher;
 import io.cucumber.plugin.event.PickleStepTestStep;
@@ -52,6 +53,9 @@ public final class FrameworkCucumberEventListener implements ConcurrentEventList
     }
 
     private void onCaseStarted(TestCaseStarted event) {
+        //  场景边界清判决：上一个 case 若未走 CucumberWithPw（没有 RunNotifier 投影消费），
+        //  或收尾异常导致未 clear，都不能把判决带给复用本线程的下一条 case。
+        RouteAssertionVerdict.clear();
         FrameworkLifecycleBus.fireScenarioStarted(scenarioInfo(event.getTestCase()));
     }
 

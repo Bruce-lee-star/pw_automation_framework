@@ -122,7 +122,7 @@ String v = ctx.get(KEY);
 | `monitor.timeout.max.ms` | `300000` | 监控全局超时上限 |
 | `monitor.file.store.dir` | `target/monitor-output` | 采集文件落盘目录 |
 
-> **取值优先级**：系统属性 > 环境变量 > `-P` profile 的 `environment-*.conf` > `serenity.conf` / `serenity.properties` > 代码默认值。
+> **取值优先级**：系统属性 > 环境变量 > `-P` profile 的 `environment-*.conf` > `pw.conf` / `pw.properties` > 代码默认值。
 > 例外：`route.capture.*` 三键为**环境变量优先**（由 `ConfigReader.ENV_FIRST_PRECEDENCE` 声明式声明）。
 >
 > 全量 216 个键见 `ConfigRegistry.java`；golden 快照逐键逐字比对默认值，任何漂移即失败。

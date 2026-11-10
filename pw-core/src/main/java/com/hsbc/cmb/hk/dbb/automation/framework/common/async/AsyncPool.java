@@ -648,8 +648,8 @@ public final class AsyncPool {
     // ─── 内部工具 ──────────────────────────────────────────────
 
     // 修复 CORE-P1-N7：配置改走统一配置门面 ConfigReader（合并 -D 系统属性 / 环境变量 /
-    // serenity.properties 并透明解密），消除"直读 ASYNC_* 环境变量"这第三套割裂的配置体系，
-    // 使 ASYNC_* 可被 serenity.properties 与 -D 覆盖、并支持 ENC() 加密。env 名映射与历史一致
+    // pw.properties 并透明解密），消除"直读 ASYNC_* 环境变量"这第三套割裂的配置体系，
+    // 使 ASYNC_* 可被 pw.properties / pw.conf 与 -D 覆盖、并支持 ENC() 加密。env 名映射与历史一致
     // （toEnvKey("ASYNC_CORE_THREADS") == "ASYNC_CORE_THREADS"），对现网零变更。
     /** P2-1：按注册表条目解析 int（键名 + 默认值均来自 SSoT）。 */
     private static int cfgInt(ConfigRegistry key) {

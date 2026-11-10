@@ -44,7 +44,7 @@ final class OutcomeFixtures {
         TestStep signIn = step("s4", "click sign in", TestResult.FAILURE, 1020);
         signIn.setScreenshot("step-002.png");
         signIn.setException(new FailureCause("expected status 200 but was 401", "FAILURE"));
-        signIn.getEvidence().add("POST /api/session?token=*** -> 401");
+        signIn.getEvidence().add("POST /api/session?token=***** -> 401");
         //  主动请求（REST，管道分隔多行块 → 渲染成 api-card 结构化卡片）→ 进 API Request 面板
         signIn.getApiOperations().add("REST|POST|https://api.example.com/api/session|401|86 ms\n"
                 + "REQH|Request headers|Content-Type=application/json; Accept=application/json\n"

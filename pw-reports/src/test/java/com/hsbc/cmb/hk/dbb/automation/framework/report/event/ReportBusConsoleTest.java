@@ -65,6 +65,6 @@ class ReportBusConsoleTest {
 
         TestOutcome o = bus.outcomeSnapshots().get(0);
         assertThat(o.getConsoleOutput()).noneMatch(line -> line.contains("secret-value"));
-        assertThat(o.getConsoleOutput()).anyMatch(line -> line.contains("token=***"));
+        assertThat(o.getConsoleOutput()).anyMatch(line -> line.contains("token=*****"));
     }
 }

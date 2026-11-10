@@ -45,17 +45,15 @@ public class ConcurrencyGateTest {
 
     /**
      * 前提确定性（本轮修复既有失败，<b>关键</b>）：本类用系统属性表达每条用例的配置前提，
-     * 但 <b>{@code System.clearProperty} 并不能把配置拉回默认值</b> ——
-     * {@code ConfigReader.resolve} 的第 1 步（实时系统属性）之后还有第 3 步「SPI 扩展配置源」，
-     * web 侧即 框架 合并源（{@code FrameworkConfigResolver} → {@code SystemEnvironmentVariables}），
-     * 它是<b>启动期系统属性快照 + Typesafe {@code ConfigFactory} 静态缓存</b>：一旦前序用例设过某键，
-     * 之后即使 {@code clearProperty}，{@code WebFrameworkConfig.getValue()} 仍返回<b>旧值</b>
-     * （实测：{@code cfgValue=[true]}，且 {@code new SystemEnvironmentVariables()} 同样刷不掉）。
+     * 但 <b>不要依赖 {@code System.clearProperty} 把配置拉回默认值</b> ——
+     * {@code ConfigReader.resolve} 在实时系统属性之后还有环境变量层与 SPI 配置文件层
+     * （web 侧 {@code FileConfigResolver}，读 {@code pw.conf} / {@code pw.properties}），
+     * 用例执行顺序或外部文件都可能让"清除"之后的取值不确定。
      * 生产侧不存在 {@code clearProperty}（仅有单向 {@code WebFrameworkConfig.setValue}），
-     * 故该陈旧快照的实际影响域就是<b>单测隔离</b>。
+     * 故该约束的实际影响域是<b>单测隔离</b>。
      *
      * <p>应对：把四个键在<b>前后各显式写成其文档默认值</b>（{@link WebFrameworkConfig#getDefaultValue()}），
-     * 而非清除 —— 前提恒定，且全程走"实时系统属性"通道，不受任何快照影响。
+     * 而非清除 —— 前提恒定，且全程走"实时系统属性"通道，不受下层配置源影响。
      * 仅引擎级并行开关可清理：{@code ConcurrencyGate.parseTriState} 是直接
      * {@code System.getProperty} 读的，不经配置层。</p>
      *

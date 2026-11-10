@@ -112,8 +112,6 @@ public class FrameworkCore {
         try {
             LoggingLevelConfig.apply();
             logFrameworkConfigurationIfDebugEnabled();
-            // DEV-V5 去 Serenity 适配器：把 framework.* 配置回填给 serenity.* 系统属性，避免 Serenity-core 报告/浏览器行为回归
-            com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig.publishSerenityCompatibility();
             if (frameworkState.isInitialized()) {
                 logger.debug("FrameworkCore is already initialized");
                 return;
@@ -207,8 +205,6 @@ public class FrameworkCore {
     // 初始化框架（带自定义监听器包）
     public void initialize(String... listenerPackages) {
         try {
-            // DEV-V5 去 Serenity 适配器：把 framework.* 配置回填给 serenity.* 系统属性，避免 Serenity-core 报告/浏览器行为回归
-            com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig.publishSerenityCompatibility();
             if (frameworkState.isInitialized()) {
                 logger.debug("FrameworkCore is already initialized");
                 return;

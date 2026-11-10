@@ -51,8 +51,10 @@ public final class HtmlRenderer {
         //  模板可直接调 ${scrub(text)}：把 ScrubGate（脱敏唯一实现）暴露给 FreeMarker，
         //   避免在 FTL 里另写一份敏感键正则（两份规则必然漂移）。
         //   典型用途：失败消息/堆栈里内联的 URL（含 key/token/username）。
+        //   【只脱敏、不再限长】：数据入 bus 时已按配置做过有界处理，展示层再做一次会
+        //   用 defaults() 的 2048B 砍掉本该可见的堆栈尾部。
         FREEMARKER.setSharedVariable("scrub", (TemplateMethodModelEx) args ->
-                args.isEmpty() ? "" : SCRUB_GATE.scrubLine(String.valueOf(args.get(0))));
+                args.isEmpty() ? "" : SCRUB_GATE.scrubText(String.valueOf(args.get(0))));
         //  模板可直接调 ${failureLines(text)}：把一条失败消息拆成可读的多行。
         //   框架的元素异常是 "原因 | page=… title=… obstruction=… | cause=…" 的三段式
         //   （见 ElementOperationSupport#buildDiagnosticMessage），整段糊在一行里既看不出重点也没法扫读；
@@ -78,7 +80,7 @@ public final class HtmlRenderer {
         if (message == null || message.isBlank()) {
             return List.of();
         }
-        String scrubbed = SCRUB_GATE.scrubLine(message);
+        String scrubbed = SCRUB_GATE.scrubText(message);
         List<String> out = new ArrayList<>();
         for (String part : scrubbed.split(java.util.regex.Pattern.quote(FAILURE_SEGMENT_SEPARATOR), -1)) {
             String trimmed = part.strip();

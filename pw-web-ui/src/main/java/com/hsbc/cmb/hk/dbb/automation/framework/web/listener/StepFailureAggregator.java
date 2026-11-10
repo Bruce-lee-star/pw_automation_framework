@@ -8,8 +8,10 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteLifecycleRegis
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionFailure;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionProbe;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionRegistry;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionVerdict;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.FrameworkConfigManager;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageEventMonitor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.PageInteractionMonitor;
 import org.slf4j.Logger;
@@ -183,13 +185,19 @@ final class StepFailureAggregator {
             // 路由模块未启用：跳过（与老版 route 未启用语义一致）
             return;
         }
-        List<RouteAssertionFailure> failures = probe.drainAndResolveFailures();
+        List<RouteAssertionFailure> failures =
+                probe.drainAndResolveFailures(PlaywrightManager.currentContextForThread());
         if (failures.isEmpty()) {
             return;
         }
         String report = buildRouteFailureReport(failures);
         logger.error("Route API assertions failed during step - failing scenario:\n{}", report);
         ReportingBridgeRegistry.get().recordReportData("Route API ASSERTION FAILURES DETECTED", report);
+        //  本方法在 FrameworkLifecycleBus.fireStepFinished 的生命周期回调里执行，
+        //  safe() 会隔离 Throwable——抛错不一定能冒到 Cucumber 的 executeStep。
+        //  因此先登记判决，由 CucumberWithPw 在 RunNotifier 层兜底投影为 case failure；
+        //  若异常确实冒泡成功，Runner 的「本 case 已有 failure」标记会阻止重复补发。
+        RouteAssertionVerdict.record(report);
         // 直接在 stepFinished 回调中抛 AssertionError，使异常沿
         //  StepInterceptor → Cucumber → JUnit4 传播，令 IDE runner 正确标红。
         throw new AssertionError("Route API assertion failures detected — failing scenario:\n" + report);
@@ -207,13 +215,17 @@ final class StepFailureAggregator {
         if (probe == null) {
             return;
         }
-        List<RouteAssertionFailure> failures = probe.drainAndResolveFailures();
+        List<RouteAssertionFailure> failures =
+                probe.drainAndResolveFailures(PlaywrightManager.currentContextForThread());
         if (failures.isEmpty()) {
             return;
         }
         String report = buildRouteFailureReport(failures);
         logger.error("Route API assertions failed at scenario end:\n{}", report);
         ReportingBridgeRegistry.get().recordReportData("Route API ASSERTION FAILURES DETECTED", report);
+        //  场景收尾 drain 只写证据、不抛错；登记判决让 CucumberWithPw 在
+        //  RunNotifier.fireTestFinished 把本 case 判红（否则「最后一步无业务操作」会假绿）。
+        RouteAssertionVerdict.record(report);
     }
 
     /** 构建 V2 断言失败明细（每条一行 summary）。 */

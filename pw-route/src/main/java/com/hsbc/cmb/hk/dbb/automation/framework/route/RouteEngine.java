@@ -422,11 +422,39 @@ public final class RouteEngine {
         return runtime == null ? null : runtime.waitForCapturedApi(predicate, timeoutMs, minCaptureSeq);
     }
 
+    /**
+     * 只取走<b>指定 context</b> 的已定案断言失败（消费式、幂等）。
+     *
+     * <p><b>并行隔离</b>：case 级判红必须走本重载。无参
+     * {@link #drainSettledAssertionFailures()} 会遍历全部 runtime，仅适合套件收尾做汇总，
+     * 用在步骤/场景判定上会让并行 case 互相取走对方的失败。</p>
+     *
+     * @param context 当前 case 的 BrowserContext；null 或未注册 runtime 时返回空列表
+     */
+    public static List<RouteAssertionFailure> drainSettledAssertionFailures(BrowserContext context) {
+        if (context == null) {
+            return List.of();
+        }
+        RouteRuntime runtime = RUNTIMES.get(context);
+        if (runtime == null) {
+            return List.of();
+        }
+        try {
+            return runtime.drainSettledAssertionFailures();
+        } catch (Exception e) {
+            LOGGER.warn("[Route] drain assertion failures for context failed: {}", e.toString());
+            return List.of();
+        }
+    }
+
     /** 聚合全部活跃 runtime 的已定案断言失败（消费式；幂等——第二次调用返回空列表）。
      *
      * <p>MONITOR 断言失败上报的统一出口，由 {@code RouteAssertionProbeImpl} 委托；
      * web 侧（步骤结束 / 用例收尾）经 {@link RouteAssertionRegistry} 获取探针后调用。
      * 单 runtime 失败不阻断其它（fail-safe 隔离）。
+     *
+     * @apiNote 仅用于套件级汇总；case 级判定请用
+     *          {@link #drainSettledAssertionFailures(BrowserContext)}。
      */
     public static List<RouteAssertionFailure> drainSettledAssertionFailures() {
         List<RouteAssertionFailure> all = new ArrayList<>();

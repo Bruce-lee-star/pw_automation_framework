@@ -67,6 +67,33 @@ public final class ApiCaptureContext {
         return q == null ? null : q.getLastApiCall(context(), endpoint);
     }
 
+    /**
+     * 指定 endpoint 最近一次调用的响应体（老版 {@code getStoredResponse} 的向后兼容入口）。
+     *
+     * <p>老实现只由 MONITOR handler 经 {@code storeResponse} 单独写入 {@code responseStorage}；
+     * 当前采集层已统一收敛为 {@link CapturedApiCallView} 一条记录，故此处等价于
+     * {@code getLastApiCall(endpoint).responseBody()}：按当前线程 BrowserContext 隔离，
+     * endpoint 匹配口径（pattern 精确匹配 / URL 前缀）与 {@link #getLastApiCall(String)} 完全一致。
+     *
+     * <p><b>何时返回 null（非缺陷）</b>：
+     * <ol>
+     *   <li>该 endpoint 没有<b>被采集</b>的记录：默认只采集 MONITOR 主渠道规则，
+     *       其余渠道需显式 {@code .capture()} 或 {@code route.capture.all.type=true}；</li>
+     *   <li>响应尚未到达 —— 本方法是<b>即时查询、不等待</b>；需要等待请用
+     *       {@link #waitForApi(java.util.function.Predicate, long)} /
+     *       {@link #waitForApiSince(long, java.util.function.Predicate, long)}；</li>
+     *   <li>body 不可读：3xx 重定向、SSE/流式、响应句柄被回收、读取失败，
+     *       或该规则显式 {@code .captureBody(false)}；</li>
+     *   <li>pw-route 不在 classpath（SPI 缺席）——安全降级，不抛异常。</li>
+     * </ol>
+     *
+     * <p>除上述情形外，采集记录默认就会读取响应体，本方法返回解码后的响应体文本，<b>不会恒为 null</b>。
+     */
+    public String getStoredResponse(String endpoint) {
+        CapturedApiCallView last = getLastApiCall(endpoint);
+        return last == null ? null : last.responseBody();
+    }
+
     /** 指定 URL 的全部记录。 */
     public List<CapturedApiCallView> getCallsByUrl(String url) {
         ApiCaptureQuery q = query();

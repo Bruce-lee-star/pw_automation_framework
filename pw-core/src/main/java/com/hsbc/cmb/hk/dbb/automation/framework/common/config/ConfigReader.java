@@ -23,17 +23,16 @@ import java.util.ServiceLoader;
  *   <li>环境变量：点/连字符转下划线 + 大写（与 框架 的 ENV 映射一致），补齐"仅直读
  *       System.getProperty 会漏掉 ENV"的缺口，使所有 WebFrameworkConfig / ApiFrameworkConfig 均支持 ENV 覆盖；</li>
  *   <li>SPI 扩展配置源：由上层模块（web）通过 JDK {@link ServiceLoader} 提供
- *       {@link ConfigResolver} 实现（如 框架 的 serenity.conf/private 合并源）。
- *       core 在编译期与运行期均不依赖 框架；无上层实现时该来源为空，自然降级；</li>
+ *       {@link ConfigResolver} 实现（web 侧为读取 {@code pw.conf} / {@code pw.properties} 的
+ *       {@code FileConfigResolver}）。core 在编译期与运行期均不依赖上层实现；
+ *       无上层实现时该来源为空，自然降级；</li>
  *   <li>默认值。</li>
  * </ol>
  *
  * <p><b>边界（实测，2026-09-28，勿踩）</b>：第 1 步只覆盖「当前存在的系统属性」——
- * <b>{@code System.clearProperty} 之后不保证回落到文件 / 默认值</b>。原因在第 3 步：SPI 源
- * （web 侧即 框架 合并源）是<b>启动期系统属性快照 + Typesafe {@code ConfigFactory} 静态缓存</b>，
- * 某键只要在快照期存在过，之后即使清除该属性，该源仍会返回<b>旧值</b>
- * （实测：清除后 {@code getValue()} 仍为 {@code "true"}，且新建
- * {@code SystemEnvironmentVariables} 也无法刷新）。
+ * <b>不要把 {@code System.clearProperty} 当作"回落到文件 / 默认值"的手段</b>。第 3 步 SPI 源
+ * （web 侧 {@code FileConfigResolver}）为懒加载一次性文件快照，且环境变量层先于它命中；
+ * 清除系统属性后的实际取值取决于外部配置文件与环境变量，不是确定值。
  * 因此<b>「回退」必须用 {@code setValue}(目标值) 显式表达</b>，不要依赖 {@code clearProperty}；
  * 生产代码中不存在该调用形态，主要是单测需要显式写默认值以建立确定前提。</p>
  *

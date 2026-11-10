@@ -28,20 +28,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p><b>降级语义</b>：非报告环境（如纯 JUnit 单测 / 未装配报告引擎）经 {@code ReportingBridge.isReportingActive()}
  * 短路 —— 此时直接清空队列并静默返回，绝不产生 ERROR 噪音、也不积压。进程级上限由
  * {@code route.evidence.max.pending}（默认 500）控制，每个 outcome 默认最多 100 条；
- * 单场景超限只淘汰自身旧记录，进程级满载时优先从过度占用的场景腾挪空间。旧系统属性
- * {@code serenity.route.maxPendingRecords} 仍兼容。运行计数可通过本类的只读指标方法获取。</p>
+ * 单场景超限只淘汰自身旧记录，进程级满载时优先从过度占用的场景腾挪空间。
+ * 运行计数可通过本类的只读指标方法获取。</p>
  */
 public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceSink {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RouteEvidenceSink.class);
 
     /** 进程级待报告上限。 */
-    private static final int MAX_PENDING = configuredLimit(
-            ConfigRegistry.ROUTE_EVIDENCE_MAX_PENDING, "serenity.route.maxPendingRecords");
+    private static final int MAX_PENDING = configuredLimit(ConfigRegistry.ROUTE_EVIDENCE_MAX_PENDING);
 
     /** 单个 outcome 的待报告上限。 */
-    private static final int MAX_PENDING_PER_OUTCOME = Math.min(MAX_PENDING, configuredLimit(
-            ConfigRegistry.ROUTE_EVIDENCE_MAX_PENDING_PER_OUTCOME, null));
+    private static final int MAX_PENDING_PER_OUTCOME = Math.min(MAX_PENDING,
+            configuredLimit(ConfigRegistry.ROUTE_EVIDENCE_MAX_PENDING_PER_OUTCOME));
 
     /** 待报告记录按 outcome id 隔离；flush 只消费当前场景所属记录。 */
     private static final Map<String, ArrayDeque<EvidenceRecord>> PENDING = new LinkedHashMap<>();
@@ -123,11 +122,8 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
         return true;
     }
 
-    private static int configuredLimit(ConfigRegistry key, String legacyKey) {
-        ConfigReader.Resolved resolved = ConfigReader.resolveWithLayer(key.key(), key.defaultValue());
-        String raw = resolved.layer() == ConfigReader.Layer.DEFAULT && legacyKey != null
-                ? ConfigReader.getProperty(legacyKey)
-                : resolved.value();
+    private static int configuredLimit(ConfigRegistry key) {
+        String raw = ConfigReader.resolveWithLayer(key.key(), key.defaultValue()).value();
         if (raw == null) {
             raw = key.defaultValue();
         }

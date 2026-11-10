@@ -195,7 +195,7 @@ public record CapturedApiCall(String pattern, String method, String url,
         String postData = request == null ? null : request.postData();
         String preview = postData == null ? null
                 : (postData.length() > REQUEST_BODY_PREVIEW_MAX
-                        ? postData.substring(0, REQUEST_BODY_PREVIEW_MAX) + "...[truncated]" : postData);
+                        ? postData.substring(0, REQUEST_BODY_PREVIEW_MAX) + CaptureLimits.PREVIEW_MASK : postData);
         return new CapturedApiCall(pattern,
                 request == null ? null : request.method(),
                 request == null ? null : request.url(),

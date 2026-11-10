@@ -53,12 +53,10 @@
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.concurrent.ContextTaskResultTest"/><Bug pattern="JUA_DONT_ASSERT_INSTANCEOF_IN_TESTS"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.LifecycleBusBridge"/><Bug pattern="NP_NONNULL_PARAM_VIOLATION"/></Match>
 
-    <!-- ===== web.listener (PlaywrightListener/ThucydidesStepsListenerAdapter/BadLoadListener/测试, 7 条) | owner: @web-core/@web-test | SLA: 2026-Q4 | 方式: 并发可见性改造(AT/ST) + 冗余 null 清理 + 测试断言豁免 ===== -->
+    <!-- ===== web.listener (PlaywrightListener/BadLoadListener/测试, 5 条) | owner: @web-core/@web-test | SLA: 2026-Q4 | 方式: 并发可见性改造(AT/ST) + 冗余 null 清理 + 测试断言豁免 ===== -->
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.PlaywrightListener"/><Bug pattern="AT_NONATOMIC_OPERATIONS_ON_SHARED_VARIABLE"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.PlaywrightListener"/><Bug pattern="RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.PlaywrightListener"/><Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD"/></Match>
-    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.ThucydidesStepsListenerAdapter"/><Bug pattern="MS_EXPOSE_REP"/></Match>
-    <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.ThucydidesStepsListenerAdapter"/><Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.resiliencypkg.BadLoadListener"/><Bug pattern="CT_CONSTRUCTOR_THROW"/></Match>
     <Match><Class name="com.hsbc.cmb.hk.dbb.automation.framework.web.listener.RouteAssertionFailureSurfacesToScenarioTest"/><Bug pattern="JUA_DONT_ASSERT_INSTANCEOF_IN_TESTS"/></Match>
 

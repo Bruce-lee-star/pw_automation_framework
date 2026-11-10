@@ -7,7 +7,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
  * 现键名与默认值的<b>唯一事实来源</b>是 {@link ConfigRegistry}（{@code MONITOR_*} / {@code API_CAPTURE_*} 条目），
  * 本类仅保留 {@link Key} 形态与读取访问器，使既有调用方（route / persistence 域）零改动。
  *
- * <p>解析统一走 {@link ConfigReader#resolve(String, String)}（支持 serenity.properties / 系统属性 /
+ * <p>解析统一走 {@link ConfigReader#resolve(String, String)}（支持 pw.properties / pw.conf / 系统属性 /
  * 环境变量 / {@code ENC()} 透明解密）；键名与默认值经 {@link ConfigRegistry} 集中登记，对既有配置零侵入
  * （配置仅按 key 字符串解析，与定义位置无关）。
  *
@@ -104,10 +104,11 @@ public final class MonitorConfig {
     public static final Key MONITOR_BODY_READ_MAX_WAIT_MS = new Key(ConfigRegistry.MONITOR_BODY_READ_MAX_WAIT_MS.key(), ConfigRegistry.MONITOR_BODY_READ_MAX_WAIT_MS.defaultValue());
 
     /**
-     * Monitor / Mock / Modify 超时上限（毫秒，默认 5min）：防御性 sanity cap。
-     * <p>{@code RouteRule.setTimeoutMs} 在设置超时时会钳制到此上限并打 WARN。
-     * 防止极端超时被长期挂在调度器上（持有 MonitorSession / context / rule 引用，延迟 GC；
-     * 且若 context 清理遗漏，future 会一直挂到超时时刻才触发）。正常监控时长远低于此值。
+     * 监控窗口上限（毫秒，默认 5min）：防御性 sanity cap，防止极端窗口让规则长期 armed。
+     *
+     * <p><b>语义</b>：{@code timeout} 是「持续监控的最长时间」，窗口到期即停止监控、<b>不判失败</b>；
+     * 本键是上限参考值（当前 {@code ApiSpec.Builder.monitorTimeoutMs} 未做钳制，保留供上层治理）。
+     * 早期注释引用的 {@code RouteRule.setTimeoutMs} / {@code MonitorSession} 已随重构退役。</p>
      */
     public static final Key MONITOR_TIMEOUT_MAX_MS = new Key(ConfigRegistry.MONITOR_TIMEOUT_MAX_MS.key(), ConfigRegistry.MONITOR_TIMEOUT_MAX_MS.defaultValue());
 

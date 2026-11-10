@@ -161,9 +161,9 @@
    │  ├─ mocks/                     # Mock 夹具模板（mockBodyFromFile 读 classpath）
    │  ├─ payload/                   # 接口测试请求体
    │  ├─ config/                    # application.conf / *.conf
-   │  └─ serenity.conf              # 框架配置（见第 10 节）
+   │  └─ pw.conf                     # 框架配置（见第 10 节）
    └─ java/…/tests/
-      ├─ CucumberTestRunnerIT.java  # 运行入口（@RunWith(CucumberWithSerenity)）
+      ├─ CucumberTestRunnerIT.java  # 运行入口（@RunWith(CucumberWithPw)）
       ├─ glue/                      # Glue 层：步骤绑定（@Given/@When/@Then）+ 钩子（@Before/@After）
       ├─ steps/                     # Steps 层：业务编排（@Step），调用页面对象
       └─ pages/                     # Page 层：页面对象（extends AbstractManagedPage）</code></pre>
@@ -938,36 +938,36 @@ public class UserApiSteps {
     <tbody>
       <tr><td>1（最高）</td><td>系统属性 <code>-D</code></td><td><code>-Dplaywright.browser.headless=true</code></td></tr>
       <tr><td>2</td><td>环境变量（点/连字符转下划线大写）</td><td><code>PLAYWRIGHT_BROWSER_HEADLESS=true</code></td></tr>
-      <tr><td>3</td><td>配置文件 <code>serenity.conf</code>（HOCON，优先）/ <code>serenity.properties</code></td><td><code>playwright.browser.headless = true</code></td></tr>
+      <tr><td>3</td><td>配置文件 <code>pw.conf</code>（HOCON，优先）/ <code>pw.properties</code></td><td><code>playwright.browser.headless = true</code></td></tr>
       <tr><td>4（兜底）</td><td>代码默认值</td><td>见下表「默认」列</td></tr>
     </tbody>
   </table>
   <div class="note">例外：route 采集三键（<code>route.capture.all.type</code> / <code>route.capture.inline.max.bytes</code> / <code>route.capture.gzip.max.bytes</code>）为 <b>环境变量优先</b>；其余键均为系统属性优先。</div>
   <div class="warn"><b>注意</b>：用 <code>System.clearProperty</code> 清属性<b>不保证回落到文件/默认值</b>（配置源为启动期快照）。要改回某值请用 <code>-D</code> 显式覆盖。</div>
 
-  <h3>两套配置文件：serenity.conf 与 serenity.properties</h3>
-  <p>Serenity 会<b>自动读取两者</b>（都放在 <code>src/test/resources</code>），但格式与优先级不同：</p>
+  <h3>两套配置文件：pw.conf 与 pw.properties</h3>
+  <p>框架经 <code>FileConfigResolver</code> <b>自动读取两者</b>（都放在 <code>src/test/resources</code>），格式与优先级不同：</p>
   <table>
     <thead><tr><th>文件</th><th>格式</th><th>定位</th><th>同键冲突</th></tr></thead>
     <tbody>
-      <tr><td><code>serenity.conf</code></td><td>HOCON（支持嵌套、<code>//</code> 或 <code>#</code> 注释、分组）</td><td><b>主配置</b>，推荐</td><td rowspan="2">同一 key 两份都出现时，<b><code>.conf</code> 覆盖 <code>.properties</code></b></td></tr>
-      <tr><td><code>serenity.properties</code></td><td>经典 <code>key = value</code> 扁平格式</td><td>遗留入口，适合极简覆盖</td></tr>
+      <tr><td><code>pw.conf</code></td><td>HOCON（支持嵌套、<code>//</code> 或 <code>#</code> 注释、分组）</td><td><b>主配置</b>，推荐</td><td rowspan="2">同一 key 两份都出现时，<b><code>.conf</code> 覆盖 <code>.properties</code></b></td></tr>
+      <tr><td><code>pw.properties</code></td><td>经典 <code>key = value</code> 扁平格式</td><td>极简覆盖</td></tr>
     </tbody>
   </table>
   <div class="tip"><b>等价写法对照</b>：
-<pre><code># serenity.conf（HOCON，推荐）
+<pre><code># pw.conf（HOCON，推荐）
 playwright {
   browser { type = chromium  headless = true }
 }
 framework.screenshot.strategy = AFTER_EACH_STEP
 
-# serenity.properties（等价）
+# pw.properties（等价）
 playwright.browser.type = chromium
 playwright.browser.headless = true
 framework.screenshot.strategy = AFTER_EACH_STEP</code></pre>
   </div>
-  <div class="note"><b>建议</b>：统一用 <code>serenity.conf</code>（可读性好、支持分组），把通用基线写在这里即可；不要两份各写一半，避免「同键到底以谁为准」的歧义。这两份文件管的是 <b>Serenity 配置层</b>——runner 与框架行为键（<code>playwright.*</code>、<code>route.*</code>、<code>serenity.*</code>、<code>monitor.*</code>、<code>sensitive.*</code>、<code>axe.*</code>、<code>http.*</code>、<code>framework.*</code>、<code>api.*</code> 等）。</div>
-  <div class="warn"><b>别和接口实体配置混为一谈</b>：接口相关的实体配置（<code>baseUri</code> / <code>headers</code> / <code>end-points</code> / 环境节点）走<b>另一套</b>文件 <code>application.conf</code> + <code>config/{entity}.conf</code>（HOCON，由 pw-api-core 的 <code>ConfigProvider</code> 读取，规则见 §9），<b>不写</b>在这两份 Serenity 文件里。</div>
+  <div class="note"><b>建议</b>：统一用 <code>pw.conf</code>（可读性好、支持分组），把通用基线写在这里即可；不要两份各写一半，避免「同键到底以谁为准」的歧义。这两份文件管的是<b>框架行为配置层</b>——runner 与框架行为键（<code>playwright.*</code>、<code>route.*</code>、<code>monitor.*</code>、<code>sensitive.*</code>、<code>axe.*</code>、<code>http.*</code>、<code>framework.*</code>、<code>api.*</code> 等）。</div>
+  <div class="warn"><b>别和接口实体配置混为一谈</b>：接口相关的实体配置（<code>baseUri</code> / <code>headers</code> / <code>end-points</code> / 环境节点）走<b>另一套</b>文件 <code>application.conf</code> + <code>config/{entity}.conf</code>（HOCON，由 pw-api-core 的 <code>ConfigProvider</code> 读取，规则见 §9），<b>不写</b>在这两份框架配置文件里。</div>
 
   <h3>常用键速查（节选）</h3>
   <h4>浏览器 / 启动</h4>
@@ -1140,7 +1140,7 @@ framework.screenshot.strategy = AFTER_EACH_STEP</code></pre>
     </tbody>
   </table>
 
-  <h3>配置文件示例（<code>serenity.conf</code>）</h3>
+  <h3>配置文件示例（<code>pw.conf</code>）</h3>
 <pre><code>playwright.browser.type = chromium
 playwright.browser.headless = true
 playwright.page.timeout = 20000
@@ -1201,7 +1201,7 @@ route.capture.all.type = false</code></pre>
   <h2><span class="n">12</span>配置加解密与日志脱敏</h2>
 
   <h3>12.1 配置值加密（<code>ENC()</code>）</h3>
-  <p>密码 / token / API key 不要明文写进 <code>serenity.properties</code>。用框架自带的 AES-256-GCM 把它转成 <code>ENC(base64)</code>，框架在读取时<b>透明解密</b>——代码里拿到的还是明文，配置仓库里看不到。</p>
+  <p>密码 / token / API key 不要明文写进 <code>pw.properties</code> / <code>pw.conf</code>。用框架自带的 AES-256-GCM 把它转成 <code>ENC(base64)</code>，框架在读取时<b>透明解密</b>——代码里拿到的还是明文，配置仓库里看不到。</p>
 
   <p><b>第一步：先生成主密钥</b>（32 字节，64 位十六进制；主密钥本身绝不能入库）：</p>
   <pre><code>openssl rand -hex 32</code></pre>

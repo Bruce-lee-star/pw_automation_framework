@@ -188,6 +188,10 @@ public final class RouteDsl {
         while (true) {
             // main 业务 seam：执行入队的 DELAY resume/fulfill（方案 B 可选启用通道）
             RouteEngine.drainMainThreadActions(page.context());
+            // UI 等待切片是业务线程安全点：本 case 的 MONITOR 断言一旦定案立即判红，
+            // 不再等整个 waitFor 超时/步骤结束；按 page.context() 隔离，不牵连并行 case。
+            com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionCheckpoint
+                    .checkNow(page.context());
             long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
                     deadlineNs - System.nanoTime());
             if (remainingMs <= 0L) {

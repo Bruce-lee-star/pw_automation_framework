@@ -666,11 +666,13 @@ public final class MonitorSink {
     /**
      * 消费全部观测记录（含未收到响应的超时标记）。
      *
-     * <p>超时定案与 {@link #drainSettledFailures()} 走同一结算路径
-     * （{@code settleFailure} + CAS 去重）：先 drain() 再 drainSettledFailures() 也不会
-     * 漏掉超时失败（drain 内 markTimedOut 后即结算入队）。
+     * <p><b>timeout 是持续监控的最长时间，不是断言期限</b>：监控窗口到期仍未捕获到响应时，
+     * 只做 {@code markTimedOut()} + DEBUG 留痕 + 移出 pending 索引，<b>不调用
+     * {@code settleFailure()}</b>，因此不进失败队列、不生成 {@code RouteAssertionFailure}、
+     * 不投影为场景失败（即「超过时间就不监控了，且不会报错」）。规则的生命终点由
+     * {@code RouteRuntimeImpl.schedulePurposeDeadline} 到点退役负责。</p>
      *
-     * @return 从最早到最新的全部快照
+     * @return 从最早到最新的全部快照（供测试 / 采集侧诊断；生产路径不依赖本方法）
      */
     public List<CapturedExchange> drain() {
         settlePendingBodyAssertions(); // 业务线程：延迟结算 body 断言（读 body 在 main，串行安全）
@@ -742,7 +744,9 @@ public final class MonitorSink {
     /**
      * 结算一条断言失败的交换（幂等：每条失败只入队一次）。
      *
-     * <p>调用方：响应轮询线程（status / body 断言定案）、{@link #drainSettledFailures()}（超时定案）。
+     * <p>调用方<b>仅</b>为响应侧断言定案路径：status 不符、body 断言失败 / 断言执行异常
+     * （响应轮询线程或业务线程 {@code settlePendingBodyAssertions()}）。
+     * <b>监控窗口超时不调用本方法</b>——超时不是断言失败，绝不进 {@code settledFailures}。
      * CAS 保证多路径并发下不重复上报。
      */
     private void settleFailure(CapturedExchange exchange) {
@@ -768,11 +772,14 @@ public final class MonitorSink {
     }
 
     /**
-     * 上报一次观测<b>结果</b>（成功 / 失败 / 超时 / 未判定都上报）。
+     * 上报一次观测<b>结果</b>（断言成功 / 失败）。
+     *
+     * <p>监控窗口超时与未判定<b>不产生结果证据</b>（只有 DEBUG 留痕），与「超时不报错」一致；
+     * {@code resultDetail()} 中的 {@code TIMEOUT} 标签仅供快照诊断，不是失败上报。</p>
      *
      * <p><b>为什么成功也要上报</b>：报告里原先只有命中时刻写下的"规则声明 + 请求"
      * （expectStatus=200 timeout=60s…），读者无法回答"到底成功没、实际拿到什么"。
-     * 定案时刻补一条结果证据（实际 status / 期望 status / PASS-FAIL-TIMEOUT / 耗时 / 失败明细），
+     * 定案时刻补一条结果证据（实际 status / 期望 status / PASS-FAIL / 耗时 / 失败明细），
      * 与 CAPTURE 的 {@code CapturedApiCall.detail()} 同款三段式。</p>
      *
      * <p>旁路语义：上报异常绝不影响断言链路（只 DEBUG）；URL/明细在 {@code resultDetail()} 内已脱敏。</p>
@@ -790,16 +797,17 @@ public final class MonitorSink {
      *
      * <p>执行两件事：
      * <ol>
-     *   <li><b>超时扫描</b>：对仍在等待响应、且超过 monitor 超时窗口的请求做超时定案
-     *       （{@code markTimedOut} + 结算），保证"请求发出但迟迟无响应"也会被上报；</li>
-     *   <li><b>消费失败队列</b>：把已结算的失败交换一次性返回并清空。</li>
+     *   <li><b>超时扫描</b>：对仍在等待响应、且超过监控窗口的请求标记
+     *       {@code markTimedOut} 并移出 pending 索引 —— <b>仅停止观测，不判失败、不报错</b>；</li>
+     *   <li><b>消费失败队列</b>：把已由响应侧断言定案的失败一次性返回并清空。</li>
      * </ol>
      *
      * <p>线程安全：遍历 {@link ConcurrentLinkedQueue} 弱一致（超时定案可能滞后一拍，可接受）；
      * 消费队列无锁。未定案的请求（有期望但响应未到、未超时）保留在观测队列继续等待，
      * 不会被本方法误取，符合 timeout 窗口语义。
      *
-     * @return 已定案失败交换快照（按结算顺序）；无失败时为空列表（永不返回 null）
+     * @return 已定案失败交换快照（按结算顺序）；<b>超时条目永不入队</b>，
+     *         无失败时为空列表（永不返回 null）
      */
     public List<CapturedExchange> drainSettledFailures() {
         settlePendingBodyAssertions(); // 业务线程：延迟结算 body 断言（读 body 在 main，串行安全）

@@ -1000,10 +1000,6 @@
 <file name="web/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/listener/StepFailureAggregator.java">
 <error line="9" column="8" severity="error" message="无用导入 - com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder 。" source="com.puppycrawl.tools.checkstyle.checks.imports.UnusedImportsCheck"/>
 </file>
-<file name="web/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/listener/ThucydidesStepsListenerAdapter.java">
-<error line="223" column="9" severity="error" message="&apos;if&apos; 结构必须使用大括号 &apos;{}&apos;。" source="com.puppycrawl.tools.checkstyle.checks.blocks.NeedBracesCheck"/>
-<error line="259" column="9" severity="error" message="&apos;if&apos; 结构必须使用大括号 &apos;{}&apos;。" source="com.puppycrawl.tools.checkstyle.checks.blocks.NeedBracesCheck"/>
-</file>
 <file name="web/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/base/BasePage.java">
 <error line="270" column="9" severity="error" message="&apos;if&apos; 结构必须使用大括号 &apos;{}&apos;。" source="com.puppycrawl.tools.checkstyle.checks.blocks.NeedBracesCheck"/>
 </file>

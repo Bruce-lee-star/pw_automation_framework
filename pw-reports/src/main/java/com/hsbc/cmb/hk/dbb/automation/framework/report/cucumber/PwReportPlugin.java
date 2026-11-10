@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionVerdict;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.StepHandle;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
@@ -163,7 +164,19 @@ public final class PwReportPlugin implements ConcurrentEventListener {
         Result result = event.getResult();
         StepHandle handle = caseHandle.get();
         TestResult mapped = StatusMapper.toTestResult(result.getStatus());
-        bus().finishCase(handle, mapped, result.getError(), result.getDuration().toMillis());
+        Throwable error = result.getError();
+        //  Cucumber 按 PASSED 构造 Result 之后，框架才结算出的 MONITOR 断言失败：
+        //  CucumberWithPw 会在 JUnit 层把该 case 判红，报告必须同步标红，
+        //  否则又出现「IDEA / surefire 红、框架报告绿」的不一致。
+        //  peek() 不消费——判决由 Runner 的 fireTestFinished 统一取走。
+        //  登记发生在 FrameworkCucumberEventListener 的 TestCaseFinished 处理器内；
+        //  CucumberWithPw.FRAMEWORK_PLUGINS 保证它先于本插件注册，故此处必能读到。
+        AssertionError verdict = RouteAssertionVerdict.peek();
+        if (verdict != null && mapped == TestResult.SUCCESS) {
+            mapped = TestResult.FAILURE;
+            error = verdict;
+        }
+        bus().finishCase(handle, mapped, error, result.getDuration().toMillis());
         caseHandle.remove();
         stepStack.remove();
     }

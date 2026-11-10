@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionVerdict;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.event.ReportBus;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
@@ -76,6 +77,7 @@ class PluginEventChainTest {
     @AfterEach
     void tearDown() {
         ReportBus.installDefault(previousBus);
+        RouteAssertionVerdict.clear();
     }
 
     // ------------------------------------------------------------ event plumbing
@@ -303,6 +305,38 @@ class PluginEventChainTest {
     }
 
     // --------------------------------------------------------------------- tests
+
+    @Test
+    @DisplayName("晚到 MONITOR 断言失败：Runner 在 JUnit 层判红，报告必须同步标 FAILURE")
+    void lateMonitorFailureIsReflectedInReport() throws Exception {
+        RouteAssertionVerdict.clear();
+        startRun();
+        startCase("file:features/api.feature", 31, "late monitor failure", List.of());
+        startStep("When ", "last step has no framework operation", 32);
+        finishStep("When ", "last step has no framework operation", 32, Status.PASSED, null);
+
+        // Cucumber 已按 PASSED 构造 Result（不可变），框架在场景收尾才 drain 到失败并登记判决。
+        RouteAssertionVerdict.record("[status=500, expect=200] POST /api/x (pattern=api/x)");
+        finishCase(Status.PASSED, null, 3);
+        finishRun();
+
+        TestOutcome o = read("late monitor failure");
+        assertThat(o.getResult()).as("case 判红后报告不得仍显示 SUCCESS").isEqualTo(TestResult.FAILURE);
+        assertThat(o.getTestFailureCause()).as("必须留下 MONITOR 断言失败根因").isNotNull();
+        assertThat(o.getTestFailureCause().getMessage()).contains("api/x");
+    }
+
+    @Test
+    @DisplayName("无晚到判决时 PASSED 仍为 SUCCESS（不误判、不跨用例串味）")
+    void passedCaseStaysSuccessWithoutVerdict() throws Exception {
+        RouteAssertionVerdict.clear();
+        startRun();
+        startCase("file:features/api.feature", 41, "clean case", List.of());
+        finishCase(Status.PASSED, null, 2);
+        finishRun();
+
+        assertThat(read("clean case").getResult()).isEqualTo(TestResult.SUCCESS);
+    }
 
     @Test
     @DisplayName("完整 run → 场景 → 步骤：产物形状正确（步骤树、keyword 前缀、行号、tag、duration）")

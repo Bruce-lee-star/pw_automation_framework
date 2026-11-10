@@ -69,7 +69,7 @@ mvn -pl test-automation -am test
 
 ## 配置体系
 
-取值优先级：**系统属性 > 环境变量 > `-P` profile 的 `environment-*.conf` > `serenity.conf` / `serenity.properties` > 代码默认值**。
+取值优先级：**系统属性 > 环境变量 > `-P` profile 的 `environment-*.conf` > `pw.conf` / `pw.properties` > 代码默认值**。
 
 > 例外：route 采集三键（`route.capture.all.type` / `route.capture.inline.max.bytes` / `route.capture.gzip.max.bytes`）
 > 为 **环境变量 > 系统属性 > 配置文件 > 默认值**，经 `ConfigRegistry` 的**声明式层序**

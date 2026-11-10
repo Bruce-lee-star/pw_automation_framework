@@ -39,7 +39,7 @@ public final class FeatureHtmlRenderer {
         FREEMARKER.setDefaultEncoding(StandardCharsets.UTF_8.name());
         FREEMARKER.setLogTemplateExceptions(false);
         FREEMARKER.setLocale(Locale.ROOT);
-    }
+   }
 
     private FeatureHtmlRenderer() {
     }

@@ -2,6 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.config.WebFrameworkConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.exceptions.ElementException;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge.MonitorAssertionCheckpoint;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.LoadState;
 
@@ -53,20 +54,27 @@ public final class PageWaits {
 
     /** 等待网络空闲（超时毫秒，与 {@link #waitForElementEditable} 单位一致，对齐 Playwright 原生 API）。 */
     public static void waitForNetworkIdle(BasePage bp, int timeout) {
+        // 长等待前先推进已到达的响应并判定；等待结束再判定一次，避免断言被加载等待吞到步骤末尾。
+        MonitorAssertionCheckpoint.checkNow();
         bp.getPage().waitForLoadState(LoadState.NETWORKIDLE,
                 new Page.WaitForLoadStateOptions().setTimeout(timeout));
+        MonitorAssertionCheckpoint.checkNow();
     }
 
     /** 等待页面完全加载（超时毫秒，与 {@link #waitForElementEditable} 单位一致）。 */
     public static void waitForPageFullyLoaded(BasePage bp, int timeout) {
+        MonitorAssertionCheckpoint.checkNow();
         bp.getPage().waitForLoadState(LoadState.LOAD,
                 new Page.WaitForLoadStateOptions().setTimeout(timeout));
+        MonitorAssertionCheckpoint.checkNow();
     }
 
     /** 等待 DOM 内容加载完成（超时毫秒，与 {@link #waitForElementEditable} 单位一致）。 */
     public static void waitForDOMContentLoaded(BasePage bp, int timeout) {
+        MonitorAssertionCheckpoint.checkNow();
         bp.getPage().waitForLoadState(LoadState.DOMCONTENTLOADED,
                 new Page.WaitForLoadStateOptions().setTimeout(timeout));
+        MonitorAssertionCheckpoint.checkNow();
     }
 
     public static void shouldBeVisible(BasePage bp, String selector) {
@@ -103,6 +111,8 @@ public final class PageWaits {
     public static void retry(BasePage bp, Runnable runnable, int retries, int intervalMs, String desc) {
         List<Throwable> failures = new ArrayList<>();
         for (int i = 0; i <= retries; i++) {
+            // 等待/重试循环切片：每轮先推进响应轮询并检查 MONITOR 断言，失败即时抛错。
+            MonitorAssertionCheckpoint.checkNow();
             try {
                 runnable.run();
                 return;
@@ -126,6 +136,8 @@ public final class PageWaits {
     public static boolean retryWithValidation(BasePage bp, Runnable operation, BooleanSupplier validation,
                                               int maxRetries, int retryIntervalMs, String desc) {
         for (int i = 0; i <= maxRetries; i++) {
+            // 同上：长等待被切成小步，断言不会被元素重试循环阻塞。
+            MonitorAssertionCheckpoint.checkNow();
             try {
                 operation.run();
                 if (validation.getAsBoolean())  {return true;} 
@@ -154,6 +166,8 @@ public final class PageWaits {
     private static void waitUntil(BasePage bp, BooleanSupplier condition, int maxWaitMs) {
         long deadline = System.currentTimeMillis() + Math.max(0, maxWaitMs);
         while (System.currentTimeMillis() < deadline) {
+            // 小步长轮询天然是业务线程安全点：每个切片都推进一次 MONITOR 断言结算。
+            MonitorAssertionCheckpoint.checkNow();
             try {
                 if (condition.getAsBoolean()) {
                     return;

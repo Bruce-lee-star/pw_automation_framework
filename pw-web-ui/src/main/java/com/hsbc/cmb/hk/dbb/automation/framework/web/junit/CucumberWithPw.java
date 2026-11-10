@@ -2,7 +2,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.junit;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
-import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteAssertionVerdict;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.cucumber.PwReportPlugin;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwReportObjectFactory;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.FrameworkCucumberEventListener;
@@ -10,10 +10,13 @@ import io.cucumber.junit.Cucumber;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.junit.runner.Description;
+import org.junit.runner.Result;
 import org.junit.runner.Runner;
 import org.junit.runner.manipulation.Filter;
 import org.junit.runner.manipulation.Filterable;
 import org.junit.runner.manipulation.NoTestsRemainException;
+import org.junit.runner.notification.Failure;
+import org.junit.runner.notification.RunListener;
 import org.junit.runner.notification.RunNotifier;
 import org.junit.runners.model.InitializationError;
 
@@ -21,7 +24,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 框架自带的 Cucumber JUnit4 Runner——业务把 {@code @RunWith(Cucumber.class)} 换成
@@ -41,6 +46,25 @@ import java.util.Set;
  *
  * <p><b>幂等与尊重用户配置</b>：插件是追加（缺哪个补哪个，重复调用不会重复注册）；
  * ObjectFactory 仅在业务<b>未指定</b>时才填默认值——业务显式指定了自己的实现时以业务为准。</p>
+ *
+ * <p><b>MONITOR 断言失败的 case 判红投影（不加任何 hook）</b>：{@link #run(RunNotifier)}
+ * 用 {@link MonitorVerdictNotifier} 包装 notifier。当 MONITOR 断言失败在 glue 步骤方法
+ * 执行期间未能抛出（例如最后一步内完全没有框架业务操作），Cucumber 会先把
+ * {@code TestCaseFinished} 的 {@link io.cucumber.plugin.event.Result} 按 PASSED 构造完毕；
+ * 该对象是 {@code final} 且字段全 {@code final}，{@code TestCaseState} 接口也只有只读方法，
+ * 事件层无法改写。框架改在 <b>JUnit 结果投影层</b>补一刀：
+ * {@code FeatureRunner.runChild} 以 {@code try/finally} 包裹 {@code child.run(notifier)}，
+ * 因此 {@code fireTestFinished} 一定在 Cucumber 派发完 {@code TestCaseFinished} 之后、
+ * 同一线程被调用；此处消费 {@link RouteAssertionVerdict} 并补发
+ * {@code fireTestFailure}，case 即判红。</p>
+ *
+ * <p>该路径不新增 Cucumber hook、不打断 {@code TestCaseFinished} 派发链，
+ * afterHooks / 报告插件 / {@code JUnitReporter} / 框架场景清理全部照常执行；
+ * 失败仍按 {@code BrowserContext} 归属消费、判决按线程隔离，不终止 JVM、
+ * 不中断整个 run、不牵连并行 case。</p>
+ *
+ * <p><b>使用约束</b>：只有使用本 Runner（{@code @RunWith(CucumberWithPw.class)}）的
+ * 运行器具备该投影能力；仍用 {@code @RunWith(Cucumber.class)} 的自定义 runner 需迁移一行注解。</p>
  */
 public final class CucumberWithPw extends Runner implements Filterable {
 
@@ -105,7 +129,7 @@ public final class CucumberWithPw extends Runner implements Filterable {
 
     @Override
     public void run(RunNotifier notifier) {
-        delegate.run(notifier);
+        delegate.run(new MonitorVerdictNotifier(Objects.requireNonNull(notifier, "notifier")));
     }
 
     @Override
@@ -125,5 +149,109 @@ public final class CucumberWithPw extends Runner implements Filterable {
             }
         }
         return out;
+    }
+
+    /**
+     * 把「Cucumber 已按 PASSED 定案、但框架登记了 MONITOR 断言失败」的 case 在 JUnit 层判红。
+     *
+     * <p><b>必须整体委托</b>：{@code RunNotifier} 的监听器列表是实例私有字段，若只覆写少数
+     * {@code fire*} 方法，未覆写的通知会打到本包装对象自己的空列表上，导致 run / suite 级
+     * 事件与 surefire 的收集全部丢失。故所有 public 方法逐一转发。</p>
+     *
+     * <p><b>时机</b>：{@code FeatureRunner.runChild} 用 {@code try/finally} 包裹
+     * {@code child.run(notifier)}，{@code fireTestFinished} 必在 Cucumber 派发完
+     * {@code TestCaseFinished} 之后同线程执行——此时 {@code RouteAssertionVerdict} 已登记，
+     * 而 {@code JUnitReporter} 已结束本 case 的 failure 收集。补发的
+     * {@code fireTestFailure} 位于 {@code fireTestFinished} 之前，符合 JUnit 契约。</p>
+     *
+     * <p><b>并行</b>：{@code failed} 以 {@code Description}（case 唯一标识）为键，
+     * 判决本身按线程隔离；{@code RunNotifier} 包装对象无可变 case 维度状态泄漏。</p>
+     */
+    static final class MonitorVerdictNotifier extends RunNotifier {
+
+        private final RunNotifier delegate;
+        /** 本 case 已由 Cucumber / 其它插件报过 failure，用于防重复补发。 */
+        private final Set<Description> failed = ConcurrentHashMap.newKeySet();
+
+        MonitorVerdictNotifier(RunNotifier delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void addListener(RunListener listener) {
+            delegate.addListener(listener);
+        }
+
+        @Override
+        public void removeListener(RunListener listener) {
+            delegate.removeListener(listener);
+        }
+
+        @Override
+        public void addFirstListener(RunListener listener) {
+            delegate.addFirstListener(listener);
+        }
+
+        @Override
+        public void fireTestRunStarted(Description description) {
+            delegate.fireTestRunStarted(description);
+        }
+
+        @Override
+        public void fireTestRunFinished(Result result) {
+            delegate.fireTestRunFinished(result);
+        }
+
+        @Override
+        public void fireTestSuiteStarted(Description description) {
+            delegate.fireTestSuiteStarted(description);
+        }
+
+        @Override
+        public void fireTestSuiteFinished(Description description) {
+            delegate.fireTestSuiteFinished(description);
+        }
+
+        @Override
+        public void fireTestStarted(Description description) {
+            // 双保险：即便 FrameworkCucumberEventListener 未被装载，也不把上一条 case 的判决带过来。
+            RouteAssertionVerdict.clear();
+            delegate.fireTestStarted(description);
+        }
+
+        @Override
+        public void fireTestFailure(Failure failure) {
+            if (failure != null && failure.getDescription() != null) {
+                failed.add(failure.getDescription());
+            }
+            delegate.fireTestFailure(failure);
+        }
+
+        @Override
+        public void fireTestAssumptionFailed(Failure failure) {
+            delegate.fireTestAssumptionFailed(failure);
+        }
+
+        @Override
+        public void fireTestIgnored(Description description) {
+            delegate.fireTestIgnored(description);
+        }
+
+        @Override
+        public void fireTestFinished(Description description) {
+            boolean alreadyFailed = description != null && failed.remove(description);
+            AssertionError verdict = RouteAssertionVerdict.takeAndClear();
+            if (verdict != null && !alreadyFailed && description != null) {
+                LOGGER.error("MONITOR assertion failure settled after Cucumber result was fixed"
+                        + " - failing case via JUnit notifier: {}", description.getDisplayName());
+                delegate.fireTestFailure(new Failure(description, verdict));
+            }
+            delegate.fireTestFinished(description);
+        }
+
+        @Override
+        public void pleaseStop() {
+            delegate.pleaseStop();
+        }
     }
 }

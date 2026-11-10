@@ -53,13 +53,13 @@
       </div>
       <#list groups as g>
         <div class="feature-block">
-          <h2>${g.feature}</h2>
+          <h2>${g.feature?html}</h2>
           <#list g.items as item>
             <details class="fail-item">
-              <summary>${item.line}</summary>
+              <summary>${item.line?html}</summary>
               <div class="detail">
-                <pre>${item.line}</pre>
-                <p>Scenario: <a class="scenario" href="${item.link}">${item.scenario}</a></p>
+                <pre>${item.line?html}</pre>
+                <p>Scenario: <a class="scenario" href="${item.link?html}">${item.scenario?html}</a></p>
               </div>
             </details>
           </#list>

@@ -90,11 +90,11 @@ class ApiCallBlockTest {
     @Test
     @DisplayName("历史单行格式降级：整体作 URL，无分区行，不抛异常")
     void legacySingleLineFallsBackToUrl() {
-        ApiCallBlock call = ApiCallBlock.parse("POST /api/session?token=*** -> 401");
+        ApiCallBlock call = ApiCallBlock.parse("POST /api/session?token=***** -> 401");
 
         assertThat(call.getMethod()).isEmpty();
         assertThat(call.getStatus()).isEmpty();
-        assertThat(call.getUrl()).isEqualTo("POST /api/session?token=*** -> 401");
+        assertThat(call.getUrl()).isEqualTo("POST /api/session?token=***** -> 401");
         assertThat(call.getRows()).isEmpty();
     }
 
@@ -110,7 +110,7 @@ class ApiCallBlockTest {
     @DisplayName("Route Captured 结构化块：与 API Request 同构（能力标签 + 方法/URL/状态/耗时 + 分区）")
     void parsesCapturedRouteBlock() {
         ApiCallBlock call = ApiCallBlock.parseCaptured(
-                "[Route MONITOR] https://host/api/v2/auth/assert?*** — {\n"
+                "[Route MONITOR] https://host/api/v2/auth/assert?***** — {\n"
                         + "  pattern   : auth/assert\n"
                         + "  request   : POST https://host/api/v2/auth/assert?ad=webapplication_cxp_sit1&did=56ab36e6\n"
                         + "  duration  : 417ms\n"

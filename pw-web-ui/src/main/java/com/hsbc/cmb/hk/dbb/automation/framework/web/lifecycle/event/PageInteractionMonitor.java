@@ -283,7 +283,7 @@ public final class PageInteractionMonitor {
                 // 抖动闸门信号源：记录"最近一次主框架导航"，供元素操作前的 awaitQuiet 落定等待
                 recordMainFrameChurn(page);
                 // 主框架导航轨迹本身已记入 navTrail（失败时回放用）；此处日志默认关闭，
-                // 仅在 serenity.logging=VERBOSE/TRACE 时输出，避免每次跳转刷屏。
+                // 仅在 framework.logging=VERBOSE/TRACE 时输出，避免每次跳转刷屏。
                 logger.debug("[nav] main frame navigated -> {}", url);
             } else {
                 logger.debug("[nav] frame '{}' navigated -> {}", frame.name(), url);

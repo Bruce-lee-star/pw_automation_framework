@@ -27,25 +27,36 @@ public final class LifecycleBusBridge {
     }
 
     /**
-     * 在编排线程回放失败：对每个失败项抛 {@link CompletionException}（message 含线程/耗时/页面错误诊断），
+     * 在编排线程回放失败：汇总各 worker 的失败摘要并抛 {@link CompletionException}，
      * 由 v2 的 {@code @Step} 拦截器负责报告标记。
+     *
+     * <p><b>线程模型</b>：{@code ConcurrentContextExecutor} 的 {@code ctx-N} worker 抛出的
+     * 异常被 {@code runOnce} 的 {@code catch (Throwable)} 包装进 {@code ContextTaskResult}，
+     * 不会冒泡到 Cucumber。本方法是它回到编排（glue）线程的唯一出口。
+     * 原实现把 cause 写成 {@code null}，MONITOR 断言的 {@link AssertionError} 只以摘要文本
+     * 残留，既丢失类型也丢失堆栈；现保留首个失败项的原始 cause，使「只影响当前 case」的
+     * 判红语义在并发执行模型下依然完整（失败明细不被降级）。</p>
      *
      * @param results runAll 返回的等序结果
      */
     public static void replayFailures(List<? extends ContextTaskResult<?>> results) {
         List<String> summaries = new ArrayList<>();
+        Throwable firstCause = null;
         for (ContextTaskResult<?> r : results) {
             if (!r.isSuccess()) {
                 try {
                     r.valueOrThrow(); // 抛 CompletionException，message 含线程/耗时/页面错误诊断
                 } catch (CompletionException ce) {
                     summaries.add(ce.getMessage());
+                    if (firstCause == null) {
+                        firstCause = ce.getCause(); // 保留原始 AssertionError / 业务异常
+                    }
                 }
             }
         }
         if (!summaries.isEmpty()) {
             throw new CompletionException("ConcurrentContextExecutor: " + summaries.size()
-                    + " task(s) failed -> " + summaries, null);
+                    + " task(s) failed -> " + summaries, firstCause);
         }
     }
 

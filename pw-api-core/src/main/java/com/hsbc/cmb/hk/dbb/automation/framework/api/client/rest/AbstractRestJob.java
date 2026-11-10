@@ -36,6 +36,12 @@ public abstract class AbstractRestJob {
     /** 上报到报告的请求/响应体预览上限（字符）——防止大文件/二进制灌进 JSON 与页面。 */
     private static final int BODY_PREVIEW_MAX_CHARS = 512;
 
+    /**
+     * 预览被限长时追加的掩码（与 {@code ScrubGate} 的报告掩码一致）。
+     * pw-api-core 不依赖 pw-reports，故字面量在此单独声明；两处必须同为 {@code *****}。
+     */
+    private static final String BODY_PREVIEW_MASK = "*****";
+
     /** JSON 美化专用 mapper（只读树 → pretty string，不做类型绑定，容错最好）。 */
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
@@ -227,7 +233,7 @@ public abstract class AbstractRestJob {
      * 失败时状态列为 {@code FAILED}，并以 {@code ERR|Error|...} 行替代两个 Response 行。
      *
      * <p>脱敏由报告侧（{@code ScrubGate}）统一完成：URL query 与 header 中的
-     * token/key/password 会被替换为 {@code [SCRUBBED]}，因此这里可携带完整 URL
+     * token/key/password 会被替换为报告掩码，因此这里可携带完整 URL
      * （业务需要靠它定位环境）。响应体仍做长度截断，防止把大文件/二进制灌进报告。
      */
     private void reportApiOperation(Entity entity, long elapsedMs, Integer status, Throwable failure) {
@@ -307,7 +313,7 @@ public abstract class AbstractRestJob {
         return sb.toString();
     }
 
-    /** 请求/响应体：空白 → {@code <none>}；JSON 则 pretty-print；否则截断到上限并标注原始长度。 */
+    /** 请求/响应体：空白 → {@code <none>}；JSON 则 pretty-print；否则截断到上限，尾部统一显示掩码。 */
     private static String describeBody(String body) {
         if (StringUtils.isBlank(body)) {
             return "<none>";
@@ -317,8 +323,7 @@ public abstract class AbstractRestJob {
         if (shown.length() <= BODY_PREVIEW_MAX_CHARS) {
             return shown;
         }
-        return shown.substring(0, BODY_PREVIEW_MAX_CHARS)
-                + "… [truncated, total " + body.length() + " chars]";
+        return shown.substring(0, BODY_PREVIEW_MAX_CHARS) + BODY_PREVIEW_MASK;
     }
 
     /**

@@ -337,7 +337,7 @@ public final class CapturedExchange {
         }
         boolean truncated = sanitized.length() > RESPONSE_BODY_PREVIEW_MAX;
         this.responseBodyPreview = truncated
-                ? sanitized.substring(0, RESPONSE_BODY_PREVIEW_MAX) + "...[truncated]"
+                ? sanitized.substring(0, RESPONSE_BODY_PREVIEW_MAX) + CaptureLimits.PREVIEW_MASK
                 : sanitized;
         this.responseBodyTruncated = truncated;
     }
@@ -419,7 +419,7 @@ public final class CapturedExchange {
     static CapturedExchange ofRequest(com.microsoft.playwright.Request request, ApiSpec spec) {
         String postData = request.postData();
         String preview = postData == null ? null
-                : (postData.length() > POST_DATA_PREVIEW_MAX ? postData.substring(0, POST_DATA_PREVIEW_MAX) + "...[truncated]" : postData);
+                : (postData.length() > POST_DATA_PREVIEW_MAX ? postData.substring(0, POST_DATA_PREVIEW_MAX) + CaptureLimits.PREVIEW_MASK : postData);
         // 分渠道标注：把命中规则的渠道集合与主渠道一次带进快照（后续 dump/peek 与 View 转换直接可用）。
         // 连同请求身份（request 引用）一并带入，供响应侧按"同一请求"精确配对。
         return new CapturedExchange(request.method(), request.url(), spec.pattern(),

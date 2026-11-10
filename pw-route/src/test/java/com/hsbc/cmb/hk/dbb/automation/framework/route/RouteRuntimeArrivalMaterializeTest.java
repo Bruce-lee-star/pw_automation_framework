@@ -1,6 +1,8 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.CapturedApiCallView;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.RouteDsl;
+import com.hsbc.cmb.hk.dbb.automation.framework.route.monitor.CaptureSink;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Request;
@@ -13,10 +15,13 @@ import org.mockito.ArgumentCaptor;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
@@ -101,5 +106,54 @@ public class RouteRuntimeArrivalMaterializeTest {
         assertFalse("drain 后应有采集记录", calls.isEmpty());
         assertTrue("到达即读：记录里必须带 body", calls.get(0).responseBody().contains("recovered"));
         assertEquals((long) 200L, (long) calls.get(0).responseStatus());
+
+        // getStoredResponse 的底层链路：lastCapturedApi → SPI 视图必须带同一份 body（证明不会恒 null）
+        CapturedApiCallView view = CaptureSink.toView(RouteEngine.lastCapturedApi(ctx, "/api/users/**"));
+        assertNotNull("lastCapturedApi 必须命中已采集记录", view);
+        assertEquals("{\"recovered\":true}", view.responseBody());
+    }
+
+    /** 即时查询 lastCapturedApi 必须先 drain 一次，与 waitForCapturedApi 的周期 drain 对齐。 */
+    @Test
+    public void lastCapturedApiDrainsPendingMainActionsBeforeReading() {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        AtomicInteger executed = new AtomicInteger();
+        runtime.enqueueMainAction(executed::incrementAndGet);
+
+        assertNull(runtime.lastCapturedApi("/api/missing"));
+        assertEquals("即时查询必须先结清在途 main 动作，再读采集快照", 1, executed.get());
+    }
+
+    /** 所有采集只读入口都 drain，且 drain 幂等（动作不重复执行）。 */
+    @Test
+    public void allReadOnlyQueriesDrainOnceAndRemainIdempotent() {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        AtomicInteger executed = new AtomicInteger();
+        for (int i = 0; i < 5; i++) {
+            runtime.enqueueMainAction(executed::incrementAndGet);
+        }
+
+        runtime.lastCapturedPerPattern();
+        assertEquals("首个查询应一次结清全部在途动作", 5, executed.get());
+
+        runtime.capturedApisByUrl("https://host/x");
+        runtime.capturedApisByChannel("MOCK");
+        runtime.capturedApiSequence();
+        runtime.lastCapturedApi("/x");
+        assertEquals("drain 幂等：已消费动作不得重复执行", 5, executed.get());
+    }
+
+    /** 回归护栏：waitForCapturedApi 入口的 drain 不得因本次改动回退。 */
+    @Test
+    public void waitForCapturedApiStillDrainsOnEntry() {
+        mockContext();
+        RouteRuntime runtime = RouteEngine.runtimeOf(ctx);
+        AtomicInteger executed = new AtomicInteger();
+        runtime.enqueueMainAction(executed::incrementAndGet);
+
+        assertNull(runtime.waitForCapturedApi(call -> true, 0L, 0L));
+        assertEquals(1, executed.get());
     }
 }

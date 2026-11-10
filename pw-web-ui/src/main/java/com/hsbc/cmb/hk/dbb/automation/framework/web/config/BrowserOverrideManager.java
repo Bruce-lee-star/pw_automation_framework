@@ -16,7 +16,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
  * Browser Override Manager - 管理测试用例级别的浏览器覆盖配置
  * 
  * 使用场景：
- * 1. 大部分测试用例使用 serenity.conf 中配置的默认浏览器
+ * 1. 大部分测试用例使用 pw.conf 中配置的默认浏览器
  * 2. 某些特定测试用例需要在特定浏览器上执行（如 Firefox、WebKit）
  * 3. 通过 Cucumber tags 动态指定浏览器类型
  * 
