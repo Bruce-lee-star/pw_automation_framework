@@ -24,6 +24,27 @@ public final class ContextKey<T> {
         return new ContextKey<>(name, type);
     }
 
+    /**
+     * 创建键，其中 {@code rawType} 是<b>参数化类型</b>的 {@code Class} token（如 {@code List.class}）。
+     *
+     * <p>由于 Java 泛型擦除，无法用 {@code Class<List<String>>} 这样的 token：{@code List.class}
+     * 的静态类型只能是 {@code Class<List>}（raw），要表达 {@code ContextKey<List<String>>}
+     * 必然有一次 unchecked 转换。<b>调用方不应自行写
+     * {@code (Class<List<String>>) (Class<?>) List.class}</b> 这种双重 cast（既丑又有告警），
+     * 统一走本方法把 unsafe 事实收敛到框架内部一处。</p>
+     *
+     * <p>运行期类型校验仍由 {@link #cast(Object)} 基于 {@code rawType} 完成；
+     * 参数化元素类型仅用于编译期静态校验，运行期无法区分。</p>
+     *
+     * @param name    键名（唯一标识）
+     * @param rawType 擦除后的原始类型 token（如 {@code List.class} / {@code Map.class}）
+     * @param <T>     目标值类型（由调用点推导，例如 {@code List<String>}）
+     */
+    @SuppressWarnings("unchecked")
+    public static <T> ContextKey<T> ofRaw(String name, Class<?> rawType) {
+        return new ContextKey<>(name, (Class<T>) rawType);
+    }
+
     public String name() {
         return name;
     }

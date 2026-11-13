@@ -83,7 +83,7 @@ class ConfigParseTest {
     class LimitsParsing {
 
         @Test
-        @DisplayName("三值全给 → 逐位生效")
+        @DisplayName("三值全给 -> 逐位生效")
         void allThreeValues() {
             PwReportsConfig.Limits l = PwReportsConfig.Limits.parse("80,4096,1000");
             assertThat(l.evidenceLines()).isEqualTo(80);
@@ -101,7 +101,7 @@ class ConfigParseTest {
         }
 
         @Test
-        @DisplayName("非法输入整体回退默认（非数字/非正/个数超限/空）——绝不半途生效半个值")
+        @DisplayName("非法输入整体回退默认（非数字/非正/个数超限/空）--绝不半途生效半个值")
         void invalidInputFallsBackWholesale() {
             assertThat(PwReportsConfig.Limits.parse("abc")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
             assertThat(PwReportsConfig.Limits.parse("80,0,1000")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
@@ -138,7 +138,7 @@ class ConfigParseTest {
         }
 
         @Test
-        @DisplayName("无法识别 → DISABLED（向少截一侧失败）+ 告警回调，绝不静默按默认放行")
+        @DisplayName("无法识别 -> DISABLED（向少截一侧失败）+ 告警回调，绝不静默按默认放行")
         void unknownFallsBackToDisabledAndWarns() {
             StringBuilder warned = new StringBuilder();
             ScreenshotMode m = ScreenshotMode.parse("EVERYTHING", msg -> warned.append(msg));

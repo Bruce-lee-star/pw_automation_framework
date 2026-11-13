@@ -18,7 +18,7 @@ class ErrorClassifierTest {
     // ---- 1) 异常类名（结构化信号，最高优先级） ----
 
     @Test
-    @DisplayName("异常类名 TimeoutError → TIMEOUT，消息措辞不得覆盖")
+    @DisplayName("异常类名 TimeoutError -> TIMEOUT，消息措辞不得覆盖")
     void classnameTimeoutWinsOverMessage() {
         assertThat(ErrorClassifier.classify(
                 "Timeout 30000ms exceeded during navigation", "com.microsoft.playwright.TimeoutError", "ERROR"))
@@ -26,7 +26,7 @@ class ErrorClassifierTest {
     }
 
     @Test
-    @DisplayName("异常类名 AssertionError → ASSERTION（消息仅业务文案也归断言）")
+    @DisplayName("异常类名 AssertionError -> ASSERTION（消息仅业务文案也归断言）")
     void classnameAssertion() {
         assertThat(ErrorClassifier.classify(
                 "expected status 200 but was 401", "java.lang.AssertionError", "FAILURE"))
@@ -34,7 +34,7 @@ class ErrorClassifierTest {
     }
 
     @Test
-    @DisplayName("异常类名 NoSuchElementException → ELEMENT_NOT_FOUND")
+    @DisplayName("异常类名 NoSuchElementException -> ELEMENT_NOT_FOUND")
     void classnameNoSuchElement() {
         assertThat(ErrorClassifier.classify(
                 "Unable to locate element", "org.openqa.selenium.NoSuchElementException", "ERROR"))
@@ -44,7 +44,7 @@ class ErrorClassifierTest {
     // ---- 2) 消息精确短语 ----
 
     @Test
-    @DisplayName("导航期超时（无 TimeoutError 类名）→ TIMEOUT（超时优先于导航语义）")
+    @DisplayName("导航期超时（无 TimeoutError 类名）-> TIMEOUT（超时优先于导航语义）")
     void messageTimeoutBeatsNavigation() {
         assertThat(ErrorClassifier.classify(
                 "Timeout 30000ms exceeded during navigation", "com.hsbc.framework.ElementOperationException", "ERROR"))
@@ -52,7 +52,7 @@ class ErrorClassifierTest {
     }
 
     @Test
-    @DisplayName("执行上下文销毁（导航重建 DOM 的典型文案）→ NAVIGATION_LOSS")
+    @DisplayName("执行上下文销毁（导航重建 DOM 的典型文案）-> NAVIGATION_LOSS")
     void messageExecutionContextDestroyed() {
         assertThat(ErrorClassifier.classify(
                 "Execution context was destroyed, most likely because of a navigation", null, null))
@@ -60,7 +60,7 @@ class ErrorClassifierTest {
     }
 
     @Test
-    @DisplayName("等待导航中 / 导航失败页面关闭 → NAVIGATION_LOSS（对齐 isNavigationOrContextLoss 接受集）")
+    @DisplayName("等待导航中 / 导航失败页面关闭 -> NAVIGATION_LOSS（对齐 isNavigationOrContextLoss 接受集）")
     void messageNavigationPhrases() {
         assertThat(ErrorClassifier.classify("waiting while navigating to url", null, null))
                 .isEqualTo(ErrorClassifier.Category.NAVIGATION_LOSS);
@@ -71,28 +71,28 @@ class ErrorClassifierTest {
     }
 
     @Test
-    @DisplayName("页面/上下文/浏览器关闭 → CONTEXT_CLOSED")
+    @DisplayName("页面/上下文/浏览器关闭 -> CONTEXT_CLOSED")
     void messageContextClosed() {
         assertThat(ErrorClassifier.classify("Target page, context or browser has been closed", null, null))
                 .isEqualTo(ErrorClassifier.Category.CONTEXT_CLOSED);
     }
 
     @Test
-    @DisplayName("frame 分离 → FRAME_DETACHED")
+    @DisplayName("frame 分离 -> FRAME_DETACHED")
     void messageFrameDetached() {
         assertThat(ErrorClassifier.classify("frame was detached", null, null))
                 .isEqualTo(ErrorClassifier.Category.FRAME_DETACHED);
     }
 
     @Test
-    @DisplayName("元素不存在 → ELEMENT_NOT_FOUND；且裸 'navigatetab' 类名不误伤导航分类")
+    @DisplayName("元素不存在 -> ELEMENT_NOT_FOUND；且裸 'navigatetab' 类名不误伤导航分类")
     void messageElementNotFoundNoNavigationFalsePositive() {
         assertThat(ErrorClassifier.classify("element with class 'navigatetab' is not found", null, null))
                 .isEqualTo(ErrorClassifier.Category.ELEMENT_NOT_FOUND);
     }
 
     @Test
-    @DisplayName("连接/协议级异常 → DRIVER_INFRA")
+    @DisplayName("连接/协议级异常 -> DRIVER_INFRA")
     void messageDriverInfra() {
         assertThat(ErrorClassifier.classify("Connection refused: localhost:9222", null, null))
                 .isEqualTo(ErrorClassifier.Category.DRIVER_INFRA);
@@ -101,14 +101,14 @@ class ErrorClassifierTest {
     // ---- 3) 语义类别兜底 ----
 
     @Test
-    @DisplayName("无类名无关键词：errorType=FAILURE → ASSERTION（兼容旧 failureTypeOf 兜底）")
+    @DisplayName("无类名无关键词：errorType=FAILURE -> ASSERTION（兼容旧 failureTypeOf 兜底）")
     void fallbackFailureSemantic() {
         assertThat(ErrorClassifier.classify("expected status 200 but was 401", null, "FAILURE"))
                 .isEqualTo(ErrorClassifier.Category.ASSERTION);
     }
 
     @Test
-    @DisplayName("无类名无关键词：errorType=COMPROMISED → DRIVER_INFRA（环境/基础设施）")
+    @DisplayName("无类名无关键词：errorType=COMPROMISED -> DRIVER_INFRA（环境/基础设施）")
     void fallbackCompromisedSemantic() {
         assertThat(ErrorClassifier.classify("page load aborted", null, "COMPROMISED"))
                 .isEqualTo(ErrorClassifier.Category.DRIVER_INFRA);
@@ -117,7 +117,7 @@ class ErrorClassifierTest {
     // ---- 4) 边界与展示名 ----
 
     @Test
-    @DisplayName("全空输入 → UNKNOWN；null outcome → UNKNOWN")
+    @DisplayName("全空输入 -> UNKNOWN；null outcome -> UNKNOWN")
     void unknownsAndNulls() {
         assertThat(ErrorClassifier.classify(null, null, null)).isEqualTo(ErrorClassifier.Category.UNKNOWN);
         assertThat(ErrorClassifier.classify(null)).isEqualTo(ErrorClassifier.Category.UNKNOWN);

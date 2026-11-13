@@ -151,22 +151,25 @@ public final class PageElementList extends AbstractList<PageElement> {
             int actual = locatorInternal().count();
             if (actual < expectCount) {
                 throw new IllegalStateException(
-                        String.format("Expected ≥ %d, found %d: %s", expectCount, actual, selector));
+                        String.format("Expected >= %d, found %d: %s", expectCount, actual, selector));
             }
         } catch (TimeoutError e) {
             int actual = locatorInternal().count();
             throw new IllegalStateException(
-                    String.format("Timeout after %ds: expected ≥ %d, found %d: %s",
+                    String.format("Timeout after %ds: expected >= %d, found %d: %s",
                             timeoutSec, expectCount, actual, selector), e);
         }
     }
 
     // ========================== 大小（实时查询 DOM） ==========================
     /**
-     * 列表默认大小 = 当前【可见】元素数量。
-     * 被隐藏（display:none / visibility:hidden / opacity:0 / 被遮挡）的元素不计入，
-     * 避免后续 nth()/first() 拿到隐藏元素后，Playwright 在 click/getText 时的
-     * scrollIntoViewIfNeeded 报异常。
+     * 列表大小 = 当前 DOM 中匹配的元素总数（含隐藏副本），<b>并非</b>「可见数量」。
+     * <p>实现：对首个匹配元素 {@code waitFor(VISIBLE)} 做存活保护（确保列表非空时不会因首元素隐藏而抛错），
+     * 随后返回 {@code count()} —— {@code count()} 统计的是 DOM 匹配总数，<b>不过滤</b>可见性，
+     * 因此隐藏（display:none / visibility:hidden / 落在隐藏容器内）的元素也会被计入。
+     * 若需「只统计肉眼可见项」，请改用 {@link #visibleSize()} / {@link #visibleSizeStrict()}。</p>
+     * <p>注意：{@link #get(int)} 的上界即本方法返回值（总数），调用方若期望「只取可见项」需自行结合
+     * {@link #visibleSize()} 约束索引范围。</p>
      */
     @Override
     public int size() {
@@ -192,6 +195,41 @@ public final class PageElementList extends AbstractList<PageElement> {
             logger.warn("Unexpected error getting size: {}", selector, e);
             return 0;
         }
+    }
+
+    // ========================== 可见数量（实时查询 DOM） ==========================
+    /**
+     * 返回当前【真正可见】元素数量（排除 display:none / visibility:hidden / 零尺寸祖先隐藏，
+     * 对齐 Playwright {@code :visible}，等价于 {@link ElementVisibility#isVisible(Locator)} 宽松档）。
+     * <p>与 {@link #size()} 的区别：{@code size()} 返回 DOM 匹配总数（含隐藏），本方法只计肉眼可见项。
+     * 实现：遍历每个匹配项，用框架 {@link ElementVisibility} 严格可见性探针逐元素判定并计数
+     * （对较大列表有一定 evaluate 开销，列表规模通常可控）。</p>
+     */
+    public int visibleSize() {
+        return countVisible(false);
+    }
+
+    /**
+     * 严格可见数量：在 {@link #visibleSize()} 基础上额外排除 opacity:0 / 视口外 / 被遮挡
+     * （{@link ElementVisibility#isVisibleStrict(Locator)}），用于「多份重叠 / 离屏副本只计真正可交互项」的场景。
+     */
+    public int visibleSizeStrict() {
+        return countVisible(true);
+    }
+
+    private int countVisible(boolean strict) {
+        Locator base = locatorInternal();
+        int total = base.count();
+        int visible = 0;
+        for (int i = 0; i < total; i++) {
+            Locator nth = base.nth(i);
+            boolean isVis = strict ? ElementVisibility.isVisibleStrict(nth)
+                                   : ElementVisibility.isVisible(nth);
+            if (isVis) {
+                visible++;
+            }
+        }
+        return visible;
     }
 
     // ========================== 获取元素（一次等待） ==========================

@@ -44,7 +44,7 @@ public class CodegenLogGateTest {
         Assume.assumeTrue(!verboseOpened());
         CodegenLogGate.apply();
         Level lv = effectiveLevel(CODGEN_LAUNCHER);
-        Assert.assertTrue("codegen v3 默认级别应 ≥ WARN（死开关默认关），实际 " + lv,
+        Assert.assertTrue("codegen v3 默认级别应 >= WARN（死开关默认关），实际 " + lv,
                 lv.levelInt >= Level.WARN_INT);
     }
 
@@ -53,7 +53,7 @@ public class CodegenLogGateTest {
         Assume.assumeTrue(!verboseOpened());
         CodegenLogGate.apply();
         Level lv = effectiveLevel(PKG_CODGEN);
-        Assert.assertTrue("codegen v3 默认级别应 ≥ WARN（死开关默认关），实际 " + lv,
+        Assert.assertTrue("codegen v3 默认级别应 >= WARN（死开关默认关），实际 " + lv,
                 lv.levelInt >= Level.WARN_INT);
     }
 
@@ -74,6 +74,6 @@ public class CodegenLogGateTest {
         Assume.assumeTrue(verboseOpened());
         CodegenLogGate.apply();
         Level lv = effectiveLevel(CODGEN_LAUNCHER);
-        Assert.assertTrue("打开后级别应 ≤ INFO，实际 " + lv, lv.levelInt <= Level.INFO_INT);
+        Assert.assertTrue("打开后级别应 <= INFO，实际 " + lv, lv.levelInt <= Level.INFO_INT);
     }
 }

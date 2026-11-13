@@ -9,7 +9,8 @@ import static org.junit.Assert.assertTrue;
 public class FrameworkRecordingConfigTest {
 
     private static final String RECORDING_KEY = ConfigRegistry.FRAMEWORK_RECORDING_ENABLED.key();
-    private static final String LEGACY_KEY = ConfigRegistry.WEB_FRAMEWORK_LOGGING.key();
+    /** 已下线的历史键名：保留同名系统属性回归护栏，防止兼容回退被重新引入。 */
+    private static final String LEGACY_KEY = "framework.logging";
     private final String previousRecording = System.getProperty(RECORDING_KEY);
     private final String previousLegacy = System.getProperty(LEGACY_KEY);
 
@@ -21,7 +22,6 @@ public class FrameworkRecordingConfigTest {
 
     @Test
     public void usesDedicatedRecordingSettingWhenConfigured() {
-        System.setProperty(LEGACY_KEY, "VERBOSE");
         System.setProperty(RECORDING_KEY, "false");
         assertFalse(FrameworkRecordingConfig.isEnabled());
 
@@ -30,12 +30,29 @@ public class FrameworkRecordingConfigTest {
     }
 
     @Test
-    public void fallsBackToLegacyRecordingSettingWhenNewSettingIsAbsent() {
+    public void defaultsToEnabledWhenRecordingSettingIsAbsent() {
         System.clearProperty(RECORDING_KEY);
-        System.setProperty(LEGACY_KEY, "VERBOSE");
+        assertTrue(FrameworkRecordingConfig.isEnabled());
+    }
+
+    @Test
+    public void legacyLoggingKeyNeverDisablesRecording() {
+        System.clearProperty(RECORDING_KEY);
+        System.setProperty(LEGACY_KEY, "QUIET");
         assertTrue(FrameworkRecordingConfig.isEnabled());
 
-        System.setProperty(LEGACY_KEY, "QUIET");
+        System.setProperty(RECORDING_KEY, "true");
+        System.setProperty(LEGACY_KEY, "OFF");
+        assertTrue(FrameworkRecordingConfig.isEnabled());
+    }
+
+    @Test
+    public void legacyLoggingKeyNeverEnablesRecording() {
+        System.setProperty(RECORDING_KEY, "false");
+        System.setProperty(LEGACY_KEY, "VERBOSE");
+        assertFalse(FrameworkRecordingConfig.isEnabled());
+
+        System.setProperty(LEGACY_KEY, "TRACE");
         assertFalse(FrameworkRecordingConfig.isEnabled());
     }
 

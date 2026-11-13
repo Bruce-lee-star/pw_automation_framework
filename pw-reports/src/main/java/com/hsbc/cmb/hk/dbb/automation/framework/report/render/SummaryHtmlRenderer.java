@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -281,7 +283,11 @@ public final class SummaryHtmlRenderer {
         return t;
     }
 
-    /** 人读时间戳格式（{@code yyyy-MM-dd HH:mm:ss}，系统默认时区渲染）。 */
+    /**
+     * 人读时间戳格式（{@code yyyy-MM-dd HH:mm:ss}）。渲染前统一换算到
+     * {@link PwReportsConfig#reportZone()}，并由 {@link #humanTs} 追加 {@code (UTC+08:00)} 后缀——
+     * 报告里所有时间同区、且读者一眼看出是哪个时区（2026-11-11 用户要求）。
+     */
     private static final DateTimeFormatter HUMAN_TS =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT);
 
@@ -289,29 +295,79 @@ public final class SummaryHtmlRenderer {
      * 运行窗口（index / feature / per-case / 邮件四份报告顶栏共用，2026-10-22 用户要求：
      * 「顶部除报告名外，显示生成时间、从什么时间开始测试、什么时间结束」）。
      *
-     * <p>口径：{@code startedAt} = 最早用例开始时间、{@code endedAt} = 最晚用例结束时间、
-     * {@code generatedAt} = 报告生成时刻；均已格式化为 {@code yyyy-MM-dd HH:mm:ss}。
+     * <p>口径（2026-11-11 按用户反馈修正 rerun 语义）：
+     * <ul>
+     *   <li>{@code startedAt} = 最早用例的<b>首次</b>开始时间（{@code firstStartTime}，
+     *       旧数据缺失时回退 {@code startTime}）。rerun 覆盖后用例的 {@code startTime} 已是
+     *       重跑时刻，若仍用它，整个运行的 Started 会退化成最后一轮（用户实测现象）；</li>
+     *   <li>{@code endedAt} = 最晚用例的结束时间（最后一轮最后完成的时刻）；</li>
+     *   <li>{@code lastStartedAt} = 最晚的 {@code startTime}，即<b>最后一次执行</b>的开始时刻。
+     *       per-case 被重跑时同时给出「总窗口」与「最后一次执行窗口」，避免
+     *       {@code Started 10:00 → Ended 10:35} 配 {@code 1.3s} 自相矛盾；</li>
+     *   <li>{@code rerunNote} = 仅在发生过重跑时放入（如 {@code rerun ×1 · 3 cases}），
+     *       未重跑时该键<b>不出现</b>在模型里，模板用 {@code run.rerunNote??} 判断。
+     *       index / feature 用它做汇总；per-case 改用 {@code attempt N + last run} 文案。</li>
+     * </ul>
      * 空跑或无时间戳时 started/ended 为 {@code "—"}，{@code generatedAt} 恒有值。</p>
      */
     static Map<String, Object> runWindow(List<TestOutcome> outcomes) {
         List<TestOutcome> list = outcomes == null ? List.of() : outcomes;
         OffsetDateTime min = null;
         OffsetDateTime max = null;
+        OffsetDateTime lastStart = null;
+        int rerunCases = 0;
+        int maxAttempt = 1;
         for (TestOutcome o : list) {
-            OffsetDateTime s = parseQuietly(o.getStartTime());
+            OffsetDateTime s = parseQuietly(firstStartOf(o));
             OffsetDateTime e = parseQuietly(o.getEndTime());
+            OffsetDateTime last = parseQuietly(o.getStartTime());
             if (s != null && (min == null || s.isBefore(min))) {
                 min = s;
             }
             if (e != null && (max == null || e.isAfter(max))) {
                 max = e;
             }
+            if (last != null && (lastStart == null || last.isAfter(lastStart))) {
+                lastStart = last;
+            }
+            int attempt = o.getAttempt();
+            if (attempt > 1) {
+                rerunCases++;
+                maxAttempt = Math.max(maxAttempt, attempt);
+            }
         }
+        ZoneId zone = PwReportsConfig.reportZone();
         Map<String, Object> w = new LinkedHashMap<>();
-        w.put("startedAt", min == null ? "—" : HUMAN_TS.format(min));
-        w.put("endedAt", max == null ? "—" : HUMAN_TS.format(max));
-        w.put("generatedAt", HUMAN_TS.format(OffsetDateTime.now()));
+        w.put("startedAt", min == null ? "—" : humanTs(min, zone));
+        w.put("endedAt", max == null ? "—" : humanTs(max, zone));
+        w.put("lastStartedAt", lastStart == null ? "—" : humanTs(lastStart, zone));
+        w.put("generatedAt", humanTs(OffsetDateTime.now(zone), zone));
+        if (rerunCases > 0) {
+            //  ×N 的 N = 重跑轮次数（attempt 最大值 - 1）；cases = 被重跑过的用例数
+            w.put("rerunNote", "rerun ×" + (maxAttempt - 1)
+                    + " · " + rerunCases + (rerunCases == 1 ? " case" : " cases"));
+        }
         return w;
+    }
+
+    /**
+     * 时间戳 → 报告时区的人读串，末尾带时区后缀（{@code 2026-11-11 10:00:00 (UTC+08:00)}）。
+     * 包级可见以便单测直接验证换算与后缀。
+     */
+    static String humanTs(OffsetDateTime ts, ZoneId zone) {
+        ZonedDateTime zoned = ts.atZoneSameInstant(zone);
+        return HUMAN_TS.format(zoned) + " (" + zoneLabel(zoned.getOffset()) + ")";
+    }
+
+    /** 时区标签：{@code UTC} / {@code UTC+08:00} / {@code UTC-05:00}。 */
+    private static String zoneLabel(ZoneOffset offset) {
+        return offset.getTotalSeconds() == 0 ? "UTC" : "UTC" + offset.getId();
+    }
+
+    /** 用例首次开始时间（rerun 后仍指向首轮）；旧 JSON 无该字段时回退 {@code startTime}。 */
+    private static String firstStartOf(TestOutcome o) {
+        String first = o.getFirstStartTime();
+        return first == null || first.isBlank() ? o.getStartTime() : first;
     }
 
     /** ISO-8601 → {@link OffsetDateTime}；缺失/不可解析时返回 null（不抛，容忍脏数据）。 */

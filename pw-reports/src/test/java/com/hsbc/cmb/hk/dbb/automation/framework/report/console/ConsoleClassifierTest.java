@@ -50,7 +50,7 @@ class ConsoleClassifierTest {
     }
 
     @Test
-    @DisplayName("分组顺序固定 route→net→out→err（无 log 组），且只输出非空组")
+    @DisplayName("分组顺序固定 route->net->out->err（无 log 组），且只输出非空组")
     void groupsAreOrderedAndNonEmptyOnly() {
         List<Map<String, Object>> groups = ConsoleClassifier.classify(
                 List.of("plain stdout", "INFO c.Foo - started", "[Route] register GET",

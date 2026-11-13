@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParser;
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.CaptureStage;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.microsoft.playwright.Request;
@@ -68,6 +69,10 @@ import java.util.Set;
  *                               由 {@code OriginResolver} 解析；非采集路径为
  *                               {@link RequestOrigin#UNKNOWN}。配合 {@code captureSeq}
  *                               一起表达"谁 / 哪一版导航 / 第几条记录"。
+ * @param stage                采集生命周期阶段（见 {@link CaptureStage}）；业务只读查询
+ *                               只返回 {@link CaptureStage#BODY_MATERIALIZED}
+ * @param bodyUnavailableReason body 为空/未物化的原因（固定英文文案，不含业务数据）；
+ *                               null = 无异常
  */
 public record CapturedApiCall(String pattern, String method, String url,
                               Map<String, String> requestHeaders, String requestBodyPreview,
@@ -76,17 +81,37 @@ public record CapturedApiCall(String pattern, String method, String url,
                               long durationMs, boolean timedOut, long recordedAtMillis,
                               Set<String> channels, String primaryChannel,
                               String contentType, byte[] responseBodyBytes,
-                              CapturedBody body, long captureSeq, RequestOrigin origin) {
+                              CapturedBody body, long captureSeq, RequestOrigin origin,
+                              CaptureStage stage, String bodyUnavailableReason) {
 
     /** 未被采集序号标记（派发链证据等不走 {@code CaptureSink} 的路径）。 */
     public static final long UNSEQUENCED = -1L;
 
     /**
+     * 兼容构造（旧 19 参签名）：派发链证据 / monitor 结果渲染 / 测试夹具等"已定案快照"路径，
+     * 默认视为 {@link CaptureStage#BODY_MATERIALIZED}（无体不可用原因）。
+     *
+     * <p>保留该签名让既有构造点零改动：采集链路走全参构造显式携带阶段；非采集路径本就代表
+     * 一条完整快照，不该被业务只读过滤误伤。
+     */
+    public CapturedApiCall(String pattern, String method, String url,
+                           Map<String, String> requestHeaders, String requestBodyPreview,
+                           Integer responseStatus, Map<String, String> responseHeaders,
+                           String responseBody, boolean responseBodyTruncated,
+                           long durationMs, boolean timedOut, long recordedAtMillis,
+                           Set<String> channels, String primaryChannel,
+                           String contentType, byte[] responseBodyBytes,
+                           CapturedBody body, long captureSeq, RequestOrigin origin) {
+        this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
+                responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
+                channels, primaryChannel, contentType, responseBodyBytes,
+                body, captureSeq, origin, CaptureStage.BODY_MATERIALIZED, null);
+    }
+
+    /**
      * 兼容构造（旧 12 参签名）：{@code channels} 为空集、{@code primaryChannel} 为 null、
      * {@code captureSeq} 为 {@link #UNSEQUENCED}、{@code origin} 为 {@link RequestOrigin#UNKNOWN}。
-     *
-     * <p>目的：本次只为采集记录增加"分渠道"信息，既有调用点（派发链证据、monitor 结果渲染等）
-     * 不需要跟着改签名，避免大范围牵动；需要标注渠道的新调用点走全参构造即可。
+     * 阶段沿用 19 参兼容构造的默认（已完成）。
      */
     public CapturedApiCall(String pattern, String method, String url,
                            Map<String, String> requestHeaders, String requestBodyPreview,
@@ -129,6 +154,8 @@ public record CapturedApiCall(String pattern, String method, String url,
                 : java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(channels));
         // 数组不是不可变类型：不拷贝会被静态分析判为"存了外部可变对象"（EI_EXPOSE_REP2）并拦下构建。
         responseBodyBytes = responseBodyBytes == null ? null : responseBodyBytes.clone();
+        // 兼容构造已显式传"已完成"；全参构造也做 null 兜底，防 NPE 让业务只读过滤失效。
+        stage = stage == null ? CaptureStage.BODY_MATERIALIZED : stage;
     }
 
     /** 只读视图：静态分析要求访问器不得直接返回可变类型字段（与 pw-core 的 CapturedApiCallView 同处理）。 */

@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 测试替身（真实实现类，满足"每接口≥2实现：生产 RouteRuntimeImpl + 测试替身"验收）。
+ * 测试替身（真实实现类，满足"每接口>=2实现：生产 RouteRuntimeImpl + 测试替身"验收）。
  *
  * <p>仅用于验证工厂换实现全链路生效；不依赖真实浏览器/驱动。协作者以真实轻量实例承载
  * （本模块仅 {@code mockito-core}，不支持 mock final 类），{@link #close()} 负责释放其资源。

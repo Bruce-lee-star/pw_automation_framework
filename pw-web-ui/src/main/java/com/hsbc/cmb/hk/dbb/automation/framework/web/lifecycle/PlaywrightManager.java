@@ -388,7 +388,7 @@ public class PlaywrightManager {
             // 否则后续 getContext() 新建 Context 时不会注入 storageState，导致「本地有有效缓存却仍走完整登录」
             // （master 分支「首次登录不加载 session 文件」的等价缺陷）。此时本就无存活 Context，谈不上「重建」。
             customOptions().setStorageState(storageStateJson);
-            logger.debug("StorageState set (context not alive) — will apply on next getContext() creation");
+            logger.debug("StorageState set (context not alive) - will apply on next getContext() creation");
         }
     }
 
@@ -412,7 +412,7 @@ public class PlaywrightManager {
             // 否则后续 getContext() 新建 Context 时不会注入 storageState，导致「本地有有效缓存却仍走完整登录」
             // （master 分支「首次登录不加载 session 文件」的等价缺陷）。此时本就无存活 Context，谈不上「重建」。
             customOptions().setStorageStatePath(storageStatePath);
-            logger.debug("StorageState path set (context not alive) — will apply on next getContext() creation: {}",
+            logger.debug("StorageState path set (context not alive) - will apply on next getContext() creation: {}",
                     storageStatePath);
         }
     }

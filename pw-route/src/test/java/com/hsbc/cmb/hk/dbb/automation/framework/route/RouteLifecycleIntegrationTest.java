@@ -114,8 +114,8 @@ public class RouteLifecycleIntegrationTest {
         RouteDsl.on(ctx).api("/api/a").mock().status(200).body("{}").register();
 
         RouteLifecycle lifecycle = RouteLifecycleRegistry.get();
-        assertNull( "Route 实现不向 RouteLifecycle 查询面暴露捕获句柄 → null（等价未启用降级）", lifecycle.getCurrentCapture());
-        assertNull( "无断言上下文 → null", lifecycle.resolveFailureCapture());
+        assertNull( "Route 实现不向 RouteLifecycle 查询面暴露捕获句柄 -> null（等价未启用降级）", lifecycle.getCurrentCapture());
+        assertNull( "无断言上下文 -> null", lifecycle.resolveFailureCapture());
         assertEquals("primary 缺失时 sanitizeUrl 原样返回", (Object) "https://api.example/x?a=1", (Object) lifecycle.sanitizeUrl("https://api.example/x?a=1"));
     }
 

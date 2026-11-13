@@ -113,11 +113,11 @@ public final class PatternBinder implements AutoCloseable {
 
     /** 注册超时降级告警：行为影响面 + 恢复严格语义的方法，缺一不可（避免"静默失效"）。 */
     private static void reportDegradedRegistration(ApiSpec spec, long bindBoundMs) {
-        LOGGER.error("[Route] route registration DEGRADED for pattern='{}' capability={} — no reply within {}ms; "
+        LOGGER.error("[Route] route registration DEGRADED for pattern='{}' capability={} - no reply within {}ms; "
                         + "this rule is INERT for this case (its mock/monitor will NOT apply).",
                 spec.pattern(), spec.capability(), bindBoundMs);
         if (spec.capability() != RouteCapability.MONITOR) {
-            LOGGER.warn("[Route] DEGRADED rule '{}' is BEHAVIOUR-AFFECTING (capability={}) — the case will run "
+            LOGGER.warn("[Route] DEGRADED rule '{}' is BEHAVIOUR-AFFECTING (capability={}) - the case will run "
                             + "WITHOUT this mock/modify/delay, so its behaviour may differ from the intended scenario.",
                     spec.pattern(), spec.capability());
         }

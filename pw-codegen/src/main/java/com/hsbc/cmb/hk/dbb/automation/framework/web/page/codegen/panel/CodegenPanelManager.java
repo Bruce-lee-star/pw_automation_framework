@@ -140,12 +140,21 @@ public final class CodegenPanelManager {
     public CodegenPanelHandle open(Path panelHtml, Consumer<List<Object>> onCommand, String nlsLang) {
         // 每次会话刷新配置（idle timeout 等 -D 可即时生效）；panelResourceDir 由固定导出的 html 推导。
         CodegenPanelConfig cfg = CodegenPanelConfig.fromSystem();
+        //  codegen 的 pick/注入全部依赖 CDP，Firefox/WebKit 无 CDP 支持：明确拒绝并指引改用 chrome，
+        //  不静默回退 Chromium（避免用户以为录的是 firefox/webkit 的页面）。
+        if (!CodegenPanelConfig.isChromiumFamily(cfg.browserType())) {
+            throw new IllegalStateException("Codegen panel requires CDP and only supports Chromium-based "
+                    + "browsers (chromium/chrome/edge); current playwright.browser.type=" + cfg.browserType()
+                    + ". Please switch to chrome, e.g. playwright.browser.channel=chrome "
+                    + "or playwright.browser.type=chromium.");
+        }
         Path panelParent = panelHtml == null ? null : panelHtml.getParent();
         Path serveDir = (panelParent == null) ? null : panelParent.toAbsolutePath().normalize();
         cfg = new CodegenPanelConfig(
                 serveDir, cfg.profileDir(), cfg.idleTimeoutMillis(),
                 cfg.launchTimeoutMs(), cfg.navigateTimeoutMs(), cfg.readyTimeoutMs(),
-                cfg.commandPollIntervalMs(), nlsLang);
+                cfg.commandPollIntervalMs(), nlsLang, cfg.browserChannel(),
+                cfg.browserExecutablePath(), cfg.browserType());
         this.config = cfg;
         // 活跃标记提前（watchdog 竞态防护）：ensureProcess 在途期间不回收新进程。
         lastActiveNanos = System.nanoTime();
@@ -216,7 +225,7 @@ public final class CodegenPanelManager {
                     if (state == State.READY && process == p) {
                         process = null;
                         state = State.DEGRADED;
-                        log.info("[codegen][panel] resident panel process is dead — DEGRADED, next open will relaunch");
+                        log.info("[codegen][panel] resident panel process is dead - DEGRADED, next open will relaunch");
                     }
                 }
                 continue;
@@ -342,7 +351,7 @@ public final class CodegenPanelManager {
         }
         long elapsedNanos = System.nanoTime() - lastActiveNanos;
         if (elapsedNanos >= TimeUnit.MILLISECONDS.toNanos(idleMillis)) {
-            log.info("[codegen][panel] no active session for {}ms — idle timeout reached, reclaiming panel process",
+            log.info("[codegen][panel] no active session for {}ms - idle timeout reached, reclaiming panel process",
                     idleMillis);
             shutdownProcess();
         }
@@ -396,7 +405,7 @@ public final class CodegenPanelManager {
         // 仍存活，若无人回收会泄漏 driver 进程且 JVM 无法干净退出。shutdownProcess() 在
         // process 已为 null 时是 no-op，此处是唯一回收点。offload 到 LAUNCH_EXECUTOR，
         // 避免在本 Playwright 事件派发线程上同步发 close 协议引发潜在死锁（closeNow 各段已吞异常）。
-        log.info("[codegen][panel] panel window closed by OS — reclaiming driver/server resources");
+        log.info("[codegen][panel] panel window closed by OS - reclaiming driver/server resources");
         LAUNCH_EXECUTOR.submit(p::closeNow);
         if (cb != null) {
             try {
@@ -689,6 +698,17 @@ public final class CodegenPanelManager {
                 .setHeadless(false)
                 .setTimeout(cfg.launchTimeoutMs())
                 .setArgs(args);
+        String channel = cfg.browserChannel();
+        if (channel != null && !channel.isBlank()) {
+            //  复用框架主浏览器的 channel（如 chrome/msedge）：直接用系统已安装浏览器，
+            //  避免面板另下 Chromium、与框架浏览器路径/版本不一致。
+            options.setChannel(channel.trim());
+        }
+        String executablePath = cfg.browserExecutablePath();
+        if (executablePath != null && !executablePath.isBlank()) {
+            //  框架显式指定了 chrome/edge 可执行文件路径时，面板同样使用它（优先级高于 channel）。
+            options.setExecutablePath(Path.of(executablePath.trim()));
+        }
         return pw.chromium().launchPersistentContext(profile, options);
     }
 

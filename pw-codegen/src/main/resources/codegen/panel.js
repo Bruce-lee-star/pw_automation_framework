@@ -448,6 +448,13 @@
     // v2.20：面板移除「停止」按钮 —— 定稿语义由「结束会话」承载（未定稿会先定稿），
     // 避免两个按钮功能重叠；Java "stop" 命令保留（被测页控制条仍使用），此处不再绑定面板按钮。
     document.getElementById('btn-end-session').onclick = function () { send('endSession'); };
+    // 产物出口：Java 侧把最近一次定稿的三栏写成 .java 文件，并把绝对路径回显到状态条。
+    document.getElementById('btn-export').onclick = function () { send('export'); };
+    // 录制期 dialog 策略（整场生效）：accept 录确认分支、dismiss 录取消分支。
+    // 默认 accept（业务主流程是「确认」）；Playwright 官方录制器默认 dismiss，此处是产品选择。
+    document.getElementById('sel-dialog-policy').onchange = function () {
+        send('dialogPolicy', this.value);
+    };
     document.getElementById('btn-group').onclick = function () {
         var ids = checkedIds();
         if (ids.length < 2) { window.alert('请至少勾选 2 个元素，再「标记为一组」。'); return; }

@@ -189,6 +189,23 @@ public @interface RoleElement {
      */
     State expanded() default State.ANY;
 
+    /**
+     * 可见性过滤，对齐 Playwright {@code Locator.filter(visible)}（浏览器层判定，识别所有祖先
+     * display:none / visibility:hidden / 零尺寸，等价于 {@link ElementVisibility} 的宽松档）。
+     * <ul>
+     *   <li>{@link #ANY}：不限定（默认，匹配可见与隐藏元素，零回归）；</li>
+     *   <li>{@link #YES}：只匹配可见元素——自动收敛多份隐藏副本，解决「多 Continue 仅一个可见」类 strict 冲突；</li>
+     *   <li>{@link #NO}：只匹配隐藏元素（如定位「已折叠 / 未展开」区域）。</li>
+     * </ul>
+     * <p>语义与框架 {@link ElementVisibility} 一致；若需额外排除 opacity:0 / 视口外 / 被遮挡，
+     * 请显式调用 {@link ElementVisibility#isVisibleStrict(Locator)}（严格档）。</p>
+     * <pre>
+     *     &#64;RoleElement(role = AriaRole.BUTTON, name = "Continue", visible = RoleElement.State.YES)
+     *     public PageElement CONTINUE;   // 只匹配可见的 Continue，过滤掉其余隐藏副本
+     * </pre>
+     */
+    State visible() default State.ANY;
+
     /** 元素描述（可选），用于日志与错误信息 */
     String description() default "";
 
@@ -205,4 +222,17 @@ public @interface RoleElement {
      * 把底层 Locator 依次用 {@code page.frameLocator(seg).locator(...)} 包裹。
      */
     String[] frame() default {};
+
+    /**
+     * 父容器作用域（CSS 选择器）：把定位锚定在指定容器内，避免跨容器同名元素歧义
+     * （用户诉求「根据父级属性定位」）。等价于 {@code page.locator(scope).locator(child)}；
+     * 元素落在 iframe 内时，scope 在 {@link #frame()} 下钻之后再套（即 {@code frameLocator(seg).locator(scope).locator(child)}），
+     * 保证父容器也在 iframe 内被查找。默认空字符串：不限定作用域。
+     * <p>与 {@link #visible()} 互补：{@code scope} 解决「不同可见容器内同名」，{@code visible} 解决「隐藏副本」。</p>
+     * <pre>
+     *     &#64;RoleElement(role = AriaRole.BUTTON, name = "Continue", scope = "form.question-form")
+     *     public PageElement CONTINUE;   // 只在该表单容器内匹配 Continue
+     * </pre>
+     */
+    String scope() default "";
 }

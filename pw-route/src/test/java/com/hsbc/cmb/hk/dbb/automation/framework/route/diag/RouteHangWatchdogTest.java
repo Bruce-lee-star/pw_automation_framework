@@ -29,7 +29,7 @@ public class RouteHangWatchdogTest {
         assertNotNull(s);
         assertTrue(s.contains("Route-HangWatchdog"));
         assertTrue(s.contains("1234"));
-        assertTrue(s.contains("业务线程"));
+        assertTrue(s.contains("business thread"));
     }
 
     @Test

@@ -165,7 +165,7 @@ final class StepFailureAggregator {
 
         //  关键：直接在 stepFinished 回调中抛 AssertionError，使异常沿
         //   StepInterceptor → Cucumber → JUnit 传播，令 IDE runner 正确标红。
-        throw new AssertionError("API assertion failures detected — failing scenario:\n" + details);
+        throw new AssertionError("API assertion failures detected - failing scenario:\n" + details);
     }
 
     /**
@@ -200,7 +200,7 @@ final class StepFailureAggregator {
         RouteAssertionVerdict.record(report);
         // 直接在 stepFinished 回调中抛 AssertionError，使异常沿
         //  StepInterceptor → Cucumber → JUnit4 传播，令 IDE runner 正确标红。
-        throw new AssertionError("Route API assertion failures detected — failing scenario:\n" + report);
+        throw new AssertionError("Route API assertion failures detected - failing scenario:\n" + report);
     }
 
     /**
@@ -253,7 +253,7 @@ final class StepFailureAggregator {
         String details = String.join("\n", errors);
         logger.error("Uncaught page errors detected during step - failing scenario:\n{}", details);
         ReportingBridgeRegistry.get().recordReportData("Uncaught Page Errors", details);
-        throw new AssertionError("Uncaught page errors detected — failing scenario:\n" + details);
+        throw new AssertionError("Uncaught page errors detected - failing scenario:\n" + details);
     }
 
     /**
@@ -269,16 +269,16 @@ final class StepFailureAggregator {
         }
         StringBuilder sb = new StringBuilder();
         if (!trail.isEmpty()) {
-            sb.append("[导航轨迹 - 失败前页面去过]\n").append(trail);
+            sb.append("[navigation trail - pages visited before failure]\n").append(trail);
         }
         if (!popups.isEmpty()) {
             if (sb.length() > 0) {
                 sb.append("\n\n");
             }
-            sb.append("[未受管弹窗 - 框架未认领]\n").append(popups);
+            sb.append("[unmanaged popups - not registered by the framework]\n").append(popups);
         }
         String report = sb.toString();
-        logger.warn("[interaction-diagnostics] 步骤失败交互诊断:\n{}", report);
+        logger.warn("[interaction-diagnostics] step failure interaction diagnostics:\n{}", report);
         ReportingBridgeRegistry.get().recordReportData("Interaction Diagnostics (Failure)", report);
     }
 }

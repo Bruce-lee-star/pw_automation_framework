@@ -37,7 +37,7 @@ class ReportViewEnvironmentTest {
     }
 
     @Test
-    @DisplayName("空值不出现在 Environment 数据里（模板无需 — 占位）")
+    @DisplayName("空值不出现在 Environment 数据里（模板无需 - 占位）")
     void blankValuesAreDropped() {
         set("pw.report.target", null);
         set("base.url", "");

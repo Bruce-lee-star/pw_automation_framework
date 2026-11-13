@@ -30,7 +30,10 @@ final class RoleRevision {
     static CodegenEntry toCss(CodegenEntry entry) {
         if (entry == null) return null;
         String css = (entry.cssSelector == null || entry.cssSelector.isEmpty()) ? "html" : entry.cssSelector;
-        return new CodegenEntry(entry.sigKey, entry.role, entry.name, LocatorStrategy.CSS, entry.score,
-                css, css, entry.nlsKey, entry.index, entry.framePath, entry.shadowHosts);
+        // 必须走不可变拷贝：直接 new 一个 11 参条目会走旧构造重载，把 matchCount 强制为 1、
+        // tag 置 null、checked 置 false —— 复核失败时反而把生成侧语义全丢了。
+        // withLocator 也保留 roleHits：策略改成 CSS 后 effectiveMatchCount() 自动改读 matchCount，
+        // 历史复核值留作面板诊断证据，不会被误用于产物判定。
+        return entry.withLocator(LocatorStrategy.CSS, css, css);
     }
 }

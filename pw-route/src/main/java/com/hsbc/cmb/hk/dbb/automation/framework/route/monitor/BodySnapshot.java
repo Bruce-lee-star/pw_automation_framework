@@ -8,7 +8,7 @@ import java.util.List;
  * <p>{@code headers()} 是客户端本地快照、{@code body()} 是协议调用——两者都在拿到句柄的同一时刻
  * 取走，之后断言只依赖本对象，<b>不再触碰驱动句柄</b>。这正是"立即读、自己存"的落点：
  * 由 {@code MonitorSink} 的"到达即读"提前生成并存入 {@link CapturedExchange}，
- * body 断言消费本快照而非活句柄，从而消除"持有句柄→延迟读取"的驱逐窗口。</p>
+ * body 断言消费本快照而非活句柄，从而消除"持有句柄->延迟读取"的驱逐窗口。</p>
  *
  * @param bytes              响应体字节（快照失败 / 跳过时为 null）
  * @param headerNames        响应 header <b>名</b>清单（小写去重；只暴露名字不暴露值，防泄露）

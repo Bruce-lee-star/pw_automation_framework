@@ -547,7 +547,7 @@ public class PlaywrightInitializer {
         }
 
         if (isBlank(httpProxy) && isBlank(httpsProxy)) {
-            logger.debug("[Static Init] No download proxy configured — direct connection will be used");
+            logger.debug("[Static Init] No download proxy configured - direct connection will be used");
         }
     }
 

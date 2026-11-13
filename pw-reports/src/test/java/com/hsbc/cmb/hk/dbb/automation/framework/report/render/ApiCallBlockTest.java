@@ -110,7 +110,7 @@ class ApiCallBlockTest {
     @DisplayName("Route Captured 结构化块：与 API Request 同构（能力标签 + 方法/URL/状态/耗时 + 分区）")
     void parsesCapturedRouteBlock() {
         ApiCallBlock call = ApiCallBlock.parseCaptured(
-                "[Route MONITOR] https://host/api/v2/auth/assert?***** — {\n"
+                "[Route MONITOR] https://host/api/v2/auth/assert?***** - {\n"
                         + "  pattern   : auth/assert\n"
                         + "  request   : POST https://host/api/v2/auth/assert?ad=webapplication_cxp_sit1&did=56ab36e6\n"
                         + "  duration  : 417ms\n"
@@ -169,7 +169,7 @@ class ApiCallBlockTest {
     void capturedTailAfterClosingBraceIsPreserved() {
         //  模拟 MonitorSink.resultDetail() 经 detailWith 追加到 '}' 之后的 tail：
         //  通过态且仅校验 status 的 monitor 不读响应体，应给出 (not read — ...) 说明而非静默缺失。
-        String raw = "[Route MONITOR] https://host/x — {\n"
+        String raw = "[Route MONITOR] https://host/x - {\n"
                 + "  pattern   : auth/assert\n"
                 + "  reqHeaders:\n"
                 + "    accept: application/json\n"
@@ -178,7 +178,7 @@ class ApiCallBlockTest {
                 + "    content-type: application/json\n"
                 + "}\n"
                 + "  result    : PASS actual=200 expect=200 elapsed=417ms\n"
-                + "  respBody  : (not read — event-stream bodies are deliberately not read)";
+                + "  respBody  : (not read - event-stream bodies are deliberately not read)";
         ApiCallBlock call = ApiCallBlock.parseCaptured(raw);
 
         assertThat(call.getKind()).isEqualTo("MONITOR");
@@ -197,7 +197,7 @@ class ApiCallBlockTest {
     @Test
     @DisplayName("请求/响应头渲染为 JSON 对象（而非 k=v 拼接）")
     void headersAreRenderedAsJson() {
-        String raw = "[Route CAPTURED] https://host/x — {\n"
+        String raw = "[Route CAPTURED] https://host/x - {\n"
                 + "  reqHeaders:\n"
                 + "    accept: */*\n"
                 + "    content-type: application/json\n"
@@ -219,7 +219,7 @@ class ApiCallBlockTest {
     @Test
     @DisplayName("Route Captured 无法解析时降级为 Detail 分区：不抛异常、原文不丢")
     void capturedUnknownShapeKeepsDetail() {
-        ApiCallBlock call = ApiCallBlock.parseCaptured("[Route MOCK] https://host/x — {not-a-section}");
+        ApiCallBlock call = ApiCallBlock.parseCaptured("[Route MOCK] https://host/x - {not-a-section}");
 
         assertThat(call.getKind()).isEqualTo("MOCK");
         assertThat(call.getRows()).hasSize(1);
@@ -232,7 +232,7 @@ class ApiCallBlockTest {
     void capturedResponseBodyIsNeverTruncated() {
         String longValue = "a".repeat(6000);
         ApiCallBlock call = ApiCallBlock.parseCaptured(
-                "[Route MONITOR] https://host/x — {\n"
+                "[Route MONITOR] https://host/x - {\n"
                         + "  response  : 200\n"
                         + "  respBody:\n"
                         + "    {\n"

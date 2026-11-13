@@ -157,7 +157,7 @@ public final class LocalReportSink implements ReportSink {
 
         //  2026-11-02 用户需求：单 case 调试已在 renderOutcomeSafe 逐条打印该 case 链接；
         //  整跑（多 case）则在此统一打印聚合报告入口 index.html 与邮件报告 email-report.html，
-        //  CI/托管环境经 pw.report.base.url 绝对化为 http(s) 链接，本地回退 file://。
+        //  CI（Jenkins）由 BUILD_URL 自动绝对化为 http(s) 链接，本地回退 file://。
         if (!single) {
             log.info("Index report: {}", reportLink("index.html"));
             log.info("Email report: {}", reportLink("email-report.html"));
@@ -165,7 +165,7 @@ public final class LocalReportSink implements ReportSink {
 
         //  2026-11-02 用户需求：命令行整跑（多 case）时，控制台只给聚合入口、不逐条打印以免刷屏；
         //  另落盘 report-links.txt，逐条列出每条 case 的可点击链接（带 case 名，便于 grep 定位，如查 77），
-        //  CI/托管环境经 pw.report.base.url 绝对化为 http(s)，本地回退 file://。
+        //  CI（Jenkins）由 BUILD_URL 自动绝对化为 http(s)，本地回退 file://。
         writeReportLinksFile(outcomes, aggregated);
 
         if (errors.get() > 0) {
@@ -286,8 +286,8 @@ public final class LocalReportSink implements ReportSink {
     }
 
     /**
-     * 报告文件的可点击链接：CI/托管环境（配置了 {@code pw.report.base.url} / {@code PW_REPORT_BASE_URL}）
-     * 经基准 URL 绝对化为 http(s) 链接；本地未配置则回退 {@code file://}。
+     * 报告文件的可点击链接：CI（Jenkins）按 {@code BUILD_URL} 自动推导基准 URL 并绝对化为 http(s)
+     * 链接；本地（无 {@code BUILD_URL}）回退 {@code file://}。
      * 与 {@code HtmlRenderer.cssHref()} 同款约定：baseUrl 已规范为以 {@code /} 结尾。
      */
     private String reportLink(String relativePath) {

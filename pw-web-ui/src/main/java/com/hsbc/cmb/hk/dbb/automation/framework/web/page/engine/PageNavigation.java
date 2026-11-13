@@ -135,7 +135,7 @@ public final class PageNavigation {
     private static PlaywrightException selfHealOnceAfterSettle(BasePage bp, String url, Page.NavigateOptions options,
                                                                LoadState configuredState, long deadlineNanos,
                                                                DriverRaceErrors.Kind race, PlaywrightException original) {
-        logger.warn("[Navigation] driver race detected [{}]: {} — settling (≤{}ms) then retrying once: {}",
+        logger.warn("[Navigation] driver race detected [{}]: {} - settling (<={}ms) then retrying once: {}",
                 race, original.getMessage(), NAVIGATION_SETTLE_TIMEOUT_MS, url);
         long startMs = System.currentTimeMillis();
         try {

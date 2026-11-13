@@ -19,6 +19,10 @@ import java.util.function.Predicate;
  *
  * <p>本类在静态块中<b>自注册</b>到 {@link ApiCaptureQueryRegistry}，供 pw-web-ui 的业务门面
  * （{@code ApiCaptureContext.getCurrent()}）直接取用，无需依赖 pw-route。
+ *
+ * <p><b>业务只读边界</b>：{@code CaptureSink} 在唯一写入点只把
+ * {@code CaptureStage.BODY_MATERIALIZED} 收录进非消费式历史，故本类所有查询天然只返回已物化记录，
+ * 无需在各方法重复过滤；未物化终态仍可经 pw-route 的消费式诊断通道查看。
  */
 public final class ApiCaptureQueryImpl implements ApiCaptureQuery {
 

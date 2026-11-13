@@ -405,7 +405,7 @@ public class PageNavigationTest {
         when(config.getPageLoadState()).thenReturn("networkidle");
         when(page.url()).thenReturn(NAV_URL);
         // reload() 在 Playwright 中恒返回主文档响应（不会是 null）；此处 stub 一个响应，
-        // 使 historyNavigation 走"非空→enforce→等加载状态"的正常两步分支。
+        // 使 historyNavigation 走"非空->enforce->等加载状态"的正常两步分支。
         when(page.reload(any(Page.ReloadOptions.class))).thenReturn(mock(Response.class));
 
         ArgumentCaptor<Page.ReloadOptions> options = ArgumentCaptor.forClass(Page.ReloadOptions.class);

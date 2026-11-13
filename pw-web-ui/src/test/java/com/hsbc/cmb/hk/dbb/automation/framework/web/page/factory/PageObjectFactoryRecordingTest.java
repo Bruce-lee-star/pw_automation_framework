@@ -26,7 +26,8 @@ import static org.junit.Assert.assertTrue;
  */
 public class PageObjectFactoryRecordingTest {
 
-    private String prevLogging;
+    private static final String RECORDING_KEY = "framework.recording.enabled";
+    private String prevRecording;
     private RuntimeProvider prevProvider;
 
     /** 测试用组合式 Page Object：仅持有工厂注入的受管 Page 供应器。 */
@@ -91,20 +92,17 @@ public class PageObjectFactoryRecordingTest {
 
     @Before
     public void setUp() {
-        prevLogging = System.getProperty("framework.logging");
+        prevRecording = System.getProperty(RECORDING_KEY);
         prevProvider = PlaywrightManager.getProvider();
-        System.setProperty("framework.logging", "VERBOSE"); // 开启录制开关
+        System.setProperty(RECORDING_KEY, "true"); // 开启录制开关
     }
 
     @After
     public void tearDown() {
         PlaywrightManager.setProvider(prevProvider);
         PageObjectFactory.clear(DummyManagedPage.class);
-        if (prevLogging == null) {
-            System.clearProperty("framework.logging");
-        } else {
-            System.setProperty("framework.logging", prevLogging);
-        }
+        // 显式恢复默认值：Serenity 配置快照会让 clearProperty 无法回落到默认值
+        System.setProperty(RECORDING_KEY, prevRecording == null ? "true" : prevRecording);
     }
 
     @Test

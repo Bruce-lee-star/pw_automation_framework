@@ -256,7 +256,7 @@ public abstract class AbstractRestJob {
             }
             ReportingBridgeRegistry.get().recordApiOperation(block.toString());
         } catch (Throwable t) {
-            logger.debug("API 调用上报失败（忽略，不影响用例）: {}", t.toString());
+            logger.debug("Failed to report API invocation (ignored, no impact on test): {}", t.toString());
         }
     }
 
@@ -393,7 +393,7 @@ public abstract class AbstractRestJob {
                 ValidatableResponse response = invoker.apply(requestSpecification);
                 int status = response.extract().statusCode();
                 if (shouldRetry(status, idempotent, attempt, maxAttempts)) {
-                    logger.warn("API 请求返回 5xx（{}），幂等方法第 {}/{} 次将重试（退避 {}ms）: {}",
+                    logger.warn("API request returned 5xx ({}); idempotent method retry {}/{} (backoff {}ms): {}",
                             status, attempt, maxAttempts, delayMs, entity.getBaseUri());
                     sleepQuietly(delayMs);
                     last = response;
@@ -402,7 +402,7 @@ public abstract class AbstractRestJob {
                 return response;
             } catch (Exception e) {
                 if (idempotent && attempt < maxAttempts) {
-                    logger.warn("API 请求失败（{}），幂等方法第 {}/{} 次将重试（退避 {}ms）: {}",
+                    logger.warn("API request failed ({}); idempotent method retry {}/{} (backoff {}ms): {}",
                             e.getMessage(), attempt, maxAttempts, delayMs, entity.getBaseUri());
                     sleepQuietly(delayMs);
                     last = null;
@@ -425,7 +425,7 @@ public abstract class AbstractRestJob {
         }
         LockSupport.parkNanos(millis * 1_000_000L);
         if (Thread.currentThread().isInterrupted()) {
-            logger.debug("API 重试退避被中断（parkNanos 提前返回，中断标志保留）");
+            logger.debug("API retry backoff interrupted (parkNanos returned early, interrupt flag preserved)");
         }
     }
 

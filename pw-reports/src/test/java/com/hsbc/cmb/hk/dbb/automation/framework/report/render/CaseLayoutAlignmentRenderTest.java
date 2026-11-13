@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CaseLayoutAlignmentRenderTest {
 
     @Test
-    @DisplayName("通过用例：无右栏 → case-layout is-single（Execution steps 与上下卡片同宽）")
+    @DisplayName("通过用例：无右栏 -> case-layout is-single（Execution steps 与上下卡片同宽）")
     void passedCase_isSingleColumn() throws Exception {
         TestOutcome o = new TestOutcome();
         o.setOutcomeId("lay-pass");
@@ -30,7 +30,7 @@ class CaseLayoutAlignmentRenderTest {
     }
 
     @Test
-    @DisplayName("失败用例：Case actions 并入主列 → 仍是单栏（Execution steps 右边缘与上下卡片齐平）")
+    @DisplayName("失败用例：Case actions 并入主列 -> 仍是单栏（Execution steps 右边缘与上下卡片齐平）")
     void failedCase_isSingleColumnWithActions() throws Exception {
         TestOutcome o = new TestOutcome();
         o.setOutcomeId("lay-fail");

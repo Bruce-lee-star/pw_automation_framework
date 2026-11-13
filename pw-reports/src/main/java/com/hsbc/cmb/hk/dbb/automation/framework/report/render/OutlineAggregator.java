@@ -6,7 +6,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
@@ -30,8 +30,15 @@ import java.util.Map;
  */
 public final class OutlineAggregator {
 
-    private static final DateTimeFormatter ISO_UTC =
-            DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneOffset.UTC);
+    /**
+     * 与 {@code RecordingSession#ISO} 同口径（系统默认时区 + offset）。
+     *
+     * <p>此前固定 {@code ZoneOffset.UTC}：聚合父 outcome 的时间串是 UTC，而各行是本地时区，
+     * 报告按各自 offset 渲染 → 同一 outline 家族的父页与行页时间相差一个时区
+     * （2026-11-11 用户反馈"per case 时间不对"的成因之一）。</p>
+     */
+    private static final DateTimeFormatter ISO_TS =
+            DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneId.systemDefault());
 
     private OutlineAggregator() {
     }
@@ -100,6 +107,12 @@ public final class OutlineAggregator {
                 .max(Comparator.naturalOrder()).orElse(null);
         parent.setStartTime(minStart != null ? format(minStart) : first.getStartTime());
         parent.setEndTime(maxEnd != null ? format(maxEnd) : rows.get(rows.size() - 1).getEndTime());
+        //  首次开始时间：取各行（含 rerun 继承后的）最早者；执行次数取最大者，
+        //  使聚合父页在运行窗口 / rerun 标注上与行页一致。
+        Long minFirstStart = rows.stream().map(OutlineAggregator::epochOfFirstStart)
+                .filter(j -> j != null).min(Comparator.naturalOrder()).orElse(null);
+        parent.setFirstStartTime(minFirstStart != null ? format(minFirstStart) : parent.getStartTime());
+        parent.setAttempt(rows.stream().mapToInt(TestOutcome::getAttempt).max().orElse(1));
         parent.setDuration(rows.stream().mapToLong(TestOutcome::getDuration).sum());
         parent.setExamples(rows);
         return parent;
@@ -107,6 +120,12 @@ public final class OutlineAggregator {
 
     private static Long epochOfStart(TestOutcome o) {
         return parse(o.getStartTime());
+    }
+
+    /** 首次开始时间（rerun 后仍指向首轮）；缺失回退 {@code startTime}。 */
+    private static Long epochOfFirstStart(TestOutcome o) {
+        String first = o.getFirstStartTime();
+        return parse(first == null || first.isBlank() ? o.getStartTime() : first);
     }
 
     private static Long epochOfEnd(TestOutcome o) {
@@ -125,6 +144,6 @@ public final class OutlineAggregator {
     }
 
     private static String format(long epochMilli) {
-        return ISO_UTC.format(Instant.ofEpochMilli(epochMilli));
+        return ISO_TS.format(Instant.ofEpochMilli(epochMilli));
     }
 }

@@ -160,7 +160,12 @@ public class CucumberWithPwVerdictTest {
         try {
             notifier.fireTestStarted(description);
             bothStarted.countDown();
-            release.await(5, TimeUnit.SECONDS);
+            // await 的布尔返回值表示「是否在超时前被放行」，必须消费（SpotBugs RV_RETURN_VALUE_IGNORED）：
+            // 忽略它会让「等待超时」静默变成「继续往下跑」，用例仍可能通过，断言失去意义。
+            if (!release.await(5, TimeUnit.SECONDS)) {
+                error.compareAndSet(null, new AssertionError("等待主线程放行超时（5s）"));
+                return;
+            }
             RouteAssertionVerdict.record("[status=500] POST /api/" + marker + " (pattern=" + marker + ")");
             notifier.fireTestFinished(description);
         } catch (Throwable t) {

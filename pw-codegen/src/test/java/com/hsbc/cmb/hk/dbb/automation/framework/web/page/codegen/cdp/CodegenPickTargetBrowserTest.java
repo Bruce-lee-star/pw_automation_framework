@@ -41,7 +41,13 @@ public class CodegenPickTargetBrowserTest {
             + "<span class=\"new-password-hint-text\" data-i18n=\"password_hint\">"
             + "Do not enter your 6-digit Mobile Security Key PIN or Security Code here."
             + " Enter your logon password (6–30 characters, letters and/or numbers).</span>"
-            + "</div>";
+            + "</div>"
+            //  2026-11-11：点 label 必须保留 label（原逻辑会转发到关联 input）
+            + "<label class=\"field-label\" for=\"userName\">User name</label>"
+            + "<input id=\"userName\" name=\"userName\" type=\"text\">"
+            //  隐藏的重复副本：唯一性计数必须包含它，否则产物在面板显示后变成多匹配
+            + "<button class=\"panel-cta\">Continue</button>"
+            + "<div style=\"display:none\"><button class=\"panel-cta\">Continue</button></div>";
 
     private Playwright pw;
     private Browser browser;
@@ -99,6 +105,48 @@ public class CodegenPickTargetBrowserTest {
         assertEquals("自身已有名的元素不应被上溯", "span", self.get("tag").getAsString());
         String name = self.get("name").getAsString();
         assertTrue("span 自身文案应被带回", name.contains("Do not enter"));
+    }
+
+    /**
+     * 点 {@code <label>} ⇒ 必须保留 label 本身，绝不转发到关联 {@code <input>}。
+     *
+     * <p>2026-11-11 用户规则①：拾取对象必须 = 用户实际点击的 DOM 对象，不自动映射/跳转关联元素。
+     * label 自身带可访问名，命中 NLS 时可走文本语义策略生成 {@code @RoleElement(key=...)}。
+     */
+    @Test
+    public void clickingLabelKeepsLabelItself() {
+        JsonObject self = pick("label.field-label");
+
+        assertEquals("点 label 必须保留 label 本身（不得转发到关联 input）",
+                "label", self.get("tag").getAsString());
+        assertFalse("不得把关联 input 的 id 带回来（说明发生了元素跳转）",
+                "userName".equals(self.get("id").getAsString()));
+    }
+
+    /**
+     * 隐藏的重复副本必须参与唯一性计数。
+     *
+     * <p>2026-11-11 用户规则④：{@code data-i18n}/class 大量重复，不能凭"可见唯一"判定唯一——
+     * Playwright 的 locator 不做可见性过滤，strict mode 下多匹配即失败。此处页面有 1 个可见 +
+     * 1 个隐藏的 {@code .panel-cta}，产出的 CSS 必须全量只命中 1 个。
+     */
+    @Test
+    public void hiddenDuplicateIsCountedSoSelectorStaysUnique() {
+        JsonObject self = pick("button.panel-cta");
+        String css = self.get("cssSelector").getAsString();
+
+        //  允许为空：页面侧给不出全量唯一的 CSS 时不硬编一个多匹配选择器，
+        //  由 Java 侧的 XPath / 属性候选兜底（生成阶段还有 CodegenScorer 唯一性校验）。
+        //  硬约束只有一条：绝不能返回一个全量多匹配的选择器（隐藏副本被漏数就是这个后果）。
+        if (!css.isEmpty()) {
+            Object hits = page.evaluate("document.querySelectorAll(" + jsString(css) + ").length");
+            assertEquals("cssSelector 不得全量多匹配（隐藏副本也参与计数）", 1, ((Number) hits).intValue());
+        }
+    }
+
+    /** JS 字符串字面量（避免 CSS 里的引号/反斜杠破坏 evaluate 表达式）。 */
+    private static String jsString(String raw) {
+        return "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     /** 在真实浏览器里用嵌入 JS 对被选元素求值 getInfo，返回 {self:...}。 */

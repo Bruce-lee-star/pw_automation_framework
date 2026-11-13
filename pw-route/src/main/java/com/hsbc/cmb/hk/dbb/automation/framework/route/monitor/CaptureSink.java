@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.CaptureStage;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.route.RouteEvidenceRegistry;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.OriginResolver;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
@@ -48,10 +49,25 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>防泄漏：等不到响应的请求在 {@link #dump} 时按超时窗口（默认 30s，复用
  * {@code ApiSpec.monitorTimeoutMs}）定案为 {@code timedOut} 快照并移出 pending。
+ *
+ * <p><b>采集状态分层（{@link CaptureStage}）</b>：{@code MATCHED} = 命中规则、等待响应
+ * （{@code pendingByPattern}）；{@code ARRIVED} = 响应到达、持有句柄、body 未物化
+ * （{@code pendingMaterialization}）；{@code BODY_MATERIALIZED} = body 已在业务线程
+ * 按策略完成处理（含按配置显式不读体）。未推进到终态的定案记录（超时 / 3xx / 流式 /
+ * 句柄回收 / 协议失败）仍写日志与路由证据并注明原因，但<b>不进入业务只读查询</b>；
+ * 消费式 {@link #dump()} 保留全量，作为诊断/报告通道。
  */
 public final class CaptureSink {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CaptureSink.class);
+
+    /** body 未物化的固定原因文案（不含业务数据，可安全写入日志/报告）。 */
+    private static final String REASON_HANDLE_RECLAIMED = "response handle reclaimed before body read";
+    private static final String REASON_REDIRECT = "redirect response body not available";
+    private static final String REASON_EVENT_STREAM = "event-stream body deliberately not read";
+    private static final String REASON_READ_FAILED = "response body read failed";
+    private static final String REASON_TIMEOUT = "response timed out before arrival";
+    private static final String REASON_RETENTION_FAILED = "response body retention failed";
 
     private final int maxCaptured;
     private final long defaultTimeoutMs;
@@ -253,6 +269,7 @@ public final class CaptureSink {
             LOGGER.warn("[Route] capture body unavailable (response handle reclaimed) "
                             + "pattern='{}' url='{}'",
                     spec.pattern(), snapshot.url());
+            snapshot.markBodyUnavailable(REASON_HANDLE_RECLAIMED);
             enqueue(snapshot, null, null, false);
             return;
         }
@@ -270,13 +287,15 @@ public final class CaptureSink {
         if (status >= 300 && status < 400) {
             // 已知事实（重定向响应无 body），单独计数，不计入 bodyReadFailures 竞态桶
             redirectNotAvailableBodyReads.incrementAndGet();
+            snapshot.markBodyUnavailable(REASON_REDIRECT);
             enqueue(snapshot, null, contentType, false);
             return;
         }
         // SSE/流式（text/event-stream）：体永不结束，调 body() 会钉死线程直到 close 掐流
         // 才抛 TargetClosedError（E2E 实证：capture body unavailable WARN 即由此而来，2026-10-10）。
-        // 刻意不读体，只按 status/headers 定案，证据侧由 CapturedExchange 标注「event-stream body not read」。
+        // 刻意不读体，只按 status/headers 定案，证据侧注明原因（阶段停在 ARRIVED）。
         if (isStreamingContentType(contentType)) {
+            snapshot.markBodyUnavailable(REASON_EVENT_STREAM);
             enqueue(snapshot, null, contentType, false);
             return;
         }
@@ -293,13 +312,14 @@ public final class CaptureSink {
             LOGGER.warn("[Route] capture body unavailable (driver handle reclaimed / page closed) "
                             + "pattern='{}' url='{}': {}",
                     spec.pattern(), snapshot.url(), DriverErrors.shortMessage(read.failure));
+            snapshot.markBodyUnavailable(REASON_READ_FAILED);
             enqueue(snapshot, null, contentType, false);
             return;
         }
         byte[] bytes = read.bytes;
         CapturedBody created = null;
         try {
-            // 【不截断】整响应保留 —— 供业务"取整响应 → 改指定节点 → 当 mock 回放"使用。
+            // 【不截断】整响应保留 —— 供业务"取整响应 -> 改指定节点 -> 当 mock 回放"使用。
             // captureBodyLimitBytes 字段保留（兼容旧写法）但不再参与截断；截断标志恒为 false。
             // 【阈值生效点】由装配方冻结的采集策略决定留存形态：≤inlineMax 内存原字节；
             // 文本型且 ≤gzipMax 内存 gzip；否则落盘临时文件（落盘失败 fail-open 退回内存）。
@@ -307,6 +327,7 @@ public final class CaptureSink {
             // 编码口径仍由 contentType 决定（访问器内解析），故不再有"字符串往返"的堆峰值。
             created = BodyStore.of(bytes, contentType,
                     capturePolicy.inlineMaxBytes(), capturePolicy.gzipMaxBytes());
+            snapshot.markBodyMaterialized();   // 响应体已留存：推进到业务可见终态
             enqueue(snapshot, created, contentType, false);
         } catch (Throwable t) {
             // of() 内部已 fail-open（gzip/落盘失败均退回内存）；此处兜住任何意外并退回内存原字节
@@ -318,8 +339,12 @@ public final class CaptureSink {
                 created.close();
             }
             try {
-                enqueue(snapshot, BodyStore.of(bytes, contentType, Integer.MAX_VALUE, 0), contentType, false);
+                CapturedBody fallback = BodyStore.of(bytes, contentType, Integer.MAX_VALUE, 0);
+                // 阶段必须在 enqueue 之前推进：toDto 在 enqueue 内读取 snapshot.stage()
+                snapshot.markBodyMaterialized();
+                enqueue(snapshot, fallback, contentType, false);
             } catch (Throwable fallbackFailure) {
+                snapshot.markBodyUnavailable(REASON_RETENTION_FAILED);
                 enqueue(snapshot, null, contentType, false);
             }
         }
@@ -346,7 +371,9 @@ public final class CaptureSink {
             if (readBody) {
                 captureBodyNow(snapshot, spec); // 业务线程（main）：读 body 后入队
             } else {
-                // 未读取响应体：只保留 status/headers（本地快照），不发起 body() 协议调用
+                // 规则显式关闭读体：按配置完成物化流程，body 为 null 是预期语义。
+                // 仍推进到 BODY_MATERIALIZED，否则 .captureBody(false) 会整体从业务查询中消失。
+                snapshot.markBodyMaterialized();
                 enqueue(snapshot, null, null, false);
             }
         }
@@ -374,22 +401,28 @@ public final class CaptureSink {
         }
         CapturedApiCall call = toDto(snapshot, body, contentType, truncated, snapshot.captureSeq());
         captured.add(call);
-        // 非消费式历史（peek 用）：与消费式队列并行维护，保证"用例收尾复核真实流量"不会被
-        // 框架自身的断言结算（走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
-        // 事件驱动、生产者无锁：历史写入走并发队列，随后仅发一次无阻塞信号（AQS 单次 CAS，不 park、不阻塞）
-        history.add(call);
-        historySize.incrementAndGet();
-        while (historySize.get() > maxCaptured) {
-            CapturedApiCall evicted = history.poll();
-            if (evicted == null) {
-                break;   // 理论不可达：并发下计数与队列短暂不一致时不空转
-            }
-            historySize.decrementAndGet();
-            // 驱逐即释放，但必须排除"仍被消费队列持有"的对象：同一对象同处两队列，
-            // 关掉它会让随后的 dump() 把已失效载体交给业务（use-after-close）。
-            // 残留（本处不关、且此后无人关）由 reset() 与 JVM 退出兜底覆盖。
-            if (evicted != call && !captured.contains(evicted) && evicted.body() != null) {
-                evicted.body().close();
+        // 【业务只读边界 · 单一写入点】只把 BODY_MATERIALIZED 收录进非消费式历史 history。
+        // 未推进到终态的定案记录（超时 / 3xx / 流式 / 句柄回收 / 协议失败）仍进诊断队列
+        // captured（由 dump 消费）+ 日志 + 路由证据（含原因），但绝不出现在
+        // peek/all/lastOf/byUrl/byChannel/waitFor 的返回里。闸门放在写入点而非 7 个读取点，
+        // 可杜绝"新增查询方法忘记过滤"这类漏网。
+        if (isBusinessVisible(call)) {
+            // 与消费式队列并行维护，保证"用例收尾复核真实流量"不会被框架自身的断言结算
+            // （走 dump ⇒ 抽干 captured）抢走。上限同 maxCaptured，超出丢最旧。
+            history.add(call);
+            historySize.incrementAndGet();
+            while (historySize.get() > maxCaptured) {
+                CapturedApiCall evicted = history.poll();
+                if (evicted == null) {
+                    break;   // 理论不可达：并发下计数与队列短暂不一致时不空转
+                }
+                historySize.decrementAndGet();
+                // 驱逐即释放，但必须排除"仍被消费队列持有"的对象：同一对象同处两队列，
+                // 关掉它会让随后的 dump() 把已失效载体交给业务（use-after-close）。
+                // 残留（本处不关、且此后无人关）由 reset() 与 JVM 退出兜底覆盖。
+                if (evicted != call && !captured.contains(evicted) && evicted.body() != null) {
+                    evicted.body().close();
+                }
             }
         }
         // 通知等待者：版本前进 + 释放与"等待者数量 + 1"相当的许可。
@@ -406,8 +439,15 @@ public final class CaptureSink {
         // 日志里再灌一份多 KB 的 pretty body 只是白烧 CPU 与磁盘。
         String evidence = null;
         try {
+            // 诊断/报告通道保留全部终态：未物化的记录也写明阶段与原因，便于定位"为什么没有响应体"。
+            String stageLine = "stage     : " + call.stage()
+                    + (call.stage() == CaptureStage.BODY_MATERIALIZED
+                            ? " (business visible)" : " (business read suppressed)");
+            String reasonLine = call.bodyUnavailableReason() == null ? null
+                    : "bodyNote  : " + call.bodyUnavailableReason();
             evidence = call.detailWith(
-                    "result    : CAPTURED (no assertion; 'response' section is what the browser actually received)");
+                    "result    : CAPTURED (no assertion; 'response' section is what the browser actually received)",
+                    stageLine, reasonLine);
         } catch (Throwable t) {
             // 展示是纯旁路：任何异常都吞掉（含非 JSON 体、脱敏/格式化失败），绝不影响采集与主流程
             LOGGER.debug("[Route] capture evidence render skipped (non-fatal): {}", t.toString());
@@ -482,7 +522,8 @@ public final class CaptureSink {
                 null, truncated, snapshot.durationMs(), snapshot.responseTimedOut(),
                 snapshot.recordedAtMillis(),
                 snapshot.channels(), snapshot.primaryChannel(),
-                contentType, null, body, captureSeq, snapshot.origin());
+                contentType, null, body, captureSeq, snapshot.origin(),
+                snapshot.stage(), snapshot.bodyUnavailableReason());
     }
 
     /**
@@ -491,17 +532,51 @@ public final class CaptureSink {
      * <p>由 {@code RouteRuntimeImpl} 在每批 {@code drainMainThreadActions()} 收尾调用——响应轮询在 drain 里
      * 检出到达、持句柄后，<b>当次 drain 即读 body</b>（业务线程、协议调用安全），不再延迟到下一次采集查询。
      * 这让 {@code drainSettledAssertionFailures/register/close} 等<b>非查询型 drain</b>检出的到达也能立即物化，
-     * 压缩"检出到达→读取 body"窗口（对齐《网络API分层指南》"立即读、自己存"）。幂等：无待物化项时为空操作。</p>
+     * 压缩"检出到达->读取 body"窗口（对齐《网络API分层指南》"立即读、自己存"）。幂等：无待物化项时为空操作。</p>
      *
-     * <p>注：不可压缩的是"网络到达→本次业务 drain"窗口（受"body() 必须业务线程、禁后台泵 Connection"约束），
+     * <p>注：不可压缩的是"网络到达->本次业务 drain"窗口（受"body() 必须业务线程、禁后台泵 Connection"约束），
      * 本方法只保证"一旦 drain 检出到达，同批内即读"。</p>
      */
     public void materializeArrivedBodies() {
         flushPendingResponses();
     }
 
+    /** 业务只读判据：仅 body 已物化的记录进入 history（诊断/报告通道不受此限）。 */
+    private static boolean isBusinessVisible(CapturedApiCall call) {
+        return call != null && call.stage() != null && call.stage().isBusinessVisible();
+    }
+
+    /**
+     * 各阶段当前记录数（可观测；弱一致快照，仅用于诊断，非热路径）。
+     *
+     * <p>{@code MATCHED} = 仍在 pending 等待响应 + 已超时定案但未物化的记录；
+     * {@code ARRIVED} = 待物化句柄 + 响应已到但 body 未能留存；
+     * {@code BODY_MATERIALIZED} = 业务只读可见的记录数（{@code history} 规模）。</p>
+     */
+    public java.util.EnumMap<CaptureStage, Integer> stageCounts() {
+        java.util.EnumMap<CaptureStage, Integer> counts = new java.util.EnumMap<>(CaptureStage.class);
+        for (CaptureStage s : CaptureStage.values()) {
+            counts.put(s, 0);
+        }
+        counts.put(CaptureStage.BODY_MATERIALIZED, historySize.get());
+        for (ConcurrentLinkedQueue<CapturedExchange> pending : pendingByPattern.values()) {
+            counts.merge(CaptureStage.MATCHED, pending.size(), Integer::sum);
+        }
+        counts.merge(CaptureStage.ARRIVED, pendingMaterialization.size(), Integer::sum);
+        for (CapturedApiCall c : captured) {
+            // materialized 已由 history 计数；captured 里只补未物化的定案记录，避免重复计数
+            if (c != null && c.stage() != null && c.stage() != CaptureStage.BODY_MATERIALIZED) {
+                counts.merge(c.stage(), 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
     /**
      * 取走全部已定案快照（消费式；幂等——第二次调用返回空列表）。
+     *
+     * <p><b>诊断/报告通道</b>：返回<b>全部</b>终态记录（含未物化的超时/3xx/流式/读取失败），
+     * 而非仅业务可见记录；业务只读查询以 {@code peek/all/lastOf/byUrl/byChannel/waitFor} 为准。
      *
      * <p>执行两件事：
      * <ol>
@@ -550,6 +625,7 @@ public final class CaptureSink {
                 // 超时窗口恒定用本 sink 的默认值（横切语义：不受 monitor 断言超时影响）
                 if (now - snapshot.recordedAtNanos() > defaultTimeoutMs * 1_000_000L) {
                     snapshot.markTimedOut();
+                    snapshot.markBodyUnavailable(REASON_TIMEOUT); // 停在 MATCHED：业务只读不可见
                     timedOutCount.incrementAndGet();
                     pending.remove(snapshot);
                     enqueue(snapshot, null, null, false);
@@ -799,7 +875,7 @@ public final class CaptureSink {
                 c.requestHeaders(), c.requestBodyPreview(), c.responseStatus(), c.responseHeaders(),
                 responseText, c.responseBodyTruncated(), c.durationMs(), c.timedOut(),
                 c.recordedAtMillis(), c.channels(), c.contentType(), responseBytes,
-                toOriginView(c.origin()));
+                toOriginView(c.origin()), c.stage(), c.bodyUnavailableReason());
     }
 
     /** 归属映射：pw-route 的 {@link RequestOrigin} → pw-core 的跨模块视图（null 安全）。 */

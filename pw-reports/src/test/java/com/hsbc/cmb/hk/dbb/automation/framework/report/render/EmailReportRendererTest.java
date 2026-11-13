@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.UserStory;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -161,11 +163,13 @@ class EmailReportRendererTest {
                 .contains(">Min</div>");
         //  指标条标签加粗提色（用户反馈"Total/Clock 这些字体不显眼"）
         assertThat(html).contains("font-size:11px;font-weight:700;color:#475569;text-transform:uppercase");
-        //  运行时间行：生成 / 开始 / 结束（与三份站点报告同源的 run 窗口）
+        //  运行时间行：生成 / 开始 / 结束（与三份站点报告同源的 run 窗口，带时区后缀）
+        String started = SummaryHtmlRenderer.humanTs(
+                OffsetDateTime.parse("2026-10-15T10:15:30.123+08:00"), PwReportsConfig.reportZone());
         assertThat(html)
                 .contains("tests executed")
                 .contains("Generated at <b>")
-                .contains("Started <b>2026-10-15 10:15:30</b>");
+                .contains("Started <b>" + started + "</b>");
     }
 
     @Test

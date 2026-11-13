@@ -112,7 +112,7 @@ public class CloseGuardConcurrencyTest {
         while (CloseGuard.inFlightCount() > base) {
             if (System.nanoTime() > deadline) {
                 throw new AssertionError("超时后 worker 必须被回收至基线（期望=" + base
-                        + ", 实际=" + CloseGuard.inFlightCount() + "）—— 存在后台线程泄漏");
+                        + ", 实际=" + CloseGuard.inFlightCount() + "）-- 存在后台线程泄漏");
             }
             Thread.sleep(20);
         }

@@ -23,7 +23,7 @@ class FailureAnalysisTest {
     }
 
     @Test
-    @DisplayName("AssertionError 及其子类 → FAILURE（被测系统未达预期）")
+    @DisplayName("AssertionError 及其子类 -> FAILURE（被测系统未达预期）")
     void assertionErrorIsFailure() {
         FailureAnalysis a = FailureAnalysis.analyse(new AssertionError("step boom"));
         assertThat(a.getErrorType()).isEqualTo(FailureAnalysis.ErrorType.FAILURE);
@@ -31,7 +31,7 @@ class FailureAnalysisTest {
     }
 
     @Test
-    @DisplayName("非断言意外异常 → ERROR（真实缺陷 / 未预期错误）")
+    @DisplayName("非断言意外异常 -> ERROR（真实缺陷 / 未预期错误）")
     void unexpectedExceptionIsError() {
         assertThat(FailureAnalysis.analyse(new RuntimeException("boom")).getErrorType())
                 .isEqualTo(FailureAnalysis.ErrorType.ERROR);
@@ -40,7 +40,7 @@ class FailureAnalysisTest {
     }
 
     @Test
-    @DisplayName("已知环境/基础设施异常（类名）→ COMPROMISED")
+    @DisplayName("已知环境/基础设施异常（类名）-> COMPROMISED")
     void infrastructureExceptionByClassNameIsCompromised() {
         assertThat(FailureAnalysis.analyse(new TimeoutException()).getErrorType())
                 .isEqualTo(FailureAnalysis.ErrorType.COMPROMISED);
@@ -52,7 +52,7 @@ class FailureAnalysisTest {
     }
 
     @Test
-    @DisplayName("消息关键字命中（启动/连接失败兜底）→ COMPROMISED")
+    @DisplayName("消息关键字命中（启动/连接失败兜底）-> COMPROMISED")
     void messageKeywordIsCompromised() {
         assertThat(FailureAnalysis.analyse(new RuntimeException("browser has been closed")).getErrorType())
                 .isEqualTo(FailureAnalysis.ErrorType.COMPROMISED);
@@ -61,7 +61,7 @@ class FailureAnalysisTest {
     }
 
     @Test
-    @DisplayName("cause 链命中受损异常 → COMPROMISED（顶层虽是通用 RuntimeException）")
+    @DisplayName("cause 链命中受损异常 -> COMPROMISED（顶层虽是通用 RuntimeException）")
     void causeChainCompromised() {
         RuntimeException wrapped = new RuntimeException("wrap", new PlaywrightException("pipe closed"));
         assertThat(FailureAnalysis.analyse(wrapped).getErrorType())
@@ -69,7 +69,7 @@ class FailureAnalysisTest {
     }
 
     @Test
-    @DisplayName("null 根因 → ERROR（无有效根因，按非断言意外处理）")
+    @DisplayName("null 根因 -> ERROR（无有效根因，按非断言意外处理）")
     void nullThrowableIsError() {
         assertThat(FailureAnalysis.analyse(null).getErrorType())
                 .isEqualTo(FailureAnalysis.ErrorType.ERROR);

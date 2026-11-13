@@ -32,7 +32,8 @@ import java.util.Objects;
  * 更贴近生成物（生成物带 shadow 前缀，本就只在自身链路内解析）。
  *
  * <p><b>fail-soft</b>：CDP 批量计数不可判定（导航中 / 上下文销毁 / 选择器非法）时回退到 Playwright 页级计数；
- * 仍失败则视为"唯一"（1），与历史语义一致——环境抖动不得把可用定位器退化成脆弱 CSS。
+ * 仍失败则返回 {@code -1}（<b>不可判定</b>）——调用方（{@link com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.score.CodegenScorer}）
+ * 只把 {@code == 1} 当作唯一，故「查不到」既不会被误当成唯一，也不会让整次拾取失败。
  *
  * <p><b>缓存生命周期</b>：缓存属于 {@link #forFrame} 返回的实例，即"一次拾取"范围；页面变化后不会读到陈旧计数。
  * 线程安全：由拾取执行器（单线程）使用，内部不加锁。
@@ -89,7 +90,7 @@ public final class CdpLocatorCounter implements LocatorCounter {
         cache.putAll(counts);
         if (counts.size() < missing.size()) {
             log.debug("[codegen][cdp] batch count resolved {}/{} selector(s) in frame {} "
-                            + "(其余将回退 Playwright 页级计数)", counts.size(), missing.size(), frameId);
+                            + "(remainder falls back to Playwright page-level counting)", counts.size(), missing.size(), frameId);
         }
     }
 
@@ -109,7 +110,7 @@ public final class CdpLocatorCounter implements LocatorCounter {
                 session.countSelectorsInFrame(frameId, shadowHosts, List.of(cssSelector));
         Integer n = counts.get(cssSelector);
         if (n != null) return n;
-        log.debug("[codegen][cdp] frame-scoped count unavailable for '{}' (frame={}) — falling back to page-level",
+        log.debug("[codegen][cdp] frame-scoped count unavailable for '{}' (frame={}) - falling back to page-level",
                 cssSelector, frameId);
         return pageCount(cssSelector);
     }
@@ -117,22 +118,45 @@ public final class CdpLocatorCounter implements LocatorCounter {
     /**
      * 页级兜底计数（Playwright 语义；只在 CDP 不可用时使用）。
      *
-     * <p>异常降级为 1（视为唯一）：与历史行为一致，避免环境抖动把可用定位器退化成脆弱 CSS。
+     * <p>异常返回 {@code -1}（<b>不可判定</b>）：选择器非法 / 求值失败时，「查不到」不等于「唯一」。
+     * 调用方只信 {@code == 1}，故该候选会被跳过而不是被误选——历史实现的 {@code return 1}
+     * 会让一个根本求值失败的选择器直接胜出。
      */
     private int pageCount(String cssSelector) {
         try {
             return page.locator(cssSelector).count();
         } catch (Exception e) {
-            log.debug("[codegen] uniqueness count failed for '{}': {}", cssSelector, e.getMessage());
-            return 1;
+            log.debug("[codegen] uniqueness count unavailable for '{}': {}", cssSelector, e.getMessage());
+            return -1;
         }
     }
 
     /**
-     * role 复核：仍由 <b>Playwright 真实引擎</b>计数（{@code @RoleElement} 运行期就是它）。
+     * 文本唯一性：<b>必须</b>用 Playwright 真实引擎计数（生成的 key-only {@code @RoleElement} 运行期
+     * 走的就是 {@code getByText}），CDP 自绘文本匹配会与之语义不符。
+     *
+     * <p>异常/不可判定返回 {@code -1}：调用方只信 {@code == 1}，绝不把"查不到"当成唯一。
+     */
+    @Override
+    public int countByText(String text) {
+        if (text == null || text.isBlank()) return -1;
+        try {
+            return page.getByText(text, new Page.GetByTextOptions().setExact(true)).count();
+        } catch (Exception e) {
+            log.debug("[codegen] text count failed for '{}': {}", text, e.getMessage());
+            return -1;
+        }
+    }
+
+    /**
+     * role 复核：由 <b>Playwright 真实引擎</b>计数（{@code @RoleElement} 运行期走的就是它）。
      *
      * <p>只对主 frame 元素调用（子 frame 元素在抽取阶段已跳过复核：页级 {@code getByRole} 对它们恒 0 命中）。
-     * 引擎抛异常时返回 1（视为唯一），与历史语义一致。
+     *
+     * <p>异常/不可判定返回 {@code -1}，与本类其余方法（{@link #count} / {@link #countByText}）语义统一：
+     * 调用方（{@code RoleVerificationPolicy#keepRole}）只把 {@code <0} 当"不可判定 ⇒ 放行"、
+     * 把 {@code ==1} 当"确认唯一"。历史实现异常返回 {@code 1} 把不确定伪装成确定：
+     * 复核<b>根本没跑成</b>却被判为通过，连 warn 都不会留下。
      */
     @Override
     public int countByRole(String role, String name) {
@@ -141,9 +165,11 @@ public final class CdpLocatorCounter implements LocatorCounter {
         try {
             return page.getByRole(AriaRole.valueOf(constant),
                     new Page.GetByRoleOptions().setName(name).setExact(true)).count();
-        } catch (Exception e) {
-            log.debug("[codegen] role count failed for role={} name='{}': {}", role, name, e.getMessage());
-            return 1;
+        } catch (Exception | LinkageError e) {
+            // LinkageError 也接：极简 classpath 下 AriaRole/Playwright 缺席是 Error 而非 Exception，
+            // 让它逃出去会让整次拾取静默失败。复核属「尽力而为」，不可判定 ⇒ -1。
+            log.debug("[codegen] role count failed for role={} name='{}': {}", role, name, e.toString());
+            return -1;
         }
     }
 }

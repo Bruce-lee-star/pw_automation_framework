@@ -70,6 +70,7 @@ public final class TraceRetention {
                     }
                 } catch (IOException ignore) {
                     // 单个文件 stat 失败跳过，不影响整体治理
+                    logger.debug("stat failed for {}; skipped", p, ignore);
                 }
             }
             totalBytes = bytes;

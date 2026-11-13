@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.UserStory;
@@ -10,8 +11,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -110,6 +113,50 @@ class ReportLayoutTest {
     }
 
     @Test
+    @DisplayName("per-case 的 started chip 用统一人读格式（首次开始），不再吐原始 ISO 串")
+    void caseChipUsesHumanReadableFirstStart() throws Exception {
+        TestOutcome o = OutcomeFixtures.full();
+        o.setFirstStartTime("2026-11-11T10:00:00+08:00"); // 首轮开始
+        o.setStartTime("2026-11-11T10:30:00+08:00");      // 重跑时刻
+        o.setEndTime("2026-11-11T10:35:00+08:00");
+        o.setAttempt(2);
+
+        String html = HtmlRenderer.renderToString(o);
+
+        String started = SummaryHtmlRenderer.humanTs(
+                OffsetDateTime.parse("2026-11-11T10:00:00+08:00"), PwReportsConfig.reportZone());
+        String lastRun = SummaryHtmlRenderer.humanTs(
+                OffsetDateTime.parse("2026-11-11T10:30:00+08:00"), PwReportsConfig.reportZone());
+        assertThat(html)
+                .contains("started " + started)
+                //  顶栏同时给出总窗口与「最后一次执行窗口」+ 次数，解释 duration chip
+                .contains("attempt 2")
+                .contains("last run " + lastRun)
+                .contains("1.3s · last attempt")
+                // 原先 chip 直接渲染 startTime 原始 ISO 串（带 T 与 offset）
+                .doesNotContain("started 2026-11-11T10:30:00+08:00");
+    }
+
+    @Test
+    @DisplayName("截图画廊序号连续（1/2），不随步骤号跳号（1/4）")
+    void screenshotBadgesAreContiguousNotStepNumbers() throws Exception {
+        //  用户反馈"截图序号是 1，3，5"：序号只能对「真有截图的步骤」递增。
+        //  OutcomeFixtures.full() 的截图落在步骤 1 与步骤 4（步骤 2/3/5 无截图），
+        //  故 badge 必须是 1、2，而 index 仍为真实步骤号 1、4（供 tooltip 定位）。
+        List<Map<String, Object>> shots = HtmlRenderer.collectScreenshots(OutcomeFixtures.full());
+
+        assertThat(shots).hasSize(2);
+        assertThat(shots.get(0)).containsEntry("badge", "1").containsEntry("index", 1);
+        assertThat(shots.get(1)).containsEntry("badge", "2").containsEntry("index", 4);
+
+        String html = HtmlRenderer.renderToString(OutcomeFixtures.full());
+        assertThat(html)
+                .contains("data-badge=\"2\"")
+                .contains("<span class=\"shot-pick-num\">2</span>")
+                .doesNotContain("<span class=\"shot-pick-num\">4</span>");
+    }
+
+    @Test
     @DisplayName("Feature 页构成/结果两块同排版：dist-list + stack-bar 各两份")
     void featureCompositionMatchesResultDistribution(@TempDir Path dir) throws Exception {
         List<Path> pages = FeatureHtmlRenderer.writeFeatures(dir, List.of(OutcomeFixtures.full()));
@@ -169,8 +216,8 @@ class ReportLayoutTest {
                     .contains("Started ")
                     .contains(" · Ended ");
         }
-        //  per-case 的窗口来自用例自身时间（fixture：2026-10-15T10:15:30+08:00 → 人读格式）
-        assertThat(perCase).contains("Started 2026-10-15 10:15:30");
+        //  per-case 的窗口来自用例自身时间（fixture：2026-10-15T10:15:30.123+08:00 → 报告时区人读格式）
+        assertThat(perCase).contains("Started " + ts("2026-10-15T10:15:30.123+08:00"));
     }
 
     @Test
@@ -188,9 +235,10 @@ class ReportLayoutTest {
         checkout.setDuration(300000);
         List<TestOutcome> outcomes = List.of(auth, checkout);
 
-        //  index：整个运行（最早开始 → 最晚结束）
+        //  index：整个运行（最早开始 → 最晚结束）；时间按报告时区换算并带 (UTC±hh:mm) 后缀
         String index = AggregateBuilder.renderIndexToString(outcomes);
-        assertThat(index).contains("Started 2026-10-15 10:15:30 · Ended 2026-10-15 11:05:00");
+        assertThat(index).contains("Started " + ts("2026-10-15T10:15:30.123+08:00")
+                + " · Ended " + ts("2026-10-15T11:05:00.000+08:00"));
 
         //  feature 页：各自的窗口，不再与 index 相同（2026-10-22 用户核对发现两者一模一样）
         List<Path> pages = FeatureHtmlRenderer.writeFeatures(dir, outcomes);
@@ -201,15 +249,15 @@ class ReportLayoutTest {
         }
         assertThat(featurePages)
                 .as("Authentication feature 页应显示该 feature 自己的窗口")
-                .anySatisfy(h -> assertThat(h)
-                        .contains("Started 2026-10-15 10:15:30 · Ended 2026-10-15 10:15:31"))
+                .anySatisfy(h -> assertThat(h).contains("Started " + ts("2026-10-15T10:15:30.123+08:00")
+                        + " · Ended " + ts("2026-10-15T10:15:31.456+08:00")))
                 .as("Checkout feature 页应显示该 feature 自己的窗口")
-                .anySatisfy(h -> assertThat(h)
-                        .contains("Started 2026-10-15 11:00:00 · Ended 2026-10-15 11:05:00"));
+                .anySatisfy(h -> assertThat(h).contains("Started " + ts("2026-10-15T11:00:00.000+08:00")
+                        + " · Ended " + ts("2026-10-15T11:05:00.000+08:00")));
         //  两个 feature 页都不是 index 的全量窗口
         assertThat(featurePages)
-                .noneSatisfy(h -> assertThat(h)
-                        .contains("Started 2026-10-15 10:15:30 · Ended 2026-10-15 11:05:00"));
+                .noneSatisfy(h -> assertThat(h).contains("Started " + ts("2026-10-15T10:15:30.123+08:00")
+                        + " · Ended " + ts("2026-10-15T11:05:00.000+08:00")));
     }
 
     @Test
@@ -343,5 +391,10 @@ class ReportLayoutTest {
 
         assertThat(html).contains("← back to overview");
         assertThat(html).doesNotContain("feature-");
+    }
+
+    /** ISO 时刻 → 报告时区的人读串（带 {@code (UTC±hh:mm)} 后缀），与生产同源。 */
+    private static String ts(String iso) {
+        return SummaryHtmlRenderer.humanTs(OffsetDateTime.parse(iso), PwReportsConfig.reportZone());
     }
 }

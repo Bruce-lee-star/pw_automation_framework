@@ -122,7 +122,7 @@ public class MockFidelityTest {
             return null;
         }).when(route).fulfill(any());
         handler.accept(route);
-        assertNotNull("route.fulfill 未被调用（mock 未交付）——url=" + requestUrl, captured.get());
+        assertNotNull("route.fulfill 未被调用（mock 未交付）--url=" + requestUrl, captured.get());
         return captured.get();
     }
 
@@ -238,7 +238,7 @@ public class MockFidelityTest {
 
         Route.FulfillOptions opts = dispatchAndCaptureFulfill("/api/replay/**", "http://h/api/replay/x");
 
-        assertEquals("采集→回放保真：交付体必须与采集体一致", "{\"orig\":true,\"n\":1}", opts.body);
+        assertEquals("采集->回放保真：交付体必须与采集体一致", "{\"orig\":true,\"n\":1}", opts.body);
         assertEquals("采集的 content-type 应随回放交付", "application/json",
                 opts.headers.get("content-type"));
     }

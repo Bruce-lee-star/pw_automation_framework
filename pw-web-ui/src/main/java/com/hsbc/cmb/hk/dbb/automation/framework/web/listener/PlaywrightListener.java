@@ -470,8 +470,8 @@ public class PlaywrightListener implements
     // ═══════════════════════════════════════════════════════════
 
     private List<CapturedScreenshot> currentStepScreenshots() {
-        ContextKey<List<CapturedScreenshot>> key = ContextKey.of(
-                "playwright.listener.currentStepScreenshots", (Class<List<CapturedScreenshot>>) (Class<?>) List.class);
+        ContextKey<List<CapturedScreenshot>> key = ContextKey.ofRaw(
+                "playwright.listener.currentStepScreenshots", List.class);
         List<CapturedScreenshot> list = TestContextHolder.get().get(key);
         if (list == null) {
             list = new ArrayList<>();

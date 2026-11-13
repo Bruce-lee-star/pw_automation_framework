@@ -1,9 +1,11 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,6 +34,28 @@ class IndexRenderTest {
     void footerFallsBackOnEmptyList() throws Exception {
         String html = AggregateBuilder.renderIndexToString(List.of());
         assertThat(html).contains("reportVersion 1");
+    }
+
+    @Test
+    @DisplayName("rerun 后 index 顶栏 Started 取首轮首次开始，并标注 rerun（2026-11-11 用户反馈）")
+    void rerunWindowIsLabelledInTopbar() throws Exception {
+        TestOutcome o = OutcomeFixtures.full();
+        o.setFirstStartTime("2026-11-11T10:00:00+08:00"); // 首轮开始
+        o.setStartTime("2026-11-11T10:30:00+08:00");      // 重跑时刻（已被覆盖）
+        o.setEndTime("2026-11-11T10:35:00+08:00");
+        o.setAttempt(2);
+
+        String html = AggregateBuilder.renderIndexToString(List.of(o));
+
+        //  期望值按本机报告时区换算（跨时区机器同样成立），并带 (UTC±hh:mm) 后缀
+        String started = SummaryHtmlRenderer.humanTs(
+                OffsetDateTime.parse("2026-11-11T10:00:00+08:00"), PwReportsConfig.reportZone());
+        String ended = SummaryHtmlRenderer.humanTs(
+                OffsetDateTime.parse("2026-11-11T10:35:00+08:00"), PwReportsConfig.reportZone());
+        assertThat(html)
+                .contains("Started " + started)
+                .contains("Ended " + ended)
+                .contains("rerun ×1 · 1 case");
     }
 
     @Test

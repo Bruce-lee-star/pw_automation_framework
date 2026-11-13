@@ -62,7 +62,7 @@ public class ContextCloseProbeTest {
         List<Long> sse = runGroup("B-sse-open", ctx -> { /* SSE 在导航后开启 */ }, true, true, false);
         List<Long> routed = runGroup("C-routed", ctx -> { /* route 在导航后注册 */ }, true, false, true);
 
-        System.out.println("===== [PROBE] Context close 耗时分布 (ms) — 框架 PlaywrightContextManager.closeContext =====");
+        System.out.println("===== [PROBE] Context close 耗时分布 (ms) - 框架 PlaywrightContextManager.closeContext =====");
         printStats("A-plain-home   (常规页面)", plain);
         printStats("B-sse-open     (SSE 常开)", sse);
         printStats("C-routed       (路由注册后)", routed);

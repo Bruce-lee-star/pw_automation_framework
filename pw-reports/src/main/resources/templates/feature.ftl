@@ -32,7 +32,8 @@
   <div class="topbar-side is-right">
     <div class="topbar-stack">
       <span class="topbar-ver">Generated at ${run.generatedAt?html}</span>
-      <span class="topbar-ver">Started ${run.startedAt?html} · Ended ${run.endedAt?html}</span>
+      <#-- 与 index 同口径：本 feature 内首次开始 → 最后结束；有重跑时追加 rerun 标注。 -->
+      <span class="topbar-ver">Started ${run.startedAt?html} · Ended ${run.endedAt?html}<#if run.rerunNote??> · ${run.rerunNote?html}</#if></span>
       <#-- CI / 构建链接：仅 Jenkins / GitLab CI 运行（存在 BUILD_URL 或 JOB_NAME+BUILD_NUMBER）时渲染。
            企业级状态条风格 pill；有构建 URL 才包 <a>（target=_blank + rel=noopener 防反向标签页劫持）。 -->
       <#if ci?? && ci.present>

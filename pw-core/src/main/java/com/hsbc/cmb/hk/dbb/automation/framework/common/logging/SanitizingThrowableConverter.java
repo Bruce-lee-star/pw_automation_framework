@@ -22,6 +22,11 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSan
  * <p>同 {@link SanitizingMessageConverter}，受运维开关 {@code framework.log.sanitize.enabled}
  * （默认 true）控制；关闭时原样返回（属运维显式动作，影响全进程）。
  *
+ * <p><b>防递归（2026-11-12 修复，勿删）</b>：与 {@code %msg} Converter <b>共享</b>
+ * {@link SanitizerSwitch} 重入守卫（一条日志会依次经过两者，各自持有标记会漏防）。
+ * 重入时不再读配置，按"开启脱敏"的安全路径处理，避免
+ * 「格式化 → 读配置 → 配置加载打日志 → 再格式化」的 {@code StackOverflowError}。
+ *
  * @apiNote 需在 logback 配置中注册 {@code <conversionRule conversionWord="ex" .../>}。
  */
 public class SanitizingThrowableConverter extends ThrowableProxyConverter {
@@ -35,14 +40,33 @@ public class SanitizingThrowableConverter extends ThrowableProxyConverter {
         if (raw == null || raw.isEmpty()) {
             return raw;
         }
-        if (!FrameworkFlags.isEnabled(SanitizingMessageConverter.ENABLED_KEY, true)) {
-            return raw;
+        boolean outermost = SanitizerSwitch.enter();
+        try {
+            if (!sanitizationEnabled(outermost)) {
+                return raw;
+            }
+            try {
+                return sanitizeThrowableLine(raw);
+            } catch (Exception e) {
+                // L-3：高风险字段必须抑制，回退原文 = 明文泄露
+                return SUPPRESSED;
+            }
+        } finally {
+            if (outermost) {
+                SanitizerSwitch.exit();
+            }
+        }
+    }
+
+    /** 与 {@code %msg} 同源：重入 / 开关不可判定时一律走安全侧（继续脱敏）。 */
+    private boolean sanitizationEnabled(boolean mayReadConfig) {
+        if (!mayReadConfig) {
+            return SanitizerSwitch.SAFE_DEFAULT;
         }
         try {
-            return sanitizeThrowableLine(raw);
-        } catch (Exception e) {
-            // L-3：高风险字段必须抑制，回退原文 = 明文泄露
-            return SUPPRESSED;
+            return FrameworkFlags.isEnabled(SanitizingMessageConverter.ENABLED_KEY, true);
+        } catch (Exception | LinkageError e) {
+            return SanitizerSwitch.SAFE_DEFAULT;
         }
     }
 

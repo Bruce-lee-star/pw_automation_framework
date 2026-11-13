@@ -496,7 +496,8 @@ public class PageElementTest {
 
         ElementOperationException ex = assertThrows(ElementOperationException.class,
                 () -> { PageElement r = el.uploadFile("no/such/resource.txt"); });
-        assertTrue("两端都找不到应抛明确异常：" + ex.getMessage(), ex.getMessage().contains("上传文件不存在"));
+        assertTrue("Both locations missing should throw a clear exception: " + ex.getMessage(),
+                ex.getMessage().contains("Upload file not found"));
         verify(loc, never()).setInputFiles(any(Path[].class), any(Locator.SetInputFilesOptions.class));
     }
 

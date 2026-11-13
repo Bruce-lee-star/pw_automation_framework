@@ -1,0 +1,1620 @@
+﻿diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/CodegenLauncher.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/CodegenLauncher.java
+index 09b60fdc..b0cf8600 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/CodegenLauncher.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/CodegenLauncher.java
+@@ -31,6 +31,7 @@ import java.nio.file.Path;
+ import java.util.Comparator;
+ import java.util.function.Consumer;
+ import java.util.ArrayList;
++import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.Collection;
+ import java.util.LinkedHashMap;
+@@ -315,7 +316,7 @@ public final class CodegenLauncher {
+                         return new CodegenCdpSession(page, nlsLang);
+                     } catch (com.microsoft.playwright.PlaywrightException e) {
+                         last = e;
+-                        log.warn("[codegen][cdp] newCDPSession attempt {}/5 失败 on {}: {} — 100ms 后重试",
++                        log.warn("[codegen][cdp] newCDPSession attempt {}/5 failed on {}: {} - retrying in 100ms",
+                                 attempt, page.url(), e.getMessage());
+                         try {
+                             Thread.sleep(100L);
+@@ -427,7 +428,7 @@ public final class CodegenLauncher {
+                 String selector = cssSelector instanceof String ? (String) cssSelector : null;
+                 ElementRef ref = session.elementBySelector(selector, shadowHosts, framePath);
+                 if (ref != null) {
+-                    log.debug("[codegen][cdp] resolved by selector ({}) '{}' shadowHosts={} → frame={}",
++                    log.debug("[codegen][cdp] resolved by selector ({}) '{}' shadowHosts={} -> frame={}",
+                             type, selector, shadowHosts, ref.frameId());
+                 }
+                 if (ref == null) {
+@@ -435,20 +436,20 @@ public final class CodegenLauncher {
+                         // 诊断：页侧 cssSelector 在任意 frame 都查不到（多半是元素在点击与 CDP 探测之间被重渲染替换，
+                         // 或 cssSel 口径偏差）。记下选择器与 framePath，便于定位这类动态按钮失配根因；
+                         // 随后走坐标兜底——抽取阶段会从命中的节点重新派生稳定选择器（role/name/cssSel），不影响最终产物。
+-                        log.debug("[codegen][cdp] page selector '{}' (framePath={}) not found in any frame — "
++                        log.debug("[codegen][cdp] page selector '{}' (framePath={}) not found in any frame - "
+                                 + "falling back to coordinates (type={}, x={}, y={})", selector, framePath, type, px, py);
+                     }
+                     ref = elementAt(px, py);
+                     if (ref != null) {
+-                        log.info("[codegen][cdp] resolved by coordinates ({}) at ({}, {}) → frame={}",
++                        log.info("[codegen][cdp] resolved by coordinates ({}) at ({}, {}) -> frame={}",
+                                 type, px, py, ref.frameId());
+                     }
+                 }
+                 if (ref == null) {
+                     // 必须可见：静默失败时用户只看到「点了没反应」，无从判断是坐标偏差、页面已导航还是选择器失配。
+-                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {} (selector='{}', shadowHosts={}) — "
+-                                    + "所有 frame 内都没能找到该选择器，坐标 hit-test 也未命中："
+-                                    + "页面可能已导航 / 元素已被移除 / shadow root 为 closed 模式（不可穿透）",
++                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {} (selector='{}', shadowHosts={}) - "
++                                    + "Selector not found in any frame and coordinate hit-test missed: "
++                                    + "page may have navigated / element removed / closed shadow root (not traversable)",
+                             type, px, py, page.url(), selector, shadowHosts);
+                     return null;
+                 }
+@@ -610,7 +611,7 @@ public final class CodegenLauncher {
+                 }
+                 boolean businessPopup = (opener != null && !opener.isClosed());
+                 if (!businessPopup) {
+-                    log.debug("[codegen][follow] new page {} opened without opener (manual tab) — register + dialog only, no follow/enable",
++                    log.debug("[codegen][follow] new page {} opened without opener (manual tab) - register + dialog only, no follow/enable",
+                             np.url());
+                     return;
+                 }
+@@ -645,7 +646,7 @@ public final class CodegenLauncher {
+                         of(np).focusPanel();
+                         log.debug("[codegen][follow] injected recorder + bridge into new page {}", np.url());
+                     } catch (Exception e) {
+-                        log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} — {}",
++                        log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} - {}",
+                                 np.url(), e.getMessage());
+                     } finally {
+                         injected.countDown();   // 成败都放行探针，避免探针永久挂死
+@@ -675,7 +676,7 @@ public final class CodegenLauncher {
+                                 log.debug("[codegen][follow] enabled pick channel on ready new page {}", np.url());
+                             } else {
+                                 // 1.5s 内没 ready：不硬等 —— 交给 submitPick 懒加载兜底（每条点击重试开通道）
+-                                log.warn("[codegen][follow] new page {} not DOM-ready within 1.5s — pick enabled lazily on first click",
++                                log.warn("[codegen][follow] new page {} not DOM-ready within 1.5s - pick enabled lazily on first click",
+                                         np.url());
+                             }
+                         } catch (Exception e) {
+@@ -718,7 +719,7 @@ public final class CodegenLauncher {
+                 }
+                 if (!reached) {
+                     trigger.interrupt();
+-                    log.warn("[codegen][follow] PICK BINDING UNREACHABLE on page {} — this page's "
++                    log.warn("[codegen][follow] PICK BINDING UNREACHABLE on page {} - this page's "
+                             + "window.__codegenEvent did not deliver to Java; clicks here will be silently dropped "
+                             + "(see codegen-inject.js note about unestablished binding).", probeUrl);
+                 }
+@@ -863,7 +864,7 @@ public final class CodegenLauncher {
+                     // 同一会话内重复 Stop 去重：Stop 后除非经过 Start 续拾（会复位 stopped），否则内容不会变化，
+                     // 用户连点 Stop 不应刷出 N 份相同产物。已定稿则只刷新状态条、跳过重生成。
+                     if (sessions.stopped.get()) {
+-                        log.debug("[codegen] stop received but already finalized (no resume since last stop) — skipping re-generation");
++                        log.debug("[codegen] stop received but already finalized (no resume since last stop) - skipping re-generation");
+                         if (panelRef[0] != null) panelRef[0].setStatus("stopped");
+                         broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
+                         break;
+@@ -907,7 +908,7 @@ public final class CodegenLauncher {
+                     }
+                     sessions.closeAll();
+                     closeLatch.countDown();
+-                    log.info("[codegen] session ended by panel '结束会话'; panel process stays resident for next inspect");
++                    log.info("[codegen] session ended by panel 'End Session'; panel process stays resident for next inspect");
+                     break;
+                 }
+                 case "highlight":
+@@ -970,7 +971,7 @@ public final class CodegenLauncher {
+             // （输入框连续输入会连发 fill 事件，这里必须短路，否则每次按键都要查一遍节点）。
+             if (!sessions.pickOn.get() || ps == null || matchFieldKey(info, picked) != null) {
+                 if (sessions.pickOn.get() && ps == null) {
+-                    log.warn("[codegen][bridge] no pick session for page {} — 该页不在拾取通道中（非活动页？）",
++                    log.warn("[codegen][bridge] no pick session for page {} - page is not in the pick channel (inactive page?)",
+                             src != null ? src.url() : "null");
+                 }
+                 recordAction.accept(payload, null);
+@@ -1075,13 +1076,13 @@ public final class CodegenLauncher {
+                     if (deltaDom - deltaBridge > 0) {
+                         if (++skewTicks[0] >= 2) {
+                             log.warn("[codegen][pump] active page DOM click dropped (consecutive {} ticks): "
+-                                    + "DOM +{} but bridge +{} on {} — instrumentation not firing on this page "
++                                    + "DOM +{} but bridge +{} on {} - instrumentation not firing on this page "
+                                     + "(click listener or its window.__codegenEvent call is broken).",
+                                     skewTicks[0], deltaDom, deltaBridge, p.url());
+                             skewTicks[0] = 0;
+                         } else {
+                             log.debug("[codegen][pump] transient DOM/bridge skew (likely message ordering): "
+-                                    + "DOM +{} bridge +{} on {} — will re-check next tick", deltaDom, deltaBridge, p.url());
++                                    + "DOM +{} bridge +{} on {} - will re-check next tick", deltaDom, deltaBridge, p.url());
+                         }
+                     } else {
+                         skewTicks[0] = 0;
+@@ -1099,7 +1100,7 @@ public final class CodegenLauncher {
+                 // 页面正在导航 / 执行上下文已销毁：本拍失败不影响下一拍
+             }
+         }, 0, 120, java.util.concurrent.TimeUnit.MILLISECONDS);
+-        log.info("[codegen][pump] event pump started (120ms, separate thread) — drives Playwright message dispatch");
++        log.info("[codegen][pump] event pump started (120ms, separate thread) - drives Playwright message dispatch");
+ 
+         Path panelHtml = PanelResource.resolvePanelHtml();
+ 
+@@ -1124,7 +1125,7 @@ public final class CodegenLauncher {
+         // 注意：countDown() 必须放进 finally —— 若 closeAll()/broadcast() 抛异常（页面已随窗口关闭），
+         // 不能让"释放主线程"这一步被跳过，否则表现为"关掉窗口程序还卡着"。
+         panel.onClose(() -> {
+-            log.info("[codegen] panel window closed by user — ending codegen session (panel process terminated, resident service degraded)");
++            log.info("[codegen] panel window closed by user - ending codegen session (panel process terminated, resident service degraded)");
+             try {
+                 sessions.pickOn.set(false);
+                 sessions.stopped.set(true);   // 关窗即结束：被测页上的状态指示条随之隐藏
+@@ -1173,7 +1174,7 @@ public final class CodegenLauncher {
+             Thread.currentThread().interrupt();
+         } finally {
+             com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.HangWatchdog.resume();
+-            if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception e) { log.debug("[codegen] closeWatchdog 关闭失败（会话收尾，忽略）", e); } }
++            if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception e) { log.debug("[codegen] closeWatchdog shutdown failed (session teardown, ignored)", e); } }
+             sessions.closeAll();
+             if (eventPump != null) eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
+             regenExecutor.shutdownNow();                       // 停掉实时代码生成线程
+@@ -1200,7 +1201,7 @@ public final class CodegenLauncher {
+         if (nlsFiles == null || nlsFiles.length == 0) return;
+         String lang = NLSUtils.getLanguage();
+         if (lang == null || lang.isBlank()) {
+-            throw new IllegalStateException("[codegen] NLS bundles were provided but the current language is not set — "
++            throw new IllegalStateException("[codegen] NLS bundles were provided but the current language is not set - "
+                     + "call NLSUtils.setLanguage(\"zh\"); before CodegenLauncher.inspect(...). "
+                     + "NLS files are keyed by language ({ lang: { key: value } }), so the framework must know "
+                     + "which language table to reverse-lookup against.");
+@@ -1222,7 +1223,7 @@ public final class CodegenLauncher {
+         }
+         if (members.size() < 2) {
+             log.warn("[codegen] group skipped: need at least 2 distinct elements, got {}", members.size());
+-            panel.setStatus("grouped: 需要 ≥2 个元素");
++            panel.setStatus("grouped: 需要 >=2 个元素");
+             return;
+         }
+         List<CodegenEntry> rewritten = groupAsList(members.stream().map(m -> m.entry).collect(Collectors.toList()));
+@@ -1244,7 +1245,7 @@ public final class CodegenLauncher {
+         boolean uniform = members.stream().allMatch(e -> Objects.equals(e.role, first.role)
+                 && Objects.equals(e.name, first.name));
+         if (!uniform) {
+-            log.warn("[codegen] grouped {} elements whose role/name differ — the list locator is derived from "
++            log.warn("[codegen] grouped {} elements whose role/name differ - the list locator is derived from "
+                     + "the first member (role='{}', name='{}'); confirm it really matches every item.",
+                     members.size(), first.role, first.name);
+         }
+@@ -1286,7 +1287,7 @@ public final class CodegenLauncher {
+         if (!name.toLowerCase(java.util.Locale.ROOT).contains("chromium")) {
+             throw new IllegalStateException("element picking uses the CDP protocol and requires a Chromium browser"
+                     + (name.isEmpty() ? "" : " (current: " + name + ")")
+-                    + " — run the inspector against chromium (remove @firefox/@edge overrides for that scenario)");
++                    + " - run the inspector against chromium (remove @firefox/@edge overrides for that scenario)");
+         }
+     }
+ 
+@@ -1513,7 +1514,7 @@ public final class CodegenLauncher {
+         try {
+             Object ok = page.evaluate("() => !!(window.__CODEGEN__ && window.__CODEGEN__.recorder)");
+             if (!Boolean.TRUE.equals(ok)) {
+-                log.warn("[codegen][bridge] instrumentation missing on {} — lazy re-injecting codegen-inject.js",
++                log.warn("[codegen][bridge] instrumentation missing on {} - lazy re-injecting codegen-inject.js",
+                         page.url());
+                 CodegenScriptInjector.inject(page);
+             }
+@@ -1571,7 +1572,7 @@ public final class CodegenLauncher {
+                     generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
+                     long firstMs = (System.nanoTime() - tFirst) / 1_000_000;
+                     if (firstMs > 500) {
+-                        log.warn("[codegen][regen] first push (skipVerify) took {} ms (>500ms) — "
++                        log.warn("[codegen][regen] first push (skipVerify) took {} ms (>500ms) - "
+                                 + "push/assemble bottleneck, not verify", firstMs);
+                     } else {
+                         log.debug("[codegen][regen] first push (skipVerify) took {} ms", firstMs);
+@@ -1713,10 +1714,14 @@ public final class CodegenLauncher {
+ 
+         // 3) 每个键规划（字段名 / 动作 / fill 占位）：Page、Step、Assert 共用同一份，字段名严格一致
+         Map<String, String> fillValues = fillValuesFromRecorder(recorder);
++        // 文本语义定位白名单（问题②）：label 等无 ARIA role 的元素，命中 NLS 且文本唯一时才生成
++        // key-only @RoleElement。必须在生成前用真实引擎复核——拾取热路径不做这次计数（一次 10~90ms）。
++        Set<String> textSemanticSigs = resolveTextSemanticSigs(picks);
+         Map<PageUrl, CodegenFieldPlanner.Plan> plans = new LinkedHashMap<>();
+         List<MultiPageCodegen.PageUnit> pageUnits = new ArrayList<>();
+         for (PageUrl key : byKey.keySet()) {
+-            CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(ordered.get(key), nlsFiles, fillValues);
++            CodegenFieldPlanner.Plan plan =
++                    CodegenFieldPlanner.plan(ordered.get(key), nlsFiles, fillValues, textSemanticSigs);
+             plans.put(key, plan);
+             pageUnits.add(new MultiPageCodegen.PageUnit(targets.get(key), ordered.get(key), plan));
+         }
+@@ -1745,6 +1750,51 @@ public final class CodegenLauncher {
+         return MultiPageCodegen.build(pageUnits, sessions, nlsFiles);
+     }
+ 
++    /**
++     * 计算「NLS 文本唯一定位」白名单（问题②，2026-11-11）。
++     *
++     * <p>条件（缺一不可）：
++     * <ul>
++     *   <li>条目带 NLS key（多语言环境下才有跨语言稳定标识）；</li>
++     *   <li>主文档元素（页级 {@code getByText} 对 iframe / shadow 内元素不可靠）；</li>
++     *   <li>{@code getByText(可访问名, exact)} 恰好命中 <b>1</b> 个 —— 与运行期 key-only
++     *       {@code @RoleElement} 的解析路径同源。未通过校验一律不纳入，宁可退 CSS：
++     *       不做唯一性校验的文本定位会在 strict mode 下多命中失败（用户规则④）。</li>
++     * </ul>
++     * 同一文案只计数一次（生成期页面静态）；异常一律视为不通过。
++     */
++    private static Set<String> resolveTextSemanticSigs(Collection<Pick> picks) {
++        if (picks == null || picks.isEmpty()) {
++            return Set.of();
++        }
++        Map<String, Boolean> byText = new HashMap<>();
++        Set<String> out = new HashSet<>();
++        for (Pick p : picks) {
++            CodegenEntry e = p.entry;
++            if (e == null || e.nlsKey == null || e.nlsKey.isEmpty()) continue;
++            if (e.name == null || e.name.isBlank()) continue;
++            if (!e.framePath.isEmpty() || !e.shadowHosts.isEmpty()) continue;
++            boolean unique = byText.computeIfAbsent(e.name, text -> countText(p.page, text) == 1);
++            if (unique) {
++                out.add(e.sigKey);
++            } else {
++                log.debug("[codegen] NLS text not unique for key={} name='{}' - keeping CSS fallback",
++                        e.nlsKey, e.name);
++            }
++        }
++        return out;
++    }
++
++    /** 页级文本计数；异常/不可判定返回 -1（调用方只信 {@code == 1}）。 */
++    private static int countText(Page page, String text) {
++        try {
++            return page.getByText(text, new Page.GetByTextOptions().setExact(true)).count();
++        } catch (Exception ex) {
++            log.debug("[codegen] text uniqueness check failed for '{}': {}", text, ex.getMessage());
++            return -1;
++        }
++    }
++
+     /**
+      * 单个会话 → 一个 step 单元：动作序列（元素操作 / frame / dialog / 切页）+ 断言条目。
+      *
+@@ -2015,7 +2065,7 @@ public final class CodegenLauncher {
+                 if (hasNonRoleMember(picks, en.getKey())) {
+                     // 组内已有条目被回退（上一轮复核 / 本就不属于 role 策略）：整组必须一致，
+                     // 否则字段规划取首条注解时会生成自相矛盾的产物。
+-                    log.warn("[codegen][cdp] group role strategy mismatch (base={}) — 整组统一回退 CSS",
++                    log.warn("[codegen][cdp] group role strategy mismatch (base={}) - falling back to CSS for the whole group",
+                             en.getKey());
+                     for (Pick pk : en.getValue()) {
+                         reviseToCss(panel, pk, -1, "group already has non-role member");
+@@ -2064,7 +2114,7 @@ public final class CodegenLauncher {
+         CodegenEntry entry = pk.entry;
+         int hits = pk.extractor.countRoleMatches(entry);
+         if (hits < 0) {
+-            log.warn("[codegen][cdp] deferred role verification undeterminable for #{} (role={}, name='{}') — "
++            log.warn("[codegen][cdp] deferred role verification undeterminable for #{} (role={}, name='{}') - "
+                     + "keeping ROLE strategy", pk.id, entry.role, entry.name);
+             return;
+         }
+@@ -2088,7 +2138,7 @@ public final class CodegenLauncher {
+         int hits = head.extractor.countRoleMatches(entry);
+         if (hits < 0) {
+             log.warn("[codegen][cdp] group role verification undeterminable (base={}, picked={}, role={}, "
+-                    + "name='{}') — keeping ROLE strategy", base, members, entry.role, entry.name);
++                    + "name='{}') - keeping ROLE strategy", base, members, entry.role, entry.name);
+             return;
+         }
+         if (RoleVerificationPolicy.keepRole(hits, members)) {
+@@ -2096,9 +2146,9 @@ public final class CodegenLauncher {
+                     base, members, hits);
+             return;
+         }
+-        log.warn("[codegen][cdp] group role locator mismatched (base={}, picked={}, hits={}) — "
+-                        + "组内元素数与引擎命中数不一致（不可见元素被排除 / 页面有未拾取的同类元素），"
+-                        + "索引不可信，整组回退 CSS",
++        log.warn("[codegen][cdp] group role locator mismatched (base={}, picked={}, hits={}) - "
++                        + "group element count differs from engine hits (invisible elements excluded / unpicked peers present), "
++                        + "index unreliable, falling back to CSS for the whole group",
+                 base, members, hits);
+         for (Pick pk : group) {
+             reviseToCss(panel, pk, hits, "group picked=" + members);
+@@ -2113,7 +2163,7 @@ public final class CodegenLauncher {
+         if (panel != null) {
+             panel.onPickedRevised(pk.id, revised, "hits=" + hits + ", " + because);
+         }
+-        log.info("[codegen][cdp] role locator rejected for #{} (hits={}, role={}, name='{}', {}) — "
++        log.info("[codegen][cdp] role locator rejected for #{} (hits={}, role={}, name='{}', {}) - "
+                         + "strategy revised to CSS ('{}')",
+                 pk.id, hits, entry.role, entry.name, because, revised.selector);
+     }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpFrameLocator.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpFrameLocator.java
+index a41e26e0..d6bb00e2 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpFrameLocator.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpFrameLocator.java
+@@ -95,7 +95,7 @@ public final class CdpFrameLocator {
+         for (String host : hosts) {
+             if (host == null || host.isBlank()) {
+                 // 宿主链不可信（拼进表达式就是非法选择器）：放弃选择器路径，让调用方走坐标兜底。
+-                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' — skipped",
++                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' - skipped",
+                         hosts, cssSelector);
+                 return null;
+             }
+@@ -103,7 +103,7 @@ public final class CdpFrameLocator {
+         // 取（缓存的）frame 树：枚举 frame 逐 frame 求值，并产出 parent 映射快照随 ElementRef 带给抽取阶段。
+         FrameTree t = tree();
+         if (t == null || t.frameIds.isEmpty()) {
+-            log.warn("[codegen][cdp] Page.getFrameTree returned no frame — CDP 会话不可用，选择器反查跳过");
++            log.warn("[codegen][cdp] Page.getFrameTree returned no frame - CDP session unavailable, selector reverse lookup skipped");
+             return null;
+         }
+         int degradedFrames = 0;
+@@ -130,8 +130,8 @@ public final class CdpFrameLocator {
+         if (degradedFrames == t.frameIds.size()) {
+             // 全部 frame 都是"基础设施失败"而非"元素不存在"：必须显性告警，否则看起来和"页面上没这个元素"一样，
+             // 排查时无从区分（这是历史上 selector 反查静默失效、全部退化到坐标法的原因）。
+-            log.warn("[codegen][cdp] selector '{}' could not be probed in any of {} frame(s) — "
+-                            + "隔离世界/CDP 求值整体失败（页面导航中 / frame 未就绪 / CDP 会话异常），本次退回坐标 hit-test",
++            log.warn("[codegen][cdp] selector '{}' could not be probed in any of {} frame(s) - "
++                            + "isolated world / CDP evaluation failed (page navigating / frame not ready / CDP session error), falling back to coordinate hit-test",
+                     cssSelector, t.frameIds.size());
+         } else {
+             log.debug("[codegen][cdp] selector '{}' matched no element in {} frame(s)", cssSelector, t.frameIds.size());
+@@ -152,7 +152,7 @@ public final class CdpFrameLocator {
+         for (String host : hosts) {
+             if (host == null || host.isBlank()) {
+                 // 宿主链不可信：放弃选择器路径，直接回退全帧扫描（由被调方法走坐标兜底）。
+-                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' — fall back",
++                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' - fall back",
+                         hosts, cssSelector);
+                 return findBySelector(cssSelector, shadowHosts);
+             }
+@@ -167,13 +167,13 @@ public final class CdpFrameLocator {
+                 ElementRef.FrameScope scope = frameId.equals(t.mainFrameId)
+                         ? ElementRef.FrameScope.MAIN : ElementRef.FrameScope.SUB;
+                 ElementRef.Frames snap = new ElementRef.Frames(t.mainFrameId, t.parentByFrame);
+-                log.debug("[codegen][cdp] resolved by frame-path {} → frame {} '{}'", framePath, frameId, cssSelector);
++                log.debug("[codegen][cdp] resolved by frame-path {} -> frame {} '{}'", framePath, frameId, cssSelector);
+                 return new ElementRef(hit.backendNodeId(), hit.frameId(), scope, hit.objectId(), snap);
+             }
+-            log.debug("[codegen][cdp] frame-path {} → {} but selector '{}' not hit — fall back to full scan",
++            log.debug("[codegen][cdp] frame-path {} -> {} but selector '{}' not hit - fall back to full scan",
+                     framePath, frameId, cssSelector);
+         } else {
+-            log.debug("[codegen][cdp] frame-path {} could not be resolved (stale tree?) — fall back to full scan",
++            log.debug("[codegen][cdp] frame-path {} could not be resolved (stale tree?) - fall back to full scan",
+                     framePath);
+         }
+         return findBySelector(cssSelector, hosts);
+@@ -483,7 +483,7 @@ public final class CdpFrameLocator {
+         if (ok) {
+             log.debug("[codegen][cdp] DOM document primed (getDocument)");
+         } else {
+-            log.debug("[codegen][cdp] DOM.getDocument failed — selector probing may degrade to coordinates");
++            log.debug("[codegen][cdp] DOM.getDocument failed - selector probing may degrade to coordinates");
+         }
+         return ok;
+     }
+@@ -496,7 +496,7 @@ public final class CdpFrameLocator {
+                 Map.of("frameId", frameId, "worldName", WORLD_NAME));
+         Long id = CdpJson.longField(created, "executionContextId");
+         if (id == null) {
+-            log.debug("[codegen][cdp] createIsolatedWorld failed for frame {} — frame 可能已失效，令帧树失效待重建",
++            log.debug("[codegen][cdp] createIsolatedWorld failed for frame {} - frame may be stale, invalidating frame tree for rebuild",
+                     frameId);
+             invalidateTree();   // 建隔离世界失败 ⇒ 该 frame 多半已随导航/移除消失，帧树可能过期，下次 tree() 重建
+             return -1;
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpLocatorCounter.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpLocatorCounter.java
+index 68910572..9260c2c8 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpLocatorCounter.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CdpLocatorCounter.java
+@@ -32,7 +32,8 @@ import java.util.Objects;
+  * 更贴近生成物（生成物带 shadow 前缀，本就只在自身链路内解析）。
+  *
+  * <p><b>fail-soft</b>：CDP 批量计数不可判定（导航中 / 上下文销毁 / 选择器非法）时回退到 Playwright 页级计数；
+- * 仍失败则视为"唯一"（1），与历史语义一致——环境抖动不得把可用定位器退化成脆弱 CSS。
++ * 仍失败则返回 {@code -1}（<b>不可判定</b>）——调用方（{@link com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.score.CodegenScorer}）
++ * 只把 {@code == 1} 当作唯一，故「查不到」既不会被误当成唯一，也不会让整次拾取失败。
+  *
+  * <p><b>缓存生命周期</b>：缓存属于 {@link #forFrame} 返回的实例，即"一次拾取"范围；页面变化后不会读到陈旧计数。
+  * 线程安全：由拾取执行器（单线程）使用，内部不加锁。
+@@ -89,7 +90,7 @@ public final class CdpLocatorCounter implements LocatorCounter {
+         cache.putAll(counts);
+         if (counts.size() < missing.size()) {
+             log.debug("[codegen][cdp] batch count resolved {}/{} selector(s) in frame {} "
+-                            + "(其余将回退 Playwright 页级计数)", counts.size(), missing.size(), frameId);
++                            + "(remainder falls back to Playwright page-level counting)", counts.size(), missing.size(), frameId);
+         }
+     }
+ 
+@@ -109,7 +110,7 @@ public final class CdpLocatorCounter implements LocatorCounter {
+                 session.countSelectorsInFrame(frameId, shadowHosts, List.of(cssSelector));
+         Integer n = counts.get(cssSelector);
+         if (n != null) return n;
+-        log.debug("[codegen][cdp] frame-scoped count unavailable for '{}' (frame={}) — falling back to page-level",
++        log.debug("[codegen][cdp] frame-scoped count unavailable for '{}' (frame={}) - falling back to page-level",
+                 cssSelector, frameId);
+         return pageCount(cssSelector);
+     }
+@@ -117,14 +118,16 @@ public final class CdpLocatorCounter implements LocatorCounter {
+     /**
+      * 页级兜底计数（Playwright 语义；只在 CDP 不可用时使用）。
+      *
+-     * <p>异常降级为 1（视为唯一）：与历史行为一致，避免环境抖动把可用定位器退化成脆弱 CSS。
++     * <p>异常返回 {@code -1}（<b>不可判定</b>）：选择器非法 / 求值失败时，「查不到」不等于「唯一」。
++     * 调用方只信 {@code == 1}，故该候选会被跳过而不是被误选——历史实现的 {@code return 1}
++     * 会让一个根本求值失败的选择器直接胜出。
+      */
+     private int pageCount(String cssSelector) {
+         try {
+             return page.locator(cssSelector).count();
+         } catch (Exception e) {
+-            log.debug("[codegen] uniqueness count failed for '{}': {}", cssSelector, e.getMessage());
+-            return 1;
++            log.debug("[codegen] uniqueness count unavailable for '{}': {}", cssSelector, e.getMessage());
++            return -1;
+         }
+     }
+ 
+@@ -134,6 +137,23 @@ public final class CdpLocatorCounter implements LocatorCounter {
+      * <p>只对主 frame 元素调用（子 frame 元素在抽取阶段已跳过复核：页级 {@code getByRole} 对它们恒 0 命中）。
+      * 引擎抛异常时返回 1（视为唯一），与历史语义一致。
+      */
++    /**
++     * 文本唯一性：<b>必须</b>用 Playwright 真实引擎计数（生成的 key-only {@code @RoleElement} 运行期
++     * 走的就是 {@code getByText}），CDP 自绘文本匹配会与之语义不符。
++     *
++     * <p>异常/不可判定返回 {@code -1}：调用方只信 {@code == 1}，绝不把"查不到"当成唯一。
++     */
++    @Override
++    public int countByText(String text) {
++        if (text == null || text.isBlank()) return -1;
++        try {
++            return page.getByText(text, new Page.GetByTextOptions().setExact(true)).count();
++        } catch (Exception e) {
++            log.debug("[codegen] text count failed for '{}': {}", text, e.getMessage());
++            return -1;
++        }
++    }
++
+     @Override
+     public int countByRole(String role, String name) {
+         String constant = AriaRoles.ariaConstant(role);
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CodegenCdpNodeExtractor.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CodegenCdpNodeExtractor.java
+index dca66275..dbf97024 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CodegenCdpNodeExtractor.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/cdp/CodegenCdpNodeExtractor.java
+@@ -211,14 +211,24 @@ public final class CodegenCdpNodeExtractor {
+                 }
+ 
+ 
+-                /** 当前文档中唯一性校验：只统计可见元素（供 id 前缀/包含/组内索引兜底使用）。 */
+-                function uniqueSel(sel) {
++                /**
++                 * 匹配总数（<b>含隐藏元素</b>）。
++                 *
++                 * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
++                 * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
++                 * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配。
++                 * 这是"重复面板里 Continue 按钮定位不准"的根因（2026-11-11 用户反馈）。
++                 */
++                function totalCount(sel) {
+                     try {
+-                        if (!sel) return false;
+-                        var nodes = document.querySelectorAll(sel), n = 0;
+-                        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
+-                        return n === 1;
+-                    } catch (e) { return false; }
++                        if (!sel) return 0;
++                        return document.querySelectorAll(sel).length;
++                    } catch (e) { return 0; }
++                }
++
++                /** 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。 */
++                function uniqueSel(sel) {
++                    return totalCount(sel) === 1;
+                 }
+ 
+                 function dynamicIdFallbackSel(id) {
+@@ -335,11 +345,17 @@ public final class CodegenCdpNodeExtractor {
+                     return '';
+                 }
+ 
+-                /** 唯一或组内索引：候选可见唯一即用；可见不唯一（一组元素）时取组内索引并校验可见唯一，失败返回空串。 */
++                /**
++                 * 唯一或组内索引。
++                 *
++                 * <p>① 全量唯一（含隐藏）直接用；② 否则只要是「有限个可见匹配」就尝试 {@code :nth-of-type(k)} 收窄，
++                 * 再用全量计数复核。② 的下界刻意是 {@code > 0} 而非 {@code > 1}：隐藏面板 + 可见面板各一个同名
++                 * "Continue" 时，可见计数只有 1（旧逻辑直接放弃 → 一路退化成长结构路径），而组内索引能稳定收窄。
++                 */
+                 function uniqueOrGroup(sel, e) {
+                     if (uniqueSel(sel)) return sel;
+                     var cnt = visibleCount(sel);
+-                    if (cnt > 1 && cnt <= 10) {
++                    if (cnt > 0 && cnt <= 10) {
+                         var g = groupIndexSel(sel, e);
+                         if (g && uniqueSel(g)) return g;
+                     }
+@@ -351,7 +367,8 @@ public final class CodegenCdpNodeExtractor {
+                  * ① 稳定属性（值无随机段）精确 {@code [name="value"]}；② 稳定属性双→三精确 AND；③ 含随机值属性
+                  * 用开头 {@code ^=}、包含 {@code *=}、结尾 {@code $=} 变体（段自身无随机值）；④ 组合层：单属性仍
+                  * 不唯一时多个属性共同定位——稳定属性精确 AND 随机变体（最稳定优先）、随机变体 × 随机变体 AND。
+-                 * 每个候选先做可见唯一性校验——唯一即采用；可见不唯一（一组元素）时取组内索引；全部失败返回空串交给结构链/XPath。
++                 * 每个候选先做<b>全量</b>唯一性校验（含隐藏元素，对齐 Playwright strict mode）——唯一即采用；
++                 * 否则尝试组内索引再复核；全部失败返回空串交给结构链/XPath。
+                  */
+                 function attrFallbackSel(e) {
+                     if (!e || e.nodeType !== 1) return '';
+@@ -413,7 +430,7 @@ public final class CodegenCdpNodeExtractor {
+                     }
+                     // 组合层：单属性仍不唯一时多个属性共同定位——① 稳定属性精确 AND 随机属性变体
+                     // （稳定取前 2、随机取前 2，随机变体按 ^= → *= → $=）；② 随机变体 × 随机变体 AND。
+-                    // 全部经可见唯一校验（含组内索引）；命中即返回。
++                    // 全部经全量唯一校验（含隐藏元素，必要时加组内索引）；命中即返回。
+                     var randNames = [], stabNames = [];
+                     for (var i = 0; i < names.length; i++) if (names[i].rand) randNames.push(names[i]);
+                     for (var i = 0; i < names.length && !names[i].rand && i < 2; i++) stabNames.push(names[i]);
+@@ -464,24 +481,28 @@ public final class CodegenCdpNodeExtractor {
+                     }
+                     return parts.join('');
+                 }
+-                // 拾取目标归一化：点 <label> / 标签内文本 / 链接内 <span> / 装饰性图标（alt="" 或 aria-hidden）时，
+-                // 上溯到真正可操作的控件或「带可访问名的语义祖先」。<label> 在 AriaRole 枚举里根本没有对应常量，<span>/<div>
+-                // 只是 generic —— 它们只能生成又长又脆的结构 CSS；归一到控件后就能用 role + label 文本（可访问名）
+-                // 定位。装饰性节点（如 <img alt="" aria-hidden="true"> 信息图标、空 <span>）自身无可访问名，拾取只会
+-                // 产出 role=img 这类既无名又易碎的定位器；故当被点元素自身无名（eHasName 为假）时，继续上溯到最近一个
+-                // 带可访问名（含 textContent 兜底，不再截断长度）的祖先——使产物落到其语义容器（如提示区 div#newPasswordHint），
+-                // 带回完整提示文本：既能反查出 NLS 文案 key，又能回退到稳定的 #id 定位器。eHasName 守卫保证「自身已有名的
+-                // 元素」（文本 div、按钮、带 data-i18n 的 span 等）行为完全不变，避免无谓上溯。
++                // 拾取目标归一化（2026-11-11 定稿规则：拾取对象必须 = 用户实际点击的 DOM 对象）。
++                //
++                // 保留的归一：点击装饰性节点（<img alt="" aria-hidden="true"> 信息图标、空 <span>）或文本节点容器时，
++                // 若自身无可访问名（eHasName 为假），上溯到最近的「带可访问名的祖先」——使产物落到语义容器
++                // （如提示区 div#newPasswordHint），带回完整文本：既能反查 NLS key，也能回退到稳定 #id。
++                //
++                // 已移除的归一：<label> 绝不再转发到 label.control / 内部控件。关联控件是「另一个 DOM 对象」，
++                // 转发会让产物定位到用户没点的元素（点"用户名"标签 → 生成 input 定位器），违背"拾取对象 = 点击对象"。
++                // label 自身有可访问名，命中 NLS 时可走文本语义策略生成 @RoleElement(key=...)。
++                //
++                // eHasName 守卫保证「自身已有名的元素」（文本 div、按钮、带 data-i18n 的 span 等）行为不变，避免无谓上溯。
+                 function pickTarget(e) {
+                     var eHasName = (accessibleName(e) || '').trim();
+                     var n = e, depth = 0;
+                     while (n && n.nodeType === 1 && depth < 5) {
+                         var t = n.tagName ? n.tagName.toLowerCase() : '';
+                         if (t === 'input' || t === 'select' || t === 'textarea' || t === 'button') return n;
+-                        if (t === 'label') {
+-                            var ctrl = n.control || (n.querySelector && n.querySelector('input,select,textarea,button'));
+-                            if (ctrl) return ctrl;
+-                        }
++                        //  2026-11-11：点 <label> 就保留 <label> 本身，绝不转发到 label.control。
++                        //  关联控件是另一个 DOM 对象，转发会导致「点'用户名'标签、产物却定位到 input」——
++                        //  拾取对象与用户实际点击对象不一致（用户明确否定的行为）。
++                        //  label 自身带可访问名（其文本），命中 NLS 时可走文本语义策略定位。
++                        if (t === 'label') return n;
+                         if (t === 'a' && n.getAttribute && n.getAttribute('href')) return n;
+                         if (n.getAttribute && n.getAttribute('role')) return n;
+                         if (depth > 0 && !eHasName && (accessibleName(n) || '').trim()) return n;
+@@ -532,6 +553,7 @@ public final class CodegenCdpNodeExtractor {
+                         alt: (x.getAttribute && x.getAttribute('alt')) || '',
+                         title: (x.getAttribute && x.getAttribute('title')) || '',
+                         value: (typeof x.value === 'string') ? x.value : '',
++                        checked: (typeof x.checked === 'boolean') ? x.checked : false,
+                         text: normalizedText(x), label: labelTextOf(x), nth: siblingIndex(x), cssSelector: cssSel(x),
+                         shadowHosts: shadowHostsOf(x),
+                         className: (typeof x.className === 'string') ? x.className : '',
+@@ -787,7 +809,7 @@ public final class CodegenCdpNodeExtractor {
+                 info = infoOf(objectId);
+                 afterResolve = System.nanoTime();
+                 if (info == null) {
+-                    log.debug("[codegen][cdp] objectId {} unusable (context destroyed?) — falling back to "
++                    log.debug("[codegen][cdp] objectId {} unusable (context destroyed?) - falling back to "
+                             + "DOM.resolveNode", objectId);
+                     objectId = null;
+                 }
+@@ -838,7 +860,7 @@ public final class CodegenCdpNodeExtractor {
+             // 巨名 / 伪 NLS 键（见 NlsReverseLookup.MAX_REVERSE_NAME 与 CodegenFieldPlanner.MAX_NAME_IDENTIFIER）。
+             // 直接判为无效拾取：调用方据此跳过条目、动作（若此前未被拾取）一并忽略，背景点击不污染产物。
+             if (isContainerRoot(self)) {
+-                log.info("[codegen][cdp] rejected container-root pick role='{}' tag='{}' — "
++                log.info("[codegen][cdp] rejected container-root pick role='{}' tag='{}' - "
+                                 + "not a real interaction target (background/backdrop), entry skipped",
+                         self.role, self.tag);
+                 return null;
+@@ -872,11 +894,20 @@ public final class CodegenCdpNodeExtractor {
+                     : LocatorStrategy.CSS;
+             String selector = buildSelector(role, name, nlsKey);
+ 
++            // 可观测性：CSS 候选链最终 0 命中（或计数不可判定）时，运行期会一直等不到元素。
++            // 不改变产物（拾取瞬间元素可能只是尚未渲染），但必须留下可检索的告警，
++            // 而不是像以前那样把 0 命中当作「唯一」静默采用。
++            if (!roleLocatable && scored.matchCount <= 0) {
++                log.warn("[codegen][cdp] locator '{}' matched {} element(s) at pick time{} - "
++                                + "the generated locator may time out at replay",
++                        css, scored.matchCount, inSubFrame ? " (sub frame)" : "");
++            }
++
+             // 跨 frame 穿透：元素若位于（跨源）iframe 内，沿父 frame 上行取每层 <iframe> 宿主选择器
+             List<String> framePath = inSubFrame ? resolveFramePath(frames, frameId) : List.of();
+             // shadow 宿主链随事实一并带出：CDP 侧按选择器反查时 document.querySelector 不穿透 shadow 边界
+             CodegenEntry entry = new CodegenEntry(sigKey, role, name, strategy, scored.score, selector, css,
+-                    nlsKey, index, framePath, self.shadowHosts);
++                    nlsKey, index, framePath, self.shadowHosts, scored.matchCount, self.tag, self.checked);
+             logProfile(startedNanos, afterResolve, afterFacts, afterAx, afterScore, afterRole, counting, entry);
+             return entry;
+         } catch (Exception e) {
+@@ -956,7 +987,7 @@ public final class CodegenCdpNodeExtractor {
+         if (Objects.equals(role, js.role) && Objects.equals(name, js.name)) return js;
+         return new CodegenFacts.Fact(role, name, js.tag, js.id, js.testid, js.type, js.placeholder,
+                 js.alt, js.title, js.value, js.text, js.label, js.nth, js.cssSelector, js.shadowHosts,
+-                js.className, js.xpath, js.nameAttr, js.attrs, js.src);
++                js.className, js.xpath, js.nameAttr, js.attrs, js.src, js.checked);
+     }
+ 
+     /**
+@@ -1006,13 +1037,13 @@ public final class CodegenCdpNodeExtractor {
+         try {
+             int hits = counter.countByRole(role, name);
+             if (hits == 0) {
+-                log.info("[codegen][cdp] role locator does not resolve (role={}, name='{}') — "
+-                        + "AX 与 Playwright roleUtils 口径不一致或元素对 ARIA 隐藏，回退 CSS", role, name);
++                log.info("[codegen][cdp] role locator does not resolve (role={}, name='{}') - "
++                        + "AX and Playwright roleUtils disagree or element is ARIA-hidden, falling back to CSS", role, name);
+             } else if (hits > 1) {
+-                log.info("[codegen][cdp] role locator is ambiguous (role={}, name='{}', hits={}) — 回退 CSS",
++                log.info("[codegen][cdp] role locator is ambiguous (role={}, name='{}', hits={}) - falling back to CSS",
+                         role, name, hits);
+             } else if (hits < 0) {
+-                log.debug("[codegen][cdp] role count unavailable (role={}, name='{}', hits={}) — 保留角色定位",
++                log.debug("[codegen][cdp] role count unavailable (role={}, name='{}', hits={}) - keeping role locator",
+                         role, name, hits);
+                 return -1;
+             }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/AssertClassGenerator.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/AssertClassGenerator.java
+index 7fbb71b5..b393ebfd 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/AssertClassGenerator.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/AssertClassGenerator.java
+@@ -20,9 +20,11 @@ import java.util.Set;
+  *
+  * <h2>断言风格：hamcrest（失败即显示字符差异）</h2>
+  * <ul>
+- *   <li>有可读 name 的普通元素 ⇒ {@code assertThat(page.field.getText(), is("Sign in"))}
+- *       （输入框/下拉取 {@code getValue()}）；</li>
+- *   <li>checkbox / radio ⇒ {@code assertThat(page.field.isChecked(), is(true))}；</li>
++ *   <li>有可读 name 的普通元素 ⇒ {@code assertThat(page.field.getText(), is("Sign in"))}；</li>
++ *   <li>输入框/下拉 ⇒ {@code getValue()}，期望值取<b>录制到的最终输入值</b>（没有录制值则退化为可见性
++ *       + TODO，<b>绝不</b>用可访问名 label/placeholder 冒充输入值）；</li>
++ *   <li>checkbox / radio ⇒ {@code assertThat(page.field.isChecked(), is(true|false))}，
++ *       期望值取拾取时刻的真实勾选态；</li>
+  *   <li>无 name 的元素 ⇒ 退化为可见性 {@code assertThat(..., isVisible(), is(true))}；</li>
+  *   <li>命中 NLS key ⇒ 走 {@code NLS.visibleText(key)}，语言无关。</li>
+  * </ul>
+@@ -111,7 +113,21 @@ public final class AssertClassGenerator {
+ 
+         if (f.assertion.endsWith("isChecked()")) {
+             // checkbox/radio：断言勾选态（无"字符"语义，布尔足够）。
+-            return "        assertThat(" + targetExpr + "isChecked(), is(true));";
++            // 期望值取录制时刻的真实状态：取消勾选录出来必须是 is(false)，恒 is(true) 会在回放时失败。
++            String expected = (entry != null && entry.checked) ? "true" : "false";
++            return "        assertThat(" + targetExpr + "isChecked(), is(" + expected + "));";
++        }
++
++        // 输入类元素：期望值必须取「录制到的最终输入值」。
++        // entry.name 是 AX 可访问名（label / placeholder / aria-label），拿它跟 getValue() 比对，
++        // 断言从第一次运行就是红的——除非用户恰好把标签文本原样敲进框里（评审 P0-2）。
++        if (isValueRole(entry.role)) {
++            if (f.recordedValue != null) {
++                return "        assertThat(" + targetExpr + "getValue(), is(\""
++                        + CodegenFieldPlanner.escapeJava(f.recordedValue) + "\"));";
++            }
++            return "        assertThat(" + targetExpr + "isVisible(), is(true));"
++                    + "  // TODO(review): no recorded value for this input - value assertion omitted";
+         }
+ 
+         String name = entry.name == null ? "" : entry.name;
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldPlanner.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldPlanner.java
+index 8da7e85d..5b042480 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldPlanner.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldPlanner.java
+@@ -18,7 +18,7 @@ import java.util.Set;
+ /**
+  * 字段规划（Page / Step / Assert 三个 Tab 的<b>唯一命名与定位来源</b>）。
+  *
+- * <p>把"去重 → List 分组 → 命名 → 定位注解 → 动作/断言表达式"收在一处，三个生成器都消费同一份
++ * <p>把"去重 -> List 分组 -> 命名 -> 定位注解 -> 动作/断言表达式"收在一处，三个生成器都消费同一份
+  * {@link Plan}，从根本上保证 Tab1(Page)、Tab2(Step)、Tab3(Assert) 引用的是完全相同的字段名。
+  *
+  * <h3>定位策略</h3>
+@@ -66,7 +66,24 @@ public final class CodegenFieldPlanner {
+      * @param fillValues 字段键（= {@code sigKey}）→ 录制时输入的最终值；用于 Step 类回填真实 fill 值
+      */
+     public static Plan plan(Collection<CodegenEntry> entries, String[] nlsFiles, Map<String, String> fillValues) {
++        return plan(entries, nlsFiles, fillValues, Set.of());
++    }
++
++    /**
++     * 字段规划（含录制回填值 + <b>文本语义定位白名单</b>）。
++     *
++     * @param textSemanticSigs 已通过「NLS 文本定位唯一」校验的 {@code sigKey} 集合。命中且没有可用
++     *                         ARIA role 时，生成 key-only {@code @RoleElement(key = "...")}（role 缺省 =
++     *                         文本语义策略），而不是被迫退化成 CSS —— 这正是 label 这类"在 AriaRole 枚举里
++     *                         没有对应常量、但 NLS 文案恰好唯一"的元素被误降级的原因
++     *                         （2026-11-11 用户反馈：能匹配 NLS 却直接生成 CSS）。
++     *                         <p><b>必须由调用方用真实引擎校验过</b>（{@code getByText(text, exact).count() == 1}），
++     *                         本方法不做计数、不信任未校验的入参。
++     */
++    public static Plan plan(Collection<CodegenEntry> entries, String[] nlsFiles,
++                            Map<String, String> fillValues, Set<String> textSemanticSigs) {
+         boolean allowNlsKey = (nlsFiles != null && nlsFiles.length > 0);
++        Set<String> textSemantic = textSemanticSigs == null ? Set.of() : textSemanticSigs;
+ 
+         // 1) 精确去重（同元素重复点选只留首条），保持首现顺序
+         Map<String, CodegenEntry> bySig = new LinkedHashMap<>();
+@@ -87,7 +104,10 @@ public final class CodegenFieldPlanner {
+ 
+         for (CodegenEntry e : bySig.values()) {
+             String baseSig = baseSigOf(e.sigKey);
+-            boolean isList = listBases.contains(baseSig);
++            // 一组元素有两种来源：① 用户连续多次拾取同一 base-sig 的不同序号；② 单次拾取时
++            // 所有唯一化尝试都失败、最终定位器命中多个（matchCount > 1）。② 以前会被丢弃或
++            // 硬塞成单元素 @Element（运行期 strict mode 直接多命中失败），现在产出 PageElementList。
++            boolean isList = listBases.contains(baseSig) || e.matchCount > 1;
+             if (isList) {
+                 hasList = true;
+                 // 一组元素只合成【一个】PageElementList 字段（组内序号由运行期 x.get(i) 取单项）
+@@ -111,6 +131,15 @@ public final class CodegenFieldPlanner {
+                 roleLocatable = false;
+             }
+ 
++            // 文本语义定位：无可用 ARIA role + 命中 NLS key + 主文档（页级 getByText 对 iframe/shadow
++            // 内元素不可靠）+ 调用方已用真实引擎校验「文本恰好命中 1 个」。
++            // 四个条件缺一不可：未校验的文本定位会在运行期 strict mode 下多命中失败（用户规则④）。
++            boolean textSemanticLocatable = allowNlsKey && hasNlsKey && !roleLocatable
++                    && e.framePath.isEmpty() && e.shadowHosts.isEmpty()
++                    && textSemantic.contains(e.sigKey);
++            // 语义定位（role 或文本）：用于 List 组语义校验/字段命名，二者都优于 CSS 兜底
++            boolean semantic = roleLocatable || textSemanticLocatable;
++
+             String annotation;
+             String comment = null;
+             if (!e.framePath.isEmpty()) {
+@@ -136,8 +165,13 @@ public final class CodegenFieldPlanner {
+                 annotation = ann.toString();
+                 if (!allowNlsKey && containsCjk(e.name)) {
+                     comment = "    // TODO(review): CJK element name has no English source "
+-                            + "(role-based placeholder used) — provide an English NLS key or rename for clarity";
++                            + "(role-based placeholder used) - provide an English NLS key or rename for clarity";
+                 }
++            } else if (textSemanticLocatable) {
++                // role 缺省 = 框架的文本语义策略：运行期按 key 解析当前语言文案后 getByText 定位。
++                // hasAriaRole 保持 false（不需要 AriaRole 常量 import）；hasRole 置 true 以输出 @RoleFile。
++                hasRole = true;
++                annotation = "@RoleElement(key = \"" + escapeJava(e.nlsKey) + "\")";
+             } else {
+                 if (e.cssSelector == null || e.cssSelector.isBlank() || "html".equals(e.cssSelector)) {
+                     continue; // 连 CSS 都没有的定位器无法生成，跳过（不污染产物）
+@@ -149,20 +183,22 @@ public final class CodegenFieldPlanner {
+             // 一组元素若拿不到 role 定位器（复核未通过 / 跨 frame），只能退化成组内首条的唯一 CSS：
+             // 严格模式下不会报错，但这个 PageElementList 实际只命中 1 个元素（组语义丢失）。
+             // 产物里显式标出来，避免评审时误以为它是"整组"。
+-            if (isList && !roleLocatable && comment == null) {
++            //  仅对「多次拾取合成的组」提示可能只命中 1 个；matchCount>1 的组本来就命中多个，不适用
++            if (isList && !semantic && e.matchCount <= 1 && comment == null) {
+                 comment = "    // TODO(review): group could not use a role locator (verification failed or "
+-                        + "cross-frame); this @Element matches only one element of the group — review the selector";
++                        + "cross-frame); this @Element matches only one element of the group - review the selector";
+             }
+ 
+-            String fieldName = toFieldName(baseFieldName(e, roleLocatable), usedNames);
++            String fieldName = toFieldName(baseFieldName(e, semantic), usedNames);
+ 
+             String verb = verbFor(e);
+             String fillValue = (fillValues != null) ? fillValues.get(e.sigKey) : null;
++            comment = dropdownComment(e, verb, fillValue, comment);
+             fields.add(new CodegenFieldSpec(fieldName,
+                     isList ? "PageElementList" : "PageElement",
+                     annotation, comment,
+                     verb, actionFor(e, isList, fillValue), assertionFor(e, isList),
+-                    isList, roleLocatable, e));
++                    isList, semantic, e, fillValue));
+         }
+ 
+         String classAnnotation = (hasRole && allowNlsKey) ? buildClassAnnotation(nlsFiles) : "";
+@@ -198,20 +234,33 @@ public final class CodegenFieldPlanner {
+     static String verbFor(CodegenEntry e) {
+         String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
+         switch (role) {
++            case "combobox":
++            case "listbox":
++                // 原生 <select> ⇒ selectByValue；自定义下拉（div role=combobox）⇒ 只能展开后点选项。
++                // 两者都绝不能生成 fill()：Playwright 的 fill 只接受 input/textarea/contenteditable，
++                // 对 <select> 与自定义下拉直接抛 "Element is not an <input> or <textarea>"（回放必挂）。
++                return isNativeSelect(e) ? "select" : "click";
+             case "textbox":
+             case "searchbox":
+             case "spinbutton":
+-            case "combobox":
+-            case "listbox":
+                 return "fill";
+             case "checkbox":
++                // 读拾取时刻的真实勾选态：录「取消勾选」（checked=false）必须生成 uncheck()，
++                // 否则产物会把用户的取消动作回放成勾选，终态与录制相反。
++                return (e != null && e.checked) ? "check" : "uncheck";
+             case "radio":
++                // 点击 radio 必然选中（同组旧选项自动取消），不存在「取消选中」的操作语义
+                 return "check";
+             default:
+                 return "click";
+         }
+     }
+ 
++    /** 原生 {@code <select>}：只有它有「选项列表」语义，可用 selectByValue 一次性选中。 */
++    static boolean isNativeSelect(CodegenEntry e) {
++        return e != null && "select".equals(e.tag);
++    }
++
+     /**
+      * Step 动作：按 role 派生（click/fill/check），一组元素取 {@code get(0)} 单项。
+      * 输入框优先回填录制时输入的最终值（令产物开箱即用）；未录制到值才退化为 {@code ""} 占位 + TODO。
+@@ -225,6 +274,14 @@ public final class CodegenFieldPlanner {
+             String v = (fillValue != null) ? fillValue : "";
+             return target + "fill(\"" + escapeJava(v) + "\")";
+         }
++        if ("select".equals(verb)) {
++            // 录制值来自 <option value>；没有录制值时不能生成 selectByValue("")（必然匹配不到选项），
++            // 退化为 click() 并在字段注释里标注需人工补值。
++            if (fillValue != null && !fillValue.isEmpty()) {
++                return target + "selectByValue(\"" + escapeJava(fillValue) + "\")";
++            }
++            return target + "click()";
++        }
+         return target + verb + "()";
+     }
+ 
+@@ -235,6 +292,29 @@ public final class CodegenFieldPlanner {
+         return target + (("checkbox".equals(role) || "radio".equals(role)) ? "isChecked()" : "isVisible()");
+     }
+ 
++    /**
++     * 下拉类元素的可读性收尾：两种降级必须在产物里显式标注，否则用户会以为代码可用。
++     *
++     * <p>① 自定义下拉（div role=combobox）：产物只能 {@code click()} 展开，选值需人工补；
++     * ② 原生 {@code <select>} 但没录到选项值：{@code selectByValue} 需要人工填。
++     *
++     * @param comment 已有的提示（CJK / 组降级）；非空时保持原样，不覆盖
++     */
++    private static String dropdownComment(CodegenEntry e, String verb, String fillValue, String comment) {
++        if (comment != null) return comment;
++        String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
++        boolean dropdown = "combobox".equals(role) || "listbox".equals(role);
++        if (!dropdown) return null;
++        if ("click".equals(verb)) {
++            return "    // TODO(review): custom dropdown - click() only expands it; "
++                    + "add the option click manually (no native <select> for selectByValue)";
++        }
++        if ("select".equals(verb) && (fillValue == null || fillValue.isEmpty())) {
++            return "    // TODO(review): no option value was recorded - fill selectByValue(\"...\") manually";
++        }
++        return null;
++    }
++
+     // ------------------------------------------------------------------
+     // List 分组（对齐 V2 listGroupBaseSigs）
+     // ------------------------------------------------------------------
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldSpec.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldSpec.java
+index 5aabee92..082784f2 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldSpec.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/CodegenFieldSpec.java
+@@ -30,10 +30,17 @@ public final class CodegenFieldSpec {
+     /** 是否由 role 定位（false 表示已回退 CSS/XPath）。 */
+     public final boolean roleLocatable;
+     public final CodegenEntry entry;
++    /**
++     * Assert 用：录制到的<b>最终输入值</b>；{@code null} 表示该元素在录制期间没有任何输入。
++     *
++     * <p>输入类元素的断言期望值必须来自这里，<b>不能</b>用 {@link CodegenEntry#name}
++     * （那是 AX 可访问名：label / placeholder / aria-label，不是用户输入的内容）。
++     */
++    public final String recordedValue;
+ 
+     public CodegenFieldSpec(String fieldName, String fieldType, String annotation, String comment,
+                             String verb, String action, String assertion, boolean isList,
+-                            boolean roleLocatable, CodegenEntry entry) {
++                            boolean roleLocatable, CodegenEntry entry, String recordedValue) {
+         this.fieldName = fieldName;
+         this.fieldType = fieldType;
+         this.annotation = annotation;
+@@ -44,5 +51,6 @@ public final class CodegenFieldSpec {
+         this.isList = isList;
+         this.roleLocatable = roleLocatable;
+         this.entry = entry;
++        this.recordedValue = recordedValue;
+     }
+ }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/MultiPageCodegen.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/MultiPageCodegen.java
+index 55ba4f72..b7d5c494 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/MultiPageCodegen.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/codegen/MultiPageCodegen.java
+@@ -135,7 +135,7 @@ public final class MultiPageCodegen {
+         /** 同标签页导航提示：在步骤体插入「已导航」注释，不生成任何等待 / 切页代码。 */
+         public static SessionAction navigation(CodegenTarget from, CodegenTarget to) {
+             String note = "same-tab navigation: now on " + to.pageClassName
+-                    + " (was " + from.pageClassName + " on the same tab); the page object is re-fetched below — "
++                    + " (was " + from.pageClassName + " on the same tab); the page object is re-fetched below - "
+                     + "add waitForLoadState(...) here if the new page needs to settle before the next action";
+             return new SessionAction(ActionKind.NAVIGATION, null, null, null, null, null, null, false, null, note);
+         }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/inject/CodegenScriptInjector.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/inject/CodegenScriptInjector.java
+index 08af56e1..8824564f 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/inject/CodegenScriptInjector.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/inject/CodegenScriptInjector.java
+@@ -73,7 +73,7 @@ public final class CodegenScriptInjector {
+             Object bridge = page.evaluate("() => typeof window.__codegenEvent");
+             if (!Boolean.TRUE.equals(recorder) || !"function".equals(bridge)) {
+                 log.warn("[codegen][inject] self-check failed: recorderPresent={}, bridgeType={} "
+-                        + "— 拾取与录制将不会有任何事件", recorder, bridge);
++                        + "- pick and recording will emit no events", recorder, bridge);
+             }
+         } catch (Exception e) {
+             CodegenQuiet.ignore("CodegenScriptInjector#inject", e);
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenEntry.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenEntry.java
+index ff6d48ce..c31aed9b 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenEntry.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenEntry.java
+@@ -43,6 +43,28 @@ public final class CodegenEntry {
+      * 生成代码无需特殊处理——Playwright 的 CSS 引擎自动穿透 open shadow root。
+      */
+     public final java.util.List<String> shadowHosts;
++    /**
++     * 单次拾取时最终定位器命中的元素个数（{@code 1} = 唯一；{@code >1} = 一组）。
++     *
++     * <p>生成侧依据它决定是否产出 {@code PageElementList}：{@code >1} 说明所有唯一化尝试都失败，
++     * 但定位器仍能命中整组元素 —— 直接丢弃会丢失录制流程（2026-11-11 用户规则③）。additive。
++     */
++    public final int matchCount;
++    /**
++     * 元素标签名（小写，如 {@code select} / {@code input}），可能为 null（历史构造 / 测试）。
++     *
++     * <p>生成侧用它区分「原生 <b>&lt;select&gt;</b>」与「自定义下拉（div role=combobox）」：
++     * 前者必须生成 {@code selectByValue(...)}，后者只能展开后点选项，两者都不能用 {@code fill()}。
++     * additive 字段，旧构造保留（{@code null} = 未知）。
++     */
++    public final String tag;
++    /**
++     * 元素在拾取时刻的勾选态（仅 checkbox / radio 有意义）。
++     *
++     * <p>生成侧据此区分 {@code check()} / {@code uncheck()} 与断言期望值 {@code is(true/false)}：
++     * 不读该状态时，录制「取消勾选」会退化成 {@code check()}，产物与录制终态相反。
++     */
++    public final boolean checked;
+ 
+     public CodegenEntry(String sigKey, String role, String name, String strategy,
+                         int score, String selector, String cssSelector, String nlsKey, int index) {
+@@ -60,6 +82,46 @@ public final class CodegenEntry {
+     public CodegenEntry(String sigKey, String role, String name, String strategy,
+                         int score, String selector, String cssSelector, String nlsKey, int index,
+                         java.util.List<String> framePath, java.util.List<String> shadowHosts) {
++        this(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey, index,
++                framePath, shadowHosts, 1);
++    }
++
++    /**
++     * 完整构造（含最终定位器命中数）。
++     *
++     * @param matchCount 最终定位器命中的元素个数；{@code >1} 由生成侧产出 {@code PageElementList}
++     */
++    public CodegenEntry(String sigKey, String role, String name, String strategy,
++                        int score, String selector, String cssSelector, String nlsKey, int index,
++                        java.util.List<String> framePath, java.util.List<String> shadowHosts, int matchCount) {
++        this(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey, index,
++                framePath, shadowHosts, matchCount, null);
++    }
++
++    /**
++     * 完整构造（含最终定位器命中数与元素标签）。
++     *
++     * @param matchCount 最终定位器命中的元素个数；{@code >1} 由生成侧产出 {@code PageElementList}
++     * @param tag        元素标签名（小写）；{@code null} 表示未知
++     */
++    public CodegenEntry(String sigKey, String role, String name, String strategy,
++                        int score, String selector, String cssSelector, String nlsKey, int index,
++                        java.util.List<String> framePath, java.util.List<String> shadowHosts,
++                        int matchCount, String tag) {
++        this(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey, index,
++                framePath, shadowHosts, matchCount, tag, false);
++    }
++
++    /**
++     * 完整构造（含元素标签与勾选态）。
++     *
++     * @param tag     元素标签名（小写）；{@code null} 表示未知
++     * @param checked 拾取时刻的勾选态（checkbox / radio 有意义）
++     */
++    public CodegenEntry(String sigKey, String role, String name, String strategy,
++                        int score, String selector, String cssSelector, String nlsKey, int index,
++                        java.util.List<String> framePath, java.util.List<String> shadowHosts,
++                        int matchCount, String tag, boolean checked) {
+         this.sigKey = sigKey;
+         this.role = role;
+         this.name = name;
+@@ -71,6 +133,15 @@ public final class CodegenEntry {
+         this.index = index;
+         this.framePath = framePath == null ? java.util.List.of() : framePath;
+         this.shadowHosts = shadowHosts == null ? java.util.List.of() : shadowHosts;
++        this.matchCount = Math.max(1, matchCount);
++        this.tag = tag == null || tag.isBlank() ? null : tag.toLowerCase(java.util.Locale.ROOT);
++        this.checked = checked;
++    }
++
++    /** 复制并替换命中数（其余字段不变）：拾取流程在打分之后才知道命中数，避免全量改构造签名。 */
++    public CodegenEntry withMatchCount(int count) {
++        return new CodegenEntry(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey,
++                index, framePath, shadowHosts, count, tag, checked);
+     }
+ 
+     /** 转为面板 evaluate 可直接序列化的 Map（字段名即面板 JS 读取的键）。 */
+@@ -87,6 +158,9 @@ public final class CodegenEntry {
+         m.put("index", index);
+         m.put("framePath", new ArrayList<>(framePath));
+         m.put("shadowHosts", new ArrayList<>(shadowHosts));
++        m.put("matchCount", matchCount);
++        m.put("tag", tag == null ? "" : tag);
++        m.put("checked", checked);
+         return m;
+     }
+ }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenFacts.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenFacts.java
+index 20828213..492a78a8 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenFacts.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/model/CodegenFacts.java
+@@ -68,6 +68,13 @@ public final class CodegenFacts {
+          * 值是否随机（含 hash/序号）由 {@code SelectorStability} 判定后决定精确或部分匹配。
+          */
+         public final Map<String, String> attrs;
++        /**
++         * 元素当前的勾选态（仅 checkbox / radio 有意义；其余元素恒 {@code false}）。
++         *
++         * <p>生成侧据此区分 {@code check()} 与 {@code uncheck()}：录制时用户「取消勾选」，
++         * {@code checked=false}，产物必须是 {@code uncheck()} 而不是恒定的 {@code check()}。
++         */
++        public final boolean checked;
+ 
+         public Fact(String role, String name, String tag, String id, String testid, String type,
+                     String placeholder, String alt, String title, String value,
+@@ -103,6 +110,15 @@ public final class CodegenFacts {
+                     String placeholder, String alt, String title, String value,
+                     String text, String label, int nth, String cssSelector, List<String> shadowHosts,
+                     String className, String xpath, String nameAttr, Map<String, String> attrs, String src) {
++            this(role, name, tag, id, testid, type, placeholder, alt, title, value, text, label, nth,
++                    cssSelector, shadowHosts, className, xpath, nameAttr, attrs, src, false);
++        }
++
++        public Fact(String role, String name, String tag, String id, String testid, String type,
++                    String placeholder, String alt, String title, String value,
++                    String text, String label, int nth, String cssSelector, List<String> shadowHosts,
++                    String className, String xpath, String nameAttr, Map<String, String> attrs,
++                    String src, boolean checked) {
+             this.role = role;
+             this.name = name;
+             this.tag = tag;
+@@ -128,6 +144,7 @@ public final class CodegenFacts {
+             this.attrs = (attrs == null || attrs.isEmpty())
+                     ? Map.of()
+                     : Collections.unmodifiableMap(new LinkedHashMap<>(attrs));
++            this.checked = checked;
+         }
+ 
+         /**
+@@ -186,7 +203,16 @@ public final class CodegenFacts {
+                 str(o, "xpath", ""),
+                 str(o, "nameAttr", ""),
+                 mapOf(o, "attrs"),
+-                str(o, "src", ""));
++                str(o, "src", ""),
++                boolOf(o, "checked", false));
++    }
++
++    /** 布尔取值：缺失 / 非布尔一律回落默认值（旧版注入脚本没有该字段）。 */
++    private static boolean boolOf(JsonObject o, String k, boolean def) {
++        if (!o.has(k) || o.get(k).isJsonNull()) return def;
++        JsonElement v = o.get(k);
++        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isBoolean()) return def;
++        return v.getAsBoolean();
+     }
+ 
+     /**
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/nls/NlsReverseLookup.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/nls/NlsReverseLookup.java
+index 07f2c28e..18712609 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/nls/NlsReverseLookup.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/nls/NlsReverseLookup.java
+@@ -118,7 +118,7 @@ public final class NlsReverseLookup {
+     private void ensureLoaded() {
+         String lang = NLSUtils.getLanguage();
+         if (lang == null || lang.isBlank()) {
+-            throw new IllegalStateException("[codegen][nls] current language is not set — "
++            throw new IllegalStateException("[codegen][nls] current language is not set - "
+                     + "call NLSUtils.setLanguage(\"zh\"/\"en\"/...) before starting the inspector, "
+                     + "because NLS bundles are keyed by language: { lang: { key: value } }.");
+         }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelConfig.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelConfig.java
+index 7433aa0e..21b5ca61 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelConfig.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelConfig.java
+@@ -1,6 +1,7 @@
+ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel;
+ 
+ import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
++import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigRegistry;
+ import java.nio.file.Path;
+ 
+ /**
+@@ -13,8 +14,9 @@ import java.nio.file.Path;
+  * </ul>
+  *
+  * <p>浏览器二进制下载/校验归框架（面板 driver 复用框架下载目录，经 {@code PLAYWRIGHT_BROWSERS_PATH} /
+- * {@code PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1} 环境约定），故本配置不含 browserChannel —— 面板固定无 channel
+- * （启动参数按 Chromium 调优，不吞换 channel 死窗风险，见 {@code CodegenPanelManager.PanelProcess#launchArgs}）。
++ * {@code PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1} 环境约定），并<b>复用框架主浏览器的 channel</b>
++ * （{@code playwright.browser.channel}，如 {@code chrome}/{@code msedge}）：面板直接用系统已安装浏览器，
++ * 不再单独下载 Chromium，避免与框架主浏览器路径/版本不一致。channel 为空时回退 Playwright Chromium。
+  */
+ public record CodegenPanelConfig(
+         /** 面板资源目录（serveDir：HTTP 服务托管根；由 {@link PanelResource} 固定导出，跨会话稳定）。 */
+@@ -32,10 +34,26 @@ public record CodegenPanelConfig(
+         /** 命令 outbox 轮询间隔（毫秒）。 */
+         long commandPollIntervalMs,
+         /** 命令处理线程的 NLS 语言（ThreadLocal 传递，见 {@code LanguageState}）。 */
+-        String nlsLang) {
++        String nlsLang,
++        /** 框架主浏览器 channel（{@code playwright.browser.channel}）；空 = 用 Playwright Chromium。 */
++        String browserChannel,
++        /** 框架主浏览器可执行文件路径（chrome/edge 专用配置）；空 = 用 channel / Playwright Chromium。 */
++        String browserExecutablePath,
++        /** 框架主浏览器类型（{@code playwright.browser.type}）；firefox/webkit 时面板回退 Chromium。 */
++        String browserType) {
+ 
+     /** 面板浏览器 profile 目录的系统属性覆盖项。 */
+     public static final String PROFILE_DIR_PROPERTY = "codegen.panel.profile.dir";
++    /** 框架主浏览器 channel 配置键（与主浏览器同源，避免面板另下 Chromium）。 */
++    public static final String BROWSER_CHANNEL_KEY = ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CHANNEL.key();
++    /** 框架主浏览器 Chrome 可执行文件路径配置键（channel=chrome 时生效）。 */
++    public static final String BROWSER_CHROME_EXECUTABLE_PATH_KEY =
++            ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_CHROME_EXECUTABLE_PATH.key();
++    /** 框架主浏览器 Edge 可执行文件路径配置键（channel=msedge 时生效）。 */
++    public static final String BROWSER_EDGE_EXECUTABLE_PATH_KEY =
++            ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_EDGE_EXECUTABLE_PATH.key();
++    /** 框架主浏览器类型配置键；firefox/webkit 不支持 CDP，面板必须回退 Chromium。 */
++    public static final String BROWSER_TYPE_KEY = ConfigRegistry.WEB_PLAYWRIGHT_BROWSER_TYPE.key();
+     /** idle 回收分钟数的系统属性；{@code 0} = 常驻不回收。 */
+     public static final String IDLE_TIMEOUT_MINUTES_PROPERTY = "codegen.panel.idle.timeout.minutes";
+ 
+@@ -55,6 +73,12 @@ public record CodegenPanelConfig(
+     public static CodegenPanelConfig fromSystem() {
+         long idleMinutes = Long.getLong(IDLE_TIMEOUT_MINUTES_PROPERTY, DEFAULT_IDLE_TIMEOUT_MINUTES);
+         long idleMillis = idleMinutes <= 0 ? 0 : idleMinutes * 60_000L;
++        String browserType = ConfigReader.getProperty(BROWSER_TYPE_KEY);
++        //  firefox/webkit 不支持 CDP（面板的 pick/注入全部依赖 CDP）→ 面板必须回退 Chromium；
++        //  此时也不能套用框架的 channel / executablePath（channel 仅 Chromium 系生效，
++        //  firefox/webkit 也不支持 executablePath），否则会把 Chrome 路径传给 Chromium。
++        boolean chromiumFamily = isChromiumFamily(browserType);
++        String channel = chromiumFamily ? ConfigReader.getProperty(BROWSER_CHANNEL_KEY) : null;
+         return new CodegenPanelConfig(
+                 null,                                   // panelResourceDir 由 PanelResource 固定解析（open 时注入）
+                 panelProfileDir(PROFILE_DIR_PROPERTY),
+@@ -63,7 +87,10 @@ public record CodegenPanelConfig(
+                 DEFAULT_NAVIGATE_TIMEOUT_MS,
+                 DEFAULT_READY_TIMEOUT_MS,
+                 DEFAULT_COMMAND_POLL_INTERVAL_MS,
+-                null);                                  // nlsLang 由 open 调用方注入（会话级）
++                null,                                   // nlsLang 由 open 调用方注入（会话级）
++                channel,
++                chromiumFamily ? executablePath(channel) : null,
++                browserType);
+     }
+ 
+     /** 面板浏览器 profile 目录：默认系统临时目录下固定目录；可用 {@code -Dcodegen.panel.profile.dir} 或
+@@ -75,4 +102,28 @@ public record CodegenPanelConfig(
+                 : Path.of(configured.trim());
+         return dir.toAbsolutePath().normalize();
+     }
++
++    /** 按 channel 解析框架主浏览器的自定义可执行路径（与 PlaywrightConfigManager 同规则）。 */
++    private static String executablePath(String channel) {
++        if (channel == null || channel.isBlank()) {
++            return null;
++        }
++        String c = channel.trim();
++        if ("chrome".equalsIgnoreCase(c)) {
++            return ConfigReader.getProperty(BROWSER_CHROME_EXECUTABLE_PATH_KEY);
++        }
++        if ("msedge".equalsIgnoreCase(c) || "edge".equalsIgnoreCase(c)) {
++            return ConfigReader.getProperty(BROWSER_EDGE_EXECUTABLE_PATH_KEY);
++        }
++        return null;
++    }
++
++    /** 是否 Chromium 系（CDP 可用）；firefox/webkit 不支持 CDP，面板必须回退 Chromium。 */
++    public static boolean isChromiumFamily(String browserType) {
++        if (browserType == null || browserType.isBlank()) {
++            return true;
++        }
++        String t = browserType.trim().toLowerCase(java.util.Locale.ROOT);
++        return "chromium".equals(t) || "chrome".equals(t) || "edge".equals(t) || "msedge".equals(t);
++    }
+ }
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelManager.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelManager.java
+index a2505587..8cdb4399 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelManager.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/panel/CodegenPanelManager.java
+@@ -140,12 +140,21 @@ public final class CodegenPanelManager {
+     public CodegenPanelHandle open(Path panelHtml, Consumer<List<Object>> onCommand, String nlsLang) {
+         // 每次会话刷新配置（idle timeout 等 -D 可即时生效）；panelResourceDir 由固定导出的 html 推导。
+         CodegenPanelConfig cfg = CodegenPanelConfig.fromSystem();
++        //  codegen 的 pick/注入全部依赖 CDP，Firefox/WebKit 无 CDP 支持：明确拒绝并指引改用 chrome，
++        //  不静默回退 Chromium（避免用户以为录的是 firefox/webkit 的页面）。
++        if (!CodegenPanelConfig.isChromiumFamily(cfg.browserType())) {
++            throw new IllegalStateException("Codegen panel requires CDP and only supports Chromium-based "
++                    + "browsers (chromium/chrome/edge); current playwright.browser.type=" + cfg.browserType()
++                    + ". Please switch to chrome, e.g. playwright.browser.channel=chrome "
++                    + "or playwright.browser.type=chromium.");
++        }
+         Path panelParent = panelHtml == null ? null : panelHtml.getParent();
+         Path serveDir = (panelParent == null) ? null : panelParent.toAbsolutePath().normalize();
+         cfg = new CodegenPanelConfig(
+                 serveDir, cfg.profileDir(), cfg.idleTimeoutMillis(),
+                 cfg.launchTimeoutMs(), cfg.navigateTimeoutMs(), cfg.readyTimeoutMs(),
+-                cfg.commandPollIntervalMs(), nlsLang);
++                cfg.commandPollIntervalMs(), nlsLang, cfg.browserChannel(),
++                cfg.browserExecutablePath(), cfg.browserType());
+         this.config = cfg;
+         // 活跃标记提前（watchdog 竞态防护）：ensureProcess 在途期间不回收新进程。
+         lastActiveNanos = System.nanoTime();
+@@ -216,7 +225,7 @@ public final class CodegenPanelManager {
+                     if (state == State.READY && process == p) {
+                         process = null;
+                         state = State.DEGRADED;
+-                        log.info("[codegen][panel] resident panel process is dead — DEGRADED, next open will relaunch");
++                        log.info("[codegen][panel] resident panel process is dead - DEGRADED, next open will relaunch");
+                     }
+                 }
+                 continue;
+@@ -342,7 +351,7 @@ public final class CodegenPanelManager {
+         }
+         long elapsedNanos = System.nanoTime() - lastActiveNanos;
+         if (elapsedNanos >= TimeUnit.MILLISECONDS.toNanos(idleMillis)) {
+-            log.info("[codegen][panel] no active session for {}ms — idle timeout reached, reclaiming panel process",
++            log.info("[codegen][panel] no active session for {}ms - idle timeout reached, reclaiming panel process",
+                     idleMillis);
+             shutdownProcess();
+         }
+@@ -396,7 +405,7 @@ public final class CodegenPanelManager {
+         // 仍存活，若无人回收会泄漏 driver 进程且 JVM 无法干净退出。shutdownProcess() 在
+         // process 已为 null 时是 no-op，此处是唯一回收点。offload 到 LAUNCH_EXECUTOR，
+         // 避免在本 Playwright 事件派发线程上同步发 close 协议引发潜在死锁（closeNow 各段已吞异常）。
+-        log.info("[codegen][panel] panel window closed by OS — reclaiming driver/server resources");
++        log.info("[codegen][panel] panel window closed by OS - reclaiming driver/server resources");
+         LAUNCH_EXECUTOR.submit(p::closeNow);
+         if (cb != null) {
+             try {
+@@ -689,6 +698,17 @@ public final class CodegenPanelManager {
+                 .setHeadless(false)
+                 .setTimeout(cfg.launchTimeoutMs())
+                 .setArgs(args);
++        String channel = cfg.browserChannel();
++        if (channel != null && !channel.isBlank()) {
++            //  复用框架主浏览器的 channel（如 chrome/msedge）：直接用系统已安装浏览器，
++            //  避免面板另下 Chromium、与框架浏览器路径/版本不一致。
++            options.setChannel(channel.trim());
++        }
++        String executablePath = cfg.browserExecutablePath();
++        if (executablePath != null && !executablePath.isBlank()) {
++            //  框架显式指定了 chrome/edge 可执行文件路径时，面板同样使用它（优先级高于 channel）。
++            options.setExecutablePath(Path.of(executablePath.trim()));
++        }
+         return pw.chromium().launchPersistentContext(profile, options);
+     }
+ 
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/CodegenScorer.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/CodegenScorer.java
+index e390c5ae..a1573c39 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/CodegenScorer.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/CodegenScorer.java
+@@ -130,6 +130,14 @@ public final class CodegenScorer {
+     /** 最多尝试几个"id 祖先前缀"（越近越优先；超过 2 个通常说明 id 同质化，继续试没有收益）。 */
+     private static final int MAX_ID_PREFIXES = 2;
+ 
++    /**
++     * 最多尝试几个"祖先语义属性作用域前缀"（{@code [data-i18n="…"]}/{@code [aria-label="…"]}）。
++     *
++     * <p>用于隐藏/显示面板 DOM 结构高度近似、同名按钮靠自身属性无法区分的场景——面板容器上的
++     * 业务锚点（{@code data-i18n} 等）是唯一稳定证据。上限 3：候选数量有限，避免大量 CDP 往返。
++     */
++    private static final int MAX_SCOPE_PREFIXES = 3;
++
+     /** 每个元素最多用几个语义属性（{@code data-*}/{@code aria-label}）做独立候选。 */
+     private static final int MAX_DATA_ATTRS = 3;
+ 
+@@ -139,18 +147,27 @@ public final class CodegenScorer {
+     /** 安全 CSS 标识符（可直接用于 {@code #id}）；否则退化为 {@code [id="…"]}。 */
+     private static final Pattern SAFE_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_-]*");
+ 
+-    /** 打分结果：角色可定位标志 + 唯一化后的 CSS/XPath + 分数 + 策略常量。 */
++    /** 打分结果：角色可定位标志 + 唯一化后的 CSS/XPath + 分数 + 策略常量 + 最终命中数。 */
+     public static final class ScoredLocator {
+         public final boolean roleLocatable;
+         public final String uniqueCss;
+         public final int score;
+         public final String strategy;
+-
+-        ScoredLocator(boolean roleLocatable, String uniqueCss, int score, String strategy) {
++        /**
++         * 最终定位器在 DOM 中的命中元素个数（{@code 1} = 唯一）。
++         *
++         * <p>{@code >1} 表示所有唯一化尝试（属性组合 / 祖先作用域 / 结构路径）都失败，当前 CSS 是
++         * <b>尽力而为的多匹配选择器</b>。生成侧据此产出 {@code PageElementList}，而不是丢弃这条拾取
++         * （2026-11-11 用户规则③：多匹配输出元素列表，不直接跳过）。
++         */
++        public final int matchCount;
++
++        ScoredLocator(boolean roleLocatable, String uniqueCss, int score, String strategy, int matchCount) {
+             this.roleLocatable = roleLocatable;
+             this.uniqueCss = uniqueCss;
+             this.score = score;
+             this.strategy = strategy;
++            this.matchCount = matchCount;
+         }
+     }
+ 
+@@ -198,26 +215,37 @@ public final class CodegenScorer {
+         boolean roleLocatable = self.roleLocatable();
+         int roleScore = roleLocatable ? ROLE_NAME : ROLE_NO_NAME;
+         if (roleLocatable && roleScore <= fallbackScore) {
+-            return new ScoredLocator(true, first.css(), roleScore, LocatorStrategy.ROLE_WITH_NAME);
++            return new ScoredLocator(true, first.css(), roleScore, LocatorStrategy.ROLE_WITH_NAME, first.count());
+         }
+ 
+-        // 逐候选校验唯一性：第一个唯一者胜出（后面的候选只在更优候选不唯一时才被用到）
++        // 逐候选校验唯一性：<b>只有 count == 1 才算唯一</b>。
++        // count == 0 表示该选择器当前一个都匹配不到（元素未渲染 / hydration 未完成 / 选择器写错），
++        // 它绝不能胜出——否则会遮蔽后面真正唯一的候选，产出运行期永远等不到的死选择器。
++        Unique fallback = first;
++        int fallbackScoreOfChoice = fallbackScore;
+         for (int i = 0; i < candidates.size(); i++) {
+             Candidate c = candidates.get(i);
+             if (c.css() == null || c.css().isEmpty()) continue;
+             Unique unique = (i == 0) ? first : uniqueCss(c.css(), facts, counter);
+-            if (unique.count <= 1) {
+-                return new ScoredLocator(false, unique.css(), c.score(), LocatorStrategy.CSS);
++            if (unique.count() == 1) {
++                return new ScoredLocator(false, unique.css(), c.score(), LocatorStrategy.CSS, unique.count());
++            }
++            // 兜底候选：优先选「当前确实有命中」的那一个，避免最终产物落在 0 命中的选择器上。
++            if (fallback.count() <= 0 && unique.count() > 0) {
++                fallback = unique;
++                fallbackScoreOfChoice = c.score();
+             }
+         }
+-        return new ScoredLocator(false, first.css(), fallbackScore, LocatorStrategy.CSS);
++        return new ScoredLocator(false, fallback.css(), fallbackScoreOfChoice,
++                LocatorStrategy.CSS, fallback.count());
+     }
+ 
+     /**
+      * 唯一化结果：最终 CSS + 最后一次计数。
+      *
+      * <p>把「计数」与「结果」一起返回，是为了让调用方复用最后一次计数结果而不是再查一遍
+-     * （{@code count <= 1} 即唯一）。历史实现返回裸 String，调用方只能用 {@code isUnique} 二次计数，
++     * （<b>只有 {@code count == 1} 才算唯一</b>；{@code 0} 是「当前无命中」、{@code -1} 是「不可判定」，
++     * 两者都不得被当成唯一）。历史实现返回裸 String，调用方只能用 {@code isUnique} 二次计数，
+      * 造成每个候选恒定多一次往返。
+      */
+     record Unique(String css, int count) {
+@@ -226,8 +254,10 @@ public final class CodegenScorer {
+     }
+ 
+     /**
+-     * 校验 CSS 唯一性并父级嵌套降级：{@code count <= 1} 视为唯一；否则依次尝试
+-     * {@code facts.ancestors} 给出的「<b>从该祖先到目标的完整路径</b>」（由近及远逐级加长），
++     * 校验 CSS 唯一性并父级嵌套降级：<b>只有 {@code count == 1} 才算唯一</b>；{@code 0}（当前无命中）与
++     * {@code -1}（计数不可判定）都不会被采用，且不再继续加长（前缀/祖先只会让匹配更严格，结果仍为 0）。
++     * 仅当 {@code count > 1} 时才依次尝试 {@code facts.ancestors} 给出的
++     * 「<b>从该祖先到目标的完整路径</b>」（由近及远逐级加长），
+      * 直到唯一或尝试数达 {@link #MAX_NEST_DEPTH} + 1（最后一条是绝对路径兜底）。
+      *
+      * <p><b>为什么是"整条替换"而不是"左侧拼接"</b>：页面侧 {@code cssSel} 是「上溯最多 6 层」的
+@@ -240,7 +270,8 @@ public final class CodegenScorer {
+     static Unique uniqueCss(String baseCss, CodegenFacts facts, LocatorCounter counter) {
+         if (baseCss == null || baseCss.isEmpty()) return Unique.NONE;
+         int count = counter.count(baseCss);
+-        if (count <= 1) return new Unique(baseCss, count);
++        if (count == 1) return new Unique(baseCss, 1);          // 唯一命中：采用
++        if (count <= 0) return new Unique(baseCss, count);      // 0 命中 / 不可判定(-1)：加长只会更严格，直接返回
+         if (baseCss.startsWith("xpath=")) return new Unique(baseCss, count);   // XPath 已是绝对路径
+ 
+         String best = baseCss;
+@@ -254,7 +285,28 @@ public final class CodegenScorer {
+             idTried++;
+             best = idSelector(a.id) + " " + baseCss;
+             count = counter.count(best);
+-            if (count <= 1) return new Unique(best, count);
++            if (count == 1) return new Unique(best, 1);
++            if (count <= 0) return new Unique(best, count);   // 0 命中 / 不可判定：继续加长无意义
++        }
++
++        // 阶段 1b：祖先的稳定语义属性做作用域前缀（业务锚点）。
++        // 隐藏/显示两个面板的 DOM 结构高度近似时，面板容器上的 data-i18n / aria-label 往往是
++        // 唯一能区分"哪个面板"的稳定证据——只靠按钮自身的 class token 必然同时命中两个。
++        int scopeTried = 0;
++        for (CodegenFacts.Fact a : facts.ancestors) {
++            if (scopeTried >= MAX_SCOPE_PREFIXES) break;
++            for (Map.Entry<String, String> e : a.attrs.entrySet()) {
++                if (scopeTried >= MAX_SCOPE_PREFIXES) break;
++                if (!ATTR_NAME.matcher(e.getKey()).matches()) continue;
++                // 状态类 ARIA（aria-hidden/aria-expanded…）区分不了面板，只会误锁"当前恰好展开"的那一个
++                if (ARIA_STATE_ONLY.contains(e.getKey().toLowerCase())) continue;
++                if (!SelectorStability.isStable(e.getValue())) continue;
++                scopeTried++;
++                best = attrSelector(e.getKey(), "=", e.getValue()) + " " + baseCss;
++                count = counter.count(best);
++                if (count == 1) return new Unique(best, 1);
++            if (count <= 0) return new Unique(best, count);   // 0 命中 / 不可判定：继续加长无意义
++            }
+         }
+ 
+         // 阶段 2：完整祖先路径逐级加长（<b>最后手段</b>：无可用属性/id 时才走到这里）。
+@@ -265,7 +317,8 @@ public final class CodegenScorer {
+             tried++;
+             best = a.cssSelector;
+             count = counter.count(best);
+-            if (count <= 1) return new Unique(best, count);
++            if (count == 1) return new Unique(best, 1);
++            if (count <= 0) return new Unique(best, count);   // 0 命中 / 不可判定：继续加长无意义
+         }
+         return new Unique(best, count);
+     }
+@@ -362,7 +415,7 @@ public final class CodegenScorer {
+      * 属性组合候选（AND）：{@code input[name="user"][type="text"]}、{@code div[class*="title"][class*="modal"]}。
+      *
+      * <p><b>为什么必须有这一档</b>：单个属性命中多个是常态（同名输入框、通用 class token）。若只有
+-     * "单属性 → 结构路径"两档，就会一路加祖先，产出 {@code html:nth-of-type(1) > body … > div:nth-of-type(7)}
++     * "单属性 -> 结构路径"两档，就会一路加祖先，产出 {@code html:nth-of-type(1) > body … > div:nth-of-type(7)}
+      * 这种又长又脆的定位器——用户明确要求"能靠属性就用属性，长路径是最差情况"。
+      *
+      * <p>只组合<b>稳定</b>条件（{@link SelectorStability#isStable}），且总数量有上限
+diff --git a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/LocatorCounter.java b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/LocatorCounter.java
+index 2436dfc4..6164f722 100644
+--- a/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/LocatorCounter.java
++++ b/pw-codegen/src/main/java/com/hsbc/cmb/hk/dbb/automation/framework/web/page/codegen/score/LocatorCounter.java
+@@ -21,8 +21,13 @@ public interface LocatorCounter {
+     /**
+      * 返回给定 CSS 选择器在当前页面匹配的元素个数。
+      *
++     * <p><b>三态语义</b>：{@code 0} = 当前无命中（元素未渲染 / 选择器写错，<b>不是</b>唯一）；
++     * {@code 1} = 唯一；{@code >1} = 需父级嵌套降级；{@code -1} = <b>不可判定</b>
++     * （选择器非法、框架异常、导航中等）。调用方只把 {@code == 1} 当作唯一，
++     * 0 与 -1 一律跳过——「查不到」不得等价于「正确」。
++     *
+      * @param cssSelector 待校验的 CSS 定位器
+-     * @return 匹配个数（0 表示不存在 / 1 表示唯一 / &gt;1 表示需父级嵌套降级）
++     * @return 匹配个数；{@code -1} 表示不可判定
+      */
+     int count(String cssSelector);
+ 
+@@ -43,6 +48,21 @@ public interface LocatorCounter {
+         return 1;
+     }
+ 
++    /**
++     * 返回按<b>可见文本</b>匹配的元素个数（{@code getByText(text, exact=true)}），
++     * 用于校验「文本语义定位」是否唯一。
++     *
++     * <p>这是生成 {@code @RoleElement(key=...)}（role 缺省、纯文本策略）的唯一依据：
++     * 文本定位不做唯一性校验的话，一句通用文案（"Continue"/"Submit"）会同时命中多个元素，
++     * 运行期 strict mode 直接失败。故只有 {@code == 1} 才允许生成 key-only 定位器。
++     *
++     * <p>默认返回 {@code -1}（<b>不可判定</b>）：纯 CSS 桩实现无需改动，且调用方只信 {@code == 1}，
++     * "不可判定"不会被误当成唯一。
++     */
++    default int countByText(String text) {
++        return -1;
++    }
++
+     /**
+      * 返回<b>绑定了 frame / shadow 作用域</b>的计数视图。
+      *
+diff --git a/pw-codegen/src/main/resources/codegen/codegen-inject.js b/pw-codegen/src/main/resources/codegen/codegen-inject.js
+index 245205e4..cbffa995 100644
+--- a/pw-codegen/src/main/resources/codegen/codegen-inject.js
++++ b/pw-codegen/src/main/resources/codegen/codegen-inject.js
+@@ -152,14 +152,24 @@
+     }
+ 
+ 
+-    /** 当前文档中唯一性校验：只统计可见元素（供 id 前缀/包含/组内索引兜底使用）。 */
+-    function uniqueSel(sel) {
++    /**
++     * 匹配总数（<b>含隐藏元素</b>）。
++     *
++     * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
++     * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
++     * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配
++     * （2026-11-11：重复面板定位不准的根因）。
++     */
++    function totalCount(sel) {
+         try {
+-            if (!sel) return false;
+-            var nodes = document.querySelectorAll(sel), n = 0;
+-            for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
+-            return n === 1;
+-        } catch (e) { return false; }
++            if (!sel) return 0;
++            return document.querySelectorAll(sel).length;
++        } catch (e) { return 0; }
++    }
++
++    /** 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。 */
++    function uniqueSel(sel) {
++        return totalCount(sel) === 1;
+     }
+ 
+ 
+@@ -284,11 +294,17 @@
+         return '';
+     }
+ 
+-    /** 唯一或组内索引：候选可见唯一即用；可见不唯一（一组元素）时取组内索引并校验可见唯一，失败返回空串。 */
++    /**
++     * 唯一或组内索引。
++     *
++     * <p>① 全量唯一（含隐藏）直接用；② 否则只要存在「有限个可见匹配」就尝试 {@code :nth-of-type(k)} 收窄，
++     * 再用全量计数复核。② 的下界是 {@code > 0} 而非 {@code > 1}：隐藏面板 + 可见面板各一个同名
++     * "Continue" 时可见计数只有 1（旧逻辑直接放弃 → 退化成长结构路径），组内索引能稳定收窄。
++     */
+     function uniqueOrGroup(sel, e) {
+         if (uniqueSel(sel)) return sel;
+         var cnt = visibleCount(sel);
+-        if (cnt > 1 && cnt <= 10) {
++        if (cnt > 0 && cnt <= 10) {
+             var g = groupIndexSel(sel, e);
+             if (g && uniqueSel(g)) return g;
+         }
+@@ -435,9 +451,10 @@
+      * 拾取目标归一化：点 <label> / 标签内文本 / 链接内 <span> / 装饰性图标（alt="" 或 aria-hidden）时，
+      * 上溯到真正可操作的控件或「带可访问名的语义祖先」。
+      *
+-     * <p>为什么要归一：<label> 在 Playwright {@code AriaRole} 枚举里没有对应常量，<span>/<div> 只是 generic ——
+-     * 直接拾取它们只能生成又长又脆的结构 CSS；归一到控件后即可用 role（radio/checkbox/textbox）+ label 文本
+-     * （即 AX 可访问名）定位，产物既短又稳。
++     * <p><b>2026-11-11 定稿规则：拾取对象必须 = 用户实际点击的 DOM 对象。</b>
++     * {@code <label>} 一律保留自身，<b>不再</b>转发到 {@code label.control} / 内部控件——关联控件是另一个
++     * DOM 对象，转发会让产物定位到用户没点的元素（点"用户名"标签却生成 input 定位器）。label 自身带
++     * 可访问名（其文本），命中 NLS 时可走文本语义策略定位。
+      *
+      * <p>装饰性节点（如 {@code <img alt="" aria-hidden="true">} 信息图标、空 {@code <span>}）：自身无可访问名，
+      * 拾取只会产出 {@code role=img} 这类既无名又易碎的定位器。故当<b>被点元素自身无可访问名</b>时，继续上溯到
+@@ -452,10 +469,9 @@
+         while (n && n.nodeType === 1 && depth < 5) {
+             var t = n.tagName ? n.tagName.toLowerCase() : '';
+             if (t === 'input' || t === 'select' || t === 'textarea' || t === 'button') return n;
+-            if (t === 'label') {
+-                var ctrl = n.control || (n.querySelector && n.querySelector('input,select,textarea,button'));
+-                if (ctrl) return ctrl;
+-            }
++            // 点 <label> 就保留 <label> 本身：绝不转发到 label.control（关联控件是另一个 DOM 对象，
++            // 转发会让拾取对象 != 用户点击对象）。label 自身带可访问名，命中 NLS 可走文本语义策略。
++            if (t === 'label') return n;
+             if (t === 'a' && n.getAttribute && n.getAttribute('href')) return n;
+             if (n.getAttribute && n.getAttribute('role')) return n;
+             // 仅当被点元素自身无名（装饰/空白）时，上溯到最近「带名」祖先，避免产出 role=img 这类无用定位器
+@@ -559,6 +575,7 @@
+             alt: (el.getAttribute && el.getAttribute('alt')) || '',
+             title: (el.getAttribute && el.getAttribute('title')) || '',
+             value: (typeof el.value === 'string') ? el.value : '',
++            checked: (typeof el.checked === 'boolean') ? el.checked : false,
+             text: normalizedText(el),
+             label: labelTextOf(el),
+             nth: siblingIndex(el),

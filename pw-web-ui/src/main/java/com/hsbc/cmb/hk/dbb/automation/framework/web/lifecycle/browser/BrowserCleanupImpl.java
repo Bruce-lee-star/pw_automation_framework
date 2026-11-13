@@ -82,7 +82,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         Runnable reportBudgetExhausted = () -> {
             if (budgetExhaustedReported.compareAndSet(false, true)) {
                 ShutdownCoordinator.recordFailure("cleanupAll internal budget " + CLEANUP_INTERNAL_BUDGET_MS
-                        + "ms exhausted — skipping the remaining context/browser closes so the remaining "
+                        + "ms exhausted - skipping the remaining context/browser closes so the remaining "
                         + "teardown steps (route drain / AsyncPool / ThreadLocal) still run", null);
             }
         };
@@ -173,7 +173,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
                     }
                     //  N-22 可观测性：慢关闭是「JVM 退出越过 surefire 30s 宽限 → fork 被硬杀」的唯一事后归因手段。
                     if (closeMs >= SLOW_CLOSE_WARN_MS) {
-                        logger.warn("[cleanupAll] Browser.close() took {}ms (slow close — this is what can push JVM exit past "
+                        logger.warn("[cleanupAll] Browser.close() took {}ms (slow close - this is what can push JVM exit past "
                                 + "surefire's 30s grace and get the fork hard-killed)", closeMs);
                     }
                     logger.debug("Browser instance closed in {}ms", closeMs);
@@ -216,7 +216,7 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         //    否则只会以 surefire 的 "[ERROR] ... kill self fork JVM" 形式间接暴露，无从归因。
         long totalMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - cleanupStartNanos);
         if (totalMs >= SLOW_CLOSE_WARN_MS) {
-            logger.warn("[cleanupAll] cleanupAll took {}ms — JVM exit may exceed surefire's 30s grace "
+            logger.warn("[cleanupAll] cleanupAll took {}ms - JVM exit may exceed surefire's 30s grace "
                     + "(hard kill truncates the remaining shutdown tasks and can orphan browsers)", totalMs);
         }
         logger.debug("All Playwright resources cleaned up ({}ms)", totalMs);
@@ -270,13 +270,13 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
         }
         if (key == null) {
             logger.warn("[cleanupAll] browser-close exceeded {}ms; no driver mapping found for this browser "
-                    + "— left to JVM-exit driver process-tree reaping", closeLimitMs);
+                    + "- left to JVM-exit driver process-tree reaping", closeLimitMs);
             return false;
         }
         Playwright playwright = PlaywrightRuntime.instance().state.getPlaywright(key);
         if (playwright == null) {
             logger.warn("[cleanupAll] browser-close exceeded {}ms; no Playwright driver for key={} "
-                    + "— left to JVM-exit driver process-tree reaping", closeLimitMs, key);
+                    + "- left to JVM-exit driver process-tree reaping", closeLimitMs, key);
             return false;
         }
         //  先摘除再强收：cleanupAll 末尾的 playwright.close() 循环（allPlaywrights()）不会再重复关闭它。
@@ -291,13 +291,13 @@ public final class BrowserCleanupImpl implements BrowserCleanup {
             }
         }, CloseGuard.FORCE_REAP_LIMIT_MS, false).completed();
         if (reaped) {
-            logger.warn("[cleanupAll] browser-close:{} exceeded {}ms; driver force-reaped (compensated) — "
+            logger.warn("[cleanupAll] browser-close:{} exceeded {}ms; driver force-reaped (compensated) - "
                     + "browser process reclaimed deterministically", browserTypeName(browser), closeLimitMs);
             return true;
         }
         ShutdownCoordinator.recordFailure(
                 "browser-close exceeded " + closeLimitMs + "ms and driver force-reap also exceeded "
-                        + CloseGuard.FORCE_REAP_LIMIT_MS + "ms — browser process left to JVM-exit "
+                        + CloseGuard.FORCE_REAP_LIMIT_MS + "ms - browser process left to JVM-exit "
                         + "driver process-tree reaping", null);
         return false;
     }

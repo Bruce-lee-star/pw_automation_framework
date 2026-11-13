@@ -137,7 +137,7 @@ class StepInterceptionCoverageTest {
     // ---------------------------------------------------------------- 降级路径
 
     @Test
-    @DisplayName("final 步骤库类：降级原始实例——方法照常执行、整类不入树")
+    @DisplayName("final 步骤库类：降级原始实例--方法照常执行、整类不入树")
     void finalStepsClassDegradesToRawInstance() {
         FinalGlue glue = factory.getInstance(FinalGlue.class);
         // 关键：降级不是「注入 null」——字段可用，只是无拦截
@@ -168,7 +168,7 @@ class StepInterceptionCoverageTest {
     }
 
     @Test
-    @DisplayName("@NoStepInterception：显式退出标记 → 原始实例直通，零开销")
+    @DisplayName("@NoStepInterception：显式退出标记 -> 原始实例直通，零开销")
     void noInterceptionMarkerPassesThrough() {
         SkippedGlue glue = factory.getInstance(SkippedGlue.class);
         assertThat(glue.steps).isNotNull();

@@ -44,7 +44,7 @@ class RouteRegistrationReportTest {
     }
 
     @Test
-    @DisplayName("步骤内注册 → 归位到该步骤（routeRegistrations 挂在发生注册的步骤下）")
+    @DisplayName("步骤内注册 -> 归位到该步骤（routeRegistrations 挂在发生注册的步骤下）")
     void routeRegistrationAttributedToStep() throws Exception {
         Path dir = Files.createTempDirectory("pw-report-route-step");
         ReportBus bus = new ReportBus(PwReportsConfig.builder().enabled(true).outputDir(dir).build());

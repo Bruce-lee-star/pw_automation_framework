@@ -120,7 +120,7 @@ public final class CoverageScope {
                         + "(cache-related observations are NOT representative); Service Worker is not set to BLOCK, "
                         + "so requests intercepted/served inside a Service Worker are invisible; downloads are not "
                         + "not attributed to their trigger request "
-                        + "(a late response from a previous navigation may satisfy a later wait — use waitForApiSince(..) "
+                        + "(a late response from a previous navigation may satisfy a later wait - use waitForApiSince(..) "
                         + "or waitForApiFromOwner(..) to scope waits to records produced after your action).",
                 INSTANCE.describe());
     }

@@ -25,7 +25,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.*;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -160,6 +159,7 @@ public class PlaywrightContextManager {
                 }
             } catch (RuntimeException ignore) {
                 //  报告未装配 / 桥缺失 → 不绑定，回落既有最佳努力逻辑
+                logger.debug("ContextOutcomeBinding skipped; reporting bridge unavailable", ignore);
             }
             logger.debug("BrowserContext created successfully");
             return context;
@@ -247,7 +247,7 @@ public class PlaywrightContextManager {
             //  开了录屏却连句柄都没有 = 录制根本没配置上（context 创建时 recordVideoDir 未生效）。
             //  这条必须可定位：否则报告只会静默显示"该用例没有录像"（2026-10-22 用户仍在踩）。
             if (enabled) {
-                warnVideoOnce("[video] recordVideo is enabled but no Video handle was found on any page — "
+                warnVideoOnce("[video] recordVideo is enabled but no Video handle was found on any page - "
                         + "context was likely created without setRecordVideoDir (check "
                         + "playwright.context.recordVideo.enabled / dir)");
             }
@@ -684,8 +684,8 @@ public class PlaywrightContextManager {
         if (configured > 0) {
             return configured;
         }
-        logger.warn("[Playwright] {}={} 非法（Playwright 语义中 0/负数 = 无限等待 → 操作会永久挂起且无信号）；"
-                        + "已回落到默认 {}ms，请修正该配置。",
+        logger.warn("[Playwright] {}={} is invalid (in Playwright, 0/negative means infinite wait - the operation would hang forever without a signal); "
+                        + "falling back to default {}ms; please fix the config.",
                 configKey, configured, DEFAULT_PAGE_TIMEOUT_MS);
         return DEFAULT_PAGE_TIMEOUT_MS;
     }
@@ -839,7 +839,7 @@ public class PlaywrightContextManager {
         if (event.frameworkManaged) {
             logger.debug("New page created by framework (managed): ctx=#{} pages={} url={}{}",
                     System.identityHashCode(context), event.pageCount, event.url,
-                    event.aboutBlank ? " [about:blank until first navigate — expected]" : "");
+                    event.aboutBlank ? " [about:blank until first navigate - expected]" : "");
             return;
         }
         //  非框架创建 ⇒ 业务 window.open / target=_blank 弹窗，或某路径泄漏出的额外页。
@@ -847,7 +847,7 @@ public class PlaywrightContextManager {
                 System.identityHashCode(context), event.pageCount, event.url, event.aboutBlank);
         if (event.pageCount > 1) {
             logger.warn("[multi-page] Context=#{} now holds {} pages (expected 1 managed): {}"
-                            + " ([managed]=框架登记的当前受管页；[extra]=非登记页：业务 window.open 弹窗 / 测试直接 newPage / 泄漏)",
+                            + " ([managed]=current page registered by the framework; [extra]=unregistered page: business window.open popup / direct newPage / leak)",
                     System.identityHashCode(context), event.pageCount,
                     describeContextPages(context, newPage));
         }

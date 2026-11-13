@@ -45,7 +45,7 @@ class RoutePanelsRenderTest {
     }
 
     @Test
-    @DisplayName("通过用例右栏为空 → 单栏布局（Execution steps 与上下列同宽）")
+    @DisplayName("通过用例右栏为空 -> 单栏布局（Execution steps 与上下列同宽）")
     void passingCaseUsesSingleColumnLayout() throws Exception {
         TestOutcome o = baseOutcome();
         String html = HtmlRenderer.renderToString(o);
@@ -53,7 +53,7 @@ class RoutePanelsRenderTest {
     }
 
     @Test
-    @DisplayName("失败用例：Case actions 并入主列 → 仍是单栏（Execution steps 右边缘与上下卡片齐平）")
+    @DisplayName("失败用例：Case actions 并入主列 -> 仍是单栏（Execution steps 右边缘与上下卡片齐平）")
     void failingCaseKeepsSingleColumnLayout() throws Exception {
         TestOutcome o = baseOutcome();
         o.setResult(TestResult.FAILURE);
@@ -86,7 +86,7 @@ class RoutePanelsRenderTest {
     }
 
     @Test
-    @DisplayName("同路径的 控制台镜像 + 结构化上报 + 用例级残留 → 步骤内只留结构化一份，用例级不再出现")
+    @DisplayName("同路径的 控制台镜像 + 结构化上报 + 用例级残留 -> 步骤内只留结构化一份，用例级不再出现")
     void sameRouteFromMultipleSourcesIsShownOnce() throws Exception {
         String structured = "[Route MONITOR RESULT] https://host/api/v2/auth/assert?***** - {\n"
                 + "  pattern : auth/assert\n}";

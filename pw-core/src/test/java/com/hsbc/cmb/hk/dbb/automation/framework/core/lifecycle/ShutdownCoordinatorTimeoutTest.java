@@ -59,11 +59,11 @@ public class ShutdownCoordinatorTimeoutTest {
 
         assertTrue("runAll 必须在上限附近返回（实测 " + elapsedMs + "ms）；否则 JVM 退出必然被 Surefire 硬杀，"
                         + "而硬杀会静默截断后续清理任务", elapsedMs < 3_000);
-        assertEquals("被放弃的任务必须记账 —— 否则「清理没做完」仍是零信号", 1, ShutdownCoordinator.getFailureCount());
+        assertEquals("被放弃的任务必须记账 -- 否则「清理没做完」仍是零信号", 1, ShutdownCoordinator.getFailureCount());
     }
 
     @Test
-    // @DisplayName: "N-22：总预算耗尽 → 停止后续任务并记账（替代被硬杀后的静默截断）"
+    // @DisplayName: "N-22：总预算耗尽 -> 停止后续任务并记账（替代被硬杀后的静默截断）"
     public void totalBudgetExhaustionSkipsRemainingTasks() {
         System.setProperty(TASK_PROP, "2000");
         System.setProperty(TOTAL_PROP, "200");
@@ -76,7 +76,7 @@ public class ShutdownCoordinatorTimeoutTest {
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
 
         assertTrue("总预算必须兜住整体耗时（实测 " + elapsedMs + "ms）", elapsedMs < 3_000);
-        assertFalse("预算耗尽后不得再启动后续任务 —— 必须「显式跳过并记账」，而不是继续等到被硬杀", laterTaskRan.get());
+        assertFalse("预算耗尽后不得再启动后续任务 -- 必须「显式跳过并记账」，而不是继续等到被硬杀", laterTaskRan.get());
         assertEquals("1 次超时放弃 + 1 次预算耗尽跳过，二者都必须记账", 2, ShutdownCoordinator.getFailureCount());
     }
 
@@ -97,7 +97,7 @@ public class ShutdownCoordinatorTimeoutTest {
     // @DisplayName: "N-22：非正预算不表示「无上限」，而是回落默认（与 N-16/N-19 同一纪律）"
     public void nonPositiveBudgetFallsBackToDefault() {
         System.setProperty(TASK_PROP, "0");
-        assertEquals("0 不得被当作「无上限」—— 那正是本预算要消除的隐患", ShutdownCoordinator.DEFAULT_TASK_TIMEOUT_MS, ShutdownCoordinator.resolveBudget(TASK_PROP, ShutdownCoordinator.DEFAULT_TASK_TIMEOUT_MS));
+        assertEquals("0 不得被当作「无上限」-- 那正是本预算要消除的隐患", ShutdownCoordinator.DEFAULT_TASK_TIMEOUT_MS, ShutdownCoordinator.resolveBudget(TASK_PROP, ShutdownCoordinator.DEFAULT_TASK_TIMEOUT_MS));
 
         System.setProperty(TOTAL_PROP, "-1");
         assertEquals("负数同样回落默认", ShutdownCoordinator.DEFAULT_TOTAL_BUDGET_MS, ShutdownCoordinator.resolveBudget(TOTAL_PROP, ShutdownCoordinator.DEFAULT_TOTAL_BUDGET_MS));

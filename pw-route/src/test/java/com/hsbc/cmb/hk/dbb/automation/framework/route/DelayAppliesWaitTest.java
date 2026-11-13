@@ -115,7 +115,7 @@ public class DelayAppliesWaitTest {
 
         // 修复断言①：dispatch 返回后延迟窗口内绝不可 resume（历史缺陷=立即放行）
         Thread.sleep(120);
-        assertEquals("DELAY 期间请求被立即放行——delay 空操作（P1 缺陷未修复或回归）", (long) -1, (long) resumeAtNanos.get());
+        assertEquals("DELAY 期间请求被立即放行--delay 空操作（P1 缺陷未修复或回归）", (long) -1, (long) resumeAtNanos.get());
 
         // 修复断言②：延迟窗口结束后 resume 必然发生，真实时延 ≥ delay 的 5/6
         // 方案 B（2026-10-11）：resume 由 main 业务线程 drain 执行——本测试线程模拟 main：轮询 drain。
@@ -153,7 +153,7 @@ public class DelayAppliesWaitTest {
         handler.accept(route);
 
         Thread.sleep(100);
-        assertEquals("randomDelay 配置反转时仍立即放行——负延迟未被钳制", (long) -1, (long) resumeAtNanos.get());
+        assertEquals("randomDelay 配置反转时仍立即放行--负延迟未被钳制", (long) -1, (long) resumeAtNanos.get());
 
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (resumeAtNanos.get() < 0 && System.nanoTime() < deadline) {

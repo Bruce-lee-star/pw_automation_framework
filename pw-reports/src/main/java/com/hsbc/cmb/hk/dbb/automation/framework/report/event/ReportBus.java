@@ -63,12 +63,16 @@ public final class ReportBus {
     private final PwReportsConfig config;
     private final ScrubGate scrub;
     private final ConcurrentHashMap<String, RecordingSession> sessions = new ConcurrentHashMap<>();
+    /** rerun 轮次：identity（baseId 去掉时间戳后的 SHA 摘要）→ 首轮分配的 outcomeId。 */
+    private final ConcurrentHashMap<String, String> sessionIdentities = new ConcurrentHashMap<>();
     private final CopyOnWriteArrayList<ReportSink> sinks = new CopyOnWriteArrayList<>();
     private final ThreadLocal<StepHandle> current = new ThreadLocal<>();
 
     private final AtomicLong sinkErrors = new AtomicLong();
     private final AtomicLong unattributedArtifacts = new AtomicLong();
     private final AtomicBoolean runFinished = new AtomicBoolean(false);
+    /** 本轮是否为 Surefire rerunFailingTestsCount 触发的重跑轮次（保留首轮会话）。 */
+    private volatile boolean rerunRound;
     private volatile boolean enabled;
 
     /** 当前报告数据来源（运行级）。Cucumber 路置 CUCUMBER 以互斥 FrameworkListener 桥接。 */
@@ -133,7 +137,14 @@ public final class ReportBus {
         if (!enabled) {
             return;
         }
-        sessions.clear();
+        //  Surefire rerunFailingTestsCount 会在同一 JVM 内分多轮重跑：上一轮已 finishRun 后再
+        //  startRun 即 rerun。此时绝不能清空 sessions —— 首轮通过、未参与重跑的用例会被清掉，
+        //  最终报告只剩重跑子集（如 218 → 103）。rerun 轮次保留既有会话，重跑用例按身份覆盖结果。
+        rerunRound = runFinished.get();
+        if (!rerunRound) {
+            sessions.clear();
+            sessionIdentities.clear();
+        }
         runFinished.set(false);
         current.remove(); // 防止本线程残留的用例级 ThreadLocal 句柄
         sinkErrors.set(0); // 让 getSinkErrorCount() 反映"本轮"而非跨轮累计值
@@ -189,13 +200,15 @@ public final class ReportBus {
         Map<String, String> featureFirstSeen = new HashMap<>();
         for (TestOutcome o : ordered) {
             String feature = featureKey(o);
-            //  HashMap.merge 不接受 null 值（startTime 可能为 null）→ 显式 get/put 取更早者
-            featureFirstSeen.put(feature, earlierStart(featureFirstSeen.get(feature), o.getStartTime()));
+            //  HashMap.merge 不接受 null 值（startTime 可能为 null）→ 显式 get/put 取更早者。
+            //  用「首次开始时间」排序：rerun 轮把重跑用例的 startTime 覆盖成重跑时刻，
+            //  若按 startTime 排，重跑的用例会被甩到列表末尾、顺序随重跑跳变（2026-11-11）。
+            featureFirstSeen.put(feature, earlierStart(featureFirstSeen.get(feature), firstStartOf(o)));
         }
         ordered.sort(java.util.Comparator
                 .comparing((TestOutcome o) -> featureFirstSeen.get(featureKey(o)),
                         java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder()))
-                .thenComparing(TestOutcome::getStartTime,
+                .thenComparing(ReportBus::firstStartOf,
                         java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
         return ordered;
     }
@@ -214,6 +227,12 @@ public final class ReportBus {
         UserStory story = o.getUserStory();
         String name = story == null ? null : story.getStoryName();
         return name == null ? "" : name;
+    }
+
+    /** 用例首次开始时间（rerun 后仍指向首轮）；旧数据缺失时回退 {@code startTime}。 */
+    private static String firstStartOf(TestOutcome o) {
+        String first = o.getFirstStartTime();
+        return first == null || first.isBlank() ? o.getStartTime() : first;
     }
 
     /** 取更早的 ISO-8601 时间串（同运行格式一致，字典序=时间序）；任一为 {@code null} 取另一个。 */
@@ -300,6 +319,20 @@ public final class ReportBus {
     /** putIfAbsent 循环占位：并行 startCase 同 baseId 也保证 id 唯一。 */
     private RecordingSession placeSession(String baseId, String feature, String scenario,
                                           List<String> tags, String featurePath) {
+        String identity = identityOf(baseId);
+        if (rerunRound) {
+            String previousId = sessionIdentities.get(identity);
+            if (previousId != null) {
+                //  重跑同一用例：沿用首轮 outcomeId（产物文件名稳定），整体覆盖为最新一轮结果。
+                //  时间线元数据例外——继承首轮「首次开始时刻」并 attempt+1，否则整个运行的
+                //  Started 会退化成最后一轮的重跑时刻（2026-11-11 用户反馈 index start 不对）。
+                RecordingSession fresh = new RecordingSession(previousId, feature, scenario, tags, featurePath,
+                        config.getMaxEvidenceLines(), config.getMaxApiOperations());
+                fresh.inheritRunHistory(sessions.get(previousId));
+                sessions.put(previousId, fresh);
+                return fresh;
+            }
+        }
         String id = baseId;
         int suffix = 1;
         while (true) {
@@ -307,6 +340,7 @@ public final class ReportBus {
                     config.getMaxEvidenceLines(), config.getMaxApiOperations());
             RecordingSession prev = sessions.putIfAbsent(id, candidate);
             if (prev == null) {
+                sessionIdentities.put(identity, id);
                 return candidate;
             }
             id = baseId + "-" + (++suffix);
@@ -314,6 +348,30 @@ public final class ReportBus {
                 id = baseId + "-" + System.nanoTime(); // 理论兜底，不进正常路径
             }
         }
+    }
+
+    /**
+     * baseId 的稳定身份：{@code yyyyMMdd-HHmmss-<SHA-256>} 去掉时间戳前缀后的摘要。
+     * 用于 rerun 轮次定位同一用例的既有会话；非时间戳格式（测试 / 外部直接传入）原样返回。
+     */
+    private static String identityOf(String baseId) {
+        int idx = baseId.lastIndexOf('-');
+        if (idx > 0 && idx < baseId.length() - 1) {
+            String tail = baseId.substring(idx + 1);
+            if (tail.length() == 64) {
+                boolean hex = true;
+                for (int i = 0; i < tail.length(); i++) {
+                    if (Character.digit(tail.charAt(i), 16) < 0) {
+                        hex = false;
+                        break;
+                    }
+                }
+                if (hex) {
+                    return tail;
+                }
+            }
+        }
+        return baseId;
     }
 
     /**

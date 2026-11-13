@@ -77,13 +77,16 @@ public final class ApiCaptureContext {
      *
      * <p><b>何时返回 null（非缺陷）</b>：
      * <ol>
-     *   <li>该 endpoint 没有<b>被采集</b>的记录：默认只采集 MONITOR 主渠道规则，
+     *   <li>该 endpoint 没有<b>被采集且已物化</b>的记录：默认只采集 MONITOR 主渠道规则，
      *       其余渠道需显式 {@code .capture()} 或 {@code route.capture.all.type=true}；</li>
-     *   <li>响应尚未到达 —— 本方法是<b>即时查询、不等待</b>；需要等待请用
-     *       {@link #waitForApi(java.util.function.Predicate, long)} /
+     *   <li>请求刚命中规则（{@code MATCHED}）或响应已到但 body 尚未在业务线程物化
+     *       （{@code ARRIVED}）—— 业务只读查询<b>只返回已物化记录</b>，本方法又是即时查询、不等待；
+     *       需要等待请用 {@link #waitForApi(java.util.function.Predicate, long)} /
      *       {@link #waitForApiSince(long, java.util.function.Predicate, long)}；</li>
-     *   <li>body 不可读：3xx 重定向、SSE/流式、响应句柄被回收、读取失败，
-     *       或该规则显式 {@code .captureBody(false)}；</li>
+     *   <li>规则显式 {@code .captureBody(false)}：记录已物化、对业务可见，但按配置不读体，
+     *       故 {@code responseBody()} 为 null；</li>
+     *   <li>3xx 重定向 / SSE 流式 / 句柄回收 / 读取失败 / 超时：记录停在未物化阶段，
+     *       <b>不进入业务只读查询</b>（原因仍写入日志与路由证据，可经诊断通道查看）；</li>
      *   <li>pw-route 不在 classpath（SPI 缺席）——安全降级，不抛异常。</li>
      * </ol>
      *
@@ -113,7 +116,7 @@ public final class ApiCaptureContext {
     }
 
     /**
-     * 当前已分配的采集序号（= 已进入历史队列的记录数）；无实现时返回 -1。
+     * 当前已分配的采集序号（= 已记录的请求数，与是否已物化入队无关）；无实现时返回 -1。
      *
      * <p>推荐用法（消除"过期命中"）：触发业务动作<b>之前</b>取一次该值，动作之后调用
      * {@link #waitForApiSince(long, Predicate, long)} 并传入 {@code 序号 + 1}，

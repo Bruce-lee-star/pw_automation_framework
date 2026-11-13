@@ -120,7 +120,7 @@ public class RouteMonitorFailureReportSinkTest {
         sink.record(List.of(new RouteAssertionFailure(
                 "/api/feed/persist", "GET", "http://host/api/feed/persist",
                 200, 500, List.of(), false, 60_000L, "", "", "", "")));
-        assertTrue("record 后文件应已落盘（探针 JVM → 报告 JVM 的跨进程通道）", Files.exists(path));
+        assertTrue("record 后文件应已落盘（探针 JVM -> 报告 JVM 的跨进程通道）", Files.exists(path));
         String content = Files.readString(path, StandardCharsets.UTF_8);
         assertTrue("落盘内容含 pattern", content.contains("\"pattern\":\"/api/feed/persist\""));
         assertTrue("落盘内容含 failureCount", content.contains("\"failureCount\":1"));

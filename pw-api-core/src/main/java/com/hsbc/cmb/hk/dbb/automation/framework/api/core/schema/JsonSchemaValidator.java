@@ -142,7 +142,7 @@ public final class JsonSchemaValidator {
             if (in == null) {
                 throw new IllegalStateException(
                         "JSON schema resource not found on classpath: " + schemaResource
-                                + "（请确认文件位于 src/main/resources 或 src/test/resources 下）");
+                                + " (ensure the file is under src/main/resources or src/test/resources)");
             }
             return MAPPER.readTree(in);
         } catch (IOException e) {
@@ -163,7 +163,7 @@ public final class JsonSchemaValidator {
                 .map(JsonSchemaValidator::describe)
                 .collect(Collectors.joining("\n"));
         String omitted = violations.size() > MAX_REPORTED_VIOLATIONS
-                ? "\n  ... 其余 " + (violations.size() - MAX_REPORTED_VIOLATIONS) + " 条违规已省略"
+                ? "\n  ... " + (violations.size() - MAX_REPORTED_VIOLATIONS) + " more violations omitted"
                 : "";
         return "Response does not match JSON schema '" + schemaResource + "' ("
                 + violations.size() + " violation(s)):\n" + details + omitted;

@@ -144,7 +144,7 @@ public class DelayInterceptMaterializeTest {
 
         // 断言②：延迟窗口内绝不能 fulfill（历史缺陷=立即放行）
         Thread.sleep(120);
-        assertEquals("DELAY+intercept 期间请求被立即交付——物化后未等待延迟（F5 未生效或回归）",
+        assertEquals("DELAY+intercept 期间请求被立即交付--物化后未等待延迟（F5 未生效或回归）",
                 (long) -1, (long) fulfillAtNanos.get());
 
         // 断言③：延迟窗口结束后 fulfill 必然发生（交付走 fulfill，非 resume），真实时延 ≥ delay 的 5/6

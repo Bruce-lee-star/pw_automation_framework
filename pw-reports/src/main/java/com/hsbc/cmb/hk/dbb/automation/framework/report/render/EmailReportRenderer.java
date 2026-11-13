@@ -16,9 +16,6 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,10 +47,6 @@ public final class EmailReportRenderer {
     public static final String EMAIL_FILE = "email-report.html";
 
     private static final Logger log = LoggerFactory.getLogger(EmailReportRenderer.class);
-
-    /** 生成时间戳（钉 ROOT，避免不同机器 locale 漂移）。 */
-    private static final DateTimeFormatter STAMP =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss 'UTC'", Locale.ROOT);
 
     private static final Configuration FREEMARKER = new Configuration(Configuration.VERSION_2_3_34);
 
@@ -100,10 +93,11 @@ public final class EmailReportRenderer {
         List<Map<String, Object>> features = featureRows(outcomes);
         model.put("projectName", AggregateBuilder.projectName());
         model.put("reportVersion", AggregateBuilder.reportVersion(outcomes));
-        model.put("generatedAt", STAMP.format(OffsetDateTime.now(ZoneOffset.UTC)));
-        //  运行窗口（generatedAt / startedAt / endedAt，人读格式）：邮件同样要在顶部给出
-        //  "什么时候生成、测试何时开始/结束"（2026-10-22 用户要求，与三份站点报告同源）。
-        model.put("run", SummaryHtmlRenderer.runWindow(outcomes));
+        //  运行窗口（generatedAt / startedAt / endedAt，人读 + 时区后缀）：邮件与三份站点报告同源同口径。
+        Map<String, Object> run = SummaryHtmlRenderer.runWindow(outcomes);
+        model.put("run", run);
+        //  头部小字沿用同一 generatedAt：原为单独钉 UTC 的 STAMP，与 run 行（报告时区）口径不一致。
+        model.put("generatedAt", run.get("generatedAt"));
         //  env / browsers / coverageFeatures / execTime 已随「Environment 节删除 +
         //  Functional Coverage 节删除」（2026-10-22 用户决定）从模型移除——feature 统计
         //  只保留 featureCount（顶部 Features KPI 卡），不再为已删除的节准备数据。
@@ -116,6 +110,8 @@ public final class EmailReportRenderer {
         model.put("frequentFailures", frequentFailures(outcomes));
         model.put("unstableFeatures", unstableFeatures(outcomes));
         model.put("failureGroups", failureGroups(failureList));
+        //  Full Test Results 的 per-case 链接：邮件页自包含（无 <base href>），需显式绝对化
+        absolutizeLinks(model.get("groups"));
         model.put("links", reportLinks());
         //  CI / 构建信息（邮件页脚构建链接）；无 Jenkins/GitLab 变量时 present=false，不渲染
         model.put("ci", ReportView.ciBuild());
@@ -130,6 +126,7 @@ public final class EmailReportRenderer {
             String key = String.valueOf(r.get("result"));
             row.put("resultKey", key);
             row.put("resultLabel", ReportView.label(key));
+            row.put("link", absoluteLink(String.valueOf(r.getOrDefault("link", ""))));
             rows.add(row);
         }
         return rows;
@@ -312,6 +309,40 @@ public final class EmailReportRenderer {
         l.put("fullReport", base + "index.html");
         l.put("csv", base + "pw-summary.csv");
         return l;
+    }
+
+    /** 邮件内链绝对化：CI 用自动推导的 baseUrl 前缀；本地保持相对（自包含附件内仍可用）。 */
+    private static String absoluteLink(String relative) {
+        if (relative == null || relative.isEmpty() || relative.startsWith("http")) {
+            return relative;
+        }
+        String base = PwReportsConfig.baseUrl();
+        return (base == null || base.isEmpty()) ? relative : base + relative;
+    }
+
+    /** 遍历 feature 分组，把每个场景行的相对 {@code link} 绝对化。 */
+    @SuppressWarnings("unchecked")
+    private static void absolutizeLinks(Object groups) {
+        if (!(groups instanceof List<?> list)) {
+            return;
+        }
+        for (Object g : list) {
+            if (!(g instanceof Map<?, ?>)) {
+                continue;
+            }
+            Object scenarios = ((Map<String, Object>) g).get("scenarios");
+            if (!(scenarios instanceof List<?> rows)) {
+                continue;
+            }
+            for (Object r : rows) {
+                if (r instanceof Map<?, ?> row) {
+                    Object link = ((Map<String, Object>) row).get("link");
+                    if (link instanceof String l) {
+                        ((Map<String, Object>) row).put("link", absoluteLink(l));
+                    }
+                }
+            }
+        }
     }
 
     /** 按 feature 分组的失败列表（沿用旧邮件摘要 Full Failure List），保留首现顺序。 */

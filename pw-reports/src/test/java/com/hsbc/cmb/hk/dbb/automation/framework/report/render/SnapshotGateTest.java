@@ -37,9 +37,11 @@ class SnapshotGateTest {
     private static final Pattern ISO_TIMESTAMP =
             Pattern.compile("\\d{4}-\\d{2}-\\d{2}T[\\d:.]+(?:Z|[+-]\\d{2}:\\d{2})");
     //  2026-10-22 顶栏新增运行窗口（generatedAt / startedAt / endedAt），格式为
-    //  "yyyy-MM-dd HH:mm:ss"（人读，空格分隔）——generatedAt 每次运行都变，必须一并规范化
-    private static final Pattern HUMAN_TIMESTAMP =
-            Pattern.compile("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}");
+    //  "yyyy-MM-dd HH:mm:ss"（人读，空格分隔）——generatedAt 每次运行都变，必须一并规范化。
+    //  2026-11-11 起时间统一带时区后缀 (UTC+08:00) / (UTC)：不同机器时区不同，
+    //  后缀必须与时间一起归一到 <TS>，否则快照会跨机器漂移。
+    private static final Pattern HUMAN_TIMESTAMP = Pattern.compile(
+            "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?: \\(UTC(?:[+-]\\d{2}:\\d{2})?\\))?");
     private static final Pattern SCREENSHOT_NAME = Pattern.compile("step-\\d+\\.png");
     private static final Pattern REPORT_VERSION = Pattern.compile("reportVersion \\d+");
 
@@ -57,7 +59,7 @@ class SnapshotGateTest {
                     + SNAPSHOT.toAbsolutePath());
             return;
         }
-        assertThat(SNAPSHOT).as("snapshot file missing — generate with "
+        assertThat(SNAPSHOT).as("snapshot file missing - generate with "
                         + "-Dpw.report.test.write-snapshot=true (first run or intentional reset)")
                 .exists();
         normalizedSnapshot = Files.readString(SNAPSHOT, StandardCharsets.UTF_8);
@@ -72,7 +74,7 @@ class SnapshotGateTest {
         TestOutcome outcome = OutcomeFixtures.full();
         String normalized = normalize(HtmlRenderer.renderToString(outcome));
         assertThat(normalized)
-                .as("HTML snapshot drift — 模板变更有意为止？重新冻结："
+                .as("HTML snapshot drift - 模板变更有意为止？重新冻结："
                         + "mvn test -Dtest=SnapshotGateTest -Dpw.report.test.write-snapshot=true")
                 .isEqualTo(normalizedSnapshot);
     }

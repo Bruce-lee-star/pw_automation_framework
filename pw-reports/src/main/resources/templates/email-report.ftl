@@ -63,8 +63,8 @@
         .card { background:#ffffff; border:1px solid #e4e9f0; border-radius:10px; }
         .sec { padding:18px; }
         .th { background:#f8fafc; text-align:left; padding:9px 12px; font-size:11px; color:#64748b;
-              text-transform:uppercase; letter-spacing:.4px; border-bottom:1px solid #e4e9f0; }
-        .td { padding:10px 12px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+              text-transform:uppercase; letter-spacing:.4px; border:1px solid #e4e9f0; }
+        .td { padding:10px 12px; border:1px solid #eef2f7; vertical-align:top; }
         .num { text-align:right; }
         .sub { color:#6b7a90; font-size:12px; }
         .name { font-weight:600; }
@@ -98,7 +98,7 @@
                  原名太小、没居中，且配置了 name 仍显示 Test Report）。 -->
             <div style="font-size:28px;font-weight:700;color:#ffffff;letter-spacing:.2px;">${projectName?html}</div>
             <div style="font-size:12px;color:#c7d2fe;margin-top:8px;">
-                <#-- generatedAt 已自带 "UTC" 后缀（见 EmailReportRenderer.STAMP），此处不再重复拼接 -->
+                <#-- generatedAt 与 run 行同源（报告时区 + (UTC+08:00) 后缀），此处不再重复拼接时区 -->
                 ${count?c} scenario<#if count != 1>s</#if> &middot; ${featureCount?c} feature<#if featureCount != 1>s</#if> &middot; ${totalDurationText?html} &middot; ${generatedAt?html}
             </div>
         </td>
@@ -178,7 +178,7 @@
                      从什么时间开始测试、什么时间结尾"）：替代原来只有 "executed on <generatedAt>" 的单行。 -->
                 <div class="sub" style="margin-top:12px;">
                     ${count?c} tests executed &middot; Generated at <b>${run.generatedAt?html}</b>
-                    &middot; Started <b>${run.startedAt?html}</b> &middot; Ended <b>${run.endedAt?html}</b>
+                    &middot; Started <b>${run.startedAt?html}</b> &middot; Ended <b>${run.endedAt?html}</b><#if run.rerunNote??> &middot; <b>${run.rerunNote?html}</b></#if>
                 </div>
 
                 <#-- 耗时口径：5 格指标条（标签小字 + 数值加粗、格间细分隔线）。

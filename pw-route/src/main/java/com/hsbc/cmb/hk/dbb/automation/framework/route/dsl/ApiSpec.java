@@ -1024,7 +1024,7 @@ public final class ApiSpec {
 
         public Builder monitorTimeoutMs(long timeoutMs) {
             if (timeoutMs < 0) {
-                throw new IllegalArgumentException("timeoutMs must be >= 0 (0=never timeout, 对齐现有 RouteDsl.timeout(0) 语义)");
+                throw new IllegalArgumentException("timeoutMs must be >= 0 (0=never timeout, aligned with existing RouteDsl.timeout(0) semantics)");
             }
             this.monitorTimeoutMs = timeoutMs;
             return this;
@@ -1187,7 +1187,7 @@ public final class ApiSpec {
         // ── 公共 ──
         public Builder times(int times) {
             if (times < 0) {
-                throw new IllegalArgumentException("times must be >= 0 (0=unlimited, 对齐现有 RouteDsl.times(0) 语义)");
+                throw new IllegalArgumentException("times must be >= 0 (0=unlimited, aligned with existing RouteDsl.times(0) semantics)");
             }
             this.times = times == 0 ? null : times; // null=unlimited（PatternBinder 据此不传 RouteOptions.times）
             return this;

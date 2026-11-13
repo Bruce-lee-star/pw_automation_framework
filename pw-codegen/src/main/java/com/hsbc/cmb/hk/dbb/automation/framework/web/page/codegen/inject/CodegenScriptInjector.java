@@ -73,7 +73,7 @@ public final class CodegenScriptInjector {
             Object bridge = page.evaluate("() => typeof window.__codegenEvent");
             if (!Boolean.TRUE.equals(recorder) || !"function".equals(bridge)) {
                 log.warn("[codegen][inject] self-check failed: recorderPresent={}, bridgeType={} "
-                        + "— 拾取与录制将不会有任何事件", recorder, bridge);
+                        + "- pick and recording will emit no events", recorder, bridge);
             }
         } catch (Exception e) {
             CodegenQuiet.ignore("CodegenScriptInjector#inject", e);

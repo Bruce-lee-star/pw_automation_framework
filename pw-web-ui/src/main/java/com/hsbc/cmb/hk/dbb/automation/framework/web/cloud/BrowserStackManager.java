@@ -815,7 +815,7 @@ public class BrowserStackManager {
                 if (httpsProxy != null) {
                     env.put("HTTPS_PROXY", httpsProxy);
                 } else {
-                    logger.warn("[Proxy] HTTPS_PROXY not set — wss:// connection may fail without proxy tunnel. "
+                    logger.warn("[Proxy] HTTPS_PROXY not set - wss:// connection may fail without proxy tunnel. "
                             + "Configure playwright.proxy.https or ensure playwright.proxy.http is set for fallback.");
                 }
                 // NO_PROXY：排除内网地址即可。

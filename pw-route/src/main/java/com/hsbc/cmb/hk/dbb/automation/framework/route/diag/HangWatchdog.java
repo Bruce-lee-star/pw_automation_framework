@@ -181,16 +181,16 @@ public final class HangWatchdog {
     static String renderSample(Thread owner, long elapsedMs, long interval) {
         StringBuilder sb = new StringBuilder(4096);
         sb.append("==== [Route-HangWatchdog] runtime '").append(owner.getName())
-                .append("' 已运行 ").append(elapsedMs).append("ms（采样间隔 ").append(interval)
-                .append("ms）—— 同栈连续多次采样无变化（疑似真卡死），以下为线程现场；")
-                .append("关闭：-Droute.hang.watchdog.interval.ms=0 ====\n");
-        sb.append("--- 业务线程 『").append(owner.getName()).append("』（state=")
-                .append(owner.getState()).append("）完整栈 ---\n");
+                .append("' has run for ").append(elapsedMs).append("ms (sample interval ").append(interval)
+                .append("ms) - stack unchanged across consecutive samples (suspected hang), thread dump follows;")
+                .append("disable: -Droute.hang.watchdog.interval.ms=0 ====\n");
+        sb.append("--- business thread '").append(owner.getName()).append("' (state=")
+                .append(owner.getState()).append(") full stack ---\n");
         for (StackTraceElement frame : owner.getStackTrace()) {
             sb.append("    at ").append(frame).append('\n');
         }
         Map<Thread, StackTraceElement[]> all = Thread.getAllStackTraces();
-        sb.append("--- 其它线程概览（共 ").append(all.size()).append(" 个，各取首个非 JDK 帧）---\n");
+        sb.append("--- other threads overview (total ").append(all.size()).append(", first non-JDK frame each) ---\n");
         for (Map.Entry<Thread, StackTraceElement[]> entry : all.entrySet()) {
             Thread th = entry.getKey();
             if (th == owner || isNoiseThread(th.getName())) {
@@ -199,8 +199,8 @@ public final class HangWatchdog {
             sb.append("    [").append(th.getName()).append("] ").append(th.getState()).append(" | ")
                     .append(firstInterestingFrame(entry.getValue())).append('\n');
         }
-        sb.append("==== [Route-HangWatchdog] 采样结束（若停在 GuardedDriverCall 则是 route2 阻塞；"
-                + "停在 Playwright sendMessage 则是协议层等待）====");
+        sb.append("==== [Route-HangWatchdog] sampling ended (stuck in GuardedDriverCall means route2 blockage; "
+                + "stuck in Playwright sendMessage means protocol-level wait) ====");
         return sb.toString();
     }
 
@@ -229,7 +229,7 @@ public final class HangWatchdog {
     /** 硬超时处置：记录 ERROR + 尝试中断业务线程 + 留存挂死事件。 */
     private void fireHardTimeout(Thread owner, long elapsed) {
         hardFired = true;
-        LOGGER.error("[Route-HangWatchdog] HARD TIMEOUT: runtime '{}' ran {}ms exceeding hard limit — "
+        LOGGER.error("[Route-HangWatchdog] HARD TIMEOUT: runtime '{}' ran {}ms exceeding hard limit - "
                 + "interrupting owner thread (effective only for interruptible blocks); "
                 + "consume via consumeHardHang() to fail the scenario", id, elapsed);
         try {
@@ -285,7 +285,7 @@ public final class HangWatchdog {
     /** 取首个"有信息量"的帧：跳过 JDK 反射 / 线程池样板帧，优先框架与 Playwright 帧。 */
     private static String firstInterestingFrame(StackTraceElement[] stack) {
         if (stack == null || stack.length == 0) {
-            return "(无栈帧)";
+            return "(no stack frames)";
         }
         for (StackTraceElement frame : stack) {
             String cls = frame.getClassName();

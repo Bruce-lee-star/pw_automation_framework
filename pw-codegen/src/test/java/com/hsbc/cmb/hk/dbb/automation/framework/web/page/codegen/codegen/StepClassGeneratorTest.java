@@ -77,7 +77,7 @@ public class StepClassGeneratorTest {
         List<CodegenEntry> es = Arrays.asList(
                 role("button", "Sign in", "#btn", 0),
                 role("textbox", "Username", "#u", 0),
-                role("checkbox", "Remember me", "#r", 0));
+                withChecked("checkbox", "Remember me", "#r", true));
         String out = stepClass(es);
         // 一次 Start→Pause 只产出一个 @Step 方法：step1
         Assert.assertEquals("一次会话只生成一个 @Step 方法", 1, countOccurrences(out, "@Step"));
@@ -137,6 +137,65 @@ public class StepClassGeneratorTest {
         Assert.assertTrue(out.contains("loginPage.password.fill(\"S3cret!\");"));
         Assert.assertFalse("已回填真实值不应再出现空占位 TODO",
                 out.contains("replace the empty placeholder with the real input value"));
+    }
+
+    /**
+     * 原生 {@code <select>} 必须生成 {@code selectByValue(录制值)}，绝不能生成 {@code fill()}。
+     *
+     * <p>回归评审 P0-1：Playwright 的 {@code fill()} 只接受 input/textarea/contenteditable，
+     * 对 {@code <select>} 直接抛 "Element is not an &lt;input&gt; or &lt;textarea&gt;"，回放必挂。
+     */
+    @Test
+    public void nativeSelectUsesSelectByValueNotFill() {
+        CodegenEntry e = withTag("combobox", "Province", "#prov", 0, "select");
+        String out = stepClass(List.of(e), Map.of("combobox|Province#0", "HK"));
+
+        Assert.assertTrue(out.contains("loginPage.province.selectByValue(\"HK\");"));
+        Assert.assertFalse("原生 select 不得生成 fill()", out.contains(".fill("));
+    }
+
+    /** 自定义下拉（div role=combobox）没有可选项列表：只能展开，不能生成必然抛异常的 fill()。 */
+    @Test
+    public void customDropdownExpandsInsteadOfFill() {
+        CodegenEntry e = withTag("combobox", "Province", "div.select", 0, "div");
+        String out = stepClass(List.of(e), Map.of("combobox|Province#0", "HK"));
+
+        Assert.assertTrue(out.contains("loginPage.province.click();"));
+        Assert.assertFalse("自定义下拉不得生成 fill()", out.contains(".fill("));
+    }
+
+    private static CodegenEntry withTag(String role, String name, String css, int index, String tag) {
+        return new CodegenEntry(role + "|" + name + "#" + index, role, name, "ROLE", 100,
+                "role=" + role, css, null, index, List.of(), List.of(), 1, tag);
+    }
+
+    /**
+     * 复选框「取消勾选」必须生成 {@code uncheck()}。
+     *
+     * <p>回归评审 P0-4（收窄版）：动词历史实现只由 role 决定，checkbox 恒 {@code check()}；
+     * 用户录的是取消勾选，产物回放后终态与录制相反。
+     */
+    @Test
+    public void uncheckedCheckboxGeneratesUncheck() {
+        CodegenEntry e = withChecked("checkbox", "Remember me", "#rm", false);
+        String out = stepClass(List.of(e));
+
+        Assert.assertTrue(out.contains("loginPage.rememberMe.uncheck();"));
+        Assert.assertFalse(out.contains(".check();"));
+    }
+
+    /** 勾选态为 true 时仍生成 check()。 */
+    @Test
+    public void checkedCheckboxGeneratesCheck() {
+        CodegenEntry e = withChecked("checkbox", "Remember me", "#rm", true);
+        String out = stepClass(List.of(e));
+
+        Assert.assertTrue(out.contains("loginPage.rememberMe.check();"));
+    }
+
+    private static CodegenEntry withChecked(String role, String name, String css, boolean checked) {
+        return new CodegenEntry(role + "|" + name + "#0", role, name, "ROLE", 100,
+                "role=" + role, css, null, 0, List.of(), List.of(), 1, null, checked);
     }
 
     private static int countOccurrences(String s, String sub) {

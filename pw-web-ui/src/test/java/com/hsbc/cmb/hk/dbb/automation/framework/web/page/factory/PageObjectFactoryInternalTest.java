@@ -93,7 +93,7 @@ public class PageObjectFactoryInternalTest {
         ScenarioContext.endCurrent(); // 模拟收尾先于 endRequestScope：场景身份解绑
         PageObjectFactory.endRequestScope();
 
-        assertFalse("P1-12：收尾时场景已解绑，旧实现键口径翻转→条目滞留；新实现应精确删除",
+        assertFalse("P1-12：收尾时场景已解绑，旧实现键口径翻转->条目滞留；新实现应精确删除",
                 PageObjectFactory.getRegisteredPageClasses().contains(DummyPage.class));
     }
 }

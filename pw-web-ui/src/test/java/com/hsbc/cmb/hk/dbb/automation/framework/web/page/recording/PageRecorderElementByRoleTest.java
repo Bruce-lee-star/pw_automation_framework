@@ -38,21 +38,19 @@ public class PageRecorderElementByRoleTest {
     static final class FakePage extends BasePage {
     }
 
-    private String prevLogging;
+    private static final String RECORDING_KEY = "framework.recording.enabled";
+    private String prevRecording;
 
     @Before
     public void setUp() {
-        prevLogging = System.getProperty("framework.logging");
-        System.setProperty("framework.logging", "VERBOSE");
+        prevRecording = System.getProperty(RECORDING_KEY);
+        System.setProperty(RECORDING_KEY, "true");
     }
 
     @After
     public void tearDown() {
-        if (prevLogging == null) {
-            System.clearProperty("framework.logging");
-        } else {
-            System.setProperty("framework.logging", prevLogging);
-        }
+        // 显式恢复默认值：Serenity 配置快照会让 clearProperty 无法回落到默认值
+        System.setProperty(RECORDING_KEY, prevRecording == null ? "true" : prevRecording);
     }
 
     private static String lastElement(PageRecorder recorder) {

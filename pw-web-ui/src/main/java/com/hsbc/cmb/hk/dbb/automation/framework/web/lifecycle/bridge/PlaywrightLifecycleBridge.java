@@ -1,7 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bridge;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.core.FrameworkCore;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.CloseGuard;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.context.CustomOptionsManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.bootstrap.PlaywrightContextManager;
 
@@ -159,7 +158,7 @@ public class PlaywrightLifecycleBridge {
                     List<Page> allPages = context.pages();
                     int pageCount = allPages.size();
                     if (pageCount > 1) {
-                        logger.debug("Closing {} extra page(s) — keeping only main page", pageCount - 1);
+                        logger.debug("Closing {} extra page(s) - keeping only main page", pageCount - 1);
                         for (int i = pageCount - 1; i >= 1; i--) {
                             Page extraPage = allPages.get(i);
                             try {
@@ -209,7 +208,7 @@ public class PlaywrightLifecycleBridge {
                 boolean carriesSession = PlaywrightManager.customOptions().getStorageStatePath() != null
                         || PlaywrightManager.customOptions().getStorageState() != null;
                 if (carriesSession) {
-                    logger.debug("Page storage preserved — localStorage/sessionStorage is part of the injected session");
+                    logger.debug("Page storage preserved - localStorage/sessionStorage is part of the injected session");
                 } else {
                     cleanupPageStorage(page);
                 }
@@ -319,7 +318,7 @@ public class PlaywrightLifecycleBridge {
             return;
         }
         logger.warn("[Framework] Route connection flagged UNRESPONSIVE (no-ACK on Playwright round-trip without "
-                        + "client timeout, e.g. context.route/unroute) — rebuilding this thread's Playwright "
+                        + "client timeout, e.g. context.route/unroute) - rebuilding this thread's Playwright "
                         + "instance (new Node process = new connection) and Context before the scenario, so the "
                         + "poisoned channel cannot cascade into it");
         try {
@@ -331,7 +330,7 @@ public class PlaywrightLifecycleBridge {
             //  stopAllContextEngines() → RouteEngine.shutdownAll() 连带复位框架驱动信道。
             PlaywrightManager.restartBrowser();
 
-            logger.info("[Framework] Unresponsive-connection recovery completed — new Playwright instance "
+            logger.info("[Framework] Unresponsive-connection recovery completed - new Playwright instance "
                     + "(new connection, framework driver channel reset) and new Context/Browser with storageState re-applied");
 
         } catch (Exception e) {
@@ -520,7 +519,7 @@ public class PlaywrightLifecycleBridge {
         // 仅并发执行器模式按 playwright.browser.close.after.concurrent.task 开关及时关闭；
         // 浏览器进程最终由套件收尾（JVM shutdown hook → cleanupAll）统一回收。
         closeBrowserForCurrentThreadIfApplicable();
-        logger.debug("Feature cleanup completed — Context+Page+Session cleared for next feature rebuild");
+        logger.debug("Feature cleanup completed - Context+Page+Session cleared for next feature rebuild");
     }
 
     /**

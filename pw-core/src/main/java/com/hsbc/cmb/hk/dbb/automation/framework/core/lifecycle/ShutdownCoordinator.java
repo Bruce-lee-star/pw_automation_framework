@@ -158,7 +158,7 @@ public final class ShutdownCoordinator {
     public static void recordFailure(String step, Throwable t) {
         long cumulative = failureCount.incrementAndGet();
         LOGGER.error("[ShutdownCoordinator] Cleanup step '{}' FAILED (cumulative failures: {}); "
-                        + "resources may leak (orphan browser / thread / handle) — this failure must stay observable",
+                        + "resources may leak (orphan browser / thread / handle) - this failure must stay observable",
                 step, cumulative, t);
     }
 
@@ -190,7 +190,7 @@ public final class ShutdownCoordinator {
                 if (remainingMs <= 0) {
                     //  N-22：预算耗尽 —— 显式记账后停止。此前这是"被硬杀后静默截断"，无任何信号。
                     failureCount.incrementAndGet();
-                    LOGGER.error("[ShutdownCoordinator] total budget {}ms exhausted before task '{}' — {} task(s) SKIPPED ({}); "
+                    LOGGER.error("[ShutdownCoordinator] total budget {}ms exhausted before task '{}' - {} task(s) SKIPPED ({}); "
                                     + "a hard kill would have truncated them silently; resources may leak",
                             totalBudgetMs, t.name, TASKS.size() - i, remainingTaskNames(i));
                     break;
@@ -235,12 +235,12 @@ public final class ShutdownCoordinator {
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
         if (worker.isAlive()) {
             failureCount.incrementAndGet();
-            LOGGER.error("[ShutdownCoordinator] Task '{}' exceeded the {}ms limit (elapsed {}ms) — ABANDONED so that JVM exit is "
+            LOGGER.error("[ShutdownCoordinator] Task '{}' exceeded the {}ms limit (elapsed {}ms) - ABANDONED so that JVM exit is "
                             + "not hard-killed; its thread is a daemon and dies with the JVM. Resources may leak "
                             + "(orphan browser / thread / handle)",
                     task.name, timeoutMs, elapsedMs);
         } else if (elapsedMs >= SLOW_TASK_WARN_MS) {
-            LOGGER.warn("[ShutdownCoordinator] Task '{}' took {}ms (slow cleanup — watch for orphan resources)",
+            LOGGER.warn("[ShutdownCoordinator] Task '{}' took {}ms (slow cleanup - watch for orphan resources)",
                     task.name, elapsedMs);
         }
     }
@@ -266,7 +266,7 @@ public final class ShutdownCoordinator {
     static long resolveBudget(String property, long defaultValue) {
         long value = Long.getLong(property, defaultValue);
         if (value <= 0) {
-            LOGGER.warn("[ShutdownCoordinator] {}={} 非法（0/负数不表示「无上限」，那正是本预算要消除的隐患）；已回落默认 {}ms",
+            LOGGER.warn("[ShutdownCoordinator] {}={} is invalid (0/negative does not mean unlimited; that is the hazard this budget removes); falling back to default {}ms",
                     property, value, defaultValue);
             return defaultValue;
         }

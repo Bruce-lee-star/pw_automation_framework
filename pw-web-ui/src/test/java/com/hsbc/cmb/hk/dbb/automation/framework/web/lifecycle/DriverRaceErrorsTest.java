@@ -64,7 +64,7 @@ public class DriverRaceErrorsTest {
     }
 
     @Test
-    // @DisplayName: "非驱动家族异常一律 NONE（即便文案相同）——不误伤业务异常"
+    // @DisplayName: "非驱动家族异常一律 NONE（即便文案相同）--不误伤业务异常"
     public void nonDriverExceptions_areNeverSelfHealable() {
         assertEquals(DriverRaceErrors.Kind.NONE,
                 DriverRaceErrors.classify(new IllegalStateException("Object doesn't exist: response@x")));

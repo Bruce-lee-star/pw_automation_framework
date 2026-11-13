@@ -79,7 +79,7 @@ public class ElementDiagnosticsCollector {
             if (selector == null || selector.isBlank()) {
                 logger.warn("Cannot collect element diagnostics: locator is null and selector is blank");
             } else {
-                logger.debug("[diagnostic] no Locator available for '{}' — native probes need a Locator; "
+                logger.debug("[diagnostic] no Locator available for '{}' - native probes need a Locator; "
                         + "reporting unknown state", selector);
             }
             return info;

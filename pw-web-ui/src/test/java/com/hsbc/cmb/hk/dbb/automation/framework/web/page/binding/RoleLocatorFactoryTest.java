@@ -232,7 +232,7 @@ public class RoleLocatorFactoryTest {
         assertEquals(",not-pressed", RoleLocatorFactory.describeOptionsSuffix(RoleOptions.defaults().notPressed()));
         assertEquals(",expanded", RoleLocatorFactory.describeOptionsSuffix(RoleOptions.defaults().expanded()));
         assertEquals(",collapsed", RoleLocatorFactory.describeOptionsSuffix(RoleOptions.defaults().collapsed()));
-        assertEquals("后缀顺序固定：层级 → disabled → pressed → expanded", ",level:3,pressed,expanded", RoleLocatorFactory.describeOptionsSuffix(RoleOptions.defaults().level(3).pressed().expanded()));
+        assertEquals("后缀顺序固定：层级 -> disabled -> pressed -> expanded", ",level:3,pressed,expanded", RoleLocatorFactory.describeOptionsSuffix(RoleOptions.defaults().level(3).pressed().expanded()));
     }
 
     private static BasePage bpWith(Page page) {

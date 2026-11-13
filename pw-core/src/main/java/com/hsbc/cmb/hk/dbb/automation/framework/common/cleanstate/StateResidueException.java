@@ -14,8 +14,8 @@ public class StateResidueException extends RuntimeException {
     private final transient List<String> residue;
 
     public StateResidueException(List<String> residue) {
-        super("用例结束后状态残留（隔离失效）: " + residue
-                + " —— 请检查对应 StateResolver.reset() 是否被调用 / 是否生效");
+        super("State residue after test case (isolation failure): " + residue
+                + " - check whether the corresponding StateResolver.reset() was invoked / effective");
         this.residue = residue == null ? List.of() : List.copyOf(residue);
     }
 

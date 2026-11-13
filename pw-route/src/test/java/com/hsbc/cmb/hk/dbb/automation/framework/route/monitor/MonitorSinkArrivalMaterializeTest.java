@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 /**
  * Monitor 到达即读入快照（2026-10-16）：body 断言规则的响应，在 main drain 收尾的
  * {@link MonitorSink#materializeArrivedBodies()} 里就地读 body 成 {@link BodySnapshot} 存入 exchange，
- * 结算（{@code settleBodyAssertionNow}）消费快照而非活句柄——消除"持有句柄→延迟读取"的驱逐窗口。
+ * 结算（{@code settleBodyAssertionNow}）消费快照而非活句柄——消除"持有句柄->延迟读取"的驱逐窗口。
  *
  * <p>锁定三点：① dispatch 只持句柄不读 body；② {@code materializeArrivedBodies} 读一次；
  * ③ 结算用快照、零二次读；外加回退安全（未预取时结算仍从句柄现读，行为不变）。</p>

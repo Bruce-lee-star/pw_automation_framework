@@ -124,7 +124,7 @@ public final class GuardedDriverCallRegistry {
             }
         } catch (Throwable t) {
             //  环境缺失 / 自定义实现加载失败时，安全回退默认实现（框架自带，零依赖）
-            LOGGER.debug("[Route] GuardedDriverCall SPI 解析失败，回退默认实现: {}", t.toString());
+            LOGGER.debug("[Route] GuardedDriverCall SPI resolution failed, falling back to default implementation: {}", t.toString());
         }
         return new GuardedDriverCallImpl();
     }

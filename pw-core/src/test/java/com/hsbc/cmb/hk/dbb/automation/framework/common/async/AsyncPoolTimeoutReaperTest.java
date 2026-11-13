@@ -51,6 +51,6 @@ public class AsyncPoolTimeoutReaperTest {
         while (AsyncPool.getTimeoutCount() <= timeoutCountBefore && System.nanoTime() < deadline) {
             Thread.sleep(20);
         }
-        assertTrue("超时计数应递增 —— 证明超时被裁决器真实裁决（而非静默跳过）", AsyncPool.getTimeoutCount() > timeoutCountBefore);
+        assertTrue("超时计数应递增 -- 证明超时被裁决器真实裁决（而非静默跳过）", AsyncPool.getTimeoutCount() > timeoutCountBefore);
     }
 }

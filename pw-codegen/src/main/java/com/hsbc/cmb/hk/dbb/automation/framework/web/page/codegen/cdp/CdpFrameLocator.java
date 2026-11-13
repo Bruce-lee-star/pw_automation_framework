@@ -95,7 +95,7 @@ public final class CdpFrameLocator {
         for (String host : hosts) {
             if (host == null || host.isBlank()) {
                 // 宿主链不可信（拼进表达式就是非法选择器）：放弃选择器路径，让调用方走坐标兜底。
-                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' — skipped",
+                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' - skipped",
                         hosts, cssSelector);
                 return null;
             }
@@ -103,7 +103,7 @@ public final class CdpFrameLocator {
         // 取（缓存的）frame 树：枚举 frame 逐 frame 求值，并产出 parent 映射快照随 ElementRef 带给抽取阶段。
         FrameTree t = tree();
         if (t == null || t.frameIds.isEmpty()) {
-            log.warn("[codegen][cdp] Page.getFrameTree returned no frame — CDP 会话不可用，选择器反查跳过");
+            log.warn("[codegen][cdp] Page.getFrameTree returned no frame - CDP session unavailable, selector reverse lookup skipped");
             return null;
         }
         int degradedFrames = 0;
@@ -130,8 +130,8 @@ public final class CdpFrameLocator {
         if (degradedFrames == t.frameIds.size()) {
             // 全部 frame 都是"基础设施失败"而非"元素不存在"：必须显性告警，否则看起来和"页面上没这个元素"一样，
             // 排查时无从区分（这是历史上 selector 反查静默失效、全部退化到坐标法的原因）。
-            log.warn("[codegen][cdp] selector '{}' could not be probed in any of {} frame(s) — "
-                            + "隔离世界/CDP 求值整体失败（页面导航中 / frame 未就绪 / CDP 会话异常），本次退回坐标 hit-test",
+            log.warn("[codegen][cdp] selector '{}' could not be probed in any of {} frame(s) - "
+                            + "isolated world / CDP evaluation failed (page navigating / frame not ready / CDP session error), falling back to coordinate hit-test",
                     cssSelector, t.frameIds.size());
         } else {
             log.debug("[codegen][cdp] selector '{}' matched no element in {} frame(s)", cssSelector, t.frameIds.size());
@@ -152,7 +152,7 @@ public final class CdpFrameLocator {
         for (String host : hosts) {
             if (host == null || host.isBlank()) {
                 // 宿主链不可信：放弃选择器路径，直接回退全帧扫描（由被调方法走坐标兜底）。
-                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' — fall back",
+                log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' - fall back",
                         hosts, cssSelector);
                 return findBySelector(cssSelector, shadowHosts);
             }
@@ -167,13 +167,13 @@ public final class CdpFrameLocator {
                 ElementRef.FrameScope scope = frameId.equals(t.mainFrameId)
                         ? ElementRef.FrameScope.MAIN : ElementRef.FrameScope.SUB;
                 ElementRef.Frames snap = new ElementRef.Frames(t.mainFrameId, t.parentByFrame);
-                log.debug("[codegen][cdp] resolved by frame-path {} → frame {} '{}'", framePath, frameId, cssSelector);
+                log.debug("[codegen][cdp] resolved by frame-path {} -> frame {} '{}'", framePath, frameId, cssSelector);
                 return new ElementRef(hit.backendNodeId(), hit.frameId(), scope, hit.objectId(), snap);
             }
-            log.debug("[codegen][cdp] frame-path {} → {} but selector '{}' not hit — fall back to full scan",
+            log.debug("[codegen][cdp] frame-path {} -> {} but selector '{}' not hit - fall back to full scan",
                     framePath, frameId, cssSelector);
         } else {
-            log.debug("[codegen][cdp] frame-path {} could not be resolved (stale tree?) — fall back to full scan",
+            log.debug("[codegen][cdp] frame-path {} could not be resolved (stale tree?) - fall back to full scan",
                     framePath);
         }
         return findBySelector(cssSelector, hosts);
@@ -336,6 +336,8 @@ public final class CdpFrameLocator {
             + "return out;"
             + "}";
 
+
+
     /**
      * 深度优先展开 {@code FrameTree}（{@code frame} + {@code childFrames}），按文档顺序收集 frameId，
      * 并登记每个 frame 的父 frameId（首节点即主 frame，parent 为 {@code null}）。
@@ -483,7 +485,7 @@ public final class CdpFrameLocator {
         if (ok) {
             log.debug("[codegen][cdp] DOM document primed (getDocument)");
         } else {
-            log.debug("[codegen][cdp] DOM.getDocument failed — selector probing may degrade to coordinates");
+            log.debug("[codegen][cdp] DOM.getDocument failed - selector probing may degrade to coordinates");
         }
         return ok;
     }
@@ -496,7 +498,7 @@ public final class CdpFrameLocator {
                 Map.of("frameId", frameId, "worldName", WORLD_NAME));
         Long id = CdpJson.longField(created, "executionContextId");
         if (id == null) {
-            log.debug("[codegen][cdp] createIsolatedWorld failed for frame {} — frame 可能已失效，令帧树失效待重建",
+            log.debug("[codegen][cdp] createIsolatedWorld failed for frame {} - frame may be stale, invalidating frame tree for rebuild",
                     frameId);
             invalidateTree();   // 建隔离世界失败 ⇒ 该 frame 多半已随导航/移除消失，帧树可能过期，下次 tree() 重建
             return -1;

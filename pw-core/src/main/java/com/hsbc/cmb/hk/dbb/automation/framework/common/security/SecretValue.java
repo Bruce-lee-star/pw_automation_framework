@@ -98,7 +98,7 @@ public final class SecretValue {
                 LOGGER.warn("Raw value is not ciphertext, treating as plaintext (keeping original): {}", e.getMessage());
                 return raw;
             }
-            return onDecryptFailure(raw, "配置值标记为 ENC(...) 但并非合法密文", e);
+            return onDecryptFailure(raw, "Config value marked ENC(...) is not valid ciphertext", e);
         } catch (IllegalStateException e) {
             // CORE-C5：裸 base64 是启发式识别，普通配置值"恰好合法 base64"会误命中，解密失败属预期，
             // 绝不能因此让框架启动崩溃 —— 告警并保留原串。显式 ENC(...) 才是配置声明，失败仍失败快（C-3）。
@@ -108,7 +108,7 @@ public final class SecretValue {
                         e.getMessage());
                 return raw;
             }
-            return onDecryptFailure(raw, "配置值解密失败（主密钥缺失或与密文不匹配）", e);
+            return onDecryptFailure(raw, "Config value decryption failed (master key missing or ciphertext mismatch)", e);
         }
     }
 
@@ -119,7 +119,7 @@ public final class SecretValue {
      */
     private static String onDecryptFailure(String raw, String message, Exception cause) {
         if (isStrictMode()) {
-            throw new IllegalStateException(message + "，严禁以密文形态当值使用：" + cause.getMessage(), cause);
+            throw new IllegalStateException(message + "; using ciphertext as a value is forbidden: " + cause.getMessage(), cause);
         }
         LOGGER.warn("{} (non-strict mode, keeping original): {}", message, cause.getMessage());
         return raw;
@@ -138,7 +138,7 @@ public final class SecretValue {
         }
         String legacy = FrameworkFlags.resolve(ConfigRegistry.LEGACY_SECURITY_SECRET_STRICT.key(), null);
         if (legacy != null) {
-            LOGGER.warn("配置键 '{}' 已废弃（缺 {} 前缀），请改用 '{}'；本次仍按旧值生效：{}",
+            LOGGER.warn("config key '{}' is deprecated (missing {} prefix), use '{}' instead; old value still effective this time: {}",
                     ConfigRegistry.LEGACY_SECURITY_SECRET_STRICT.key(), FrameworkFlags.PREFIX,
                     ConfigRegistry.SECURITY_SECRET_STRICT.key(), legacy);
             return Boolean.parseBoolean(legacy);

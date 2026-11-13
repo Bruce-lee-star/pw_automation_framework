@@ -20,9 +20,11 @@ import java.util.Set;
  *
  * <h2>断言风格：hamcrest（失败即显示字符差异）</h2>
  * <ul>
- *   <li>有可读 name 的普通元素 ⇒ {@code assertThat(page.field.getText(), is("Sign in"))}
- *       （输入框/下拉取 {@code getValue()}）；</li>
- *   <li>checkbox / radio ⇒ {@code assertThat(page.field.isChecked(), is(true))}；</li>
+ *   <li>有可读 name 的普通元素 ⇒ {@code assertThat(page.field.getText(), is("Sign in"))}；</li>
+ *   <li>输入框/下拉 ⇒ {@code getValue()}，期望值取<b>录制到的最终输入值</b>（没有录制值则退化为可见性
+ *       + TODO，<b>绝不</b>用可访问名 label/placeholder 冒充输入值）；</li>
+ *   <li>checkbox / radio ⇒ {@code assertThat(page.field.isChecked(), is(true|false))}，
+ *       期望值取拾取时刻的真实勾选态；</li>
  *   <li>无 name 的元素 ⇒ 退化为可见性 {@code assertThat(..., isVisible(), is(true))}；</li>
  *   <li>命中 NLS key ⇒ 走 {@code NLS.visibleText(key)}，语言无关。</li>
  * </ul>
@@ -111,7 +113,21 @@ public final class AssertClassGenerator {
 
         if (f.assertion.endsWith("isChecked()")) {
             // checkbox/radio：断言勾选态（无"字符"语义，布尔足够）。
-            return "        assertThat(" + targetExpr + "isChecked(), is(true));";
+            // 期望值取录制时刻的真实状态：取消勾选录出来必须是 is(false)，恒 is(true) 会在回放时失败。
+            String expected = (entry != null && entry.checked) ? "true" : "false";
+            return "        assertThat(" + targetExpr + "isChecked(), is(" + expected + "));";
+        }
+
+        // 输入类元素：期望值必须取「录制到的最终输入值」。
+        // entry.name 是 AX 可访问名（label / placeholder / aria-label），拿它跟 getValue() 比对，
+        // 断言从第一次运行就是红的——除非用户恰好把标签文本原样敲进框里（评审 P0-2）。
+        if (isValueRole(entry.role)) {
+            if (f.recordedValue != null) {
+                return "        assertThat(" + targetExpr + "getValue(), is(\""
+                        + CodegenFieldPlanner.escapeJava(f.recordedValue) + "\"));";
+            }
+            return "        assertThat(" + targetExpr + "isVisible(), is(true));"
+                    + "  // TODO(review): no recorded value for this input - value assertion omitted";
         }
 
         String name = entry.name == null ? "" : entry.name;

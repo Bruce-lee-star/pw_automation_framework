@@ -98,7 +98,7 @@ public final class QueuedNetworkEvidenceBridge implements NetworkEvidenceBridge 
                 if (pending.size() >= maxPending) {
                     pending.pollFirst();
                     dropped++;
-                    log.warn("[Route] network evidence queue exceeded {} records — dropping the oldest "
+                    log.warn("[Route] network evidence queue exceeded {} records - dropping the oldest "
                             + "(is a flush missing?)", maxPending);
                 }
                 pending.addLast(new String[] {
@@ -154,7 +154,7 @@ public final class QueuedNetworkEvidenceBridge implements NetworkEvidenceBridge 
         for (String[] item : batch) {
             try {
                 String line = ApiOperationKind.CAPTURED + " " + item[0] + " " + item[1]
-                        + (item[2].isEmpty() ? "" : " — " + item[2]);
+                        + (item[2].isEmpty() ? "" : " - " + item[2]);
                 if (attachToStep) {
                     bus.attachEvidence(handle, line);
                 }

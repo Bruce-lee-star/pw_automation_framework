@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.route.monitor;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.common.route.CaptureStage;
 import com.hsbc.cmb.hk.dbb.automation.framework.common.security.SensitiveDataSanitizer;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.diag.RequestOrigin;
 import com.hsbc.cmb.hk.dbb.automation.framework.route.dsl.ApiSpec;
@@ -81,6 +82,20 @@ public final class CapturedExchange {
      * 未分配的（如派发链证据路径）为 {@link CapturedApiCall#UNSEQUENCED}。
      */
     private volatile long captureSeq = CapturedApiCall.UNSEQUENCED;
+
+    /**
+     * 采集生命周期阶段（MATCHED → ARRIVED → BODY_MATERIALIZED，单向不回退）。
+     *
+     * <p>volatile：写发生在 route 事件线程（响应到达）与业务线程（body 物化），
+     * 读发生在业务线程（入队/诊断），需要跨线程可见。</p>
+     */
+    private volatile CaptureStage stage = CaptureStage.MATCHED;
+
+    /**
+     * body 未物化或为空的原因（固定英文文案，不含业务数据，可安全写入日志/报告）。
+     * null 表示无异常（含按配置显式不读体时由调用方决定是否填写说明）。
+     */
+    private volatile String bodyUnavailableReason;
 
     /**
      * 请求归属三元组（所属 Page / Frame / 主文档导航代次），由 {@link com.hsbc.cmb.hk.dbb.automation
@@ -210,7 +225,7 @@ public final class CapturedExchange {
 
     /**
      * 存入"到达即读"预取的 body 快照（业务线程 main drain 收尾调用；取走句柄后生成）。
-     * 存入后 body 断言消费本快照而非活句柄，消除"持有句柄→延迟读取"的驱逐窗口。
+     * 存入后 body 断言消费本快照而非活句柄，消除"持有句柄->延迟读取"的驱逐窗口。
      */
     void prefetchBody(BodySnapshot snapshot) {
         this.prefetchedBody = snapshot;
@@ -281,6 +296,36 @@ public final class CapturedExchange {
         this.responseHeaders = Collections.unmodifiableMap(new LinkedHashMap<>(headers));
         this.responseTimeNanos = System.nanoTime();
         this.assertionPassed = expectStatus == null || expectStatus == status;
+        this.stage = CaptureStage.ARRIVED;   // 响应已到达，body 仍待业务线程物化
+    }
+
+    /** 采集阶段（单向推进：MATCHED → ARRIVED → BODY_MATERIALIZED）。 */
+    CaptureStage stage() {
+        return stage;
+    }
+
+    /**
+     * 标记 body 已按采集策略完成处理（成功读取并留存，或规则显式关闭读体）。
+     * 只在业务线程调用；此后该记录才对业务只读查询可见。
+     */
+    void markBodyMaterialized() {
+        this.stage = CaptureStage.BODY_MATERIALIZED;
+    }
+
+    /**
+     * 记录 body 未物化/为空的原因（超时 / 3xx / 流式 / 句柄回收 / 协议失败）。
+     * <b>不改变阶段</b>：阶段是否推进由调用方决定；停在 MATCHED / ARRIVED 时业务只读过滤
+     * 会自动排除该记录，而日志与路由证据仍可解释"为什么没有响应体"。
+     *
+     * @param reason 固定英文文案（不得含 URL、token、响应体等业务数据）
+     */
+    void markBodyUnavailable(String reason) {
+        this.bodyUnavailableReason = reason;
+    }
+
+    /** body 未物化的原因；null 表示无异常。 */
+    String bodyUnavailableReason() {
+        return bodyUnavailableReason;
     }
 
     /**
@@ -373,7 +418,7 @@ public final class CapturedExchange {
             tail.append(" (response not settled yet)");
         } else if (responseBodyPreview == null && bodyAssertionInconclusive == null) {
             // 刻意不读体（流式端点读体会挂住观测线程，或被开关关掉）——如实标注，而不是留空让人误以为"没有响应"
-            tail.append('\n').append("respBody  : (not read — event-stream bodies are deliberately not read to keep")
+            tail.append('\n').append("respBody  : (not read - event-stream bodies are deliberately not read to keep")
                     .append(" the observer unblocked, or reading is disabled via")
                     .append(" -Droute.evidence.readResponseBody=false)");
         }

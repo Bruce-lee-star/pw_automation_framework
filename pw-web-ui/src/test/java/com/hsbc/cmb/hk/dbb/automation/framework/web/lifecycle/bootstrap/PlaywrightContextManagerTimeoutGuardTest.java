@@ -26,7 +26,7 @@ public class PlaywrightContextManagerTimeoutGuardTest {
     }
 
     @Test
-    // @DisplayName: "N-16：0 被视为无限等待 → 必须回落到默认值（否则操作永久挂起且无信号）"
+    // @DisplayName: "N-16：0 被视为无限等待 -> 必须回落到默认值（否则操作永久挂起且无信号）"
     public void zeroFallsBackToDefault() {
         assertEquals("配置 0 在 Playwright 语义中 = 无限等待，必须回落默认值而非透传", DEFAULT_MS, PlaywrightContextManager.positiveTimeoutOrDefault("playwright.page.timeout", 0));
     }

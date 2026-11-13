@@ -73,9 +73,11 @@ public final class RouteDelayScheduler {
                 return value;
             }
         } catch (NumberFormatException ignored) {
-            // Report malformed values below, then use the registered safe default.
+            LOGGER.warn("[Route] invalid {} value '{}'; using registered default {}",
+                    ConfigRegistry.ROUTE_DELAY_MAX_PENDING.key(), raw, DEFAULT_MAX_PENDING);
+            return DEFAULT_MAX_PENDING;
         }
-        LOGGER.warn("[Route] invalid {} value '{}'; using registered default {}",
+        LOGGER.warn("[Route] invalid {} value '{}' (must be > 0); using registered default {}",
                 ConfigRegistry.ROUTE_DELAY_MAX_PENDING.key(), raw, DEFAULT_MAX_PENDING);
         return DEFAULT_MAX_PENDING;
     }

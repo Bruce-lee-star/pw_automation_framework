@@ -421,7 +421,11 @@
   <div class="topbar-side is-right">
     <div class="topbar-stack">
       <span class="topbar-ver">Generated at ${run.generatedAt?html}</span>
-      <span class="topbar-ver">Started ${run.startedAt?html} · Ended ${run.endedAt?html}</span>
+      <#-- per-case 同时给出两段窗口（企业级报告惯例：总窗口用于审计，单次执行窗口解释 duration chip）：
+           ① Started / Ended = 本用例首次开始 → 最后一轮结束（含 rerun 之间的空档）；
+           ② attempt N · last run = 最后一次执行自己的开始 → 结束，对应卡片里的 duration。
+           未重跑时只渲染 ①，与改动前完全一致。 -->
+      <span class="topbar-ver">Started ${run.startedAt?html} · Ended ${run.endedAt?html}<#if (outcome.attempt!1) gt 1> · attempt ${outcome.attempt?c} · last run ${run.lastStartedAt?html} → ${run.endedAt?html}</#if></span>
       <#-- CI / 构建链接：仅 Jenkins / GitLab CI 运行（存在 BUILD_URL 或 JOB_NAME+BUILD_NUMBER）时渲染。
            企业级状态条风格 pill；有构建 URL 才包 <a>（target=_blank + rel=noopener 防反向标签页劫持）。 -->
       <#if ci?? && ci.present>
@@ -449,8 +453,12 @@
     </div>
     <#-- 时长 / 开始时间 / 类型 / tags 独占一行（与标题分行的原因：标题长短不一，混排在 flex 行内会被挤压换行） -->
     <div class="case-meta">
-      <span class="chip"><#if outcome.duration gt 0>${(outcome.duration / 1000)?string["0.#"]}s<#else>—</#if></span>
-      <#if outcome.startTime??><span class="chip">started ${outcome.startTime?html}</span></#if>
+      <#-- duration 是「最后一次执行」的时长；被重跑时标注 last attempt，
+           避免与顶栏总窗口跨度（可能含 20 分钟空档）被误读成同一次执行。 -->
+      <span class="chip"><#if outcome.duration gt 0>${(outcome.duration / 1000)?string["0.#"]}s<#else>—</#if><#if (outcome.attempt!1) gt 1> · last attempt</#if></span>
+      <#-- 与顶栏同格式（人读 + 首次开始）：原先直接吐原始 ISO 串（带 T 与时区偏移），
+           既与顶栏风格不一致，rerun 后还会显示成重跑时刻（2026-11-11 用户反馈）。 -->
+      <#if outcome.startTime??><span class="chip">started ${run.startedAt?html}</span></#if>
       <span class="chip">${outcome.manual?then('Manual','Automated')}</span>
       <#list outcome.tags![] as tag><span class="chip tag">${tag?html}</span></#list>
     </div>
@@ -660,9 +668,12 @@
           </div>
           <div class="shot-picker">
             <#list screenshots as shot>
+              <#-- data-index = 真实步骤序号（会跳号，如 1/3/5）；data-badge = 连续截图序号（1/2/3）。
+                   按钮上显示连续序号（2026-11-11 用户反馈"截图序号是 1，3，5"），
+                   真实步骤号只进 tooltip，用于回步骤树定位。 -->
               <button type="button" class="shot-pick<#if shot?is_first> is-active</#if>"
                       data-file="${shot.file?html}" data-index="${shot.index}" data-badge="${shot.badge}"
-                      title="Step ${shot.index}<#if shot.description??> — ${shot.description?html}</#if>">
+                      title="Screenshot ${shot.badge} · Step ${shot.index}<#if shot.description??> — ${shot.description?html}</#if>">
                 <span class="shot-pick-num">${shot.badge}</span>
               </button>
             </#list>

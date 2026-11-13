@@ -1,9 +1,11 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.report.render;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.report.config.PwReportsConfig;
 import com.hsbc.cmb.hk.dbb.automation.framework.report.model.TestOutcome;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,22 +19,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  * "Could not load trace"，反而误导用户。
  *
  * <p>现契约：播放按钮是<b>普通链接，只打开 Viewer 首页</b>；要播放下载好的 trace.zip 需用户
- * 自己拖进 Viewer（Tip 已说明）。下载按钮仍按二态给地址（托管 = baseUrl + path，本地 = 回退一级）。
+ * 自己拖进 Viewer（Tip 已说明）。下载按钮仍按二态给地址（CI = 自动推导的 baseUrl + path，
+ * 本地 = 回退一级）。
+ *
+ * <p>基准 URL 不再由 {@code pw.report.base.url} 配置提供：CI 直接由 Jenkins {@code BUILD_URL}
+ * 与 {@code publishHTML} 的 reportName（约定 "Test Report"）推导，本地为空。
  */
 class TraceBarRenderTest {
-
-    private static final String BASE_URL_PROP = "pw.report.base.url";
-
-    @AfterEach
-    void resetBaseUrl() {
-        // 恢复为空（本键默认即空）；PwReportsConfig.str 直读 System.getProperty，set("") 确定性复位
-        System.setProperty(BASE_URL_PROP, "");
-    }
 
     @Test
     @DisplayName("播放按钮只打开 Viewer 首页，不再拼 ?trace= 深链（本地/托管一致）")
     void playButtonOpensViewerHomeOnly() throws Exception {
-        System.setProperty(BASE_URL_PROP, "");
         TestOutcome o = OutcomeFixtures.full();
         o.setTracePath("login-12-x/trace.zip");
 
@@ -52,28 +49,34 @@ class TraceBarRenderTest {
     }
 
     @Test
-    @DisplayName("托管（baseUrl 存在）→ 下载用绝对 URL；播放按钮仍只开首页")
-    void hostedBaseUrlStillOnlyOpensViewerHome() throws Exception {
-        System.setProperty(BASE_URL_PROP, "https://ci.example/job/run42/artifact/reports/");
-        TestOutcome o = OutcomeFixtures.full();
-        o.setTracePath("login-12-x/trace.zip");
+    @DisplayName("CI：由 Jenkins BUILD_URL + publishHTML reportName 自动推导基准 URL（无需配置）")
+    void baseUrlDerivedFromJenkinsBuildUrl() {
+        String base = PwReportsConfig.baseUrl(Map.of(
+                "BUILD_URL", "https://ci.example/job/run42/",
+                "PW_REPORT_PUBLISH_NAME", "Test Report"));
 
-        String html = HtmlRenderer.renderToString(o);
+        assertThat(base).isEqualTo("https://ci.example/job/run42/Test%20Report/");
+    }
 
-        assertThat(html)
-                .contains("href=\"https://trace.playwright.dev\"")
-                .doesNotContain("trace.playwright.dev/?trace=")
-                //  下载地址：baseUrl + tracePath（真实工件 URL；/ 为路径分隔符，
-                //  不能编码成 %2F，否则 Jenkins 按 %2F 当单文件名 → 下载 404）
-                .contains("ci.example")
-                .contains("login-12-x/trace.zip")
-                .contains("Download trace.zip");
+    @Test
+    @DisplayName("CI：Jenkinsfile 改了 reportName 时可用 PW_REPORT_PUBLISH_NAME 覆盖")
+    void baseUrlHonorsPublishNameOverride() {
+        String base = PwReportsConfig.baseUrl(Map.of(
+                "BUILD_URL", "https://ci.example/job/run42/",
+                "PW_REPORT_PUBLISH_NAME", "PW Report"));
+
+        assertThat(base).isEqualTo("https://ci.example/job/run42/PW%20Report/");
+    }
+
+    @Test
+    @DisplayName("本地：无 BUILD_URL 时基准为空（回退 file:// 相对链接）")
+    void baseUrlEmptyWithoutBuildUrl() {
+        assertThat(PwReportsConfig.baseUrl(Map.of())).isEmpty();
     }
 
     @Test
     @DisplayName("Tips 位于 trace 路径上方（先讲怎么播，再给路径与操作）")
     void tipIsRenderedAboveThePathRow() throws Exception {
-        System.setProperty(BASE_URL_PROP, "");
         TestOutcome o = OutcomeFixtures.full();
         o.setTracePath("login-12-x/trace.zip");
 

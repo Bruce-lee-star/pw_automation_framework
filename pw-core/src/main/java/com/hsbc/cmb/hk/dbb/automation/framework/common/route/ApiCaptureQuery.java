@@ -17,6 +17,12 @@ import java.util.function.Predicate;
  *
  * <p>查询语义与既有 {@code RouteDsl.dumpCaptured / peekCaptured} 一致：{@code dump*} 为消费式，
  * 本接口的 {@code get*} 系列为<b>非消费式</b>（只读快照，不取走也不清空）。
+ *
+ * <p><b>业务只读契约</b>：所有 {@code get*} / {@code waitForApi} 只返回
+ * {@link CaptureStage#BODY_MATERIALIZED} 的记录 —— 请求已匹配（{@code MATCHED}）或响应已到达
+ * 但响应体尚未在业务线程物化（{@code ARRIVED}）的记录一律不可见，避免业务读到"看似完整、
+ * 实际没有响应体"的快照。未物化的终态（超时 / 3xx / 流式 / 句柄回收 / 读取失败）仍由
+ * 框架写入日志与路由证据，并可经 pw-route 的消费式诊断通道 {@code dumpCaptured} 查看。
  */
 public interface ApiCaptureQuery {
 
@@ -43,7 +49,7 @@ public interface ApiCaptureQuery {
     CapturedApiCallView waitForApi(Object context, Predicate<CapturedApiCallView> predicate, long timeoutMs);
 
     /**
-     * 当前已分配的采集序号（= 已进入历史队列的记录数）；实现不支持时返回 -1。
+     * 当前已分配的采集序号（= 已记录的请求数，与是否已物化入队无关）；实现不支持时返回 -1。
      *
      * <p>配合 {@link #waitForApi(Object, Predicate, long, long)} 使用：动作前取该值，
      * 把 {@code 值+1} 当门槛，即可只看本次动作之后新产生的采集。

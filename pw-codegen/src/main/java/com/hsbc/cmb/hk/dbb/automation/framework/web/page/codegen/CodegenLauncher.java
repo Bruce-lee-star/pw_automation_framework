@@ -31,6 +31,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.function.Consumer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -79,6 +80,19 @@ import java.util.stream.Collectors;
  */
 public final class CodegenLauncher {
 
+    /**
+     * 录制期原生对话框（confirm / prompt / alert）的策略：整场录制生效，录制开始前在面板选好。
+     *
+     * <p>Playwright 的默认行为是「不接管、自动 dismiss」：driver 的 {@code DialogManager#dialogDidOpen}
+     * 在没有 handler 时调 {@code _close()}，而 {@code _close()} 对非 beforeunload 一律 dismiss；
+     * 官方录制器的 handler 也 {@code return false} 交给平台关闭。本项目默认取
+     * {@link #ACCEPT}（业务主流程是「确认」）——这是产品选择，不是与官方对齐。
+     *
+     * <p>两种默认值都只能录到一半：dismiss 录取消分支，accept 录确认分支。需要覆盖相反分支时，
+     * 切换策略后整条重录，而不是在同一条用例里混合（那会产出互相矛盾的产物）。
+     */
+    enum DialogPolicy { ACCEPT, DISMISS }
+
     private static final Logger log = LoggerFactory.getLogger(CodegenLauncher.class);
 
     /**
@@ -97,6 +111,15 @@ public final class CodegenLauncher {
      */
     private static final AtomicLong EVENT_SEQ = new AtomicLong();
 
+    /**
+     * 最近一次成功生成的三栏产物快照，专供「导出代码」命令使用（P0-6）。
+     *
+     * <p>面板进程单实例常驻、生成在单线程执行器上串行发生，故用 {@link AtomicReference} 保证
+     * 跨线程可见性即可；这里只存「最后一份」，不参与任何拾取/打分/去重决策。
+     */
+    private static final AtomicReference<MultiPageCodegen.MultiPageResult> LAST_GENERATED =
+            new AtomicReference<>();
+
     private CodegenLauncher() {}
 
     /**
@@ -107,7 +130,7 @@ public final class CodegenLauncher {
      * 它们恰恰是 List 最典型的来源，若用 sigKey 作行标识会互相覆盖、无法分别勾选/高亮，
      * 故每次拾取都分配一个单调递增的唯一 id。
      */
-    private static final class Pick {
+    static final class Pick {
         final long id;
         /** 全局操作序号（与 dialog 共用 {@code eventSeq}）：用于跨页面推导切换边界、dialog 与动作的先后。 */
         final long seq;
@@ -144,9 +167,34 @@ public final class CodegenLauncher {
          * 因此 {@code pushGeneratedCode} / Stop 都会先 {@code verifyPendingRoles}。
          */
         volatile boolean rolePending;
+        /**
+         * {@code true} = 仅代表「对已拾取元素的又一次操作」：不进 Elements 表、不参与字段规划，
+         * 只进入动作时间线（否则「勾 → 取消」「同字段两次不同值提交」会被当作重复拾取吞掉）。
+         */
+        final boolean actionOnly;
+        /** 触发该条目的录制动作类型（{@code click} / {@code fill} / ...），用于按本次操作生成动作。 */
+        final String actionType;
+        /**
+         * 本次动作的录制值（fill 的输入值 / press 的按键）。动作生成据此产出<b>当次</b>的
+         * {@code fill("A")}，而不是字段模板里被后续输入覆盖成的末值（逐键合并时会被更新，故非 final）。
+         */
+        volatile String actionValue;
+        /**
+         * change 事件已为这条动作「盖章」（失焦 / 选中完成）。之后出现的<b>非增量</b>新值
+         * 必须另起一条动作，避免「填 A → 失焦 → 填 B」被合并成一条、丢掉第一次提交的语义。
+         */
+        volatile boolean fillCommitted;
+        /** 本次动作携带的值的个数（multiple select = 选中项数；其余 = 1），用于产物 TODO 提示。 */
+        volatile int valueCount = 1;
 
         Pick(long id, long seq, int session, CodegenEntry entry, Page page, String url,
               CodegenCdpNodeExtractor extractor, boolean rolePending) {
+            this(id, seq, session, entry, page, url, extractor, rolePending, false, "click");
+        }
+
+        Pick(long id, long seq, int session, CodegenEntry entry, Page page, String url,
+              CodegenCdpNodeExtractor extractor, boolean rolePending,
+              boolean actionOnly, String actionType) {
             this.id = id;
             this.seq = seq;
             this.session = session;
@@ -155,6 +203,8 @@ public final class CodegenLauncher {
             this.url = url;
             this.extractor = extractor;
             this.rolePending = rolePending;
+            this.actionOnly = actionOnly;
+            this.actionType = actionType == null ? "click" : actionType;
         }
     }
 
@@ -315,7 +365,7 @@ public final class CodegenLauncher {
                         return new CodegenCdpSession(page, nlsLang);
                     } catch (com.microsoft.playwright.PlaywrightException e) {
                         last = e;
-                        log.warn("[codegen][cdp] newCDPSession attempt {}/5 失败 on {}: {} — 100ms 后重试",
+                        log.warn("[codegen][cdp] newCDPSession attempt {}/5 failed on {}: {} - retrying in 100ms",
                                 attempt, page.url(), e.getMessage());
                         try {
                             Thread.sleep(100L);
@@ -427,7 +477,7 @@ public final class CodegenLauncher {
                 String selector = cssSelector instanceof String ? (String) cssSelector : null;
                 ElementRef ref = session.elementBySelector(selector, shadowHosts, framePath);
                 if (ref != null) {
-                    log.debug("[codegen][cdp] resolved by selector ({}) '{}' shadowHosts={} → frame={}",
+                    log.debug("[codegen][cdp] resolved by selector ({}) '{}' shadowHosts={} -> frame={}",
                             type, selector, shadowHosts, ref.frameId());
                 }
                 if (ref == null) {
@@ -435,20 +485,20 @@ public final class CodegenLauncher {
                         // 诊断：页侧 cssSelector 在任意 frame 都查不到（多半是元素在点击与 CDP 探测之间被重渲染替换，
                         // 或 cssSel 口径偏差）。记下选择器与 framePath，便于定位这类动态按钮失配根因；
                         // 随后走坐标兜底——抽取阶段会从命中的节点重新派生稳定选择器（role/name/cssSel），不影响最终产物。
-                        log.debug("[codegen][cdp] page selector '{}' (framePath={}) not found in any frame — "
+                        log.debug("[codegen][cdp] page selector '{}' (framePath={}) not found in any frame - "
                                 + "falling back to coordinates (type={}, x={}, y={})", selector, framePath, type, px, py);
                     }
                     ref = elementAt(px, py);
                     if (ref != null) {
-                        log.info("[codegen][cdp] resolved by coordinates ({}) at ({}, {}) → frame={}",
+                        log.info("[codegen][cdp] resolved by coordinates ({}) at ({}, {}) -> frame={}",
                                 type, px, py, ref.frameId());
                     }
                 }
                 if (ref == null) {
                     // 必须可见：静默失败时用户只看到「点了没反应」，无从判断是坐标偏差、页面已导航还是选择器失配。
-                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {} (selector='{}', shadowHosts={}) — "
-                                    + "所有 frame 内都没能找到该选择器，坐标 hit-test 也未命中："
-                                    + "页面可能已导航 / 元素已被移除 / shadow root 为 closed 模式（不可穿透）",
+                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {} (selector='{}', shadowHosts={}) - "
+                                    + "Selector not found in any frame and coordinate hit-test missed: "
+                                    + "page may have navigated / element removed / closed shadow root (not traversable)",
                             type, px, py, page.url(), selector, shadowHosts);
                     return null;
                 }
@@ -512,6 +562,11 @@ public final class CodegenLauncher {
              * 自动关闭，污染用户后续使用（弹窗会被挂起而非自动关闭）。
              */
             final Map<Page, Consumer<Dialog>> dialogHandlers = new ConcurrentHashMap<>();
+            /**
+             * 录制期原生对话框的默认动作（整场生效）。handler 内<b>同步</b>执行、不等待面板，
+             * 因此不会阻塞 Playwright 的派发线程；切换策略只影响之后弹出的对话框。
+             */
+            final AtomicReference<DialogPolicy> dialogPolicy = new AtomicReference<>(DialogPolicy.ACCEPT);
 
             PageSession of(Page p) {
                 return map.computeIfAbsent(p, k -> new PageSession(k, lang, nls));
@@ -521,28 +576,38 @@ public final class CodegenLauncher {
                 return of(p).openPickChannel();
             }
             /**
-             * 自动关闭原生对话框（alert/confirm/prompt/beforeunload）：被测页弹窗会冻结 JS 主线程，挂起事件泵的
-             * evaluate 与拾取 callFunctionOn，导致高亮/拾取整体冻结（P0 缺口，对标 page.pause 的 dialogManager）。
-             * 与 page.pause 一致一律 {@code accept()}：alert 唯一动作即接受；confirm/prompt 接受等价于「确定 / 空串」；
-             * beforeunload 接受即放行导航——既不阻塞录制/拾取，也贴合用户默认操作。
+             * 接管原生对话框（alert / confirm / prompt / beforeunload），按会话级策略<b>同步</b>放行。
+             *
+             * <p>必须注册 handler，否则 Playwright 会在无人接管时自动 {@code dismiss}（见
+             * {@link DialogPolicy} 的说明）——那样「确认」分支永远录不到。接入策略后：
+             * accept 录确认分支、dismiss 录取消分支；{@code beforeunload} 恒 accept（dismiss 会取消导航，
+             * 页面停在原地，后续拾取/录制全部失效）。
+             *
+             * <p>handler 内只做一次同步的 accept/dismiss，不等待面板回传，因此不会冻结派发线程；
+             * 三键 UI（每次弹窗暂停等用户选）会让每次弹窗都打断录制，不做。
              */
             void installDialogAutoDismiss(Page page) {
                 if (page == null || dialogHandlers.containsKey(page)) return;
                 Consumer<Dialog> h = dialog -> {
+                    boolean accept = acceptForDialog(dialogPolicy.get(), dialog.type());
                     try {
-                        dialog.accept();
-                        // 记录该对话框事件（已自动关闭）：步骤里据此生成 acceptAlert()；按页归集、带全局序号。
-                        dialogOps.add(new DialogOp(page, dialog.type(), true, EVENT_SEQ.incrementAndGet(),
+                        if (accept) {
+                            dialog.accept();
+                        } else {
+                            dialog.dismiss();
+                        }
+                        // 记录<b>真实</b>动作（不再恒 true）：步骤里据此生成 acceptAlert() / dismissAlert()。
+                        dialogOps.add(new DialogOp(page, dialog.type(), accept, EVENT_SEQ.incrementAndGet(),
                                 currentSession(sessionSeq)));
                     } catch (Throwable t) {
                         // 同一弹窗可能被 context 级 / 其它监听器先关掉 → "No dialog is showing"，忽略即可。
-                        log.debug("[codegen][dialog] dialog already handled / accept failed on {}: {}",
-                                page.url(), t.getMessage());
+                        log.debug("[codegen][dialog] dialog already handled / {} failed on {}: {}",
+                                accept ? "accept" : "dismiss", page.url(), t.getMessage());
                     }
                 };
                 page.onDialog(h);
                 dialogHandlers.put(page, h);
-                log.debug("[codegen][dialog] auto-dismiss installed on {}", page.url());
+                log.debug("[codegen][dialog] handler installed on {} (policy={})", page.url(), dialogPolicy.get());
             }
             /** 注销某页的对话框自动关闭监听器（会话结束 / 页面关闭时调用）。 */
             void removeDialogAutoDismiss(Page page) {
@@ -610,7 +675,7 @@ public final class CodegenLauncher {
                 }
                 boolean businessPopup = (opener != null && !opener.isClosed());
                 if (!businessPopup) {
-                    log.debug("[codegen][follow] new page {} opened without opener (manual tab) — register + dialog only, no follow/enable",
+                    log.debug("[codegen][follow] new page {} opened without opener (manual tab) - register + dialog only, no follow/enable",
                             np.url());
                     return;
                 }
@@ -645,7 +710,7 @@ public final class CodegenLauncher {
                         of(np).focusPanel();
                         log.debug("[codegen][follow] injected recorder + bridge into new page {}", np.url());
                     } catch (Exception e) {
-                        log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} — {}",
+                        log.warn("[codegen][follow] inject recorder/bridge into new page failed: {} - {}",
                                 np.url(), e.getMessage());
                     } finally {
                         injected.countDown();   // 成败都放行探针，避免探针永久挂死
@@ -675,7 +740,7 @@ public final class CodegenLauncher {
                                 log.debug("[codegen][follow] enabled pick channel on ready new page {}", np.url());
                             } else {
                                 // 1.5s 内没 ready：不硬等 —— 交给 submitPick 懒加载兜底（每条点击重试开通道）
-                                log.warn("[codegen][follow] new page {} not DOM-ready within 1.5s — pick enabled lazily on first click",
+                                log.warn("[codegen][follow] new page {} not DOM-ready within 1.5s - pick enabled lazily on first click",
                                         np.url());
                             }
                         } catch (Exception e) {
@@ -718,7 +783,7 @@ public final class CodegenLauncher {
                 }
                 if (!reached) {
                     trigger.interrupt();
-                    log.warn("[codegen][follow] PICK BINDING UNREACHABLE on page {} — this page's "
+                    log.warn("[codegen][follow] PICK BINDING UNREACHABLE on page {} - this page's "
                             + "window.__codegenEvent did not deliver to Java; clicks here will be silently dropped "
                             + "(see codegen-inject.js note about unestablished binding).", probeUrl);
                 }
@@ -854,6 +919,39 @@ public final class CodegenLauncher {
                     broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
                     log.info("[codegen] pick paused; page interaction kept, recording continues");
                     break;
+                case "export": {
+                    // 产物出口（P0-6）：把最近一次定稿的三个栏逐块写成 .java 文件。
+                    // 默认落 <cwd>/target/codegen/<时间戳>/；CI 可用 -Dcodegen.export.dir=<绝对路径>
+                    // 指到工程外，避免全新检出时产物被冲掉。
+                    MultiPageCodegen.MultiPageResult snapshot = LAST_GENERATED.get();
+                    if (snapshot == null) {
+                        if (panelRef[0] != null) panelRef[0].setStatus("nothing to export yet");
+                        break;
+                    }
+                    try {
+                        Path root = Path.of(System.getProperty("codegen.export.dir", "target/codegen"));
+                        Path dir = allocateExportDir(root);
+                        CodegenExporter.export(snapshot, dir);
+                        String msg = "exported to " + dir.toAbsolutePath();
+                        if (panelRef[0] != null) panelRef[0].setStatus(msg);
+                        log.info("[codegen] {}", msg);
+                    } catch (Exception e) {
+                        log.warn("[codegen] export failed: {}", e.toString());
+                        if (panelRef[0] != null) panelRef[0].setStatus("export failed: " + e.getMessage());
+                    }
+                    break;
+                }
+                case "dialogPolicy": {
+                    // 会话级策略：整场录制生效。切换只影响之后弹出的对话框，
+                    // 需要覆盖相反分支时整条重录（一条用例里不混两种策略）。
+                    DialogPolicy policy = parseDialogPolicy(cmd.size() > 1 ? String.valueOf(cmd.get(1)) : "accept");
+                    sessions.dialogPolicy.set(policy);
+                    if (panelRef[0] != null) {
+                        panelRef[0].setStatus("dialog: " + policy.name().toLowerCase(java.util.Locale.ROOT));
+                    }
+                    log.info("[codegen] dialog policy = {}", policy);
+                    break;
+                }
                 case "group":
                     handleGroup(picked, cmd, panelRef[0]);
                     requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
@@ -863,7 +961,7 @@ public final class CodegenLauncher {
                     // 同一会话内重复 Stop 去重：Stop 后除非经过 Start 续拾（会复位 stopped），否则内容不会变化，
                     // 用户连点 Stop 不应刷出 N 份相同产物。已定稿则只刷新状态条、跳过重生成。
                     if (sessions.stopped.get()) {
-                        log.debug("[codegen] stop received but already finalized (no resume since last stop) — skipping re-generation");
+                        log.debug("[codegen] stop received but already finalized (no resume since last stop) - skipping re-generation");
                         if (panelRef[0] != null) panelRef[0].setStatus("stopped");
                         broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
                         break;
@@ -907,7 +1005,7 @@ public final class CodegenLauncher {
                     }
                     sessions.closeAll();
                     closeLatch.countDown();
-                    log.info("[codegen] session ended by panel '结束会话'; panel process stays resident for next inspect");
+                    log.info("[codegen] session ended by panel 'End Session'; panel process stays resident for next inspect");
                     break;
                 }
                 case "highlight":
@@ -968,12 +1066,58 @@ public final class CodegenLauncher {
             Map<String, Object> info = infoObj instanceof Map ? (Map<String, Object>) infoObj : null;
             // 未拾取 / 该页没有拾取会话 / 该元素已在 Elements 里：只录制，省掉一次 CDP 往返
             // （输入框连续输入会连发 fill 事件，这里必须短路，否则每次按键都要查一遍节点）。
-            if (!sessions.pickOn.get() || ps == null || matchFieldKey(info, picked) != null) {
+            String matchedKey = matchFieldKey(info, picked);
+            if (!sessions.pickOn.get() || ps == null || matchedKey != null) {
                 if (sessions.pickOn.get() && ps == null) {
-                    log.warn("[codegen][bridge] no pick session for page {} — 该页不在拾取通道中（非活动页？）",
+                    log.warn("[codegen][bridge] no pick session for page {} - page is not in the pick channel (inactive page?)",
                             src != null ? src.url() : "null");
                 }
                 recordAction.accept(payload, null);
+                // 已拾取元素不再重复 CDP 拾取，但「第二次操作」必须进入动作时间线：
+                // 否则勾→取消、同组 radio 改选、同字段两次不同值提交都只剩第一步（P0-3）。
+                // 逐键连续 fill 不新增条目（末次值已由 recorder 覆盖），避免每个按键一条动作。
+                if (sessions.pickOn.get() && matchedKey != null && src != null) {
+                    Pick existing = findPickBySig(picked, matchedKey);
+                    if (existing != null) {
+                        String repeatType = String.valueOf(payload.get("type"));
+                        String currentValue = String.valueOf(payload.getOrDefault("value", ""));
+                        String semantic = String.valueOf(payload.getOrDefault("semantic", ""));
+                        // 键盘动作把按键编进动作标记，供生成侧产出 press("Enter") 等可回放调用；
+                        // file 单独标记：生成侧要出 uploadFile 占位而不是 fill(fakepath)。
+                        String actionTag = "press".equals(repeatType)
+                                ? "press:" + currentValue
+                                : "file".equals(semantic) ? "file" : repeatType;
+                        int valueCount = payload.get("valueCount") instanceof Number
+                                ? ((Number) payload.get("valueCount")).intValue() : 1;
+                        Pick lastFill = lastFillPick(picked, matchedKey);
+                        // 逐键输入合并、重新填写切分（P1 值维度）：
+                        // ① 值相同（含 change 在失焦时重报同一值）→ 合并，避免一次选择留两条等价动作；
+                        // ② 未盖章且值互为前缀（打字/退格）→ 合并，末次值覆盖；
+                        // ③ 其余（先填 A 再填 B、失焦后重填）→ 新增一条动作，值各按当次操作生成。
+                        // file 不是「输入」，不参与输入合并：每次选择文件都是一次独立动作。
+                        boolean fillEvent = "fill".equals(repeatType) && !"file".equals(semantic);
+                        boolean sameValue = lastFill != null && currentValue.equals(lastFill.actionValue);
+                        boolean continuousFill = fillEvent && lastFill != null
+                                && (sameValue || (!lastFill.fillCommitted
+                                        && isIncremental(lastFill.actionValue, currentValue)));
+                        if (continuousFill) {
+                            lastFill.actionValue = currentValue;
+                        } else {
+                            CodegenEntry repeatEntry = resolveCheckedState(existing.entry, info, repeatType);
+                            Pick np = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(),
+                                    currentSession(sessionSeq), repeatEntry, src, safeUrl(src),
+                                    existing.extractor, false, true, actionTag);
+                            np.actionValue = fillEvent ? currentValue : null;
+                            np.valueCount = Math.max(1, valueCount);
+                            picked.add(np);
+                        }
+                        // change = 「这次填写完成」的语义盖章：下一次出现非增量值必须另起一条动作。
+                        if (fillEvent && "change".equals(semantic)) {
+                            Pick committed = continuousFill ? lastFill : lastFillPick(picked, matchedKey);
+                            if (committed != null) committed.fillCommitted = true;
+                        }
+                    }
+                }
                 return null;
             }
             final String actionType = String.valueOf(payload.get("type"));
@@ -1002,7 +1146,7 @@ public final class CodegenLauncher {
                     e = pickSession.pickAt(actionType, payload.get("x"), payload.get("y"),
                             info != null ? info.get("cssSelector") : null, shadowHostsOf(info),
                             framePathOf(payload));
-                    if (e != null) addPick.accept(eventPage, e);
+                    if (e != null) addPick.accept(eventPage, resolveCheckedState(e, info, actionType));
                     recordAction.accept(payload, e);
                 } finally {
                     pickSession.guard.finish(fingerprint, e != null);
@@ -1075,13 +1219,13 @@ public final class CodegenLauncher {
                     if (deltaDom - deltaBridge > 0) {
                         if (++skewTicks[0] >= 2) {
                             log.warn("[codegen][pump] active page DOM click dropped (consecutive {} ticks): "
-                                    + "DOM +{} but bridge +{} on {} — instrumentation not firing on this page "
+                                    + "DOM +{} but bridge +{} on {} - instrumentation not firing on this page "
                                     + "(click listener or its window.__codegenEvent call is broken).",
                                     skewTicks[0], deltaDom, deltaBridge, p.url());
                             skewTicks[0] = 0;
                         } else {
                             log.debug("[codegen][pump] transient DOM/bridge skew (likely message ordering): "
-                                    + "DOM +{} bridge +{} on {} — will re-check next tick", deltaDom, deltaBridge, p.url());
+                                    + "DOM +{} bridge +{} on {} - will re-check next tick", deltaDom, deltaBridge, p.url());
                         }
                     } else {
                         skewTicks[0] = 0;
@@ -1099,7 +1243,7 @@ public final class CodegenLauncher {
                 // 页面正在导航 / 执行上下文已销毁：本拍失败不影响下一拍
             }
         }, 0, 120, java.util.concurrent.TimeUnit.MILLISECONDS);
-        log.info("[codegen][pump] event pump started (120ms, separate thread) — drives Playwright message dispatch");
+        log.info("[codegen][pump] event pump started (120ms, separate thread) - drives Playwright message dispatch");
 
         Path panelHtml = PanelResource.resolvePanelHtml();
 
@@ -1124,7 +1268,7 @@ public final class CodegenLauncher {
         // 注意：countDown() 必须放进 finally —— 若 closeAll()/broadcast() 抛异常（页面已随窗口关闭），
         // 不能让"释放主线程"这一步被跳过，否则表现为"关掉窗口程序还卡着"。
         panel.onClose(() -> {
-            log.info("[codegen] panel window closed by user — ending codegen session (panel process terminated, resident service degraded)");
+            log.info("[codegen] panel window closed by user - ending codegen session (panel process terminated, resident service degraded)");
             try {
                 sessions.pickOn.set(false);
                 sessions.stopped.set(true);   // 关窗即结束：被测页上的状态指示条随之隐藏
@@ -1173,7 +1317,7 @@ public final class CodegenLauncher {
             Thread.currentThread().interrupt();
         } finally {
             com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.HangWatchdog.resume();
-            if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception e) { log.debug("[codegen] closeWatchdog 关闭失败（会话收尾，忽略）", e); } }
+            if (closeWatchdog != null) { try { closeWatchdog.shutdownNow(); } catch (Exception e) { log.debug("[codegen] closeWatchdog shutdown failed (session teardown, ignored)", e); } }
             sessions.closeAll();
             if (eventPump != null) eventPump.shutdownNow();     // 会话结束：事件泵不再打扰被测页
             regenExecutor.shutdownNow();                       // 停掉实时代码生成线程
@@ -1200,7 +1344,7 @@ public final class CodegenLauncher {
         if (nlsFiles == null || nlsFiles.length == 0) return;
         String lang = NLSUtils.getLanguage();
         if (lang == null || lang.isBlank()) {
-            throw new IllegalStateException("[codegen] NLS bundles were provided but the current language is not set — "
+            throw new IllegalStateException("[codegen] NLS bundles were provided but the current language is not set - "
                     + "call NLSUtils.setLanguage(\"zh\"); before CodegenLauncher.inspect(...). "
                     + "NLS files are keyed by language ({ lang: { key: value } }), so the framework must know "
                     + "which language table to reverse-lookup against.");
@@ -1222,7 +1366,7 @@ public final class CodegenLauncher {
         }
         if (members.size() < 2) {
             log.warn("[codegen] group skipped: need at least 2 distinct elements, got {}", members.size());
-            panel.setStatus("grouped: 需要 ≥2 个元素");
+            panel.setStatus("grouped: 需要 >=2 个元素");
             return;
         }
         List<CodegenEntry> rewritten = groupAsList(members.stream().map(m -> m.entry).collect(Collectors.toList()));
@@ -1244,7 +1388,7 @@ public final class CodegenLauncher {
         boolean uniform = members.stream().allMatch(e -> Objects.equals(e.role, first.role)
                 && Objects.equals(e.name, first.name));
         if (!uniform) {
-            log.warn("[codegen] grouped {} elements whose role/name differ — the list locator is derived from "
+            log.warn("[codegen] grouped {} elements whose role/name differ - the list locator is derived from "
                     + "the first member (role='{}', name='{}'); confirm it really matches every item.",
                     members.size(), first.role, first.name);
         }
@@ -1286,7 +1430,7 @@ public final class CodegenLauncher {
         if (!name.toLowerCase(java.util.Locale.ROOT).contains("chromium")) {
             throw new IllegalStateException("element picking uses the CDP protocol and requires a Chromium browser"
                     + (name.isEmpty() ? "" : " (current: " + name + ")")
-                    + " — run the inspector against chromium (remove @firefox/@edge overrides for that scenario)");
+                    + " - run the inspector against chromium (remove @firefox/@edge overrides for that scenario)");
         }
     }
 
@@ -1298,6 +1442,27 @@ public final class CodegenLauncher {
     private static Pick findPickBySig(List<Pick> picked, String sigKey) {
         for (Pick p : picked) if (p.entry.sigKey.equals(sigKey)) return p;
         return null;
+    }
+
+    /** 同一元素最近一条动作型 fill（逐键输入合并到这条上；没有则返回 null，表示本次应新建动作）。 */
+    private static Pick lastFillPick(List<Pick> picked, String sigKey) {
+        Pick last = null;
+        for (Pick p : picked) {
+            if (p.actionOnly && p.entry.sigKey.equals(sigKey)) last = p;
+        }
+        return (last != null && "fill".equals(last.actionType)) ? last : null;
+    }
+
+    /**
+     * 两次值是否属于「同一段输入」：相等，或一方是另一方的前缀（打字追加 / 退格删除）。
+     *
+     * <p>用前缀关系而不是「值相同才合并」，是因为逐键输入每键值都不同；若按后者判，
+     * 一个 6 位账号会产出 6 条动作。反过来，「填 A → 清空 → 填 B」中 A 与 B 互不为前缀，
+     * 会正确切分成两条。
+     */
+    static boolean isIncremental(String previous, String current) {
+        if (previous == null || current == null) return false;
+        return previous.equals(current) || current.startsWith(previous) || previous.startsWith(current);
     }
 
     private static Long parseId(String s) {
@@ -1416,6 +1581,66 @@ public final class CodegenLauncher {
         return null;
     }
 
+    /**
+     * 对话框默认动作：{@code beforeunload} 恒 accept（dismiss 等于取消导航，页面停在原地，
+     * 后续拾取与录制全部失效），其余类型按会话策略。纯函数，便于不依赖 Playwright 的单测覆盖。
+     */
+    static boolean acceptForDialog(DialogPolicy policy, String dialogType) {
+        if ("beforeunload".equals(dialogType)) return true;
+        return policy != DialogPolicy.DISMISS;
+    }
+
+    /** 面板值解析：只认 {@code dismiss}（大小写不敏感），其余（含 null / 拼错）一律回落到默认 accept。 */
+    static DialogPolicy parseDialogPolicy(String raw) {
+        String v = raw == null ? "" : raw.trim();
+        return "dismiss".equalsIgnoreCase(v) ? DialogPolicy.DISMISS : DialogPolicy.ACCEPT;
+    }
+
+    /**
+     * 为本次导出一个唯一目录：毫秒级时间戳，同毫秒已存在则追加 {@code -2/-3}…
+     *
+     * <p>旧实现只到秒，同一秒内连点两次导出会落进同一目录，第二份直接覆盖第一份（评审 N-06）。
+     * 抽成可注入时间的纯函数，便于不依赖真实时钟验证「已存在则加序号」分支。
+     */
+    static Path allocateExportDir(Path root) {
+        return allocateExportDir(root, java.time.LocalDateTime.now());
+    }
+
+    static Path allocateExportDir(Path root, java.time.LocalDateTime now) {
+        String stamp = now.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS"));
+        Path dir = root.resolve(stamp);
+        int n = 2;
+        while (java.nio.file.Files.exists(dir)) {
+            dir = root.resolve(stamp + "-" + n++);
+        }
+        return dir;
+    }
+
+    /**
+     * 勾选态「终态」解析（P0-1）。
+     *
+     * <p>注入侧 {@code infoOf} 在 click <b>捕获阶段</b>执行，{@code info.checked} 必然是<b>点击前</b>状态；
+     * 抽取侧 {@code Runtime.callFunctionOn} 在独立的拾取执行器线程上发出，与页面默认 toggle 之间存在
+     * 跨线程时序竞态，直接采信抽取快照既可能拿到旧值也可能拿到新值。因此对 checkbox / radio 的 click
+     * 一律按动作语义推导终态：checkbox 取反、radio 恒选中（点击 radio 必然选中）。
+     * 缺少注入侧证据（旧脚本 / 跨源 iframe）时保留抽取快照，行为退化为既有实现而不是丢字段。
+     *
+     * @param entry      CDP 抽取得到的条目
+     * @param info       注入侧 click 事件携带的元素事实（含点击前 checked）
+     * @param actionType 录制动作类型（{@code click} / {@code fill} / ...）
+     * @return 勾选态已按动作后终态修正的派生条目；非目标场景原样返回
+     */
+    static CodegenEntry resolveCheckedState(CodegenEntry entry, Map<String, Object> info, String actionType) {
+        if (entry == null || info == null || !"click".equals(actionType)) return entry;
+        String role = entry.role == null ? "" : entry.role.toLowerCase(java.util.Locale.ROOT);
+        boolean checkbox = "checkbox".equals(role);
+        if (!checkbox && !"radio".equals(role)) return entry;
+        Object before = info.get("checked");
+        if (!(before instanceof Boolean)) return entry;
+        boolean after = checkbox ? !((Boolean) before) : true;
+        return entry.withChecked(after);
+    }
+
     private static String str(Map<String, Object> m, String k, String def) {
         Object v = m.get(k);
         return v == null ? def : String.valueOf(v);
@@ -1513,7 +1738,7 @@ public final class CodegenLauncher {
         try {
             Object ok = page.evaluate("() => !!(window.__CODEGEN__ && window.__CODEGEN__.recorder)");
             if (!Boolean.TRUE.equals(ok)) {
-                log.warn("[codegen][bridge] instrumentation missing on {} — lazy re-injecting codegen-inject.js",
+                log.warn("[codegen][bridge] instrumentation missing on {} - lazy re-injecting codegen-inject.js",
                         page.url());
                 CodegenScriptInjector.inject(page);
             }
@@ -1546,6 +1771,17 @@ public final class CodegenLauncher {
                     cnt, sumMs / Math.max(1, cnt), spanMs, 500L);
         }
     }
+    /**
+     * 本轮渲染期间是否有「新请求到达、但本轮没渲染到」——决定是否必须补投一轮。
+     *
+     * <p>抽成纯函数是为了把并发不变量变成可锁定的契约：{@code renderedSeq} 是本轮最后一次
+     * 读取到的请求序号，{@code currentSeq} 是结束时的实时序号。相等 = 已收敛，大于 = 漏了一轮。
+     * 包级私有仅供同包测试与 {@link #requestLiveRegeneration} 使用。
+     */
+    static boolean regenerationStale(long renderedSeq, long currentSeq) {
+        return currentSeq > renderedSeq;
+    }
+
     private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanelHandle[] panelRef,
                                                 List<Pick> picks, CodegenRecorder recorder,
                                                 List<DialogOp> dialogOps, String[] nlsFiles,
@@ -1559,19 +1795,20 @@ public final class CodegenLauncher {
         }
         try {
             regenExecutor.execute(() -> {
+                // 本轮「已渲染到的请求序号」，用于 finally 判断是否漏掉了期间到达的请求。
+                long renderedSeq = REGEN_SEQ.get();
                 try {
                     if (nlsLang != null) {
                         com.hsbc.cmb.hk.dbb.automation.framework.common.context.LanguageState
                                 .setLanguage(nlsLang);
                     }
-                    long started = REGEN_SEQ.get();
-                    boolean anyPending = picks.stream().anyMatch(p -> p.rolePending);
+                    long started = renderedSeq;
                     // 首推：跳过全量复核（verify 是 CDP 往返、首推瓶颈），先把代码推上面板（快，目标 <500ms）。
                     long tFirst = System.nanoTime();
                     generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
                     long firstMs = (System.nanoTime() - tFirst) / 1_000_000;
                     if (firstMs > 500) {
-                        log.warn("[codegen][regen] first push (skipVerify) took {} ms (>500ms) — "
+                        log.warn("[codegen][regen] first push (skipVerify) took {} ms (>500ms) - "
                                 + "push/assemble bottleneck, not verify", firstMs);
                     } else {
                         log.debug("[codegen][regen] first push (skipVerify) took {} ms", firstMs);
@@ -1582,6 +1819,10 @@ public final class CodegenLauncher {
                         generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
                         log.debug("[codegen][regen] merged re-push took {} ms", (System.nanoTime() - tMerge) / 1_000_000);
                     }
+                    // 【必须在合并之后重新求 pending】首推之前算出的 anyPending 是过期快照：
+                    // 若首推期间到达一条 rolePending 拾取，合并重推已把它画到面板上，
+                    // 但旧快照为 false ⇒ 这一轮不会补复核 ⇒ 面板会一直显示未校验的 @RoleElement 直到 Stop。
+                    boolean anyPending = picks.stream().anyMatch(p -> p.rolePending);
                     // 首推完成后，若有未复核 role，后台补复核 + 重推修订（不阻塞首推；verify 是 CDP 往返，
                     // 落在首推路径之外，用户先把代码看到、再被修订覆盖）。Stop 定稿走 skipVerify=false 已含复核。
                     if (anyPending && !stopped.get()) {
@@ -1591,10 +1832,19 @@ public final class CodegenLauncher {
                         // 慢轮在 generateMultiPage 内以 (slow) INFO 单独呈现。
                         regenLogBucket((int) ((System.nanoTime() - tBack) / 1_000_000));
                     }
+                    renderedSeq = REGEN_SEQ.get();
                 } catch (Throwable t) {
                     log.warn("[codegen][regen] regeneration failed: {}", t.toString());
                 } finally {
                     REGEN_INFLIGHT.set(false);
+                    // 【补触发】requestLiveRegeneration 的早退注释说"已在跑的任务兜底"，
+                    // 但只在任务尚未越过合并判断时成立。若新请求恰好落在 merge/verify 之后、
+                    // INFLIGHT 置回 false 之前，它只 increment 了 REGEN_SEQ 就返回，永远不会被渲染。
+                    // 这里按序号差补投一轮；补投任务自身看不到新的序号变化 ⇒ 收敛，不会自旋。
+                    if (!stopped.get() && regenerationStale(renderedSeq, REGEN_SEQ.get())) {
+                        requestLiveRegeneration(regenExecutor, panelRef, picks, recorder,
+                                dialogOps, nlsFiles, nlsLang, stopped);
+                    }
                 }
             });
         } catch (RuntimeException re) {   // shutdown 竞态下的 RejectedExecutionException
@@ -1670,6 +1920,7 @@ public final class CodegenLauncher {
         pushBlocks(panel, "page", result.pageBlocks);
         pushBlocks(panel, "step", result.stepBlocks);
         pushBlocks(panel, "assert", result.assertBlocks);
+        LAST_GENERATED.set(result);   // 供「导出代码」命令落盘（P0-6）
         tPush = (System.nanoTime() - tp) / 1_000_000;
         long regenTotal = tVerify + tRender + tPush;
         if (regenTotal > 500) {
@@ -1695,10 +1946,30 @@ public final class CodegenLauncher {
      */
     private static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
                                                                     List<DialogOp> dialogOps, String[] nlsFiles) {
+        // 0) 视图分流：字段视图（每元素一次，供 Page 类 / plan / 断言字段名）与动作视图
+        //    （含「对已拾取元素的后续操作」，供 Step 动作时间线）。二者不能混用，否则
+        //    「勾 → 取消」「同字段两次不同值提交」会因 sigKey 相同而被吞掉（P0-3）。
+        //    字段视图里的 checked 取末次状态：断言必须校验最终态，而不是第一次操作后的态。
+        List<Pick> allPicks = new ArrayList<>(picks);
+        allPicks.sort(Comparator.comparingLong(p -> p.seq));
+        Map<String, CodegenEntry> lastStateBySig = new LinkedHashMap<>();
+        for (Pick p : allPicks) {
+            if (p.entry != null && p.entry.sigKey != null) lastStateBySig.put(p.entry.sigKey, p.entry);
+        }
+        List<Pick> fieldPicks = new ArrayList<>();
+        for (Pick p : allPicks) {
+            if (p.actionOnly || p.entry == null || p.entry.sigKey == null) continue;
+            CodegenEntry latest = lastStateBySig.get(p.entry.sigKey);
+            CodegenEntry view = (latest != null && latest.checked != p.entry.checked)
+                    ? p.entry.withChecked(latest.checked) : p.entry;
+            fieldPicks.add(new Pick(p.id, p.seq, p.session, view, p.page, p.url,
+                    p.extractor, p.rolePending));
+        }
+
         // 1) 每个「标签页 + 拾取 URL」唯一目标（URL 派生，碰撞则追加 _2 / _3）。
         //    同一个标签页内发生导航（A→B）会产生两个不同的键，因此 A、B 各自产出独立的 Page 类。
         Map<PageUrl, List<Pick>> byKey = new LinkedHashMap<>();
-        for (Pick p : picks) byKey.computeIfAbsent(new PageUrl(p.page, p.url), k -> new ArrayList<>()).add(p);
+        for (Pick p : fieldPicks) byKey.computeIfAbsent(new PageUrl(p.page, p.url), k -> new ArrayList<>()).add(p);
         Map<PageUrl, CodegenTarget> targets = resolveTargets(byKey.keySet());
 
         // 2) 每个键按真实操作序列排序的 entries（字段命名基准，跨会话合并）
@@ -1713,17 +1984,22 @@ public final class CodegenLauncher {
 
         // 3) 每个键规划（字段名 / 动作 / fill 占位）：Page、Step、Assert 共用同一份，字段名严格一致
         Map<String, String> fillValues = fillValuesFromRecorder(recorder);
+        // 文本语义定位白名单（问题②）：label 等无 ARIA role 的元素，命中 NLS 且文本唯一时才生成
+        // key-only @RoleElement。必须在生成前用真实引擎复核——拾取热路径不做这次计数（一次 10~90ms）。
+        Set<String> textSemanticSigs = resolveTextSemanticSigs(fieldPicks);
         Map<PageUrl, CodegenFieldPlanner.Plan> plans = new LinkedHashMap<>();
         List<MultiPageCodegen.PageUnit> pageUnits = new ArrayList<>();
         for (PageUrl key : byKey.keySet()) {
-            CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(ordered.get(key), nlsFiles, fillValues);
+            CodegenFieldPlanner.Plan plan =
+                    CodegenFieldPlanner.plan(ordered.get(key), nlsFiles, fillValues, textSemanticSigs);
             plans.put(key, plan);
             pageUnits.add(new MultiPageCodegen.PageUnit(targets.get(key), ordered.get(key), plan));
         }
 
-        // 4) 按会话分组（未点 Start 的历史拾取归入第 1 个会话），会话号升序
+        // 4) 按会话分组（未点 Start 的历史拾取归入第 1 个会话），会话号升序。
+        //    动作视图包含重复操作，Step 方法体会据此产出多步；字段视图只用于上面的 Page / plan。
         Map<Integer, List<Pick>> picksBySession = new LinkedHashMap<>();
-        for (Pick p : picks) {
+        for (Pick p : allPicks) {
             picksBySession.computeIfAbsent(currentSession(p.session), k -> new ArrayList<>()).add(p);
         }
         Map<Integer, List<DialogOp>> dialogsBySession = new LinkedHashMap<>();
@@ -1743,6 +2019,51 @@ public final class CodegenLauncher {
         }
 
         return MultiPageCodegen.build(pageUnits, sessions, nlsFiles);
+    }
+
+    /**
+     * 计算「NLS 文本唯一定位」白名单（问题②，2026-11-11）。
+     *
+     * <p>条件（缺一不可）：
+     * <ul>
+     *   <li>条目带 NLS key（多语言环境下才有跨语言稳定标识）；</li>
+     *   <li>主文档元素（页级 {@code getByText} 对 iframe / shadow 内元素不可靠）；</li>
+     *   <li>{@code getByText(可访问名, exact)} 恰好命中 <b>1</b> 个 —— 与运行期 key-only
+     *       {@code @RoleElement} 的解析路径同源。未通过校验一律不纳入，宁可退 CSS：
+     *       不做唯一性校验的文本定位会在 strict mode 下多命中失败（用户规则④）。</li>
+     * </ul>
+     * 同一文案只计数一次（生成期页面静态）；异常一律视为不通过。
+     */
+    private static Set<String> resolveTextSemanticSigs(Collection<Pick> picks) {
+        if (picks == null || picks.isEmpty()) {
+            return Set.of();
+        }
+        Map<String, Boolean> byText = new HashMap<>();
+        Set<String> out = new HashSet<>();
+        for (Pick p : picks) {
+            CodegenEntry e = p.entry;
+            if (e == null || e.nlsKey == null || e.nlsKey.isEmpty()) continue;
+            if (e.name == null || e.name.isBlank()) continue;
+            if (!e.framePath.isEmpty() || !e.shadowHosts.isEmpty()) continue;
+            boolean unique = byText.computeIfAbsent(e.name, text -> countText(p.page, text) == 1);
+            if (unique) {
+                out.add(e.sigKey);
+            } else {
+                log.debug("[codegen] NLS text not unique for key={} name='{}' - keeping CSS fallback",
+                        e.nlsKey, e.name);
+            }
+        }
+        return out;
+    }
+
+    /** 页级文本计数；异常/不可判定返回 -1（调用方只信 {@code == 1}）。 */
+    private static int countText(Page page, String text) {
+        try {
+            return page.getByText(text, new Page.GetByTextOptions().setExact(true)).count();
+        } catch (Exception ex) {
+            log.debug("[codegen] text uniqueness check failed for '{}': {}", text, ex.getMessage());
+            return -1;
+        }
     }
 
     /**
@@ -1813,8 +2134,9 @@ public final class CodegenLauncher {
         for (Map.Entry<PageUrl, CodegenFieldPlanner.Plan> e : plans.entrySet()) {
             planByTarget.put(targets.get(e.getKey()), e.getValue());
         }
-        // 同一元素在本步被反复拾取（如连点同一按钮）→ 只保留首次动作，避免 step 出现重复 click / fill。
-        Set<String> usedSig = new HashSet<>();
+        // 去重键 = 元素 + 动作签名：只有「完全相同的纯 click 连点」才丢弃。
+        // 勾↔取消、radio 改选、同字段两次不同值提交都是不同动作，必须全部保留（P0-3）。
+        Map<String, String> lastActionBySig = new HashMap<>();
         Pick prevPick = null;
         for (SessionItem item : items) {
             if (item.dialog != null) {
@@ -1850,32 +2172,56 @@ public final class CodegenLauncher {
 
             CodegenFieldSpec spec = fieldSpecFor(planByTarget.get(t), p.entry);
             if (spec == null) continue;
+            // 动作按「本次操作」生成：checkbox 连续勾选→取消时，两次点击必须分别产出
+            // check()/uncheck()，不能复用字段规划里那份固定的动作模板。
+            String action = actionForPick(spec, p);
+            String signature = spec.verb + "|" + action;
 
             if (triggerIds.contains(p.id)) {
-                usedSig.add(p.entry.sigKey);
+                lastActionBySig.put(p.entry.sigKey, signature);
                 actions.add(MultiPageCodegen.SessionAction.pageSwitch(
                         t, spec.fieldName, spec.action, triggerToPage.get(p.id)));
                 continue;
             }
-            // 同元素去重（保留首次）：连点同一元素不再产生重复动作
-            if (!usedSig.add(p.entry.sigKey)) continue;
+            String previous = lastActionBySig.put(p.entry.sigKey, signature);
+            if (isRepeatedClick(previous, signature, spec.verb)) continue;   // 仅纯连点去重
             boolean filled = fillValues != null && fillValues.get(p.entry.sigKey) != null;
             String todo = ("fill".equals(spec.verb) && !filled)
                     ? "replace the empty placeholder with the real input value" : "";
-            actions.add(MultiPageCodegen.SessionAction.element(t, spec.fieldName, spec.action, todo));
+            if ("file".equals(p.actionType)) {
+                // fakepath 不可用：产物给可编译的 uploadFile 占位 + TODO，不让假路径蒙混过关。
+                todo = "replace the placeholder with a real classpath/file path, "
+                        + "e.g. uploadFile(\"files/xxx.pdf\")";
+            } else if (p.valueCount > 1) {
+                todo = "multiple select: only the first of " + p.valueCount
+                        + " values is generated; add the rest manually";
+            }
+            actions.add(MultiPageCodegen.SessionAction.element(t, spec.fieldName, action, todo));
         }
 
-        // 断言：本会话每页类的元素（保持会话内操作顺序、按 sigKey 去重）
+        // 断言：本会话每页类的元素（保持会话内操作顺序、按 sigKey 去重）。
+        // 必须放 plan.fields 里的「同一个 entry 对象」：AssertClassGenerator.specOf 按引用比较；
+        // 该对象已按末次勾选态修正，因此断言期望值自然取最终状态（P0-3）。
         List<MultiPageCodegen.PageEntries> asserts = new ArrayList<>();
         for (CodegenTarget tgt : pageTargets) {
             List<CodegenEntry> es = new ArrayList<>();
             Set<String> seen = new LinkedHashSet<>();
+            CodegenFieldPlanner.Plan plan = planByTarget.get(tgt);
+            Map<String, CodegenEntry> canonical = new LinkedHashMap<>();
+            if (plan != null && plan.fields != null) {
+                for (CodegenFieldSpec f : plan.fields) {
+                    if (f.entry != null && f.entry.sigKey != null) canonical.put(f.entry.sigKey, f.entry);
+                }
+            }
             for (Pick p : timeline) {
                 CodegenTarget t = targets.get(new PageUrl(p.page, p.url));
-                if (t != null && t.equals(tgt) && p.entry != null && seen.add(p.entry.sigKey)) es.add(p.entry);
+                if (t == null || !t.equals(tgt) || p.entry == null || p.entry.sigKey == null) continue;
+                if (!seen.add(p.entry.sigKey)) continue;
+                CodegenEntry e = canonical.get(p.entry.sigKey);
+                if (e != null) es.add(e);
             }
             if (!es.isEmpty()) {
-                asserts.add(new MultiPageCodegen.PageEntries(tgt, es, planByTarget.get(tgt)));
+                asserts.add(new MultiPageCodegen.PageEntries(tgt, es, plan));
             }
         }
 
@@ -1966,10 +2312,61 @@ public final class CodegenLauncher {
         return Math.max(1, session);
     }
 
+    /**
+     * 仅「完全相同的纯 click 连点」才去重；其余动作（勾↔取消、radio 改选、两次不同值提交）
+     * 一律保留（P0-3）。抽成纯函数便于回归测试，不依赖 Playwright / 面板。
+     */
+    static boolean isRepeatedClick(String previous, String current, String verb) {
+        return previous != null && previous.equals(current) && "click".equals(verb);
+    }
+
+    /**
+     * 按「本次操作」而非「字段的固定模板」生成动作：checkbox 连续勾选→取消时，
+     * 两次点击必须分别产出 {@code check()} / {@code uncheck()}。
+     */
+    static String actionForPick(CodegenFieldSpec spec, Pick p) {
+        if (spec == null || p == null || p.entry == null) return spec == null ? "" : spec.action;
+        String role = p.entry.role == null ? "" : p.entry.role.toLowerCase(java.util.Locale.ROOT);
+        if ("checkbox".equals(role) && "click".equals(p.actionType)) {
+            return (spec.isList ? "get(0)." : "") + (p.entry.checked ? "check()" : "uncheck()");
+        }
+        // 文件选择：fakepath 不可回放，产物给可编译的 uploadFile 占位 + TODO，由人工填资源路径。
+        if ("file".equals(p.actionType)) {
+            return (spec.isList ? "get(0)." : "") + "uploadFile(\"TODO_REPLACE_WITH_RESOURCE_NAME\")";
+        }
+        // 按本次操作值生成 fill / selectByValue：字段模板里存的是「末值」，
+        // 无法代表历史上每一次填写（填 A 提交 → 填 B 提交，两次的实参必须各自不同）。
+        if ("fill".equals(p.actionType) && p.actionValue != null) {
+            String target = spec.isList ? "get(0)." : "";
+            if ("select".equals(p.entry.tag)) {
+                return p.actionValue.isEmpty() ? spec.action
+                        : target + "selectByValue(\"" + CodegenFieldPlanner.escapeJava(p.actionValue) + "\")";
+            }
+            if ("fill".equals(spec.verb)) {
+                return target + "fill(\"" + CodegenFieldPlanner.escapeJava(p.actionValue) + "\")";
+            }
+        }
+        // 键盘语义事件（Enter / Escape / Tab）：按本次按键生成可回放的 press(...)，
+        // 而不是复用字段模板里的 fill/click。按键名限定为字母，杜绝拼接注入。
+        if (p.actionType != null && p.actionType.startsWith("press:")) {
+            String key = p.actionType.substring("press:".length());
+            // 允许 "Control+Enter" 这类组合键；仍只接受字母与 '+'，杜绝拼入引号/分号。
+            if (key.matches("[A-Za-z+]+")) {
+                return (spec.isList ? "get(0)." : "") + "press(\"" + key + "\")";
+            }
+        }
+        return spec.action;
+    }
+
     private static CodegenFieldSpec fieldSpecFor(CodegenFieldPlanner.Plan plan, CodegenEntry entry) {
-        if (plan == null || plan.fields == null) return null;
+        if (plan == null || plan.fields == null || entry == null) return null;
         for (CodegenFieldSpec f : plan.fields) {
-            if (f.entry == entry) return f;
+            if (f.entry == entry) return f;   // 快路径：同一对象（常规首次拾取）
+        }
+        // 动作型条目 / 勾选态派生条目是原条目的不可变副本，引用不同但 sigKey 相同；
+        // plan 里每个 sigKey 唯一，故按 sigKey 回查即可，不必放宽成"按名字猜"。
+        for (CodegenFieldSpec f : plan.fields) {
+            if (f.entry != null && java.util.Objects.equals(f.entry.sigKey, entry.sigKey)) return f;
         }
         return null;
     }
@@ -2015,7 +2412,7 @@ public final class CodegenLauncher {
                 if (hasNonRoleMember(picks, en.getKey())) {
                     // 组内已有条目被回退（上一轮复核 / 本就不属于 role 策略）：整组必须一致，
                     // 否则字段规划取首条注解时会生成自相矛盾的产物。
-                    log.warn("[codegen][cdp] group role strategy mismatch (base={}) — 整组统一回退 CSS",
+                    log.warn("[codegen][cdp] group role strategy mismatch (base={}) - falling back to CSS for the whole group",
                             en.getKey());
                     for (Pick pk : en.getValue()) {
                         reviseToCss(panel, pk, -1, "group already has non-role member");
@@ -2064,13 +2461,17 @@ public final class CodegenLauncher {
         CodegenEntry entry = pk.entry;
         int hits = pk.extractor.countRoleMatches(entry);
         if (hits < 0) {
-            log.warn("[codegen][cdp] deferred role verification undeterminable for #{} (role={}, name='{}') — "
-                    + "keeping ROLE strategy", pk.id, entry.role, entry.name);
+            // 引擎不可用 ≠ 确认唯一：显式记 UNDETERMINABLE，生成侧据此产出 TODO，而不是静默放行。
+            pk.entry = entry.withRoleHits(CodegenEntry.ROLE_HITS_UNDETERMINABLE);
+            log.warn("[codegen][cdp] deferred role verification undeterminable for #{} (role={}, name='{}') - "
+                    + "keeping ROLE strategy but flagging it as unverified", pk.id, entry.role, entry.name);
             return;
         }
         if (RoleVerificationPolicy.keepRole(hits, 1)) {
-            log.debug("[codegen][cdp] deferred role verification passed for #{} (role={}, name='{}')",
-                    pk.id, entry.role, entry.name);
+            // 复核通过才第一次知道 role 定位器的真实命中数：回填 roleHits（CSS 的 matchCount 不动，两者独立）。
+            pk.entry = entry.withRoleHits(hits);
+            log.debug("[codegen][cdp] deferred role verification passed for #{} (role={}, name='{}', hits={})",
+                    pk.id, entry.role, entry.name, hits);
             return;
         }
         reviseToCss(panel, pk, hits, "expected exactly 1 hit");
@@ -2087,18 +2488,26 @@ public final class CodegenLauncher {
         CodegenEntry entry = head.entry;
         int hits = head.extractor.countRoleMatches(entry);
         if (hits < 0) {
+            for (Pick pk : group) {
+                if (pk.entry != null) pk.entry = pk.entry.withRoleHits(CodegenEntry.ROLE_HITS_UNDETERMINABLE);
+            }
             log.warn("[codegen][cdp] group role verification undeterminable (base={}, picked={}, role={}, "
-                    + "name='{}') — keeping ROLE strategy", base, members, entry.role, entry.name);
+                    + "name='{}') - keeping ROLE strategy but flagging it as unverified",
+                    base, members, entry.role, entry.name);
             return;
         }
         if (RoleVerificationPolicy.keepRole(hits, members)) {
+            // 组内成员共享同一个 role 定位器，命中数一致，逐条回填 roleHits。
+            for (Pick pk : group) {
+                if (pk.entry != null) pk.entry = pk.entry.withRoleHits(hits);
+            }
             log.debug("[codegen][cdp] group role verification passed (base={}, picked={}, hits={})",
                     base, members, hits);
             return;
         }
-        log.warn("[codegen][cdp] group role locator mismatched (base={}, picked={}, hits={}) — "
-                        + "组内元素数与引擎命中数不一致（不可见元素被排除 / 页面有未拾取的同类元素），"
-                        + "索引不可信，整组回退 CSS",
+        log.warn("[codegen][cdp] group role locator mismatched (base={}, picked={}, hits={}) - "
+                        + "group element count differs from engine hits (invisible elements excluded / unpicked peers present), "
+                        + "index unreliable, falling back to CSS for the whole group",
                 base, members, hits);
         for (Pick pk : group) {
             reviseToCss(panel, pk, hits, "group picked=" + members);
@@ -2108,12 +2517,17 @@ public final class CodegenLauncher {
     /** 回退 CSS 并推面板就地修订该行（不新增行）。 */
     private static void reviseToCss(CodegenPanelHandle panel, Pick pk, int hits, String because) {
         CodegenEntry entry = pk.entry;
-        CodegenEntry revised = RoleRevision.toCss(entry);
+        // 回退 CSS 后「最终定位器」变成了这条 CSS：用 CSS 引擎重新计数（拾取时的是快照，页面可能已变），
+        // 并把 roleHits 标为不适用，使 effectiveMatchCount() 自动改读 matchCount。
+        int cssHits = pk.extractor == null ? -1 : pk.extractor.countCssMatches(entry.cssSelector);
+        CodegenEntry revised = RoleRevision.toCss(entry)
+                .withMatchCount(cssHits)
+                .withRoleHits(CodegenEntry.ROLE_HITS_NOT_APPLICABLE);
         pk.entry = revised;
         if (panel != null) {
             panel.onPickedRevised(pk.id, revised, "hits=" + hits + ", " + because);
         }
-        log.info("[codegen][cdp] role locator rejected for #{} (hits={}, role={}, name='{}', {}) — "
+        log.info("[codegen][cdp] role locator rejected for #{} (hits={}, role={}, name='{}', {}) - "
                         + "strategy revised to CSS ('{}')",
                 pk.id, hits, entry.role, entry.name, because, revised.selector);
     }

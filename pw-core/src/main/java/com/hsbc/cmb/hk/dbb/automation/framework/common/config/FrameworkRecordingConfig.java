@@ -1,22 +1,20 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.config;
 
-/** Configuration for adding browser actions to the test report, independent of application logs. */
+/**
+ * 报告动作录制开关：唯一事实来源为 {@code framework.recording.enabled}。
+ *
+ * <p>与日志配置完全解耦：日志阈值由 {@code logging.root.level} 控制，
+ * 录制不受任何日志相关配置影响。</p>
+ */
 public final class FrameworkRecordingConfig {
+
+    private static final ConfigRegistry KEY = ConfigRegistry.FRAMEWORK_RECORDING_ENABLED;
 
     private FrameworkRecordingConfig() {
     }
 
     public static boolean isEnabled() {
-        ConfigRegistry recordingKey = ConfigRegistry.FRAMEWORK_RECORDING_ENABLED;
-        ConfigReader.Resolved recording = ConfigReader.resolveWithLayer(
-                recordingKey.key(), recordingKey.defaultValue());
-        if (recording.layer() != ConfigReader.Layer.DEFAULT) {
-            return parseBoolean(recording.value(), recordingKey.key());
-        }
-
-        ConfigRegistry legacyKey = ConfigRegistry.WEB_FRAMEWORK_LOGGING;
-        String legacyValue = ConfigReader.resolve(legacyKey.key(), legacyKey.defaultValue());
-        return "VERBOSE".equalsIgnoreCase(legacyValue) || "TRACE".equalsIgnoreCase(legacyValue);
+        return parseBoolean(ConfigReader.resolve(KEY.key(), KEY.defaultValue()), KEY.key());
     }
 
     private static boolean parseBoolean(String value, String key) {

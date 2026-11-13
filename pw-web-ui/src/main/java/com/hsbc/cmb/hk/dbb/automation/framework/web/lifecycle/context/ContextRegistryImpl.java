@@ -197,7 +197,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
     public void closeContext() {
         LifecycleLockMediator.withContextLock(() -> {
             //  窗口堆积修复（可靠关闭）：用例级 CONTEXT_KEY 在收尾时可能已被 Cucumber @After 清空，
-            //    此时回退到线程级记录，避免"context==null → 整段静默跳过 → Context/窗口泄漏"。
+            //    此时回退到线程级记录，避免"context==null -> 整段静默跳过 -> Context/窗口泄漏"。
             BrowserContext resolved = TestContextHolder.get().get(PlaywrightManager.CONTEXT_KEY);
             if (resolved == null) {
                 resolved = CURRENT_CONTEXT_BY_THREAD.get();
@@ -265,7 +265,7 @@ public final class ContextRegistryImpl implements ContextRegistry {
             if (configId != null) {
                 String dirtyKey = PlaywrightRuntime.instance().browserRegistry.keyFor(configId);
                 PlaywrightRuntime.instance().state.markConnectionDirty(dirtyKey);
-                logger.warn("[context-close] close exceeded {}ms — connection key={} marked DIRTY; "
+                logger.warn("[context-close] close exceeded {}ms - connection key={} marked DIRTY; "
                         + "next scenario will rebuild Playwright+Browser instead of reusing the stalled connection",
                         CloseGuard.CONTEXT_CLOSE_LIMIT_MS, dirtyKey);
             }

@@ -118,7 +118,7 @@ public final class NlsReverseLookup {
     private void ensureLoaded() {
         String lang = NLSUtils.getLanguage();
         if (lang == null || lang.isBlank()) {
-            throw new IllegalStateException("[codegen][nls] current language is not set — "
+            throw new IllegalStateException("[codegen][nls] current language is not set - "
                     + "call NLSUtils.setLanguage(\"zh\"/\"en\"/...) before starting the inspector, "
                     + "because NLS bundles are keyed by language: { lang: { key: value } }.");
         }

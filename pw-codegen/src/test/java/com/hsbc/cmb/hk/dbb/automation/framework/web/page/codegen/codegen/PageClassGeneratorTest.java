@@ -198,7 +198,7 @@ public class PageClassGeneratorTest {
         Assert.assertFalse(hasCjkDeclaration(out));
     }
 
-    /** 中英混合名保留英文片段（{@code "Login 登录 → login"}），不整段丢弃。 */
+    /** 中英混合名保留英文片段（{@code "Login 登录 -> login"}），不整段丢弃。 */
     @Test
     public void mixedCjkAndAscii_keepsAsciiPart() {
         List<CodegenEntry> es = List.of(role("button", "Login 登录", "#login", null, 0));

@@ -254,16 +254,16 @@ public final class HangWatchdog {
      */
     static String renderSample(Thread owner, String id, long elapsedMs, long interval) {
         StringBuilder sb = new StringBuilder(4096);
-        sb.append("==== [HangWatchdog] 用例 ").append(id == null ? "(未知)" : "'" + id + "'")
-                .append(" 已运行 ").append(elapsedMs).append("ms（采样间隔 ").append(interval)
-                .append("ms）—— 同栈连续多次采样无变化（疑似真卡死），以下为线程现场；")
-                .append("关闭采样：-Dframework.playwright.hang.watchdog.interval.ms=0 ====\n");
+        sb.append("==== [HangWatchdog] test case ").append(id == null ? "(unknown)" : "'" + id + "'")
+                .append(" has run for ").append(elapsedMs).append("ms (sample interval ").append(interval)
+                .append("ms) - stack unchanged across consecutive samples (suspected hang), thread dump follows;")
+                .append("disable sampling: -Dframework.playwright.hang.watchdog.interval.ms=0 ====\n");
 
-        sb.append("--- 场景线程 『").append(owner.getName()).append("』（state=")
-                .append(owner.getState()).append("）完整栈 ---\n");
+        sb.append("--- scenario thread '").append(owner.getName()).append("' (state=")
+                .append(owner.getState()).append(") full stack ---\n");
         StackTraceElement[] ownStack = owner.getStackTrace();
         if (ownStack.length == 0) {
-            sb.append("    (无栈帧)\n");
+            sb.append("    (no stack frames)\n");
         } else {
             for (StackTraceElement frame : ownStack) {
                 sb.append("    at ").append(frame).append('\n');
@@ -271,7 +271,7 @@ public final class HangWatchdog {
         }
 
         Map<Thread, StackTraceElement[]> all = Thread.getAllStackTraces();
-        sb.append("--- 其它线程概览（共 ").append(all.size()).append(" 个线程，各取首个非 JDK 帧）---\n");
+        sb.append("--- other threads overview (total ").append(all.size()).append(", first non-JDK frame each) ---\n");
         for (Map.Entry<Thread, StackTraceElement[]> entry : all.entrySet()) {
             Thread t = entry.getKey();
             if (t == owner || isNoiseThread(t.getName())) {
@@ -280,8 +280,8 @@ public final class HangWatchdog {
             sb.append("    [").append(t.getName()).append("] ").append(t.getState()).append(" | ")
                     .append(firstInterestingFrame(entry.getValue())).append('\n');
         }
-        sb.append("==== [HangWatchdog] 采样结束（若上方场景线程停在 Playwright 的 sendMessage/waitForMessage，"
-                + "则为协议层等待；停在自家锁对象上则是锁竞争）====");
+        sb.append("==== [HangWatchdog] sampling ended (scenario thread stuck in Playwright sendMessage/waitForMessage "
+                + "means protocol-level wait; stuck on a framework lock means lock contention) ====");
         return sb.toString();
     }
 
@@ -312,7 +312,7 @@ public final class HangWatchdog {
     /** 硬超时处置：记录 ERROR + 尝试中断场景线程 + 留存挂死事件。 */
     private static void fireHardTimeout(Thread owner, String id, long elapsed) {
         hardFired = true;
-        logger.error("[HangWatchdog] HARD TIMEOUT: scenario '{}' ran {}ms exceeding hard limit — "
+        logger.error("[HangWatchdog] HARD TIMEOUT: scenario '{}' ran {}ms exceeding hard limit - "
                 + "interrupting scenario thread (effective only for interruptible blocks); "
                 + "consume via consumeHardHang() to fail the scenario", id, elapsed);
         try {
@@ -358,7 +358,7 @@ public final class HangWatchdog {
     /** 取首个"有信息量"的帧：跳过 JDK 反射/线程池样板帧，优先框架与 Playwright 帧。 */
     private static String firstInterestingFrame(StackTraceElement[] stack) {
         if (stack == null || stack.length == 0) {
-            return "(无栈帧)";
+            return "(no stack frames)";
         }
         for (StackTraceElement frame : stack) {
             String cls = frame.getClassName();

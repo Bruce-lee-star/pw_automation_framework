@@ -68,6 +68,23 @@ public final class CodegenFacts {
          * 值是否随机（含 hash/序号）由 {@code SelectorStability} 判定后决定精确或部分匹配。
          */
         public final Map<String, String> attrs;
+        /**
+         * 元素当前的勾选态（仅 checkbox / radio 有意义；其余元素恒 {@code false}）。
+         *
+         * <p>生成侧据此区分 {@code check()} 与 {@code uncheck()}：录制时用户「取消勾选」，
+         * {@code checked=false}，产物必须是 {@code uncheck()} 而不是恒定的 {@code check()}。
+         */
+        public final boolean checked;
+        /**
+         * 祖先元素内部的<b>后代锚点</b>（可直接用于 CSS 的段，如 {@code [data-i18n="title_triage"]}、
+         * {@code [data-testid="row-7"]}），最多 6 个、深度 6。
+         *
+         * <p>用途：结构相同、文案相同的双胞胎（「Continue」在隐藏 modal 与未激活分页里各一份）靠祖先
+         * 自身属性区分不了，但祖先内部往往有唯一子锚点 ⇒ 生成
+         * {@code div.page:has([data-i18n="title_triage"]) [data-i18n="continue"]}。
+         * {@code :has()} 是原生 CSS（Chromium 105+），{@code querySelectorAll} 与 Playwright 引擎都支持。
+         */
+        public final List<String> childAnchors;
 
         public Fact(String role, String name, String tag, String id, String testid, String type,
                     String placeholder, String alt, String title, String value,
@@ -103,6 +120,24 @@ public final class CodegenFacts {
                     String placeholder, String alt, String title, String value,
                     String text, String label, int nth, String cssSelector, List<String> shadowHosts,
                     String className, String xpath, String nameAttr, Map<String, String> attrs, String src) {
+            this(role, name, tag, id, testid, type, placeholder, alt, title, value, text, label, nth,
+                    cssSelector, shadowHosts, className, xpath, nameAttr, attrs, src, false);
+        }
+
+        public Fact(String role, String name, String tag, String id, String testid, String type,
+                    String placeholder, String alt, String title, String value,
+                    String text, String label, int nth, String cssSelector, List<String> shadowHosts,
+                    String className, String xpath, String nameAttr, Map<String, String> attrs,
+                    String src, boolean checked) {
+            this(role, name, tag, id, testid, type, placeholder, alt, title, value, text, label, nth,
+                    cssSelector, shadowHosts, className, xpath, nameAttr, attrs, src, checked, List.of());
+        }
+
+        public Fact(String role, String name, String tag, String id, String testid, String type,
+                    String placeholder, String alt, String title, String value,
+                    String text, String label, int nth, String cssSelector, List<String> shadowHosts,
+                    String className, String xpath, String nameAttr, Map<String, String> attrs,
+                    String src, boolean checked, List<String> childAnchors) {
             this.role = role;
             this.name = name;
             this.tag = tag;
@@ -128,6 +163,10 @@ public final class CodegenFacts {
             this.attrs = (attrs == null || attrs.isEmpty())
                     ? Map.of()
                     : Collections.unmodifiableMap(new LinkedHashMap<>(attrs));
+            this.checked = checked;
+            this.childAnchors = (childAnchors == null || childAnchors.isEmpty())
+                    ? List.of()
+                    : Collections.unmodifiableList(new ArrayList<>(childAnchors));
         }
 
         /**
@@ -186,7 +225,17 @@ public final class CodegenFacts {
                 str(o, "xpath", ""),
                 str(o, "nameAttr", ""),
                 mapOf(o, "attrs"),
-                str(o, "src", ""));
+                str(o, "src", ""),
+                boolOf(o, "checked", false),
+                strList(o, "childAnchors"));
+    }
+
+    /** 布尔取值：缺失 / 非布尔一律回落默认值（旧版注入脚本没有该字段）。 */
+    private static boolean boolOf(JsonObject o, String k, boolean def) {
+        if (!o.has(k) || o.get(k).isJsonNull()) return def;
+        JsonElement v = o.get(k);
+        if (!v.isJsonPrimitive() || !v.getAsJsonPrimitive().isBoolean()) return def;
+        return v.getAsBoolean();
     }
 
     /**
@@ -218,18 +267,34 @@ public final class CodegenFacts {
         List<String> out = new ArrayList<>();
         for (JsonElement item : el.getAsJsonArray()) {
             if (item == null || item.isJsonNull()) continue;
+            // 与 str() 同源：数组元素若是对象/数组，getAsString() 会抛 IllegalStateException，
+            // 进而让整条拾取被 extract 的 catch 吞掉。类型不符不能抛，也不能"丢掉一层"
+            // （shadow 链丢层会错指向别的 shadow root），按本方法既有契约记为「失效层」空串，
+            // 由定位侧判不可用并回退坐标。
+            if (!item.isJsonPrimitive()) {
+                out.add("");
+                continue;
+            }
             String v = item.getAsString();
             if (v != null) out.add(v);
         }
         return out;
     }
 
+    /**
+     * 字符串取值：缺失 / {@code null} / <b>非原始值</b>一律回落默认值。
+     *
+     * <p>必须显式判 {@code isJsonPrimitive()}：{@code JsonElement#getAsString()} 对 JSON 数组/对象会抛
+     * {@code IllegalStateException}，而本方法的调用方 {@code fromJson} 被 {@code extract} 的
+     * {@code catch (Exception)} 包着——一次类型异常会让<b>整条拾取静默失败</b>（用户表现为"点了没反应"）。
+     * 同文件的 {@link #boolOf} / {@link #mapOf} 早已做类型判定，此处保持一致。
+     */
     private static String str(JsonObject o, String k, String def) {
-        if (o.has(k) && !o.get(k).isJsonNull()) {
-            String v = o.get(k).getAsString();
-            return v == null ? def : v;
-        }
-        return def;
+        if (!o.has(k) || o.get(k).isJsonNull()) return def;
+        JsonElement el = o.get(k);
+        if (!el.isJsonPrimitive()) return def;
+        String v = el.getAsString();
+        return v == null ? def : v;
     }
 
     private static int intOf(JsonObject o, String k, int def) {

@@ -319,7 +319,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
      */
     void markDegraded() {
         if (degraded.compareAndSet(false, true)) {
-            LOGGER.warn("[Route] route facility degraded for context @{} (registration/unroute not confirmed) — "
+            LOGGER.warn("[Route] route facility degraded for context @{} (registration/unroute not confirmed) - "
                     + "observability only, context is NOT rebuilt (I-1)", System.identityHashCode(context));
         }
     }
@@ -481,7 +481,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         // 2026-10-16 到达即读：本批 main 动作（含响应轮询 deliverResponse 持句柄）跑完后，就地物化
         // 已到达 exchange 的 body（业务线程、协议调用安全）——不再延迟到下一次采集查询/断言结算。
         // 这让 drainSettledAssertionFailures/register/close 等非查询型 drain 检出的到达也同批读 body，
-        // 压缩"检出到达→读取"窗口（对齐文档"立即读、自己存"）。两者内部均 fail-open，绝不抛异常。
+        // 压缩"检出到达->读取"窗口（对齐文档"立即读、自己存"）。两者内部均 fail-open，绝不抛异常。
         capture.materializeArrivedBodies();
         monitor.materializeArrivedBodies();
     }
@@ -706,7 +706,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         int cleared = generations.snapshot().rules().size();
         clearGenerations();
         LOGGER.debug("[Route] detachRules @{}: {} rule(s) detached in memory; {} native binding(s) kept "
-                        + "(zero protocol calls — hits fall back to pass-through)",
+                        + "(zero protocol calls - hits fall back to pass-through)",
                 System.identityHashCode(context), cleared, binders.size());
         return cleared;
     }
@@ -823,7 +823,7 @@ public final class RouteRuntimeImpl implements RouteRuntime {
         // 使用「移除」语义（而非仅标记 disabled）使该能力位彻底脱离合并视图。
         //
         // 【2026-10-10 结构性修复：目的退役不再驱动 unroute】
-        //  此前"目的达成 → 提交独立执行器异步 unroute"会在 scenario 进行中产生<b>后台线程协议调用</b>，
+        //  此前"目的达成 -> 提交独立执行器异步 unroute"会在 scenario 进行中产生<b>后台线程协议调用</b>，
         //  与主线程 UI 触发的请求 dispatch 并发泵同一条 Playwright 连接（官方模型：一个 Playwright =
         //  一条 Connection，客户端对象表/回调表<b>非线程安全</b>）→ 实证驱动级异常
         //  （"Cannot find parent object request@… to create route@…" / "Object doesn't exist: route@…"）

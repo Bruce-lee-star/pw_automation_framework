@@ -59,7 +59,7 @@ public class NLSUtilsTest {
         String manual = NLSUtils.visibleText(NLSUtils.bind(f.toString()).get("greet"));
         assertEquals("visibleText(key) 应等价于手写 visibleText(get(key))", manual, viaBundle);
         assertFalse("应剥离 HTML 标签", viaBundle.contains("<"));
-        assertTrue("应解码实体 &copy; → ©", viaBundle.contains("©"));
+        assertTrue("应解码实体 &copy; -> (c)", viaBundle.contains("(c)"));
         assertTrue(viaBundle.contains("Hello"));
         assertTrue(viaBundle.contains("World"));
     }

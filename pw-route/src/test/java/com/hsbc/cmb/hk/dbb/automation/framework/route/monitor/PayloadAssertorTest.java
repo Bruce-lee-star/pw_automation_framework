@@ -38,7 +38,7 @@ public class PayloadAssertorTest {
     public void formFieldsParsedWithDuplicateKeys() {
         Map<String, List<String>> fields = FormAssertor.parse("a=1&a=2&b=x+y&flag", java.nio.charset.StandardCharsets.UTF_8);
         assertEquals((Object) List.of("1", "2"), (Object) fields.get("a"));
-        assertEquals("表单值需 URL 解码（+ → 空格）", (Object) List.of("x y"), (Object) fields.get("b"));
+        assertEquals("表单值需 URL 解码（+ -> 空格）", (Object) List.of("x y"), (Object) fields.get("b"));
         assertEquals((Object) List.of(""), (Object) fields.get("flag"));
     }
 

@@ -11,7 +11,7 @@ import com.microsoft.playwright.Response;
  * <b>JSON/XHR/POST 不在列</b>。⇒ 对本框架的 JSON API 采集而言，body 一旦读失败就<b>无法跨浏览器挽回</b>，
  * 故本读取器<b>只读一次、绝不做失败后重试</b>：读失败即交回根因，由调用方 fail-open
  * （body=null + 分类计数）。真正的 mitigation 是"立即读、自己存"——在业务线程 main 尽快读、
- * 压缩"响应到达→读取"窗口，而非失败后重试。</p>
+ * 压缩"响应到达->读取"窗口，而非失败后重试。</p>
  *
  * <p><b>调用线程约定</b>：业务线程（main）——{@code body()} 是协议调用，须与 UI/断言串行、无并发泵 Connection。</p>
  */

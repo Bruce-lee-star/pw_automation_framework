@@ -93,7 +93,7 @@ public final class ConfigEffectiveView {
      *
      * <p>两个不同键归一后同名 ⇒ 它们只能同时拿到同一个 env 值，其中一个的语义必然被静默改变。</p>
      *
-     * @return 形如 {@code "FRAMEWORK_A_B ← [a.b, framework.a-b]"} 的可读行
+     * @return 形如 {@code "FRAMEWORK_A_B <- [a.b, framework.a-b]"} 的可读行
      */
     public static List<String> envNameCollisions() {
         Map<String, List<String>> byEnvName = new LinkedHashMap<>();
@@ -104,7 +104,7 @@ public final class ConfigEffectiveView {
         List<String> collisions = new ArrayList<>();
         for (Map.Entry<String, List<String>> e : byEnvName.entrySet()) {
             if (e.getValue().size() > 1) {
-                collisions.add(e.getKey() + " ← " + e.getValue());
+                collisions.add(e.getKey() + " <- " + e.getValue());
             }
         }
         return collisions;

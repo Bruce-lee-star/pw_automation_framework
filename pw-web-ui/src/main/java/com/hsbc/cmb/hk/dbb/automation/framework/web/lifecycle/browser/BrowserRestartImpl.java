@@ -53,7 +53,7 @@ public final class BrowserRestartImpl implements BrowserRestart {
             return;
         }
 
-        logger.debug("🔄 Restarting browser for config: {}", oldConfigId);
+        logger.debug("Restarting browser for config: {}", oldConfigId);
 
         try {
             // 锁外关闭本线程的 Page/Context（避免持有 BROWSER_LOCK 时再进入细粒度锁导致顺序反转）

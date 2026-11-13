@@ -1,7 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.AriaRoles;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.LocatorStrategy;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
 
 import java.util.ArrayList;
@@ -18,7 +17,7 @@ import java.util.Set;
 /**
  * 字段规划（Page / Step / Assert 三个 Tab 的<b>唯一命名与定位来源</b>）。
  *
- * <p>把"去重 → List 分组 → 命名 → 定位注解 → 动作/断言表达式"收在一处，三个生成器都消费同一份
+ * <p>把"去重 -> List 分组 -> 命名 -> 定位注解 -> 动作/断言表达式"收在一处，三个生成器都消费同一份
  * {@link Plan}，从根本上保证 Tab1(Page)、Tab2(Step)、Tab3(Assert) 引用的是完全相同的字段名。
  *
  * <h3>定位策略</h3>
@@ -66,7 +65,24 @@ public final class CodegenFieldPlanner {
      * @param fillValues 字段键（= {@code sigKey}）→ 录制时输入的最终值；用于 Step 类回填真实 fill 值
      */
     public static Plan plan(Collection<CodegenEntry> entries, String[] nlsFiles, Map<String, String> fillValues) {
+        return plan(entries, nlsFiles, fillValues, Set.of());
+    }
+
+    /**
+     * 字段规划（含录制回填值 + <b>文本语义定位白名单</b>）。
+     *
+     * @param textSemanticSigs 已通过「NLS 文本定位唯一」校验的 {@code sigKey} 集合。命中且没有可用
+     *                         ARIA role 时，生成 key-only {@code @RoleElement(key = "...")}（role 缺省 =
+     *                         文本语义策略），而不是被迫退化成 CSS —— 这正是 label 这类"在 AriaRole 枚举里
+     *                         没有对应常量、但 NLS 文案恰好唯一"的元素被误降级的原因
+     *                         （2026-11-11 用户反馈：能匹配 NLS 却直接生成 CSS）。
+     *                         <p><b>必须由调用方用真实引擎校验过</b>（{@code getByText(text, exact).count() == 1}），
+     *                         本方法不做计数、不信任未校验的入参。
+     */
+    public static Plan plan(Collection<CodegenEntry> entries, String[] nlsFiles,
+                            Map<String, String> fillValues, Set<String> textSemanticSigs) {
         boolean allowNlsKey = (nlsFiles != null && nlsFiles.length > 0);
+        Set<String> textSemantic = textSemanticSigs == null ? Set.of() : textSemanticSigs;
 
         // 1) 精确去重（同元素重复点选只留首条），保持首现顺序
         Map<String, CodegenEntry> bySig = new LinkedHashMap<>();
@@ -87,28 +103,39 @@ public final class CodegenFieldPlanner {
 
         for (CodegenEntry e : bySig.values()) {
             String baseSig = baseSigOf(e.sigKey);
-            boolean isList = listBases.contains(baseSig);
-            if (isList) {
-                hasList = true;
-                // 一组元素只合成【一个】PageElementList 字段（组内序号由运行期 x.get(i) 取单项）
-                if (!emittedListBases.add(baseSig)) continue;
-            }
 
-            // 角色可定位 = ①拾取阶段判定为角色策略（已用真实 Playwright 引擎按唯一命中复核过）
-            // ②role 能映射到确切的 AriaRole 常量（非 generic/none/presentation）③有可读 name。
-            // 任一条不满足就回退 @Element(css)：绝不把未知角色（如 label）降级成 AriaRole.GENERIC ——
-            // 那种产物能编译但运行期按 getByRole 定位不到元素，属于静默失效。
+            // 角色可定位 = ①拾取阶段判定为角色策略 ②role 能映射到确切的 AriaRole 常量
+            // （非 generic/none/presentation）③有可读 name。任一条不满足就回退 @Element(css)：
+            // 绝不把未知角色（如 label）降级成 AriaRole.GENERIC —— 那种产物能编译但运行期定位不到。
+            boolean roleStrategy = e.isRoleStrategy();
             String ariaConst = AriaRoles.ariaConstant(e.role);
-            boolean roleStrategy = LocatorStrategy.ROLE.equals(e.strategy)
-                    || LocatorStrategy.ROLE_WITH_NAME.equals(e.strategy);
             boolean roleLocatable = roleStrategy && ariaConst != null && AriaRoles.isLocatable(e.role)
                     && e.name != null && !e.name.isBlank();
             boolean hasNlsKey = allowNlsKey && e.nlsKey != null && !e.nlsKey.isEmpty();
             // 多语言环境（配置了 nls 包）下，反查不到 key 就没有跨语言稳定的标识：
             // 此时禁止用 name（可访问名）定位——它随语言变化，产物换个语言就跑不通。
-            // 直接回退 @Element(css/xpath)，由 id/name 属性/class/token/结构/XPath 承担。
             if (roleLocatable && allowNlsKey && !hasNlsKey) {
                 roleLocatable = false;
+            }
+
+            // 文本语义定位：无可用 ARIA role + 命中 NLS key + 主文档 + 调用方已用真实引擎校验唯一。
+            boolean textSemanticLocatable = allowNlsKey && hasNlsKey && !roleLocatable
+                    && e.framePath.isEmpty() && e.shadowHosts.isEmpty()
+                    && textSemantic.contains(e.sigKey);
+            // 语义定位（role 或文本）：用于 List 组语义校验/字段命名，二者都优于 CSS 兜底
+            boolean semantic = roleLocatable || textSemanticLocatable;
+
+            // 【唯一取数入口】按「产物里实际采用的定位引擎」选计数：
+            // role → roleHits（真实 getByRole 复核值）；其余（CSS / 文本语义）→ matchCount。
+            // 绝不直接读 matchCount —— role 策略下它只是兜底 CSS 的计数，与 getByRole 无关
+            // （CSS 命中 5、role 命中 1 时会被误判成一组 ⇒ PageElementList + get(0)，组语义静默降级）。
+            // role 未复核时返回负数 ⇒ 不判 List，下方还会产出 TODO，避免"没跑过校验却静默当成唯一"。
+            int finalCount = e.effectiveMatchCount(roleLocatable);
+            boolean isList = listBases.contains(baseSig) || finalCount > 1;
+            if (isList) {
+                hasList = true;
+                // 一组元素只合成【一个】PageElementList 字段（组内序号由运行期 x.get(i) 取单项）
+                if (!emittedListBases.add(baseSig)) continue;
             }
 
             String annotation;
@@ -136,8 +163,13 @@ public final class CodegenFieldPlanner {
                 annotation = ann.toString();
                 if (!allowNlsKey && containsCjk(e.name)) {
                     comment = "    // TODO(review): CJK element name has no English source "
-                            + "(role-based placeholder used) — provide an English NLS key or rename for clarity";
+                            + "(role-based placeholder used) - provide an English NLS key or rename for clarity";
                 }
+            } else if (textSemanticLocatable) {
+                // role 缺省 = 框架的文本语义策略：运行期按 key 解析当前语言文案后 getByText 定位。
+                // hasAriaRole 保持 false（不需要 AriaRole 常量 import）；hasRole 置 true 以输出 @RoleFile。
+                hasRole = true;
+                annotation = "@RoleElement(key = \"" + escapeJava(e.nlsKey) + "\")";
             } else {
                 if (e.cssSelector == null || e.cssSelector.isBlank() || "html".equals(e.cssSelector)) {
                     continue; // 连 CSS 都没有的定位器无法生成，跳过（不污染产物）
@@ -146,23 +178,42 @@ public final class CodegenFieldPlanner {
                 annotation = "@Element(" + toJavaStringLiteral(e.cssSelector) + ")";
             }
 
+            // role 策略但未复核 / 复核不可判定：产物必须显式标注。
+            // 这正是评审指出的"绕过 CodegenLauncher 复核链直接导出"路径的最后一道防线——
+            // 即使生成侧没跑复核，也不会把"不知道命中几个"静默伪装成"恰好 1 个"。
+            boolean roleUnverified = roleLocatable && e.roleHits < 0;
+            if (roleUnverified && comment == null) {
+                comment = "    // TODO(review): role locator was NOT verified by the Playwright engine "
+                        + "before generation - run getByRole(role, name) uniqueness check before replay";
+            }
+
             // 一组元素若拿不到 role 定位器（复核未通过 / 跨 frame），只能退化成组内首条的唯一 CSS：
             // 严格模式下不会报错，但这个 PageElementList 实际只命中 1 个元素（组语义丢失）。
             // 产物里显式标出来，避免评审时误以为它是"整组"。
-            if (isList && !roleLocatable && comment == null) {
+            //  仅对「多次拾取合成的组」提示可能只命中 1 个；finalCount>1 的组本来就命中多个，不适用
+            if (isList && !semantic && finalCount <= 1 && comment == null) {
                 comment = "    // TODO(review): group could not use a role locator (verification failed or "
-                        + "cross-frame); this @Element matches only one element of the group — review the selector";
+                        + "cross-frame); this @Element matches only one element of the group - review the selector";
             }
 
-            String fieldName = toFieldName(baseFieldName(e, roleLocatable), usedNames);
+            String fieldName = toFieldName(baseFieldName(e, semantic), usedNames);
 
             String verb = verbFor(e);
             String fillValue = (fillValues != null) ? fillValues.get(e.sigKey) : null;
+            comment = dropdownComment(e, verb, fillValue, comment);
+            if (comment == null && finalCount <= 0) {
+                // 0 命中 / 计数不可判定：产物必须在显眼处提示人工核对，而不是静默给出死定位器。
+                comment = "    // TODO(review): locator matched " + finalCount
+                        + " element(s) at pick time - verify the selector before replay";
+            } else if (comment == null && isList) {
+                comment = "    // TODO(review): PageElementList - generated action targets get(0) only;"
+                        + " add the remaining items manually";
+            }
             fields.add(new CodegenFieldSpec(fieldName,
                     isList ? "PageElementList" : "PageElement",
                     annotation, comment,
                     verb, actionFor(e, isList, fillValue), assertionFor(e, isList),
-                    isList, roleLocatable, e));
+                    isList, semantic, e, fillValue));
         }
 
         String classAnnotation = (hasRole && allowNlsKey) ? buildClassAnnotation(nlsFiles) : "";
@@ -196,20 +247,37 @@ public final class CodegenFieldPlanner {
      * 与 {@link #actionFor} 同源，避免"方法名叫 fillXxx、里面却是 click()"的错位。
      */
     static String verbFor(CodegenEntry e) {
+        // 入参校验前置：过去方法尾部还留着一处 `e != null` 冗余判空（SpotBugs
+        // RCN_REDUNDANT_NULLCHECK_WOULD_HAVE_BEEN_A_NPE），说明入口契约从未明确。
+        // 统一为语义化失败，避免后续分支里出现"半路才判空"的错觉。
+        java.util.Objects.requireNonNull(e, "entry must not be null");
         String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
         switch (role) {
+            case "combobox":
+            case "listbox":
+                // 原生 <select> ⇒ selectByValue；自定义下拉（div role=combobox）⇒ 只能展开后点选项。
+                // 两者都绝不能生成 fill()：Playwright 的 fill 只接受 input/textarea/contenteditable，
+                // 对 <select> 与自定义下拉直接抛 "Element is not an <input> or <textarea>"（回放必挂）。
+                return isNativeSelect(e) ? "select" : "click";
             case "textbox":
             case "searchbox":
             case "spinbutton":
-            case "combobox":
-            case "listbox":
                 return "fill";
             case "checkbox":
+                // 读拾取时刻的真实勾选态：录「取消勾选」（checked=false）必须生成 uncheck()，
+                // 否则产物会把用户的取消动作回放成勾选，终态与录制相反。
+                return e.checked ? "check" : "uncheck";
             case "radio":
+                // 点击 radio 必然选中（同组旧选项自动取消），不存在「取消选中」的操作语义
                 return "check";
             default:
                 return "click";
         }
+    }
+
+    /** 原生 {@code <select>}：只有它有「选项列表」语义，可用 selectByValue 一次性选中。 */
+    static boolean isNativeSelect(CodegenEntry e) {
+        return e != null && "select".equals(e.tag);
     }
 
     /**
@@ -225,6 +293,14 @@ public final class CodegenFieldPlanner {
             String v = (fillValue != null) ? fillValue : "";
             return target + "fill(\"" + escapeJava(v) + "\")";
         }
+        if ("select".equals(verb)) {
+            // 录制值来自 <option value>；没有录制值时不能生成 selectByValue("")（必然匹配不到选项），
+            // 退化为 click() 并在字段注释里标注需人工补值。
+            if (fillValue != null && !fillValue.isEmpty()) {
+                return target + "selectByValue(\"" + escapeJava(fillValue) + "\")";
+            }
+            return target + "click()";
+        }
         return target + verb + "()";
     }
 
@@ -233,6 +309,29 @@ public final class CodegenFieldPlanner {
         String target = isList ? "get(0)." : "";
         String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
         return target + (("checkbox".equals(role) || "radio".equals(role)) ? "isChecked()" : "isVisible()");
+    }
+
+    /**
+     * 下拉类元素的可读性收尾：两种降级必须在产物里显式标注，否则用户会以为代码可用。
+     *
+     * <p>① 自定义下拉（div role=combobox）：产物只能 {@code click()} 展开，选值需人工补；
+     * ② 原生 {@code <select>} 但没录到选项值：{@code selectByValue} 需要人工填。
+     *
+     * @param comment 已有的提示（CJK / 组降级）；非空时保持原样，不覆盖
+     */
+    private static String dropdownComment(CodegenEntry e, String verb, String fillValue, String comment) {
+        if (comment != null) return comment;
+        String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
+        boolean dropdown = "combobox".equals(role) || "listbox".equals(role);
+        if (!dropdown) return null;
+        if ("click".equals(verb)) {
+            return "    // TODO(review): custom dropdown - click() only expands it; "
+                    + "add the option click manually (no native <select> for selectByValue)";
+        }
+        if ("select".equals(verb) && (fillValue == null || fillValue.isEmpty())) {
+            return "    // TODO(review): no option value was recorded - fill selectByValue(\"...\") manually";
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------
@@ -468,8 +567,13 @@ public final class CodegenFieldPlanner {
     // 字符串转义
     // ------------------------------------------------------------------
 
-    /** Java 字符串字面量转义：反斜杠 / 双引号 / 换行 / 回车 / 制表，其余原样。 */
-    static String escapeJava(String s) {
+    /**
+     * Java 字符串字面量转义：反斜杠 / 双引号 / 换行 / 回车 / 制表，其余原样。
+     *
+     * <p>public 供 {@code CodegenLauncher} 在「按本次操作值生成动作」时复用，
+     * 避免同一套转义规则出现两份实现（两份必然漂移）。
+     */
+    public static String escapeJava(String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++) {

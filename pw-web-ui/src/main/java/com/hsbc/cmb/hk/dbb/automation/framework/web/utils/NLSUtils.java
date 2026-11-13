@@ -188,7 +188,7 @@ public final class NLSUtils {
         String lang = getLanguage();
         if (lang == null || lang.isEmpty()) {
             throw new IllegalStateException(
-                    "[NLS] current language not set — call setLanguage(\"xx\") first "
+                    "[NLS] current language not set - call setLanguage(\"xx\") first "
                             + "(e.g. right after switching language in the UI). file=" + filePath);
         }
         Map<String, Map<String, String>> byLang = load(filePath);
@@ -307,7 +307,7 @@ public final class NLSUtils {
                 .replace("&quot;", "\"")
                 .replace("&apos;", "'")
                 .replace("&amp;", "&")
-                .replace("&copy;", "©");
+                .replace("&copy;", "(c)");
     }
 
     private static String escapeRegexKeepingPlaceholders(String t) {

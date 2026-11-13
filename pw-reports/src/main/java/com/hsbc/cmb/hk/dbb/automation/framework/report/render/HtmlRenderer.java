@@ -184,40 +184,51 @@ public final class HtmlRenderer {
         model.put("traceViewerBaseUrl", PwReportsConfig.traceViewerBaseUrl());
         //  CI / 构建信息（顶栏构建链接）；per-case / feature / index / 邮件四处同源
         model.put("ci", ReportView.ciBuild());
-        //  底部 "Screenshots" 标签画廊：该用例全部截图（按文档顺序），附 1-based 步骤序号；
-        //  同时给出 文件名→步骤序号 的映射，供步骤树内联截图点击时定位到画廊对应步骤。
+        //  底部 "Screenshots" 标签画廊：该用例全部截图（按文档顺序），附 1-based 步骤序号。
+        //  注：2026-10-22 起步骤树内联截图改为「就地点击放大 / 再点恢复」的全屏预览，不再跳转画廊，
+        //  故这里只需提供画廊渲染用的列表，无需额外的「文件名→步骤序号」映射。
         List<Map<String, Object>> screenshots = collectScreenshots(outcome);
         model.put("screenshots", screenshots);
         return model;
     }
 
     /**
-     * 收集用例全部截图（按<b>文档顺序</b>扁平遍历，含嵌套子步骤），附 1-based 步骤序号，
-     * 供底部 "Screenshots" 标签画廊展示——用户可在画廊内按步骤序号切换查看任意一张截图。
+     * 收集用例全部截图（按<b>文档顺序</b>扁平遍历，含嵌套子步骤）。
+     *
+     * <p>两个序号刻意分开计数（2026-11-11 用户反馈"截图序号是 1，3，5"——那是步骤序号，
+     * 无截图的步骤被跳过导致跳号）：
+     * <ul>
+     *   <li>{@code shotNo} / {@code badge} —— <b>连续截图序号</b>（1,2,3…），仅对真有截图的步骤递增，
+     *       用于画廊大图角标与序号按钮，保证序号连续、不跳号；</li>
+     *   <li>{@code index} —— 该截图所属<b>步骤</b>的 1-based 序号（会跳号），仅用于 tooltip
+     *       标注"这是第几步"，便于回到步骤树定位。</li>
+     * </ul>
      */
     static List<Map<String, Object>> collectScreenshots(TestOutcome outcome) {
         List<Map<String, Object>> shots = new ArrayList<>();
-        int[] counter = {0};
-        walkSteps(outcome.getTestSteps(), shots, counter);
+        walkSteps(outcome.getTestSteps(), shots, new int[] {0}, new int[] {0});
         return shots;
     }
 
-    private static void walkSteps(List<TestStep> steps, List<Map<String, Object>> shots, int[] counter) {
+    private static void walkSteps(List<TestStep> steps, List<Map<String, Object>> shots,
+                                  int[] stepNo, int[] shotNo) {
         if (steps == null) {
             return;
         }
         for (TestStep step : steps) {
-            counter[0]++;
+            stepNo[0]++;
             String file = step.getScreenshot();
             if (file != null && !file.isBlank()) {
+                shotNo[0]++;
                 Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("index", counter[0]);
-                entry.put("badge", stepBadge(counter[0]));
+                entry.put("index", stepNo[0]);
+                entry.put("shotNo", shotNo[0]);
+                entry.put("badge", stepBadge(shotNo[0]));
                 entry.put("file", file);
                 entry.put("description", step.getDescription());
                 shots.add(entry);
             }
-            walkSteps(step.getChildren(), shots, counter);
+            walkSteps(step.getChildren(), shots, stepNo, shotNo);
         }
     }
 

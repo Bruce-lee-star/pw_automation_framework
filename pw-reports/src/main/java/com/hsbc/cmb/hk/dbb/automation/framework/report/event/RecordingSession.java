@@ -82,6 +82,13 @@ final class RecordingSession {
     private final List<String> browserErrors = new CopyOnWriteArrayList<>();
 
     private final long startTimeMs = System.currentTimeMillis();
+    /**
+     * 首次执行的开始时刻。rerun 轮次覆盖同一用例时由上一轮继承
+     * （{@link #inheritRunHistory}），使报告运行窗口的 Started 仍落在首轮。
+     */
+    private volatile long firstStartTimeMs = startTimeMs;
+    /** 该用例被执行过的次数（1 = 未重跑）。 */
+    private volatile int attemptCount = 1;
     private volatile long endTimeMs;
     private volatile long durationOverride;
     private volatile TestResult result;
@@ -347,6 +354,20 @@ final class RecordingSession {
         this.durationOverride = durationMs;
     }
 
+    /**
+     * rerun 轮次覆盖同一用例时，继承上一轮的「首次开始时刻」并把执行次数 +1。
+     *
+     * <p>只继承时间线元数据，不继承任何结果/证据/步骤（重跑轮的产物必须整体覆盖，
+     * 否则报告会混入两轮的步骤与 API 记录）。</p>
+     */
+    void inheritRunHistory(RecordingSession previous) {
+        if (previous == null) {
+            return;
+        }
+        this.firstStartTimeMs = previous.firstStartTimeMs;
+        this.attemptCount = previous.attemptCount + 1;
+    }
+
     boolean isFinished() {
         return result != null;
     }
@@ -363,6 +384,8 @@ final class RecordingSession {
         o.setTags(tags);
         o.setResult(result);
         o.setStartTime(ISO.format(Instant.ofEpochMilli(startTimeMs)));
+        o.setFirstStartTime(ISO.format(Instant.ofEpochMilli(firstStartTimeMs)));
+        o.setAttempt(attemptCount);
         o.setEndTime(ISO.format(Instant.ofEpochMilli(endTimeMs == 0 ? System.currentTimeMillis() : endTimeMs)));
         o.setDuration(durationOverride > 0 ? durationOverride : Math.max(0L, endTimeMs - startTimeMs));
         o.setTestSteps(rootSteps);

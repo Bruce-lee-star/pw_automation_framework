@@ -51,7 +51,7 @@ public class BrowserCleanupImplRunBoundedTest {
 
         assertFalse("超限必须返回 false（= 放弃等待），否则继续阻塞就还会越过 surefire 宽限", completed);
         assertTrue("必须在上限附近返回（实测 " + elapsedMs + "ms，上限 300ms）", elapsedMs < 3_000);
-        assertEquals("放弃必须记账 —— 否则『关闭没做完』仍是零信号", before + 1, ShutdownCoordinator.getFailureCount());
+        assertEquals("放弃必须记账 -- 否则『关闭没做完』仍是零信号", before + 1, ShutdownCoordinator.getFailureCount());
     }
 
     @Test
@@ -78,7 +78,7 @@ public class BrowserCleanupImplRunBoundedTest {
                 }, 2_000);
 
         assertTrue("线程已结束即视为完成；异常由看门狗内兜住并 warn（与原先 cleanupAll 的 catch 同语义）", completed);
-        assertEquals("异常本身不由看门狗记账 —— 避免与既有 warn 语义双重记账", before, ShutdownCoordinator.getFailureCount());
+        assertEquals("异常本身不由看门狗记账 -- 避免与既有 warn 语义双重记账", before, ShutdownCoordinator.getFailureCount());
     }
 
     @Test
@@ -86,7 +86,7 @@ public class BrowserCleanupImplRunBoundedTest {
     public void internalBudgetWindowIsHonoured() {
         assertTrue("刚起步必须在预算内，否则会把「正常关闭」误判为超预算而跳过", BrowserCleanupImpl.hasBudgetLeft(System.nanoTime(), 5_000));
 
-        assertFalse("已超预算必须判 false —— 否则慢关闭会吃光预算、连带跳过后续收尾步骤", BrowserCleanupImpl.hasBudgetLeft(System.nanoTime() - TimeUnit.SECONDS.toNanos(10), 5_000));
+        assertFalse("已超预算必须判 false -- 否则慢关闭会吃光预算、连带跳过后续收尾步骤", BrowserCleanupImpl.hasBudgetLeft(System.nanoTime() - TimeUnit.SECONDS.toNanos(10), 5_000));
     }
 
     private static void awaitQuietly(CountDownLatch latch) {

@@ -1077,7 +1077,7 @@ public class PageElement {
                         // 对齐 master 分支风格，避免 Thread.sleep 占用调度线程
                         page.waitForTimeout((int) backoff);
                     }
-                    logger.debug("[waitForState] nav/context loss on '{}', retry {} (remaining≈{}ms): {}",
+                    logger.debug("[waitForState] nav/context loss on '{}', retry {} (remaining~={}ms): {}",
                             selector, attempts, remainingMs, firstLine(e.getMessage()));
                     continue;
                 }
@@ -1313,27 +1313,27 @@ public class PageElement {
                 try {
                     Path p = Paths.get(res.toURI());
                     if (Files.exists(p)) {
-                        logger.debug("[upload] 命中 resources(classpath:/{}): {}", cp, p);
+                        logger.debug("[upload] found in resources (classpath:/{}): {}", cp, p);
                         return p;
                     }
                 } catch (URISyntaxException e) {
-                    logger.debug("[upload] resources 路径转换失败，改走用户指定路径: {}", e.toString());
+                    logger.debug("[upload] resources path conversion failed, falling back to user-specified path: {}", e.toString());
                 }
             } else {
                 // jar 内资源无真实文件路径，无法交 Playwright；跳过，继续尝试用户指定路径
-                logger.debug("[upload] resources 命中但位于 jar(classpath:/{})，不可用，改走用户指定路径", cp);
+                logger.debug("[upload] resources hit but inside jar (classpath:/{}), unusable; falling back to user-specified path", cp);
             }
         }
         // 2) 用户指定路径兜底（按当前系统分隔符归一化，跨系统兼容：Windows 下 '/'→'\'，其余系统保持原样）
         Path userPath = Paths.get(normalizeOsSeparators(raw));
         if (Files.exists(userPath)) {
-            logger.debug("[upload] 命中用户指定路径: {}", userPath.toAbsolutePath());
+            logger.debug("[upload] found at user-specified path: {}", userPath.toAbsolutePath());
             return userPath;
         }
         // 3) 两端皆不存在
         throw new ElementOperationException("uploadFile", selector,
-                "上传文件不存在：既未在 resources(classpath:/" + cp + ") 找到，也未在用户指定路径["
-                        + userPath.toAbsolutePath() + "] 找到。请检查资源名或传入正确的绝对/相对路径。");
+                "Upload file not found: neither in resources (classpath:/" + cp + ") nor at user-specified path ["
+                        + userPath.toAbsolutePath() + "]. Check the resource name or pass a correct absolute/relative path.");
     }
 
     /**

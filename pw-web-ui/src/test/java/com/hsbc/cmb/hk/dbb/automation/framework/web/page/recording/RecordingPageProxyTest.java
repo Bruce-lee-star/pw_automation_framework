@@ -29,21 +29,19 @@ import static org.junit.Assert.assertTrue;
  */
 public class RecordingPageProxyTest {
 
-    private String prevLogging;
+    private static final String RECORDING_KEY = "framework.recording.enabled";
+    private String prevRecording;
 
     @Before
     public void setUp() {
-        prevLogging = System.getProperty("framework.logging");
-        System.setProperty("framework.logging", "VERBOSE"); // 开启录制开关使 wrap 生效
+        prevRecording = System.getProperty(RECORDING_KEY);
+        System.setProperty(RECORDING_KEY, "true"); // 开启录制开关使 wrap 生效
     }
 
     @After
     public void tearDown() {
-        if (prevLogging == null) {
-            System.clearProperty("framework.logging");
-        } else {
-            System.setProperty("framework.logging", prevLogging);
-        }
+        // 显式恢复默认值：Serenity 配置快照会让 clearProperty 无法回落到默认值
+        System.setProperty(RECORDING_KEY, prevRecording == null ? "true" : prevRecording);
     }
 
     /** 轻量 fake：记录被调用方法名，可按方法名返回预置值。 */
@@ -143,7 +141,7 @@ public class RecordingPageProxyTest {
 
     @Test
     public void disabledWrap_returnsRealPage_zeroOverhead() {
-        System.setProperty("framework.logging", "QUIET"); // 关闭录制
+        System.setProperty(RECORDING_KEY, "false"); // 关闭录制
         CallRecorder rec = new CallRecorder();
         Page real = fakePage(rec);
         Page proxy = RecordingPageProxy.wrap(real);

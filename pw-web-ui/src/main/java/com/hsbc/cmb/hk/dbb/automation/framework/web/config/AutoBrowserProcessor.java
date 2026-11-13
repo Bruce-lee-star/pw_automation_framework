@@ -6,9 +6,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.core.context.TestContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
 
 /**
  * AutoBrowser Processor - 框架层自动处理 @AutoBrowser 注解（企业级 · 去 框架 专项 DEV-V5）。
@@ -38,7 +36,7 @@ public class AutoBrowserProcessor {
 
     /** 当前场景标签（原生生命周期上下文；由 onScenarioStarted 注入，场景结束清除）。 */
     private static final ContextKey<List<String>> CURRENT_SCENARIO_TAGS =
-            ContextKey.of("autoBrowser.currentScenarioTags", (Class<List<String>>) (Class<?>) List.class);
+            ContextKey.ofRaw("autoBrowser.currentScenarioTags", List.class);
 
     /**
      * 注入当前场景标签（由原生生命周期监听器在场景开始时调用）。

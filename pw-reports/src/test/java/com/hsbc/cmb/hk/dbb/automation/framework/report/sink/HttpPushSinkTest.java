@@ -146,7 +146,7 @@ class HttpPushSinkTest {
     }
 
     @Test
-    @DisplayName("HTTP 4xx/5xx → failed 计数 +1，不抛异常（fail-open，本地 JSON 才是真相源）")
+    @DisplayName("HTTP 4xx/5xx -> failed 计数 +1，不抛异常（fail-open，本地 JSON 才是真相源）")
     void httpErrorCountsFailureAndDoesNotThrow() throws Exception {
         responseStatus = 500;
         startSink();
@@ -164,7 +164,7 @@ class HttpPushSinkTest {
     }
 
     @Test
-    @DisplayName("连接失败（端点不可达）→ failed 计数，worker 不死（后续事件仍可推）")
+    @DisplayName("连接失败（端点不可达）-> failed 计数，worker 不死（后续事件仍可推）")
     void unreachableEndpointCountsFailureAndWorkerSurvives() throws Exception {
         // 指向一个几乎肯定没人监听的端口
         sink = new HttpPushSink(PwReportsConfig.builder()
@@ -186,7 +186,7 @@ class HttpPushSinkTest {
     }
 
     @Test
-    @DisplayName("队列满 → 丢弃最旧并计 dropped，绝不阻塞调用方（best-effort）")
+    @DisplayName("队列满 -> 丢弃最旧并计 dropped，绝不阻塞调用方（best-effort）")
     void queueOverflowCountsDropped() throws Exception {
         // 先让端点变慢，制造积压
         responseStatus = 500;

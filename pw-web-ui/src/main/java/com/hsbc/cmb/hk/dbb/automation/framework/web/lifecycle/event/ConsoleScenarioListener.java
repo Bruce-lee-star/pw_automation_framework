@@ -41,7 +41,7 @@ public final class ConsoleScenarioListener implements FrameworkLifecycleListener
         if (!enabled()) {
             return;
         }
-        line(CYAN, "════════════════════ TEST RUN STARTED ════════════════════");
+        line(CYAN, "==================== TEST RUN STARTED ====================");
     }
 
     @Override
@@ -53,7 +53,7 @@ public final class ConsoleScenarioListener implements FrameworkLifecycleListener
         String name = info == null ? "?" : info.name();
         String tags = (info == null || info.tags() == null || info.tags().isEmpty())
                 ? "" : "   " + String.join(" ", info.tags());
-        line(CYAN, "▶ SCENARIO STARTED : " + name + tags);
+        line(CYAN, tags + "\n> SCENARIO STARTED : " + name);
     }
 
     @Override
@@ -66,19 +66,19 @@ public final class ConsoleScenarioListener implements FrameworkLifecycleListener
         String dur = elapsed();
         switch (status) {
             case PASSED:
-                line(GREEN, "✔ SCENARIO PASSED : " + name + dur);
+                line(GREEN, "+ SCENARIO PASSED : " + name + dur);
                 break;
             case FAILED:
             case AMBIGUOUS:
-                line(RED, "✘ SCENARIO FAILED : " + name + dur + causeSuffix(result));
+                line(RED, "x SCENARIO FAILED : " + name + dur + causeSuffix(result));
                 break;
             case SKIPPED:
             case IGNORED:
-                line(YELLOW, "⊘ SCENARIO " + status + " : " + name + dur);
+                line(YELLOW, "- SCENARIO " + status + " : " + name + dur);
                 break;
             case PENDING:
             default:
-                line(YELLOW, "⊘ SCENARIO " + status + " : " + name + dur);
+                line(YELLOW, "- SCENARIO " + status + " : " + name + dur);
                 break;
         }
     }
@@ -88,7 +88,7 @@ public final class ConsoleScenarioListener implements FrameworkLifecycleListener
         if (!enabled()) {
             return;
         }
-        line(CYAN, "════════════════════ TEST RUN FINISHED ═══════════════════");
+        line(CYAN, "==================== TEST RUN FINISHED ===================");
     }
 
     // ---------------------------------------------------------------- internals
@@ -110,6 +110,6 @@ public final class ConsoleScenarioListener implements FrameworkLifecycleListener
     /** 失败行附异常类简名（不含 message，避免泄露 URL/token）。 */
     private static String causeSuffix(LifecycleScenarioResult result) {
         Throwable t = result == null ? null : result.error();
-        return t == null ? "" : "  ↳ " + t.getClass().getSimpleName();
+        return t == null ? "" : "  -> " + t.getClass().getSimpleName();
     }
 }

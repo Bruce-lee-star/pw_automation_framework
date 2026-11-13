@@ -224,6 +224,7 @@ public class PageObjectFactory {
         return acc;
     }
 
+    @SuppressWarnings("unchecked")
     private static void mergeThreadInstances(Map<Class<?>, Object> acc, TestContext ctx) {
         Object v = ctx.get(THREAD_INSTANCES_KEY);
         if (v instanceof Map) {
@@ -441,7 +442,7 @@ public class PageObjectFactory {
         Object created = newInstance(pageClass, config);
         Object winner = store.putIfAbsent(pageClass, created);
         if (winner != null) {
-            logger.debug("Concurrent creation detected for: {} (strategy: {}) — discarding local instance, "
+            logger.debug("Concurrent creation detected for: {} (strategy: {}) - discarding local instance, "
                     + "reusing the published one", pageClass.getSimpleName(), config.getLifecycleStrategy());
             return winner;
         }
@@ -472,20 +473,20 @@ public class PageObjectFactory {
                 instance = pageClass.getDeclaredConstructor().newInstance();
             } catch (NoSuchMethodException e) {
                 throw new ConfigurationException(
-                        "无法创建 PageObject: " + pageClass.getName() + " —— 缺少可访问的无参构造器。"
-                        + "请为其添加 public 无参构造，或通过 PageObjectFactory.register("
+                        "Cannot create PageObject: " + pageClass.getName() + " - no accessible no-arg constructor."
+                        + "Add a public no-arg constructor, or register a Supplier via PageObjectFactory.register("
                         + pageClass.getSimpleName() + ".class, () -> new " + pageClass.getSimpleName()
-                        + "(...)) 显式登记 Supplier（编译期安全）。", e);
+                        + "(...)) (compile-time safe).", e);
             } catch (InstantiationException | IllegalAccessException e) {
                 throw new ConfigurationException(
-                        "无法创建 PageObject: " + pageClass.getName() + " —— 构造器不可访问。"
-                        + "请通过 PageObjectFactory.register(...) 显式登记 Supplier。", e);
+                        "Cannot create PageObject: " + pageClass.getName() + " - constructor is not accessible."
+                        + "Register a Supplier explicitly via PageObjectFactory.register(...).", e);
             } catch (java.lang.reflect.InvocationTargetException e) {
                 //  评审：原实现的 throws Exception 会把「构造器内部抛错」原样上抛，最终只看到
                 //  "Failed to create PageObject" 而看不到真实根因 —— 此处显式带上 cause（含类名+消息）。
                 Throwable cause = e.getCause() == null ? e : e.getCause();
                 throw new ConfigurationException(
-                        "无法创建 PageObject: " + pageClass.getName() + " —— 构造器执行抛异常："
+                        "Cannot create PageObject: " + pageClass.getName() + " - constructor threw an exception: "
                         + cause.getClass().getSimpleName() + ": " + cause.getMessage(), cause);
             }
 

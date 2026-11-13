@@ -291,7 +291,7 @@ public final class AsyncPool {
         final ThreadPoolExecutor pool = POOL;
         if (pool == null) {
             long dropped = droppedOnRejectionCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] submit skipped: executor unavailable (shutdown in progress) → task DROPPED "
+            LOGGER.error("[AsyncPool] submit skipped: executor unavailable (shutdown in progress) -> task DROPPED "
                     + "(policy: never block the submitting thread). Dropped total: {}", dropped);
             return;
         }
@@ -339,7 +339,7 @@ public final class AsyncPool {
             //  现统一为：计数 + ERROR + 丢弃（可见、不静默）。AsyncPool 承载的都是 best-effort 异步任务
             //  （监控 / 日志 / 收尾），丢弃可观测且代价远低于阻塞事件线程。
             long dropped = droppedOnRejectionCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] Submit REJECTED (pool shutting down or saturated) → task DROPPED "
+            LOGGER.error("[AsyncPool] Submit REJECTED (pool shutting down or saturated) -> task DROPPED "
                     + "(policy: never block the submitting thread). Dropped total: {}", dropped, e);
         } catch (Exception e) {
             LOGGER.warn("[AsyncPool] Submit failed: {}", e.getMessage());
@@ -378,7 +378,7 @@ public final class AsyncPool {
             //  返回 null 的调用契约：调用方必须容忍 null（唯一现有调用方 RouteMonitorSession 已 null-check）。
             pendingScheduleCount.decrementAndGet();
             long dropped = droppedOnRejectionCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] schedule REJECTED (pool shutting down or saturated) → task DROPPED "
+            LOGGER.error("[AsyncPool] schedule REJECTED (pool shutting down or saturated) -> task DROPPED "
                     + "(policy: never block the submitting thread). Dropped total: {}", dropped, e);
             return null;
         }
@@ -402,7 +402,7 @@ public final class AsyncPool {
         } catch (RejectedExecutionException e) {
             // CT2-17：与 schedule / run 保持同一拒绝策略（绝不阻塞提交方，丢弃可观测）。
             long dropped = droppedOnRejectionCount.incrementAndGet();
-            LOGGER.error("[AsyncPool] scheduleWithFixedDelay REJECTED (pool shutting down or saturated) → task DROPPED "
+            LOGGER.error("[AsyncPool] scheduleWithFixedDelay REJECTED (pool shutting down or saturated) -> task DROPPED "
                     + "(policy: never block the submitting thread). Dropped total: {}", dropped, e);
             return null;
         }
@@ -436,7 +436,7 @@ public final class AsyncPool {
             //  getActiveContextSchedulerCount() 这一泄漏判据失真。PerContextEngine 已改为
             //  「自增序号 + identityHashCode」保证唯一；此处保留检测，任何未来回归都会显式告警，
             //  而不是静默计数失真。
-            LOGGER.warn("[AsyncPool] context scheduler id collision on '{}' — previous pool lost tracking; "
+            LOGGER.warn("[AsyncPool] context scheduler id collision on '{}' - previous pool lost tracking; "
                     + "context ids must be unique", contextId);
         }
         LOGGER.debug("[AsyncPool] Created context scheduler '{}' (active ctx schedulers: {})",
@@ -681,7 +681,7 @@ public final class AsyncPool {
         String legacyKey = FrameworkFlags.toEnvKey(key);
         String legacy = ConfigReader.resolve(legacyKey, null);
         if (legacy != null && !legacy.trim().isEmpty()) {
-            LOGGER.warn("[AsyncPool] 配置键 '{}' 为历史（未规范化）形式，仍生效：{}；请改用 '{}'",
+            LOGGER.warn("[AsyncPool] config key '{}' is a legacy (non-normalized) form, still effective: {}; use '{}' instead",
                     legacyKey, legacy, key);
         }
         return legacy;

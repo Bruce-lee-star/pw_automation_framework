@@ -85,6 +85,7 @@ public final class ScenarioTraceRecorder {
             }
         } catch (Exception ignore) {
             // 桥缺失/异常 → 回落固定证据目录
+            logger.debug("traceTarget unavailable; falling back to fixed evidence dir", ignore);
         }
         return Paths.get(traceDir(), fallbackName);
     }
@@ -109,6 +110,7 @@ public final class ScenarioTraceRecorder {
             }
         } catch (Exception ignore) {
             // 桥缺失/异常 → 回落固定证据目录
+            logger.debug("traceTarget unavailable; falling back to fixed evidence dir", ignore);
         }
         return Paths.get(traceDir(), fallbackName);
     }
@@ -320,10 +322,10 @@ public final class ScenarioTraceRecorder {
             if (startMs != null) {
                 contents.append("\nwindow=")
                         .append(new java.text.SimpleDateFormat("HH:mm:ss.SSS").format(new java.util.Date(startMs)))
-                        .append(" → ")
+                        .append(" -> ")
                         .append(new java.text.SimpleDateFormat("HH:mm:ss.SSS").format(new java.util.Date(endMs)))
                         .append(" (").append(Math.max(0, endMs - startMs)).append("ms)")
-                        .append("  [覆盖本用例执行窗口]");
+                        .append("  [covers this test case execution window]");
             }
             ReportingBridgeRegistry.get().recordReportData(title, contents.toString());
             //  v2 报告：把 trace 落到 <outcomeId>/trace.zip 并设 tracePath，使 per-case 页出现
@@ -346,7 +348,7 @@ public final class ScenarioTraceRecorder {
                     ReportingBridgeRegistry.get().attachTrace(tracePath);
                 }
             }
-            logger.debug("[trace] recorded {} to 框架 report (outcomeId={})",
+            logger.debug("[trace] recorded {} to framework report (outcomeId={})",
                     tracePath.getFileName(), outcomeId);
         } catch (Exception e) {
             logger.debug("[trace] record to report skipped: {}", e.getMessage());

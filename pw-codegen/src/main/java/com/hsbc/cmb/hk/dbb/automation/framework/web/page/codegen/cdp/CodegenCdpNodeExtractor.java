@@ -130,10 +130,20 @@ public final class CodegenCdpNodeExtractor {
                     if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
                     return false;
                 }
+                /** 结构链上溯层数上限（深层页面 6 层常覆盖不到带 id 的容器）。 */
+                var MAX_PATH_DEPTH = 8;
+                /** 结构链允许的「裸 tag:nth-of-type(n)」补位层数上限（超过才整条作废）。 */
+                var MAX_FILLER_LAYERS = 2;
+                /** 单层兜底段：tag:nth-of-type(k)（无父级时退化为裸 tag，如 html）。 */
+                function fallbackSeg(n) {
+                    if (!n || !n.tagName) return '';
+                    var tag = n.tagName.toLowerCase();
+                    return groupIndexSel(tag, n) || tag;
+                }
                 /**
                  * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用）；
-                 * 否则结构链逐层上溯——每层只接受稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引），
-                 * 任何一层既无锚点也无可用属性段（裸 tag:nth-of-type(n)）时整条链不产出，返回空串
+                 * 否则结构链逐层上溯——每层优先接受稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引），
+                 * 无锚点层用 :nth-of-type 补位（上限 MAX_FILLER_LAYERS 层）；补位超限才返回空串，
                  * 交给 Java 侧 XPath 兜底（属性优先：稳定属性精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体）。
                  */
                 function cssSel(e) {
@@ -148,7 +158,8 @@ public final class CodegenCdpNodeExtractor {
                     var parts = [];
                     var n = e;
                     var anchored = false;
-                    while (n && n.nodeType === 1 && parts.length < 6) {
+                    var filler = 0;
+                    while (n && n.nodeType === 1 && parts.length < MAX_PATH_DEPTH) {
                         if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); anchored = true; break; }
                         if (n.id) {
                             var pf = dynamicIdFallbackSel(n.id);
@@ -156,8 +167,13 @@ public final class CodegenCdpNodeExtractor {
                         }
                         var seg = attrFallbackSel(n);
                         if (seg) { parts.unshift(seg); n = n.parentElement; continue; }
-                        // 该层既无稳定锚点也无可用属性段：裸 tag:nth-of-type(n) 段不再产出，整条链作废交 XPath。
-                        return '';
+                        // 该层无稳定锚点也无可用属性段：用 :nth-of-type 补位，超过上限才整条作废。
+                        if (filler >= MAX_FILLER_LAYERS) return '';
+                        var fs = fallbackSeg(n);
+                        if (!fs) return '';
+                        parts.unshift(fs);
+                        filler++;
+                        n = n.parentElement;
                     }
                     if (!anchored) return '';
                     return parts.join(' > ');
@@ -176,8 +192,17 @@ public final class CodegenCdpNodeExtractor {
                     return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
                 }
                 /** 可见性判定：hidden、aria-hidden="true"、display:none / visibility:hidden（含祖先，经计算样式）、
-                 * visibility:collapse、opacity:0（含祖先链，不继承需逐级查，限 5 层）、clip 裁零 / clip-path 裁零、
-                 * 零尺寸或整体移出视口（响应式/移动端隐藏副本常见）均视为隐藏。 */
+                 * visibility:collapse、opacity:0（含祖先链，不继承需逐级查）、clip 裁零 / clip-path 裁零、
+                 * 零尺寸或整体移出视口（响应式/移动端隐藏副本常见）均视为隐藏。
+                 *
+                 * <p>祖先链必须逐级查 display / visibility：getComputedStyle(child).display 返回元素自身计算值，
+                 * 父级 display:none 不会传递下来——只看自身会把「藏在 style="display: none;" 面板里的副本」判成可见。
+                 * 祖先上限 10 层。
+                 *
+                 * <p>本函数只回答「渲染是否可见」，不等于「应从候选排除」：class="accessibleHidden" / .sr-only
+                 * 这类元素渲染不可见但仍在可访问性树里（getByRole 能命中，往往是唯一可访问名来源）。
+                 * 只有「渲染树剔除 ⇒ 同时从 AX 树剔除」的形态（display:none / visibility:hidden / hidden 属性 /
+                 * aria-hidden="true"）才可以作为排除依据。 */
                 function isVisible(e) {
                     if (!e || e.nodeType !== 1) return false;
                     if (e.hidden) return false;
@@ -191,8 +216,9 @@ public final class CodegenCdpNodeExtractor {
                             if (cs.clip && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clip.indexOf('rect(0') === 0)) return false;
                             if (cs.clipPath && (/inset\\(0%\\)/.test(cs.clipPath) || /inset\\(50%\\)/.test(cs.clipPath) || /circle\\(0/.test(cs.clipPath))) return false;
                             var p = e.parentElement, d = 0;
-                            while (p && p.nodeType === 1 && d < 5) {
+                            while (p && p.nodeType === 1 && d < 10) {
                                 var pcs = window.getComputedStyle(p);
+                                if (pcs.display === 'none' || pcs.visibility === 'hidden' || pcs.visibility === 'collapse') return false;
                                 if (pcs.opacity === '0' || pcs.opacity === '0.0' || pcs.opacity === '0.00') return false;
                                 p = p.parentElement; d++;
                             }
@@ -211,14 +237,24 @@ public final class CodegenCdpNodeExtractor {
                 }
 
 
-                /** 当前文档中唯一性校验：只统计可见元素（供 id 前缀/包含/组内索引兜底使用）。 */
-                function uniqueSel(sel) {
+                /**
+                 * 匹配总数（<b>含隐藏元素</b>）。
+                 *
+                 * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
+                 * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
+                 * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配。
+                 * 这是"重复面板里 Continue 按钮定位不准"的根因（2026-11-11 用户反馈）。
+                 */
+                function totalCount(sel) {
                     try {
-                        if (!sel) return false;
-                        var nodes = document.querySelectorAll(sel), n = 0;
-                        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
-                        return n === 1;
-                    } catch (e) { return false; }
+                        if (!sel) return 0;
+                        return document.querySelectorAll(sel).length;
+                    } catch (e) { return 0; }
+                }
+
+                /** 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。 */
+                function uniqueSel(sel) {
+                    return totalCount(sel) === 1;
                 }
 
                 function dynamicIdFallbackSel(id) {
@@ -335,11 +371,17 @@ public final class CodegenCdpNodeExtractor {
                     return '';
                 }
 
-                /** 唯一或组内索引：候选可见唯一即用；可见不唯一（一组元素）时取组内索引并校验可见唯一，失败返回空串。 */
+                /**
+                 * 唯一或组内索引。
+                 *
+                 * <p>① 全量唯一（含隐藏）直接用；② 否则只要是「有限个可见匹配」就尝试 {@code :nth-of-type(k)} 收窄，
+                 * 再用全量计数复核。② 的下界刻意是 {@code > 0} 而非 {@code > 1}：隐藏面板 + 可见面板各一个同名
+                 * "Continue" 时，可见计数只有 1（旧逻辑直接放弃 → 一路退化成长结构路径），而组内索引能稳定收窄。
+                 */
                 function uniqueOrGroup(sel, e) {
                     if (uniqueSel(sel)) return sel;
                     var cnt = visibleCount(sel);
-                    if (cnt > 1 && cnt <= 10) {
+                    if (cnt > 0 && cnt <= 10) {
                         var g = groupIndexSel(sel, e);
                         if (g && uniqueSel(g)) return g;
                     }
@@ -351,7 +393,8 @@ public final class CodegenCdpNodeExtractor {
                  * ① 稳定属性（值无随机段）精确 {@code [name="value"]}；② 稳定属性双→三精确 AND；③ 含随机值属性
                  * 用开头 {@code ^=}、包含 {@code *=}、结尾 {@code $=} 变体（段自身无随机值）；④ 组合层：单属性仍
                  * 不唯一时多个属性共同定位——稳定属性精确 AND 随机变体（最稳定优先）、随机变体 × 随机变体 AND。
-                 * 每个候选先做可见唯一性校验——唯一即采用；可见不唯一（一组元素）时取组内索引；全部失败返回空串交给结构链/XPath。
+                 * 每个候选先做<b>全量</b>唯一性校验（含隐藏元素，对齐 Playwright strict mode）——唯一即采用；
+                 * 否则尝试组内索引再复核；全部失败返回空串交给结构链/XPath。
                  */
                 function attrFallbackSel(e) {
                     if (!e || e.nodeType !== 1) return '';
@@ -413,7 +456,7 @@ public final class CodegenCdpNodeExtractor {
                     }
                     // 组合层：单属性仍不唯一时多个属性共同定位——① 稳定属性精确 AND 随机属性变体
                     // （稳定取前 2、随机取前 2，随机变体按 ^= → *= → $=）；② 随机变体 × 随机变体 AND。
-                    // 全部经可见唯一校验（含组内索引）；命中即返回。
+                    // 全部经全量唯一校验（含隐藏元素，必要时加组内索引）；命中即返回。
                     var randNames = [], stabNames = [];
                     for (var i = 0; i < names.length; i++) if (names[i].rand) randNames.push(names[i]);
                     for (var i = 0; i < names.length && !names[i].rand && i < 2; i++) stabNames.push(names[i]);
@@ -464,27 +507,37 @@ public final class CodegenCdpNodeExtractor {
                     }
                     return parts.join('');
                 }
-                // 拾取目标归一化：点 <label> / 标签内文本 / 链接内 <span> / 装饰性图标（alt="" 或 aria-hidden）时，
-                // 上溯到真正可操作的控件或「带可访问名的语义祖先」。<label> 在 AriaRole 枚举里根本没有对应常量，<span>/<div>
-                // 只是 generic —— 它们只能生成又长又脆的结构 CSS；归一到控件后就能用 role + label 文本（可访问名）
-                // 定位。装饰性节点（如 <img alt="" aria-hidden="true"> 信息图标、空 <span>）自身无可访问名，拾取只会
-                // 产出 role=img 这类既无名又易碎的定位器；故当被点元素自身无名（eHasName 为假）时，继续上溯到最近一个
-                // 带可访问名（含 textContent 兜底，不再截断长度）的祖先——使产物落到其语义容器（如提示区 div#newPasswordHint），
-                // 带回完整提示文本：既能反查出 NLS 文案 key，又能回退到稳定的 #id 定位器。eHasName 守卫保证「自身已有名的
-                // 元素」（文本 div、按钮、带 data-i18n 的 span 等）行为完全不变，避免无谓上溯。
+                // 拾取目标归一化（2026-11-11 定稿规则：拾取对象必须 = 用户实际点击的 DOM 对象）。
+                //
+                // 保留的归一：点击装饰性节点（<img alt="" aria-hidden="true"> 信息图标、空 <span>）或文本节点容器时，
+                // 若自身无可访问名（eHasName 为假），上溯到最近的「带稳定 #id 的语义容器」——使产物落到语义容器
+                // （如提示区 div#newPasswordHint），带回完整文本：既能反查 NLS key，也能回退到稳定 #id。
+                // 注意：上溯只认「稳定 #id」，无 id 的纯布局容器（content-wrapper / section / 大段文本 div）一律不接收，
+                // 否则会落到这种大文本容器，定位过广且不稳健（2026-11-12 收紧）。
+                //
+                // 已移除的归一：<label> 绝不再转发到 label.control / 内部控件。关联控件是「另一个 DOM 对象」，
+                // 转发会让产物定位到用户没点的元素（点"用户名"标签 → 生成 input 定位器），违背"拾取对象 = 点击对象"。
+                // label 自身有可访问名，命中 NLS 时可走文本语义策略生成 @RoleElement(key=...)。
+                //
+                // eHasName 守卫保证「自身已有名的元素」（文本 div、按钮、带 data-i18n 的 span 等）行为不变，避免无谓上溯。
                 function pickTarget(e) {
                     var eHasName = (accessibleName(e) || '').trim();
                     var n = e, depth = 0;
                     while (n && n.nodeType === 1 && depth < 5) {
                         var t = n.tagName ? n.tagName.toLowerCase() : '';
                         if (t === 'input' || t === 'select' || t === 'textarea' || t === 'button') return n;
-                        if (t === 'label') {
-                            var ctrl = n.control || (n.querySelector && n.querySelector('input,select,textarea,button'));
-                            if (ctrl) return ctrl;
-                        }
+                        //  2026-11-11：点 <label> 就保留 <label> 本身，绝不转发到 label.control。
+                        //  关联控件是另一个 DOM 对象，转发会导致「点'用户名'标签、产物却定位到 input」——
+                        //  拾取对象与用户实际点击对象不一致（用户明确否定的行为）。
+                        //  label 自身带可访问名（其文本），命中 NLS 时可走文本语义策略定位。
+                        if (t === 'label') return n;
                         if (t === 'a' && n.getAttribute && n.getAttribute('href')) return n;
                         if (n.getAttribute && n.getAttribute('role')) return n;
-                        if (depth > 0 && !eHasName && (accessibleName(n) || '').trim()) return n;
+                        // 2026-11-12：上溯只接受「带稳定 #id 的语义容器」（如提示区 div#newPasswordHint），
+                        // 拒绝无 id 的纯布局容器（content-wrapper / section / 文本 div / span）——它们只是把大段文本
+                        // 包起来，落到这类容器会让产物定位过广且不稳健。找不到稳定 id 容器则保留点击对象本身
+                        // （precise = 用户实际点击的 DOM 对象），即便它只得 class 兜底选择器，也比大容器窄得多。
+                        if (depth > 0 && !eHasName && (accessibleName(n) || '').trim() && n.id && !isDynamicId(n.id)) return n;
                         n = n.parentElement; depth++;
                     }
                     return e;
@@ -521,6 +574,14 @@ public final class CodegenCdpNodeExtractor {
                     }
                     return out;
                 }
+                // 与 codegen-inject.js 的 checkedStateOf 保持同源（评审 N-02）：
+                // 原生控件读 .checked，自定义 role=checkbox 的 div 回退 aria-checked。
+                function checkedStateOf(el) {
+                    if (!el) return false;
+                    if (typeof el.checked === 'boolean') return el.checked;
+                    var aria = el.getAttribute && el.getAttribute('aria-checked');
+                    return aria === 'true';
+                }
                 function factsOf(x) {
                     if (!x || x.nodeType !== 1) return null;
                     var tag = x.tagName ? x.tagName.toLowerCase() : '';
@@ -532,6 +593,7 @@ public final class CodegenCdpNodeExtractor {
                         alt: (x.getAttribute && x.getAttribute('alt')) || '',
                         title: (x.getAttribute && x.getAttribute('title')) || '',
                         value: (typeof x.value === 'string') ? x.value : '',
+                        checked: checkedStateOf(x),
                         text: normalizedText(x), label: labelTextOf(x), nth: siblingIndex(x), cssSelector: cssSel(x),
                         shadowHosts: shadowHostsOf(x),
                         className: (typeof x.className === 'string') ? x.className : '',
@@ -558,17 +620,69 @@ public final class CodegenCdpNodeExtractor {
                 // v2.12 收紧：每一层都必须有稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引）——
                 // 目标层或任一中间层是裸 tag:nth-of-type(n) 段时整条链作废（返回空数组），不再作为 CSS 候选，
                 // 交给 Java 侧 XPath / role 兜底；「锚点 + 中间裸 tag 段」的链同样不产出。
+                // 后代锚点（与 codegen-inject.js 的 descendantAnchorsOf 同源）：
+                // 深度 4 / 最多 4 个 / 最多访问 200 节点，供 :has() 作用域使用。
+                function descendantAnchorsOf(root, maxDepth, maxCount) {
+                    var out = [];
+                    if (!root || !root.children) return out;
+                    var queue = [], visited = 0;
+                    for (var i = 0; i < root.children.length; i++) queue.push({ n: root.children[i], d: 1 });
+                    while (queue.length && out.length < maxCount && visited < 200) {
+                        var cur = queue.shift();
+                        var n = cur.n;
+                        if (!n || n.nodeType !== 1) continue;
+                        visited++;
+                        var seg = '';
+                        if (n.id && !isDynamicId(n.id)) {
+                            seg = '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+                        } else {
+                            var attrs = stableAttrs(n);
+                            for (var j = 0; j < attrs.length; j++) {
+                                if (attrs[j].rand) continue;
+                                seg = '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"]';
+                                break;
+                            }
+                        }
+                        if (seg) out.push(seg);
+                        if (cur.d < maxDepth) {
+                            for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
+                        }
+                    }
+                    return out;
+                }
+                function ancestorFacts(n, path) {
+                    return {
+                        cssSelector: path,
+                        id: n.id || '',
+                        tag: n.tagName ? n.tagName.toLowerCase() : '',
+                        testid: (n.getAttribute && n.getAttribute('data-testid')) || '',
+                        attrs: semanticAttrsOf(n, 6),
+                        // 深度 6 / 最多 6 个：4 层时行级锚点（卡片 > 列表 > 行 > 单元格 > 标题）采不到，
+                        // 而 :has() 作用域恰恰依赖深层锚点。节点访问上限 200 不变。
+                        childAnchors: descendantAnchorsOf(n, 6, 6)
+                    };
+                }
+                // 祖先链：从近到远的「从该祖先到目标的完整路径」。
+                // 无锚点层改为 :nth-of-type 补位（上限 MAX_FILLER_LAYERS），超过才停止上溯——
+                // 历史上任一层失败即返回空数组，复杂页面（中间是纯布局 div）一条祖先候选都产不出。
+                // 注意「截断而非清空」：已收集的近端路径仍然有效。
                 function ancestorChain(el, maxDepth) {
-                    var first = segOf(el);
+                    var first = segOf(el) || fallbackSeg(el);
                     if (!first) return [];
                     var chain = [first], out = [], last = '';
+                    var filler = segOf(el) ? 0 : 1;
                     var p = el.parentElement, d = 0;
                     while (p && p.nodeType === 1) {
                         var seg = segOf(p);
-                        if (!seg) return [];
+                        if (!seg) {
+                            if (filler >= MAX_FILLER_LAYERS) break;   // 补位超限：截断，保留已有近端路径
+                            seg = fallbackSeg(p);
+                            if (!seg) break;
+                            filler++;
+                        }
                         chain.unshift(seg);
                         last = chain.join(' > ');
-                        if (d < maxDepth) out.push({ cssSelector: last, id: p.id || '' });
+                        if (d < maxDepth) out.push(ancestorFacts(p, last));
                         p = p.parentElement;
                         d++;
                     }
@@ -787,7 +901,7 @@ public final class CodegenCdpNodeExtractor {
                 info = infoOf(objectId);
                 afterResolve = System.nanoTime();
                 if (info == null) {
-                    log.debug("[codegen][cdp] objectId {} unusable (context destroyed?) — falling back to "
+                    log.debug("[codegen][cdp] objectId {} unusable (context destroyed?) - falling back to "
                             + "DOM.resolveNode", objectId);
                     objectId = null;
                 }
@@ -838,7 +952,7 @@ public final class CodegenCdpNodeExtractor {
             // 巨名 / 伪 NLS 键（见 NlsReverseLookup.MAX_REVERSE_NAME 与 CodegenFieldPlanner.MAX_NAME_IDENTIFIER）。
             // 直接判为无效拾取：调用方据此跳过条目、动作（若此前未被拾取）一并忽略，背景点击不污染产物。
             if (isContainerRoot(self)) {
-                log.info("[codegen][cdp] rejected container-root pick role='{}' tag='{}' — "
+                log.info("[codegen][cdp] rejected container-root pick role='{}' tag='{}' - "
                                 + "not a real interaction target (background/backdrop), entry skipped",
                         self.role, self.tag);
                 return null;
@@ -872,11 +986,30 @@ public final class CodegenCdpNodeExtractor {
                     : LocatorStrategy.CSS;
             String selector = buildSelector(role, name, nlsKey);
 
+            // 可观测性：CSS 候选链最终 0 命中（或计数不可判定）时，运行期会一直等不到元素。
+            // 不改变产物（拾取瞬间元素可能只是尚未渲染），但必须留下可检索的告警，
+            // 而不是像以前那样把 0 命中当作「唯一」静默采用。
+            if (!roleLocatable && scored.matchCount <= 0) {
+                log.warn("[codegen][cdp] locator '{}' matched {} element(s) at pick time{} - "
+                                + "the generated locator may time out at replay",
+                        css, scored.matchCount, inSubFrame ? " (sub frame)" : "");
+            }
+
+            // 两个引擎的计数各归各的字段（评审 P0-1）：
+            //   · matchCount = CSS 候选链唯一化后的命中数，无论最终策略是什么都如实保留（回退 CSS 时直接用得上）；
+            //   · roleHits   = role 引擎还没跑 ⇒ UNVERIFIED；CSS 策略下不适用 ⇒ NOT_APPLICABLE。
+            // 生成侧只经 CodegenEntry#effectiveMatchCount() 按「最终策略」取数，
+            // 绝不会拿 CSS 计数去判 role 条目的单元素 / 一组语义。
+            int roleHits = roleLocatable
+                    ? CodegenEntry.ROLE_HITS_UNVERIFIED
+                    : CodegenEntry.ROLE_HITS_NOT_APPLICABLE;
+
             // 跨 frame 穿透：元素若位于（跨源）iframe 内，沿父 frame 上行取每层 <iframe> 宿主选择器
             List<String> framePath = inSubFrame ? resolveFramePath(frames, frameId) : List.of();
             // shadow 宿主链随事实一并带出：CDP 侧按选择器反查时 document.querySelector 不穿透 shadow 边界
             CodegenEntry entry = new CodegenEntry(sigKey, role, name, strategy, scored.score, selector, css,
-                    nlsKey, index, framePath, self.shadowHosts);
+                    nlsKey, index, framePath, self.shadowHosts, scored.matchCount, self.tag, self.checked,
+                    roleHits);
             logProfile(startedNanos, afterResolve, afterFacts, afterAx, afterScore, afterRole, counting, entry);
             return entry;
         } catch (Exception e) {
@@ -956,7 +1089,7 @@ public final class CodegenCdpNodeExtractor {
         if (Objects.equals(role, js.role) && Objects.equals(name, js.name)) return js;
         return new CodegenFacts.Fact(role, name, js.tag, js.id, js.testid, js.type, js.placeholder,
                 js.alt, js.title, js.value, js.text, js.label, js.nth, js.cssSelector, js.shadowHosts,
-                js.className, js.xpath, js.nameAttr, js.attrs, js.src);
+                js.className, js.xpath, js.nameAttr, js.attrs, js.src, js.checked);
     }
 
     /**
@@ -1006,19 +1139,43 @@ public final class CodegenCdpNodeExtractor {
         try {
             int hits = counter.countByRole(role, name);
             if (hits == 0) {
-                log.info("[codegen][cdp] role locator does not resolve (role={}, name='{}') — "
-                        + "AX 与 Playwright roleUtils 口径不一致或元素对 ARIA 隐藏，回退 CSS", role, name);
+                log.info("[codegen][cdp] role locator does not resolve (role={}, name='{}') - "
+                        + "AX and Playwright roleUtils disagree or element is ARIA-hidden, falling back to CSS", role, name);
             } else if (hits > 1) {
-                log.info("[codegen][cdp] role locator is ambiguous (role={}, name='{}', hits={}) — 回退 CSS",
+                log.info("[codegen][cdp] role locator is ambiguous (role={}, name='{}', hits={}) - falling back to CSS",
                         role, name, hits);
             } else if (hits < 0) {
-                log.debug("[codegen][cdp] role count unavailable (role={}, name='{}', hits={}) — 保留角色定位",
+                log.debug("[codegen][cdp] role count unavailable (role={}, name='{}', hits={}) - keeping role locator",
                         role, name, hits);
                 return -1;
             }
             return hits;
-        } catch (Exception e) {
-            log.debug("[codegen][cdp] role count failed (role={}): {}", role, e.getMessage());
+        } catch (Exception | LinkageError e) {
+            log.debug("[codegen][cdp] role count failed (role={}): {}", role, e.toString());
+            return -1;
+        }
+    }
+
+    /**
+     * 用 CSS 引擎计数（供「role 复核失败 ⇒ 回退 CSS」时刷新 {@code matchCount}）。
+     *
+     * <p>为什么必须刷新：拾取时的 {@code matchCount} 是那一刻的快照，而复核发生在生成前，
+     * 期间页面可能已变化（SPA 渲染 / 面板展开 / 列表增删）。回退成 CSS 之后，
+     * 生成侧要按 CSS 的<b>当前</b>命中数决定「单元素 / {@code PageElementList}」，
+     * 缺了这一步会把一条本该是列表的定位器生成成单元素（运行期 strict violation），或反之。
+     *
+     * <p>只对主 frame 元素使用（role 复核本就只在主 frame 发生）；
+     * 页级 {@code locator()} 会穿透 open shadow root，与生成物语义一致。
+     *
+     * @param cssSelector 回退后的 CSS/XPath 定位器；{@code null}/空白视为不可判定
+     * @return 命中数；{@code -1} 表示不可判定
+     */
+    public int countCssMatches(String cssSelector) {
+        if (cssSelector == null || cssSelector.isBlank()) return -1;
+        try {
+            return counter.count(cssSelector);
+        } catch (Exception | LinkageError e) {
+            log.debug("[codegen][cdp] css count failed for '{}': {}", cssSelector, e.toString());
             return -1;
         }
     }

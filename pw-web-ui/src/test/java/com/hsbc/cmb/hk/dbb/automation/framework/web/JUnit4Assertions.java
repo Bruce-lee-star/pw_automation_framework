@@ -27,7 +27,7 @@ public final class JUnit4Assertions {
         try {
             action.run();
         } catch (Throwable e) {
-            fail(message + " —— 但抛出了 " + e);
+            fail(message + " -- 但抛出了 " + e);
         }
     }
 }

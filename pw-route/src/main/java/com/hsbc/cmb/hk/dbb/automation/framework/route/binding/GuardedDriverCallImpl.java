@@ -105,9 +105,9 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             unusable.set(true);
             if (policy == OnTimeout.FAIL_FAST) {
                 throw new IllegalStateException("[Route] driver channel unusable (an earlier call did not stop); "
-                        + "call '" + opName + "' rejected — rebuild the session to reset the channel", rejected);
+                        + "call '" + opName + "' rejected - rebuild the session to reset the channel", rejected);
             }
-            LOGGER.warn("[Route] driver channel unusable — call '{}' skipped (degrade, Context/Page untouched)",
+            LOGGER.warn("[Route] driver channel unusable - call '{}' skipped (degrade, Context/Page untouched)",
                     opName);
             return null;
         }
@@ -119,10 +119,10 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             handleTimeout(opName, boundMs);
             if (policy == OnTimeout.FAIL_FAST) {
                 throw new IllegalStateException("[Route] driver call '" + opName
-                        + "' 超时 " + boundMs + "ms 未收到回包（驱动忙 / 客户端共享连接被并发占用）；"
-                        + "排查协议层收发请开 DEBUG=pw:channel");
+                        + "' timed out after " + boundMs + "ms with no driver reply (driver busy / shared client connection under concurrent load); "
+                        + "enable DEBUG=pw:channel to inspect protocol send/receive");
             }
-            LOGGER.warn("[Route] driver call '{}' exceeded {}ms — abandoning wait; "
+            LOGGER.warn("[Route] driver call '{}' exceeded {}ms - abandoning wait; "
                     + "driver thread poisoned & reset (Context/Page untouched), "
                     + "driver-side handler released on context close", opName, boundMs);
             return null;
@@ -130,9 +130,9 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             Thread.currentThread().interrupt();
             if (policy == OnTimeout.FAIL_FAST) {
                 throw new IllegalStateException("[Route] driver call '" + opName
-                        + "' 被中断（驱动线程重置）", interrupted);
+                        + "' interrupted (driver thread reset)", interrupted);
             }
-            LOGGER.warn("[Route] driver call '{}' interrupted — abandoning wait (degrade)", opName);
+            LOGGER.warn("[Route] driver call '{}' interrupted - abandoning wait (degrade)", opName);
             return null;
         } catch (java.util.concurrent.ExecutionException executed) {
             Throwable cause = executed.getCause();
@@ -147,10 +147,10 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
             Thread.currentThread().interrupt();
             if (policy == OnTimeout.FAIL_FAST) {
                 LOGGER.warn("[Route] driver call '{}' was cancelled by another call's timeout reset "
-                        + "(same-connection channel poisoning) — degrading this case instead of failing it", opName);
+                        + "(same-connection channel poisoning) - degrading this case instead of failing it", opName);
                 return null;
             }
-            LOGGER.warn("[Route] driver call '{}' cancelled (same-connection reset) — abandoning", opName);
+            LOGGER.warn("[Route] driver call '{}' cancelled (same-connection reset) - abandoning", opName);
             return null;
         }
         //  调用成功 ⇒ 信道可确证可用（超时标记自动恢复；信道故障计数保持单调，供会话层判断是否被污染）
@@ -195,7 +195,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
         }
         if (!drained) {
             unusable.set(true);
-            LOGGER.error("[Route] driver call '{}' timed out {}ms and the in-flight call did NOT stop within {}ms — "
+            LOGGER.error("[Route] driver call '{}' timed out {}ms and the in-flight call did NOT stop within {}ms - "
                             + "channel marked UNUSABLE and NO new driver thread is created (a second message pump on the "
                             + "same connection would steal the acks). Rebuild the session (new Playwright instance; the "
                             + "session cache restores the login) to reset the channel. Context/Page untouched.",
@@ -205,7 +205,7 @@ public final class GuardedDriverCallImpl implements GuardedDriverCall {
         ExecutorService fresh = newDriverExecutor(this);
         if (driver.compareAndSet(current, fresh)) {
             long resets = poisonResets.incrementAndGet();
-            LOGGER.error("[Route] route driver thread RESET after '{}' timed out {}ms — in-flight call confirmed "
+            LOGGER.error("[Route] route driver thread RESET after '{}' timed out {}ms - in-flight call confirmed "
                             + "stopped within {}ms, so no orphan pump is left on the connection (reset#={}, epoch -> {}, "
                             + "Context/Page untouched)",
                     opName, boundMs, POISON_DRAIN_MS, resets, driverEpoch.get());

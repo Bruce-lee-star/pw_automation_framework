@@ -21,6 +21,195 @@ public class CodegenScorerTest {
                 "", "", "", -1, css);
     }
 
+    /**
+     * 真实场景（HSBC reset-password）：{@code [data-i18n="continue"]} 命中 3 个——隐藏 modal 一份、
+     * 两个未激活分页各一份；只有当前页所在面板有唯一标题锚点 {@code data-i18n="title_triage"}。
+     *
+     * <p>期望产物：{@code div:has([data-i18n="title_triage"]) [data-testid="continue-all"]}——
+     * 原生 CSS（Chromium 105+），不依赖可见性，也不引入 Playwright 专有伪类。
+     */
+    @Test
+    public void duplicateWidgetIsScopedByAncestorHasAnchor() {
+        CodegenFacts.Fact self = rich("generic", "", "", "continue-all", "span", "",
+                "span:nth-of-type(1)", "", "", "");
+        CodegenFacts.Fact panel = ancestor("div", "", "", List.of("[data-i18n=\"title_triage\"]"));
+        LocatorCounter counter = css -> css.equals(
+                "div:has([data-i18n=\"title_triage\"]) [data-testid=\"continue-all\"]") ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, panel), counter);
+
+        Assert.assertEquals("div:has([data-i18n=\"title_triage\"]) [data-testid=\"continue-all\"]",
+                s.uniqueCss);
+        Assert.assertEquals("必须按单元素处理", 1, s.matchCount);
+        Assert.assertEquals(LocatorStrategy.CSS, s.strategy);
+    }
+
+    /** 锚点含引号等非法字符时不得拼进选择器（仍走原兜底，matchCount 如实为 3）。 */
+    @Test
+    public void invalidHasAnchorIsIgnored() {
+        CodegenFacts.Fact self = rich("generic", "", "", "continue-all", "span", "",
+                "span:nth-of-type(1)", "", "", "");
+        CodegenFacts.Fact panel = ancestor("div", "", "", List.of("[data-i18n=\"a\\\"]\"]"));
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, panel), css -> 3);
+
+        Assert.assertFalse(s.uniqueCss.contains(":has("));
+        Assert.assertEquals(3, s.matchCount);
+    }
+
+    // ------------------------------------------------------------------
+    // 原生 CSS 伪类收敛：:has(> 锚点) 与 :not(...)
+    // ------------------------------------------------------------------
+
+    /**
+     * 锚点位于深层时，html/body/每层包裹 div 都会匹配 {@code :has(锚点)}（计数全部 >1 被丢弃）；
+     * {@code :has(> 锚点)} 只认真正的直接父级，能一次收敛到唯一。
+     */
+    @Test
+    public void hasDirectChildAnchorWinsOverNestedAncestorMatch() {
+        CodegenFacts.Fact self = selfFact("span", "span:nth-of-type(1)", Map.of());
+        CodegenFacts.Fact panel = ancestor("div", "", "", List.of("[data-i18n=\"title_triage\"]"));
+        String direct = "div:has(> [data-i18n=\"title_triage\"]) span:nth-of-type(1)";
+        LocatorCounter counter = css -> css.equals(direct) ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, panel), counter);
+
+        Assert.assertEquals(direct, s.uniqueCss);
+        Assert.assertEquals(1, s.matchCount);
+        Assert.assertFalse("产物不得引入 Playwright 专有 :visible", s.uniqueCss.contains(":visible"));
+        Assert.assertFalse("产物不得引入 Playwright 专有 :has-text", s.uniqueCss.contains(":has-text("));
+    }
+
+    /**
+     * 同容器内的禁用副本：前面的「加法」（id / 祖先属性作用域 / {@code :has()} 锚点）都区分不了，
+     * 用 {@code :not([disabled])} 一次性砍掉整族干扰项。
+     */
+    @Test
+    public void notExcludesDisabledTwin() {
+        CodegenFacts.Fact self = selfFact("button", "button:nth-of-type(2)", Map.of());
+        String expected = "button:nth-of-type(2):not([disabled])";
+        LocatorCounter counter = css -> css.equals(expected) ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(expected, s.uniqueCss);
+        Assert.assertEquals(1, s.matchCount);
+    }
+
+    /**
+     * 减法可能把目标自己也排除掉（目标本身就是 disabled）：该条件计数为 0 时必须<b>换下一个条件</b>，
+     * 不能像「加法」阶段那样直接放弃整条链。
+     */
+    @Test
+    public void notSkipsConditionThatExcludesTargetItself() {
+        CodegenFacts.Fact self = selfFact("button", "button:nth-of-type(2)", Map.of());
+        String disabledNot = "button:nth-of-type(2):not([disabled])";
+        String ariaNot = "button:nth-of-type(2):not([aria-hidden=\"true\"])";
+        LocatorCounter counter = css -> {
+            if (css.equals(disabledNot)) return 0;   // 目标自身带 disabled
+            if (css.equals(ariaNot)) return 1;
+            return 3;
+        };
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(ariaNot, s.uniqueCss);
+    }
+
+    /** {@code [disabled]} 只对可禁用标签产出：给 {@code div} 加该条件不改变匹配集，白付一次计数往返。 */
+    @Test
+    public void notConditionsAreTagAware() {
+        CodegenFacts.Fact self = selfFact("div", "div:nth-of-type(3)", Map.of());
+        String disabledNot = "div:nth-of-type(3):not([disabled])";
+        String ariaNot = "div:nth-of-type(3):not([aria-hidden=\"true\"])";
+        LocatorCounter counter = css -> {
+            if (css.equals(disabledNot)) return 1;   // 若实现错误地对 div 也试，就会选中它
+            if (css.equals(ariaNot)) return 1;
+            return 3;
+        };
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(ariaNot, s.uniqueCss);
+        Assert.assertFalse("div 不应产出 :not([disabled])", s.uniqueCss.contains("[disabled]"));
+    }
+
+    /** 单条否定都不足以收敛时两两叠加（仍是原生 CSS，不引入专有伪类）。 */
+    @Test
+    public void notCombinesTwoConditionsWhenSingleIsNotEnough() {
+        CodegenFacts.Fact self = selfFact("input", "input:nth-of-type(2)", Map.of());
+        String both = "input:nth-of-type(2):not([disabled]):not([aria-hidden=\"true\"])";
+        LocatorCounter counter = css -> css.equals(both) ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(both, s.uniqueCss);
+    }
+
+    /** 目标自身带 {@code aria-hidden="true"} 时不产出该否定条件（必然 0 命中，纯浪费一次往返）。 */
+    @Test
+    public void notSkipsAriaHiddenWhenTargetItselfIsAriaHidden() {
+        CodegenFacts.Fact self = selfFact("button", "button:nth-of-type(2)",
+                Map.of("aria-hidden", "true"));
+        String ariaNot = "button:nth-of-type(2):not([aria-hidden=\"true\"])";
+        LocatorCounter counter = css -> css.equals(ariaNot) ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertFalse("目标自身 aria-hidden=true 时不得产出该条件",
+                s.uniqueCss.contains("[aria-hidden"));
+    }
+
+    /**
+     * 祖先链存在但结构路径仍命中多个时，减法作为最后一档兜底接管。
+     *
+     * <p>顺序语义：结构路径是确定性证据（逐级 {@code :nth-of-type} 必然指向目标），必须优先于
+     * 可能误排目标的减法；只有它失败后才允许用 {@code :not()}。
+     */
+    @Test
+    public void notIsUsedOnlyAfterStructuralPathFails() {
+        CodegenFacts.Fact self = selfFact("button", "button:nth-of-type(2)", Map.of());
+        CodegenFacts.Fact deep = fact("generic", "", "", "", "div", "", "",
+                "div:nth-of-type(1) > button:nth-of-type(2)");
+        String expected = "button:nth-of-type(2):not([disabled])";
+        LocatorCounter counter = css -> css.equals(expected) ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, deep), counter);
+
+        Assert.assertEquals(expected, s.uniqueCss);
+    }
+
+    /**
+     * {@code :not()} 只能否掉「同时离开渲染树与可访问性树」的形态，不能否掉 class。
+     *
+     * <p>{@code class="accessibleHidden"} / {@code .sr-only} 只是视觉隐藏（clip 裁零 / 1px 尺寸），
+     * <b>仍在 AX 树里</b>：屏幕阅读器与 Playwright {@code getByRole} 都能命中，且往往就是唯一的
+     * 可访问名来源（图标按钮的隐藏文字标签）。把它当「垃圾副本」排除，等于丢弃无障碍语义。
+     */
+    @Test
+    public void visualOnlyHiddenClassIsNeverUsedAsNegation() {
+        // self 事实里根本没有 class 字段参与否定条件；产物只能是状态属性否定或结构路径
+        CodegenFacts.Fact self = selfFact("button", "button:nth-of-type(2)", Map.of());
+        LocatorCounter counter = css -> 3;   // 所有候选都不唯一 → 走兜底
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertFalse("不得产出 class 型否定（accessibleHidden 在 AX 树里可见）",
+                s.uniqueCss.contains(".accessibleHidden"));
+        Assert.assertFalse("不得产出 class 型否定", s.uniqueCss.contains(":not(."));
+    }
+
+    /** 只带 tag / cssSelector / 语义属性的最小事实（role 不可定位，保证走纯 CSS 链）。 */
+    private static CodegenFacts.Fact selfFact(String tag, String css, Map<String, String> attrs) {
+        return new CodegenFacts.Fact("generic", "", tag, "", "", "", "", "", "", "",
+                "", "", -1, css, List.of(), "", "", "", attrs, "", false, List.of());
+    }
+
+    private static CodegenFacts.Fact ancestor(String tag, String id, String testid, List<String> anchors) {
+        return new CodegenFacts.Fact("generic", "", tag, id, testid, "", "", "", "", "", "", "", -1,
+                "", List.of(), "", "", "", java.util.Map.of(), "", false, anchors);
+    }
+
     private static CodegenFacts facts(CodegenFacts.Fact self, CodegenFacts.Fact... ancestors) {
         return new CodegenFacts(self, List.of(ancestors));
     }
@@ -33,6 +222,20 @@ public class CodegenScorerTest {
         Assert.assertTrue(s.roleLocatable);
         Assert.assertEquals(LocatorStrategy.ROLE_WITH_NAME, s.strategy);
         Assert.assertEquals(105, s.score);
+    }
+
+    /**
+     * 可访问名是「大段文本」时，即便 role 可映射、name 非空，也不得走 role 定位（2026-11-12 "不定位大文本"）：
+     * 用一整块正文当 {@code getByRole(role, name)} 的 name 既脆弱又过宽，必须降级给 CSS 候选。
+     */
+    @Test
+    public void broadRoleName_degradesToCss() {
+        String longName = "Your session has expired. Please log in again to continue using our services securely.";
+        Assert.assertTrue("前置：本例 name 确为长文本", longName.length() > 60);
+        CodegenFacts f = facts(fact("button", longName, "", "", "button", "", "", "button:nth-of-type(1)"));
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(f, css -> 1);
+        Assert.assertFalse(s.roleLocatable);
+        Assert.assertEquals(LocatorStrategy.CSS, s.strategy);
     }
 
     /** 角色可定位时，即便存在 id（CSS 500），角色仍优先（105 <= 500）。 */
@@ -184,6 +387,48 @@ public class CodegenScorerTest {
 
         Assert.assertEquals(expected, s.uniqueCss);
         Assert.assertFalse(s.uniqueCss.contains("nth-of-type"));
+    }
+
+    /**
+     * 重复面板里的同名按钮：自身 class 命中 2 个（隐藏面板 + 可见面板），
+     * 必须用<b>祖先面板的业务锚点</b>（{@code data-i18n}）做作用域前缀收窄，
+     * 而不是一路退化到绝对 XPath。
+     *
+     * <p>2026-11-11 用户反馈「重复面板里 Continue 按钮定位不准」——隐藏/显示面板 DOM 结构近似，
+     * 仅靠 class/data-id 无法区分，父级业务锚点是唯一稳定证据。
+     */
+    @Test
+    public void ancestorBusinessAnchorScopesDuplicatePanelButton() {
+        String expected = "[data-i18n=\"panel_active\"] [class*=\"continue\"]";
+        LocatorCounter c = css -> expected.equals(css) ? 1 : 2;
+        CodegenFacts.Fact self = new CodegenFacts.Fact("generic", "", "button", "", "", "",
+                "", "", "", "", "Continue", "", -1,
+                "html > body > div:nth-of-type(2) > button:nth-of-type(1)",
+                List.of(), "continue", "", "", Map.of());
+        CodegenFacts.Fact panel = new CodegenFacts.Fact("generic", "", "div", "", "", "",
+                "", "", "", "", "", "", -1, "html > body > div:nth-of-type(2)",
+                List.of(), "panel", "", "", Map.of("data-i18n", "panel_active"));
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, panel), c);
+
+        Assert.assertEquals("必须用祖先业务锚点做作用域绑定", expected, s.uniqueCss);
+        Assert.assertFalse("不得退化成绝对 XPath", s.uniqueCss.startsWith("xpath="));
+    }
+
+    /**
+     * 所有候选都多匹配 ⇒ 把最终命中数带出（{@code >1}），供生成侧产出 {@code PageElementList}，
+     * 而不是丢弃这条拾取（2026-11-11 用户规则③）。
+     */
+    @Test
+    public void allCandidatesAmbiguous_exposesMatchCountForListGeneration() {
+        CodegenFacts.Fact self = new CodegenFacts.Fact("generic", "", "button", "", "", "",
+                "", "", "", "", "Delete", "", -1, "button[class*=\"row-action\"]",
+                List.of(), "row-action", "", "", Map.of());
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), css -> 3);
+
+        Assert.assertFalse(s.roleLocatable);
+        Assert.assertEquals(3, s.matchCount);
     }
 
     /**
@@ -493,5 +738,128 @@ public class CodegenScorerTest {
 
         Assert.assertEquals("每个（可能嵌套后的）选择器只查一次",
                 counted.size(), new java.util.HashSet<>(counted).size());
+    }
+
+    // ------------------------------------------------------------------
+    // 唯一性判据：0 命中 / 不可判定都不得当作「唯一」
+    // ------------------------------------------------------------------
+
+    /**
+     * 回归：更优候选 0 命中时必须继续检查后面的候选，不得直接胜出。
+     *
+     * <p>历史缺陷：判据是 {@code count <= 1}，于是 {@code count == 0} 与「唯一」等价。
+     * data-testid 选择器当前不匹配（元素尚未渲染 / testid 写错）时，后面那个真正唯一的
+     * {@code #id} 永远不会被采用——产物在回放时 {@code Timeout waiting for locator}。
+     */
+    @Test
+    public void zeroMatchCandidateDoesNotShadowLaterUniqueCandidate() {
+        CodegenFacts.Fact self = rich("generic", "", "user", "user-box", "div", "",
+                "div:nth-of-type(1)", "", "", "");
+        LocatorCounter c = css -> css.equals("[data-testid=\"user-box\"]") ? 0 : 1;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), c);
+
+        Assert.assertEquals("#user", s.uniqueCss);
+        Assert.assertEquals("必须报出真实命中数，0 不得被当成唯一", 1, s.matchCount);
+    }
+
+    /** 回归：整条候选链 0 命中时，不得把 0 报成「唯一」；matchCount 必须如实为 0。 */
+    @Test
+    public void zeroMatchAcrossWholeChainIsNotReportedAsUnique() {
+        CodegenFacts.Fact self = rich("generic", "", "", "", "div", "", "div:nth-of-type(1)", "", "", "");
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), css -> 0);
+
+        Assert.assertFalse(s.roleLocatable);
+        Assert.assertEquals(0, s.matchCount);
+    }
+
+    /** 回归：计数不可判定（-1）同样不得当作唯一；语义与 0 命中一致，只是原因不同。 */
+    @Test
+    public void unavailableCountIsNotTreatedAsUnique() {
+        CodegenFacts.Fact self = rich("generic", "", "user", "", "div", "", "div:nth-of-type(1)", "", "", "");
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), css -> -1);
+
+        Assert.assertEquals(-1, s.matchCount);
+        Assert.assertEquals("#user", s.uniqueCss);   // 降级为兜底候选，但如实报告不可判定
+    }
+
+    /** 0 命中不得遮蔽「多命中」候选：兜底应选中真正有命中的那一个。 */
+    @Test
+    public void zeroMatchCandidateFallsBackToCandidateWithMatches() {
+        CodegenFacts.Fact self = rich("generic", "", "user", "user-box", "div", "",
+                "div:nth-of-type(1)", "", "", "");
+        LocatorCounter c = css -> css.equals("[data-testid=\"user-box\"]") ? 0 : 5;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), c);
+
+        Assert.assertEquals("#user", s.uniqueCss);
+        Assert.assertEquals(5, s.matchCount);
+    }
+
+    // ------------------------------------------------------------------
+    // 评审 P1-5 / 一致性 b：:has() 证据分级 + 候选顺序确定性
+    // ------------------------------------------------------------------
+
+    /**
+     * 能标识祖先的头（稳定 id）必须先于裸 tag 头尝试：后者是一次全页后代搜索。
+     * 两者都能收敛时，产物必须由强证据胜出，而不是"JSON 里排在前面的那个"。
+     */
+    @Test
+    public void identifyingScopeHeadIsTriedBeforeBareTagHead() {
+        CodegenFacts.Fact self = selfFact("span", "span:nth-of-type(1)", Map.of());
+        CodegenFacts.Fact weak = ancestor("div", "", "", List.of("[data-i18n=\"weak\"]"));
+        CodegenFacts.Fact strong = ancestor("section", "panel2", "",
+                List.of("[data-i18n=\"strong\"]"));
+        String strongCss = "#panel2:has(> [data-i18n=\"strong\"]) span:nth-of-type(1)";
+        LocatorCounter counter = css -> css.equals(strongCss) ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, weak, strong), counter);
+
+        Assert.assertEquals(strongCss, s.uniqueCss);
+        Assert.assertEquals(1, s.matchCount);
+    }
+
+    /**
+     * 评审一致性 a：{@code role="dialog"} 虽非 {@code aria-*}，但作为组合条件与状态类同构，
+     * <b>有意允许</b>进组合。防止后人因 {@code ARIA_STATE_ONLY} 的名字误把它排除掉。
+     */
+    @Test
+    public void roleAttributeIsAllowedAsACombinationCondition() {
+        Map<String, String> attrs = new LinkedHashMap<>();
+        attrs.put("role", "dialog");
+        attrs.put("data-qa", "confirm");
+        CodegenFacts.Fact self = selfFact("div", "div:nth-of-type(1)", attrs);
+        LocatorCounter counter = css -> css.contains("[role=\"dialog\"]")
+                && css.contains("[data-qa=\"confirm\"]") ? 1 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertTrue("role 必须留在组合里", s.uniqueCss.contains("[role=\"dialog\"]"));
+        Assert.assertTrue(s.uniqueCss.contains("[data-qa=\"confirm\"]"));
+        Assert.assertEquals(1, s.matchCount);
+    }
+
+    /**
+     * 等价语义属性同分时，胜出者不得随注入脚本 JSON 的键序漂移。
+     * 不排序时下面两种插入顺序会分别胜出 {@code data-z} 与 {@code data-a}。
+     */
+    @Test
+    public void equalScoreAttributesAreDeterministicAcrossJsonKeyOrder() {
+        Map<String, String> first = new LinkedHashMap<>();
+        first.put("data-z", "9");
+        first.put("data-a", "1");
+        Map<String, String> reversed = new LinkedHashMap<>();
+        reversed.put("data-a", "1");
+        reversed.put("data-z", "9");
+
+        CodegenScorer.ScoredLocator s1 = CodegenScorer.score(
+                facts(selfFact("span", "span:nth-of-type(1)", first)), css -> 1);
+        CodegenScorer.ScoredLocator s2 = CodegenScorer.score(
+                facts(selfFact("span", "span:nth-of-type(1)", reversed)), css -> 1);
+
+        Assert.assertEquals("产物不得随 JSON 键序变化", s1.uniqueCss, s2.uniqueCss);
+        Assert.assertEquals("按属性名排序 ⇒ data-a 胜出", "[data-a=\"1\"]", s1.uniqueCss);
     }
 }

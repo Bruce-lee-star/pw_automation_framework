@@ -111,7 +111,7 @@ public class GuardedDriverCallSingleThreadTest {
             }
             return 999;
         });
-        assertNull("超时（无回包）→ WARN_AND_ABANDON 必须返回 null（降级，不抛、不波及 Context）", first);
+        assertNull("超时（无回包）-> WARN_AND_ABANDON 必须返回 null（降级，不抛、不波及 Context）", first);
         assertTrue("毒化重置必须触发（POISON_RESETS 至少 +1）", GuardedDriverCallImpl.poisonResetCount() > before);
 
         // 毒化后新调用必须经重建线程正常返回（信道已重建，Context/Page 未动）。

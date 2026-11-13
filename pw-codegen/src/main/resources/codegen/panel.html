@@ -18,6 +18,14 @@
     <button id="btn-start" class="btn primary">开始拾取</button>
     <button id="btn-group" class="btn ghost" title="勾选 ≥2 个元素（如表格行、tab、列表项等同构元素）合成一个 PageElementList 字段，运行期按 x.get(i) 取单项">标记为一组</button>
     <button id="btn-end-session" class="btn ghost" title="结束本次会话：未生成代码会先定稿；面板窗口保留，下次会话可立即复用">结束会话</button>
+    <button id="btn-export" class="btn ghost" title="把当前生成的 Page / Step / Assert 源码写到 target/codegen/&lt;时间戳&gt;/（可用 -Dcodegen.export.dir=绝对路径 改到工程外）">导出代码</button>
+    <label class="dialog-policy" title="录制期间原生 confirm / prompt 的默认动作，整场生效：accept 录「确认」分支，dismiss 录「取消」分支。beforeunload 恒 accept 以放行导航。两种分支请分两条用例录制。">
+        dialog
+        <select id="sel-dialog-policy">
+            <option value="accept">accept</option>
+            <option value="dismiss">dismiss</option>
+        </select>
+    </label>
 </header>
 
 <main class="content">

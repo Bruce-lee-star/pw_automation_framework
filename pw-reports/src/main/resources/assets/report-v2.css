@@ -127,6 +127,12 @@ table.tbl { width:100%; border-collapse:collapse; font-size:13px; }
 .tbl th { text-align:left; color:var(--text-2); font-weight:500; padding:10px 12px;
           border-bottom:2px solid var(--border); white-space:nowrap; }
 .tbl td { padding:12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+/* dataTable（Gherkin 步骤参数表）：完整网格线，列之间也要有明显 border */
+.tbl.step-table th, .tbl.step-table td {
+  border:1px solid var(--border);
+  padding:7px 10px;
+}
+.tbl.step-table th { background:#f8fafc; color:var(--text-2); font-weight:600; }
 .tbl tbody tr:hover td { background:#f8fafc; }
 .tbl .num-cell { text-align:right; font-variant-numeric:tabular-nums; }
 /* ---------- 表头内嵌筛选（index 的 Feature overview + per-feature 的 Scenarios 共用） ----------

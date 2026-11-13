@@ -135,7 +135,7 @@ public final class MultiPageCodegen {
         /** 同标签页导航提示：在步骤体插入「已导航」注释，不生成任何等待 / 切页代码。 */
         public static SessionAction navigation(CodegenTarget from, CodegenTarget to) {
             String note = "same-tab navigation: now on " + to.pageClassName
-                    + " (was " + from.pageClassName + " on the same tab); the page object is re-fetched below — "
+                    + " (was " + from.pageClassName + " on the same tab); the page object is re-fetched below - "
                     + "add waitForLoadState(...) here if the new page needs to settle before the next action";
             return new SessionAction(ActionKind.NAVIGATION, null, null, null, null, null, null, false, null, note);
         }

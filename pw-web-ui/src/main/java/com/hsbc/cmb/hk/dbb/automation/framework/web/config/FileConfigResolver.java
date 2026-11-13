@@ -60,6 +60,15 @@ import java.util.Properties;
  *
  * <p><b>线程与生命周期</b>：{@link #snapshot()} 双重检查懒加载一次性快照，与
  * {@code ConfigReader} 的启动期快照语义一致；加载路径只读 JVM 启动期状态，无共享可变状态。</p>
+ *
+ * <p><b>防递归（2026-11-12 修复，勿改回）</b>：加载路径上多处日志（{@code INFO} 上报命中来源、
+ * {@code WARN} 报告跳过）会经过 logback 的 {@code %msg} Converter；而 Converter 读配置开关时
+ * 可能再次落到本 resolver。{@code synchronized} 是<b>可重入</b>锁，若快照在 {@code load()} 返回后
+ * 才发布，同线程反复进入时 {@code flattened} 恒为 {@code null} ⇒ 无限递归 ⇒
+ * {@code StackOverflowError}（线上表现为 Cucumber Runner 初始化即失败）。
+ * 因此本类做两件事：① {@link #loading} 同线程重入时直接返回空快照；
+ * ② 把「命中来源」的 INFO 上报移到 {@link #flattened} <b>发布之后</b>，
+ * 使该日志重入时能命中已发布的快照。二者与主修（{@code FrameworkFlags} 直读启动态）互为纵深防御。
  */
 public final class FileConfigResolver implements ConfigResolver {
 
@@ -83,6 +92,18 @@ public final class FileConfigResolver implements ConfigResolver {
     /** 懒加载 + 缓存的一次性扁平化结果；线程安全（双重检查）。 */
     private volatile Map<String, String> flattened;
 
+    /**
+     * 同线程是否正在 {@link #load} 中；仅由 {@code synchronized(this)} 保护。
+     *
+     * <p>{@code synchronized} 可重入，所以不能靠锁本身识别"加载期间的日志又回来了"。
+     * 此标志让重入查询退化为空快照（该次配置读取自然落到默认值），绝不二次加载。
+     */
+    private boolean loading;
+
+    /** 一次加载的结果：扁平化键值 + 实际命中的来源（只含路径，不含值，供可观测性使用）。 */
+    record LoadResult(Map<String, String> values, List<String> sources) {
+    }
+
     @Override
     public String resolve(String key) {
         if (key == null) {
@@ -93,16 +114,44 @@ public final class FileConfigResolver implements ConfigResolver {
 
     private Map<String, String> snapshot() {
         Map<String, String> local = flattened;
-        if (local == null) {
-            synchronized (this) {
-                local = flattened;
-                if (local == null) {
-                    local = load(externalDirectories(), explicitFiles());
-                    flattened = local;
-                }
+        if (local != null) {
+            return local;
+        }
+        synchronized (this) {
+            local = flattened;
+            if (local != null) {
+                return local;
             }
+            if (loading) {
+                // 加载过程中的日志经 Converter 又回到本 resolver：返回空快照断环。
+                // 只影响这一次「顺便发起的查询」，真正的加载仍在最外层继续。
+                return Map.of();
+            }
+            loading = true;
+            LoadResult result;
+            try {
+                result = loadDetailed(externalDirectories(), explicitFiles());
+                local = result.values();
+                // 【顺序不可调换】先发布快照，再打日志：
+                // 上报日志本身会走 %msg Converter，此时重入必须命中已发布的 flattened。
+                flattened = local;
+            } finally {
+                loading = false;
+            }
+            reportLoaded(result);
         }
         return local;
+    }
+
+    /** 命中来源上报：只在快照发布之后调用。 */
+    private static void reportLoaded(LoadResult result) {
+        if (result.sources().isEmpty()) {
+            log.debug("[FileConfigResolver] no pw.properties / pw.conf found"
+                    + " (classpath, project root or explicit location)");
+        } else {
+            log.info("[FileConfigResolver] loaded {} file config key(s) from {}",
+                    result.values().size(), result.sources());
+        }
     }
 
     /**
@@ -112,6 +161,14 @@ public final class FileConfigResolver implements ConfigResolver {
      * <p>包级私有：供单测注入临时目录，无需改写 JVM 全局 {@code user.dir}。</p>
      */
     static Map<String, String> load(List<Path> directories, List<Path> files) {
+        return loadDetailed(directories, files).values();
+    }
+
+    /**
+     * 同 {@link #load}，但额外带回「实际命中的来源」供 {@link #reportLoaded} 在快照发布后上报。
+     * 本方法<b>不打 INFO</b>：加载期间的日志必须先有重入保护或已发布快照，见类注释。
+     */
+    private static LoadResult loadDetailed(List<Path> directories, List<Path> files) {
         Map<String, String> merged = new LinkedHashMap<>();
         List<String> loaded = new ArrayList<>();
 
@@ -136,20 +193,21 @@ public final class FileConfigResolver implements ConfigResolver {
                 if (file == null) {
                     continue;
                 }
+                // Path.getFileName() 在「根路径 / 空路径」上返回 null（如 -Dpw.config.file=C:\ 或 /）。
+                // 这类路径不可能指向 pw.properties / pw.conf，直接跳过；旧实现直接解引用会 NPE
+                // （SpotBugs NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE）。
+                Path fileName = file.getFileName();
+                if (fileName == null) {
+                    log.warn("[FileConfigResolver] explicit config path has no file name, skipped: {}", file);
+                    continue;
+                }
                 String display = file.toString();
                 merge(merged, loaded,
-                        parse(file.getFileName().toString(), readDisk(file), display), display);
+                        parse(fileName.toString(), readDisk(file), display), display);
             }
         }
 
-        if (loaded.isEmpty()) {
-            log.debug("[FileConfigResolver] no pw.properties / pw.conf found"
-                    + " (classpath, project root or explicit location)");
-        } else {
-            log.info("[FileConfigResolver] loaded {} file config key(s) from {}",
-                    merged.size(), loaded);
-        }
-        return merged;
+        return new LoadResult(merged, loaded);
     }
 
     private static void merge(Map<String, String> merged, List<String> loaded,

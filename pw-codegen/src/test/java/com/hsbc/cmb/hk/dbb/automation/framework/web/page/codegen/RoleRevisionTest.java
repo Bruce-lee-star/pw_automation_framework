@@ -50,6 +50,28 @@ public class RoleRevisionTest {
                 RoleRevision.toCss(entry).selector);
     }
 
+    /**
+     * 回退 CSS 只改定位器，不得丢掉生成侧语义字段。
+     *
+     * <p>回归 P0-2：历史 {@code toCss} 走 11 参旧构造 → matchCount 强制 1、tag=null、checked=false，
+     * 结果原生 {@code <select>} 退化成 {@code click()}、checkbox 反转、组元素退成单元素。
+     */
+    @Test
+    public void revisionKeepsTagCheckedAndMatchCount() {
+        CodegenEntry entry = new CodegenEntry("combobox|Province#0", "combobox", "Province",
+                LocatorStrategy.ROLE, 100, "role=combobox[name=\"Province\"]", "#prov", null, 0,
+                List.of(), List.of(), 3, "SELECT", true);
+
+        CodegenEntry revised = RoleRevision.toCss(entry);
+
+        assertEquals(LocatorStrategy.CSS, revised.strategy);
+        assertEquals("#prov", revised.selector);
+        assertEquals("原生 select 的 tag 必须保留", "select", revised.tag);
+        assertTrue("勾选态必须保留", revised.checked);
+        assertEquals("组元素命中数必须保留（否则退成单元素）", 3, revised.matchCount);
+        assertEquals("sigKey 仍须稳定（动作靠它绑定字段）", entry.sigKey, revised.sigKey);
+    }
+
     @Test
     public void nullEntryIsTolerated() {
         assertNull(RoleRevision.toCss(null));

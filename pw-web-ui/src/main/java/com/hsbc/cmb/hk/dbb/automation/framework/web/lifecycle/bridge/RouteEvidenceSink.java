@@ -79,7 +79,7 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
                     pendingCount--;
                     long count = DROPPED.incrementAndGet();
                     if (shouldLogCount(count)) {
-                        LOGGER.warn("[Route] outcome {} exceeded {} pending evidence records — dropping its oldest "
+                        LOGGER.warn("[Route] outcome {} exceeded {} pending evidence records - dropping its oldest "
                                 + "record (dropped count={})", outcomeId, MAX_PENDING_PER_OUTCOME, count);
                     }
                 }
@@ -89,7 +89,7 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
                     }
                     long count = DROPPED.incrementAndGet();
                     if (shouldLogCount(count)) {
-                        LOGGER.warn("[Route] pending evidence queue is full at {} records — rejecting new evidence "
+                        LOGGER.warn("[Route] pending evidence queue is full at {} records - rejecting new evidence "
                                 + "for outcome {} (dropped count={})", MAX_PENDING, outcomeId, count);
                     }
                     return;
@@ -115,7 +115,7 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
         pendingCount--;
         long count = DROPPED.incrementAndGet();
         if (shouldLogCount(count)) {
-            LOGGER.warn("[Route] pending evidence queue is full at {} records — dropping one record from "
+            LOGGER.warn("[Route] pending evidence queue is full at {} records - dropping one record from "
                             + "overrepresented outcome {} to admit evidence for {} (dropped count={})",
                     MAX_PENDING, donor.getKey(), incomingOutcomeId, count);
         }
@@ -133,9 +133,11 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
                 return value;
             }
         } catch (NumberFormatException ignored) {
-            // Report malformed values below, then use the registered safe default.
+            LOGGER.warn("[Route] invalid {} value '{}'; using registered default {}",
+                    key.key(), raw, key.defaultValue());
+            return Integer.parseInt(key.defaultValue());
         }
-        LOGGER.warn("[Route] invalid {} value '{}'; using registered default {}",
+        LOGGER.warn("[Route] invalid {} value '{}' (must be > 0); using registered default {}",
                 key.key(), raw, key.defaultValue());
         return Integer.parseInt(key.defaultValue());
     }
@@ -183,7 +185,7 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
                 PENDING.clear();
                 pendingCount = 0;
             }
-            LOGGER.debug("[Route] evidence flush skipped (no 框架 listener), drained {} record(s)", drained);
+            LOGGER.debug("[Route] evidence flush skipped (no framework listener), drained {} record(s)", drained);
             return;
         }
         String outcomeId = bridge.currentOutcomeId();
@@ -209,7 +211,7 @@ public final class RouteEvidenceSink implements com.hsbc.cmb.hk.dbb.automation.f
                 //  stepId 为入队时抓到的归属步骤：有则挂到该步骤下（与 Route Register 一致），
                 //  无（钩子 / 场景边界产生）则按用例级兜底。
                 bridge.recordApiOperation(item.stepId(),
-                        item.detail() == null || item.detail().isEmpty() ? title : title + " — " + item.detail());
+                        item.detail() == null || item.detail().isEmpty() ? title : title + " - " + item.detail());
                 written++;
             } catch (Exception e) {
                 noteWriteFailure("report write", e);

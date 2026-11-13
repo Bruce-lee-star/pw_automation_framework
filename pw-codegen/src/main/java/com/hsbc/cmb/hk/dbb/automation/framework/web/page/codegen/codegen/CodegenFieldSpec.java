@@ -30,10 +30,17 @@ public final class CodegenFieldSpec {
     /** 是否由 role 定位（false 表示已回退 CSS/XPath）。 */
     public final boolean roleLocatable;
     public final CodegenEntry entry;
+    /**
+     * Assert 用：录制到的<b>最终输入值</b>；{@code null} 表示该元素在录制期间没有任何输入。
+     *
+     * <p>输入类元素的断言期望值必须来自这里，<b>不能</b>用 {@link CodegenEntry#name}
+     * （那是 AX 可访问名：label / placeholder / aria-label，不是用户输入的内容）。
+     */
+    public final String recordedValue;
 
     public CodegenFieldSpec(String fieldName, String fieldType, String annotation, String comment,
                             String verb, String action, String assertion, boolean isList,
-                            boolean roleLocatable, CodegenEntry entry) {
+                            boolean roleLocatable, CodegenEntry entry, String recordedValue) {
         this.fieldName = fieldName;
         this.fieldType = fieldType;
         this.annotation = annotation;
@@ -44,5 +51,6 @@ public final class CodegenFieldSpec {
         this.isList = isList;
         this.roleLocatable = roleLocatable;
         this.entry = entry;
+        this.recordedValue = recordedValue;
     }
 }

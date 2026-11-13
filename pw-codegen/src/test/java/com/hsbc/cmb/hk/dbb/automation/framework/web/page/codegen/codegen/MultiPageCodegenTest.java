@@ -90,8 +90,8 @@ public class MultiPageCodegenTest {
 
         // Step：一个类 + 两个方法（一次 Start→Pause 一步），不再生成流程类
         assertTrue("Step 产物应为单个 LogonSteps 类", result.stepCode.contains("class LogonSteps"));
-        assertTrue("第一次 Start→Pause 应是 step1", result.stepCode.contains("public void step1()"));
-        assertTrue("第二次 Start→Pause 应是 step2", result.stepCode.contains("public void step2()"));
+        assertTrue("第一次 Start->Pause 应是 step1", result.stepCode.contains("public void step1()"));
+        assertTrue("第二次 Start->Pause 应是 step2", result.stepCode.contains("public void step2()"));
         assertFalse("切页已内联进 step 方法，不应再有流程类",
                 result.stepCode.contains("ScenarioFlowSteps"));
 

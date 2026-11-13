@@ -75,10 +75,10 @@ public final class Recorder {
         }
         try {
             recordingTestData.put(key, value);
-            logger.debug("Added 框架 test data: {} = {}", key, value);
+            logger.debug("Added framework test data: {} = {}", key, value);
         } catch (Exception e) {
-            logger.error("Failed to add 框架 test data: {} = {}", key, value, e);
-            throw new ConfigurationException("Failed to add 框架 test data: " + key + " = " + value, e);
+            logger.error("Failed to add framework test data: {} = {}", key, value, e);
+            throw new ConfigurationException("Failed to add framework test data: " + key + " = " + value, e);
         }
     }
 
@@ -92,16 +92,16 @@ public final class Recorder {
 
     public void clearRecordingTestData() {
         recordingTestData.clear();
-        logger.debug("Cleared all 框架 test data");
+        logger.debug("Cleared all framework test data");
     }
 
     // ==================== Layer A 原生录制（供 RecordingPageProxy 使用，无 per-page 状态） ====================
 
     /**
-     * 录制开关（零开销，D4）：reporting 关闭时返回 false。
+     * 录制开关：仅由 {@code framework.recording.enabled} 决定（默认开启），显式配置为
+     * {@code false} 时录制链路完全跳过（零开销，D4）。
      *
-     * <p>优先使用 {@code framework.recording.enabled}；未显式配置时，为兼容旧项目回退到
-     * {@code framework.logging=VERBOSE|TRACE}。</p>
+     * <p>与日志配置相互独立：{@code logging.root.level} 只控制日志阈值，不影响录制。</p>
      */
     public static boolean isEnabled() {
         return FrameworkRecordingConfig.isEnabled();

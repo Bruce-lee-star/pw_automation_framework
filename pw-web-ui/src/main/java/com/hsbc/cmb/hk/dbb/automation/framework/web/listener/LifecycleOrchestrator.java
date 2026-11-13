@@ -6,7 +6,6 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleSce
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleScenarioResult;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepInfo;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStepResult;
-import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.event.LifecycleStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

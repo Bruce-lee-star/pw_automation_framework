@@ -339,7 +339,7 @@ class PluginEventChainTest {
     }
 
     @Test
-    @DisplayName("完整 run → 场景 → 步骤：产物形状正确（步骤树、keyword 前缀、行号、tag、duration）")
+    @DisplayName("完整 run -> 场景 -> 步骤：产物形状正确（步骤树、keyword 前缀、行号、tag、duration）")
     void fullRunProducesOutcome() throws Exception {
         startRun();
         startCase("file:features/login.feature", 12, "user logs in", List.of("@smoke", "@auth"));
@@ -391,7 +391,7 @@ class PluginEventChainTest {
     }
 
     @Test
-    @DisplayName("@Before 失败 → 用例级根因（result=FAILURE + cause），不进步骤树")
+    @DisplayName("@Before 失败 -> 用例级根因（result=FAILURE + cause），不进步骤树")
     void beforeHookFailureBecomesCaseRootCause() throws Exception {
         startRun();
         startCase("file:features/login.feature", 7, "before fails", List.of());
@@ -406,7 +406,7 @@ class PluginEventChainTest {
     }
 
     @Test
-    @DisplayName("@After 失败 → 用例级 warning 证据，但不覆盖用例结论")
+    @DisplayName("@After 失败 -> 用例级 warning 证据，但不覆盖用例结论")
     void afterHookFailureBecomesWarningNotFailure() throws Exception {
         startRun();
         startCase("file:features/login.feature", 9, "after fails", List.of());
@@ -423,7 +423,7 @@ class PluginEventChainTest {
     }
 
     @Test
-    @DisplayName("AMBIGUOUS 步骤 → FAILURE + 步骤附注（不静默当 PASSED）")
+    @DisplayName("AMBIGUOUS 步骤 -> FAILURE + 步骤附注（不静默当 PASSED）")
     void ambiguousStepBecomesFailureWithNote() throws Exception {
         startRun();
         startCase("file:features/login.feature", 15, "ambiguous step", List.of());
@@ -477,7 +477,7 @@ class PluginEventChainTest {
     }
 
     @Test
-    @DisplayName("步骤失败 → 步骤 FAILURE + 用例 FAILURE + 根因消息")
+    @DisplayName("步骤失败 -> 步骤 FAILURE + 用例 FAILURE + 根因消息")
     void failedStepPropagatesFailure() throws Exception {
         startRun();
         startCase("file:features/login.feature", 30, "bad step", List.of());
@@ -517,7 +517,7 @@ class PluginEventChainTest {
     }
 
     @Test
-    @DisplayName("同名同 line 场景 → outcomeId 冲突后缀，产物不互相覆盖")
+    @DisplayName("同名同 line 场景 -> outcomeId 冲突后缀，产物不互相覆盖")
     void duplicateScenarioGetsSuffix() throws Exception {
         startRun();
         startCase("file:features/a.feature", 5, "same name", List.of());

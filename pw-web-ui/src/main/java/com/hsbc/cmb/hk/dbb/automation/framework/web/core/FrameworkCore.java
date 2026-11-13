@@ -73,7 +73,7 @@ public class FrameworkCore {
                         logger.info("JVM Shutdown Hook: browser resources cleaned");
                     } catch (IllegalStateException e) {
                         logger.warn("JVM shutdown skipped global cleanupAll (concurrent mode active): {} "
-                                + "— falling back to per-thread cleanup", e.getMessage());
+                                + "- falling back to per-thread cleanup", e.getMessage());
                         try {
                             PlaywrightManager.cleanupForFeature();
                         } catch (Exception ex) {

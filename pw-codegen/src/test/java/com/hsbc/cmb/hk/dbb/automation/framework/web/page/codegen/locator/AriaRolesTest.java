@@ -34,7 +34,7 @@ public class AriaRolesTest {
 
     @Test
     public void labelRoleHasNoConstantSoItCannotBeLocatable() {
-        assertNull("Playwright AriaRole 没有 LABEL —— 必须回退 CSS，不能降级成 GENERIC",
+        assertNull("Playwright AriaRole 没有 LABEL -- 必须回退 CSS，不能降级成 GENERIC",
                 AriaRoles.ariaConstant("label"));
         assertFalse(AriaRoles.isLocatable("label"));
     }
@@ -52,6 +52,25 @@ public class AriaRolesTest {
         assertFalse(AriaRoles.isLocatable("StaticText"));
         assertFalse(AriaRoles.isLocatable("InlineTextBox"));
         assertFalse(AriaRoles.isLocatable("LabelText"));
+    }
+
+    /**
+     * 注入脚本 {@code codegen-inject.js#roleOf} 的 HTML-AAM 映射契约（评审 P1-6）：
+     * 无隐式角色的 input 类型统一回 {@code generic}，必须在此判定为「不可 role 定位」；
+     * 有确切隐式角色的类型（range/number/search）必须能映射到真实 AriaRole 常量，否则产物编译不过。
+     */
+    @Test
+    public void inputTypeFallbackRolesAlignWithPlaywrightEngine() {
+        assertFalse("hidden/file/color/date 的 generic 必须回退 CSS",
+                AriaRoles.isLocatable("generic"));
+        assertFalse(AriaRoles.isLocatable("none"));
+        assertEquals("SLIDER", AriaRoles.ariaConstant("slider"));
+        assertEquals("SPINBUTTON", AriaRoles.ariaConstant("spinbutton"));
+        assertEquals("SEARCHBOX", AriaRoles.ariaConstant("searchbox"));
+        assertTrue(AriaRoles.isLocatable("slider"));
+        assertTrue(AriaRoles.isLocatable("spinbutton"));
+        assertTrue(AriaRoles.isLocatable("searchbox"));
+        assertEquals("BUTTON", AriaRoles.ariaConstant("button"));
     }
 
     @Test

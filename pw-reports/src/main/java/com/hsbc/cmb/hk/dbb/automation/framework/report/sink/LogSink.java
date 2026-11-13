@@ -27,10 +27,10 @@ public final class LogSink implements ReportSink {
             case CaseFinishedEvent e -> {
                 String result = e.outcome().getResult() == null ? "UNKNOWN" : e.outcome().getResult().name();
                 if (e.outcome().getResult() != null && e.outcome().getResult().isFailure()) {
-                    log.warn("[report] case FAILED: {} ({}) — {}",
+                    log.warn("[report] case FAILED: {} ({}) - {}",
                             e.outcome().getOutcomeId(), e.outcome().getName(), result);
                 } else {
-                    log.debug("[report] case finished: {} — {}", e.outcome().getOutcomeId(), result);
+                    log.debug("[report] case finished: {} - {}", e.outcome().getOutcomeId(), result);
                 }
             }
             case RunFinishedEvent e -> log.info("[report] run finished: {} outcome(s)", e.outcomes().size());

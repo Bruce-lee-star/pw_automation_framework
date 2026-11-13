@@ -207,6 +207,23 @@ public class RoleElementBinder {
                 }} 
             }} } } } } 
 
+            // ---- scope 父容器下钻 + visible 可见性过滤（在 frame 包裹之前构造最内层定位器）----
+            // scope：page.locator(scope).locator(child)（收敛到指定父容器，避免跨容器同名歧义）；
+            // visible：Locator.filter(visible)（浏览器层判定，识别所有祖先隐藏，等价于 ElementVisibility 宽松档）。
+            final String scopeSel = a.scope();
+            if (scopeSel != null && !scopeSel.isEmpty()) {
+                final Supplier<Locator> baseForScope = supplier;
+                desc = desc + " >scope(" + scopeSel + ")";
+                supplier = () -> self.getPage().locator(scopeSel).locator(baseForScope.get());
+            }
+            final RoleElement.State visibleState = a.visible();
+            if (visibleState != RoleElement.State.ANY) {
+                final Supplier<Locator> baseForVisible = supplier;
+                desc = desc + (visibleState == RoleElement.State.YES ? " :visible" : " :hidden");
+                supplier = () -> baseForVisible.get()
+                        .filter(new Locator.FilterOptions().setVisible(visibleState == RoleElement.State.YES));
+            }
+
             // 对齐 page.pause() 的 frameLocator 录制：元素位于 iframe 内时，把底层 Locator 依次用
             // page.frameLocator(seg).locator(...) 包裹（自顶向下逐层下钻），否则在主框架上执行会找不到元素。
             String[] frames = a.frame();

@@ -93,7 +93,7 @@ public class PageContextStateOwnershipRaceTest {
     }
 
     @Test(timeout = 180_000)
-    // @DisplayName: "CT2-03：两线程同时首次访问同一 BasePage → 每轮恰有一线程被归属守卫拒绝"
+    // @DisplayName: "CT2-03：两线程同时首次访问同一 BasePage -> 每轮恰有一线程被归属守卫拒绝"
     public void simultaneousFirstAccessHasExactlyOneOwner() throws Exception {
         Page page = proxy(Page.class);
         BrowserContext ctx = proxy(BrowserContext.class);

@@ -21,8 +21,13 @@ public interface LocatorCounter {
     /**
      * 返回给定 CSS 选择器在当前页面匹配的元素个数。
      *
+     * <p><b>三态语义</b>：{@code 0} = 当前无命中（元素未渲染 / 选择器写错，<b>不是</b>唯一）；
+     * {@code 1} = 唯一；{@code >1} = 需父级嵌套降级；{@code -1} = <b>不可判定</b>
+     * （选择器非法、框架异常、导航中等）。调用方只把 {@code == 1} 当作唯一，
+     * 0 与 -1 一律跳过——「查不到」不得等价于「正确」。
+     *
      * @param cssSelector 待校验的 CSS 定位器
-     * @return 匹配个数（0 表示不存在 / 1 表示唯一 / &gt;1 表示需父级嵌套降级）
+     * @return 匹配个数；{@code -1} 表示不可判定
      */
     int count(String cssSelector);
 
@@ -34,13 +39,34 @@ public interface LocatorCounter {
      * （如 {@code <select>} 的 popupButton、只在显式 {@code role="generic"} 时才成立的 generic）存在差异。
      * 用真实引擎计数复核，才能保证产出「能编译且跑得通」的 {@code @RoleElement}。
      *
-     * <p>默认返回 1（视为唯一可用）：纯 CSS 桩实现无需改动，也让"校验不可用"不致阻断拾取。
+     * <p><b>三态语义与 {@link #count} 完全一致</b>：{@code 1} = 唯一；{@code 0} = 引擎侧不成立；
+     * {@code >1} = 运行期 strict violation；{@code -1} = <b>不可判定</b>。
+     *
+     * <p>默认返回 {@code -1}（不可判定）而非 {@code 1}：纯 CSS 桩实现无需改动，
+     * 且 {@code RoleVerificationPolicy.keepRole} 对 {@code hits<0} 同样按"放行"处理，
+     * 所以不会阻断拾取——但必须<b>如实</b>告诉调用方"这次复核没跑成"，
+     * 绝不能把"不确定"伪装成"确认唯一"（评审 P0-2 的同类问题）。
      *
      * @param role 角色（任意大小写/连字符形式，实现方需自行归一化到 {@code AriaRole}）
      * @param name 可访问名（与生成代码一致，按 {@code exact=true} 匹配）
      */
     default int countByRole(String role, String name) {
-        return 1;
+        return -1;
+    }
+
+    /**
+     * 返回按<b>可见文本</b>匹配的元素个数（{@code getByText(text, exact=true)}），
+     * 用于校验「文本语义定位」是否唯一。
+     *
+     * <p>这是生成 {@code @RoleElement(key=...)}（role 缺省、纯文本策略）的唯一依据：
+     * 文本定位不做唯一性校验的话，一句通用文案（"Continue"/"Submit"）会同时命中多个元素，
+     * 运行期 strict mode 直接失败。故只有 {@code == 1} 才允许生成 key-only 定位器。
+     *
+     * <p>默认返回 {@code -1}（<b>不可判定</b>）：纯 CSS 桩实现无需改动，且调用方只信 {@code == 1}，
+     * "不可判定"不会被误当成唯一。
+     */
+    default int countByText(String text) {
+        return -1;
     }
 
     /**

@@ -5,10 +5,15 @@ import com.hsbc.cmb.hk.dbb.automation.framework.common.config.ConfigReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -32,8 +37,9 @@ import java.util.regex.PatternSyntaxException;
  *   <tr><td>{@code pw.report.push.url}</td><td>空</td><td>非空即启用推送（不再需要单独的 enabled）</td></tr>
  * </table>
  *
- * <p>其余两项<b>通常不用动</b>，只在特殊场景覆盖：{@code pw.report.scrub.extra-patterns}
- * （补脱敏规则）、{@code pw.report.limits}（限额档位）。</p>
+ * <p>其余三项<b>通常不用动</b>，只在特殊场景覆盖：{@code pw.report.scrub.extra-patterns}
+ * （补脱敏规则）、{@code pw.report.limits}（限额档位）、{@code pw.report.publish.name}
+ * （Jenkins publishHTML 的 reportName，默认 {@code Test Report}）。</p>
  *
  * <p>历史兼容：旧的 {@code push.enabled} / {@code history.enabled} / {@code screenshot.mode}
  * / {@code max-evidence-lines} 等平铺旋钮已收敛为上述形态——旧键被<b>忽略</b>而非报错
@@ -78,7 +84,7 @@ public final class PwReportsConfig {
             }
             String[] parts = raw.split(",");
             if (parts.length > 3) {
-                log.warn("pw.report.limits: expected up to 3 values 'lines,bytes,apis' but got {} — using default {}",
+                log.warn("pw.report.limits: expected up to 3 values 'lines,bytes,apis' but got {} - using default {}",
                         raw, DEFAULT);
                 return DEFAULT;
             }
@@ -92,14 +98,14 @@ public final class PwReportsConfig {
                 try {
                     vals[i] = Integer.parseInt(t);
                 } catch (NumberFormatException e) {
-                    log.warn("pw.report.limits: invalid number '{}' — using default {}", raw, DEFAULT);
+                    log.warn("pw.report.limits: invalid number '{}' - using default {}", raw, DEFAULT);
                     return DEFAULT;
                 }
             }
             try {
                 return new Limits(vals[0], vals[1], vals[2]);
             } catch (IllegalArgumentException e) {
-                log.warn("pw.report.limits: {} (must be positive) — using default {}", raw, DEFAULT);
+                log.warn("pw.report.limits: {} (must be positive) - using default {}", raw, DEFAULT);
                 return DEFAULT;
             }
         }
@@ -214,19 +220,50 @@ public final class PwReportsConfig {
     // ---------------------------------------------------------------- hosted base url
 
     /**
-     * 报告托管基准 URL（可选）——CI 把报告固定托管到某域名时使用。
-     * 非空时，渲染器会在每个 HTML 页 {@code <head>} 注入 {@code <base href>}，使页内相对链接
-     * （index.html / feature-*.html / 用例页 / 截图）解析为绝对地址；值被规范化成以 {@code /} 结尾。
+     * 报告托管基准 URL：CI（Jenkins）环境<b>自动</b>由构建信息推导，本地返回空串（渲染为相对链接 /
+     * {@code file://} 链接），因此本地与 CI 都<b>不需要额外配置</b>。
      *
-     * <p>对应属性 {@code pw.report.base.url} / 环境变量 {@code PW_REPORT_BASE_URL}。</p>
+     * <p>推导规则：Jenkins 通过 {@code publishHTML}（HTML Publisher）把报告发布到
+     * {@code BUILD_URL/<reportName>/}；{@code reportName} 取自配置项
+     * {@code pw.report.publish.name}（环境变量 {@code PW_REPORT_PUBLISH_NAME}），默认
+     * {@code Test Report}（URL 段编码为 {@code Test%20Report}），故基准为
+     * {@code https://jenkins.example/job/regression/123/Test%20Report/}。</p>
+     *
+     * <p>非空时，渲染器会在每个 HTML 页 {@code <head>} 注入 {@code <base href>}，使页内相对链接
+     * （index.html / feature-*.html / 用例页 / 截图）解析为绝对地址；值被规范化成以 {@code /} 结尾。</p>
      */
     public static String baseUrl() {
-        String raw = str("base.url", null);
-        if (raw == null || raw.isBlank()) {
+        return baseUrl(System.getenv());
+    }
+
+    /** 测试 / 嵌入式重载：注入环境变量映射（生产传 {@link System#getenv()}）。 */
+    public static String baseUrl(Map<String, String> env) {
+        if (env == null) {
             return "";
         }
-        raw = raw.trim();
-        return raw.endsWith("/") ? raw : raw + "/";
+        String buildUrl = firstNonBlank(env.get("BUILD_URL"));
+        if (buildUrl == null) {
+            return "";
+        }
+        String base = buildUrl.endsWith("/") ? buildUrl : buildUrl + "/";
+        String reportName = firstNonBlank(env.get("PW_REPORT_PUBLISH_NAME"),
+                ConfigReader.resolve(ConfigRegistry.REPORT_PUBLISH_NAME.key(),
+                        ConfigRegistry.REPORT_PUBLISH_NAME.defaultValue()));
+        return base + encodeSegment(reportName) + "/";
+    }
+
+    /** URL 路径段编码：空格编码为 {@code %20}（Jenkins publishHTML 的 reportName 段）。 */
+    private static String encodeSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v.trim();
+            }
+        }
+        return null;
     }
 
     /**
@@ -238,6 +275,28 @@ public final class PwReportsConfig {
      */
     public static String traceViewerBaseUrl() {
         return str("trace.viewer.base.url", "https://trace.playwright.dev");
+    }
+
+    /**
+     * 报告展示时区（默认 JVM 时区）。
+     *
+     * <p>对应属性 {@code pw.report.timezone} / 环境变量 {@code PW_REPORT_TIMEZONE}，
+     * 例如 {@code Asia/Shanghai}、{@code +08:00}。报告里的 Generated / Started / Ended
+     * 统一按该时区渲染并带 {@code (UTC+08:00)} 后缀——CI（常为 UTC）与本机看同一份报告时
+     * 口径一致，不会出现"差 8 小时"。非法值回退 JVM 默认时区并告警。</p>
+     */
+    public static ZoneId reportZone() {
+        String raw = str("timezone", "");
+        if (raw.isEmpty()) {
+            return ZoneId.systemDefault();
+        }
+        try {
+            return ZoneId.of(raw);
+        } catch (DateTimeException e) {
+            log.warn("invalid pw.report.timezone '{}', falling back to JVM default {}",
+                    raw, ZoneId.systemDefault());
+            return ZoneId.systemDefault();
+        }
     }
 
 

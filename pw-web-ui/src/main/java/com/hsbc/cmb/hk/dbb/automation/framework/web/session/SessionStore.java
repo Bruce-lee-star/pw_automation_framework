@@ -443,7 +443,7 @@ final class SessionStore {
         }
         if (!ConcurrencyGate.isEnabled() && GATE_DISABLED_NOTICE.compareAndSet(false, true)) {
             LOGGER.debug("[SessionStore] same-sessionKey concurrency gate is NOT enabled ({} = auto while running "
-                            + "serially) — no in-process mutual exclusion for this session; concurrent logins of the "
+                            + "serially) - no in-process mutual exclusion for this session; concurrent logins of the "
                             + "same identity from other processes / mobile are NOT protected. If a session drops "
                             + "mid-run, rule out external concurrent use of the same identity first.",
                     WebFrameworkConfig.CONCURRENCY_PARTITION_ENABLED.getKey());
@@ -668,7 +668,7 @@ final class SessionStore {
         if (reusePersistedSession(sessionKey)) {
             return true;
         }
-        LOGGER.warn("Session file exists but unusable for: {} — will login", sessionKey);
+        LOGGER.warn("Session file exists but unusable for: {} - will login", sessionKey);
 
         LoginGuard guard = acquireOrAwait(sessionKey);
         if (guard == null) {
@@ -687,7 +687,7 @@ final class SessionStore {
             return true;
         }
         loginGuards.remove(sessionKey, guard);
-        LOGGER.warn("Single-flight leader did not produce a usable session for {} — this thread will login", sessionKey);
+        LOGGER.warn("Single-flight leader did not produce a usable session for {} - this thread will login", sessionKey);
         return false;
     }
 
@@ -720,7 +720,7 @@ final class SessionStore {
             return true;
         }
         loginGuards.remove(sessionKey, guard);
-        LOGGER.warn("Single-flight leader did not produce a usable session for {} — this thread will login", sessionKey);
+        LOGGER.warn("Single-flight leader did not produce a usable session for {} - this thread will login", sessionKey);
         // leader 已结束但未产出可用态：本线程再尝试复用一次（完成守卫），否则执行登录
         if (hasUsableSession(sessionKey) && reusePersistedSession(sessionKey)) {
             completeLoginGuard(sessionKey, true);

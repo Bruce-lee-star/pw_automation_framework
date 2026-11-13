@@ -35,8 +35,17 @@
       "type": "string",
       "enum": ["SUCCESS", "FAILURE", "ERROR", "SKIPPED", "PENDING", "UNDEFINED", "IGNORED", "UNKNOWN"]
     },
-    "startTime": { "type": ["string", "null"], "description": "ISO-8601 offset date-time" },
+    "startTime": { "type": ["string", "null"], "description": "ISO-8601 offset date-time (last execution: overwritten by rerun rounds)" },
     "endTime": { "type": ["string", "null"], "description": "ISO-8601 offset date-time" },
+    "firstStartTime": {
+      "type": ["string", "null"],
+      "description": "additive: ISO-8601 offset date-time of the FIRST execution; preserved across Surefire rerunFailingTestsCount rounds so the run window Started does not degrade to the last round. Falls back to startTime when absent (old JSON)."
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "additive: execution count for this case (1 = never rerun). Absent/old JSON means 1."
+    },
     "duration": { "type": "integer", "minimum": 0, "description": "Milliseconds (Serenity 4.3.4 unit)" },
     "testSteps": {
       "type": "array",

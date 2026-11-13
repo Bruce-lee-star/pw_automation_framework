@@ -97,7 +97,7 @@ public final class ScenarioDataNamespace {
             //  注意：此处刻意用本类 LOGGER ——
             //  后者会让 `core` 反向依赖 `common`，与既有 `common -> core` 边构成切片循环
             //  （ArchUnit `frameworkSlicesMustBeFreeOfCycles` 已实测报红）。
-            LOGGER.debug("[ScenarioDataNamespace] cleanup registered without a bound scenario (domain={}) — "
+            LOGGER.debug("[ScenarioDataNamespace] cleanup registered without a bound scenario (domain={}) - "
                     + "it will run at this thread's scenario end or at suite-end fallback", key);
         }
     }

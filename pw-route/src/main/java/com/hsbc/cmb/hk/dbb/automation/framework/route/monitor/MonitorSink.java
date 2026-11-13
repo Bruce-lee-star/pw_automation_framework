@@ -215,7 +215,7 @@ public final class MonitorSink {
         }
         try {
             onPurposeMet.accept(spec);
-            LOGGER.debug("[Route] purpose met for '{}' → retire submitted", spec.pattern());
+            LOGGER.debug("[Route] purpose met for '{}' -> retire submitted", spec.pattern());
         } catch (Throwable t) {
             LOGGER.warn("[Route] purpose-met callback failed for '{}': {}", spec.pattern(), DriverErrors.shortMessage(t));
         }
@@ -507,7 +507,7 @@ public final class MonitorSink {
                     + snapshot.bytes().length + " bytes) > max " + assertBodyMaxBytes);
             skippedBodyAssertions.incrementAndGet();
             LOGGER.warn("[Route] monitor body assertion SKIPPED (over body assert limit) "
-                            + "pattern='{}' url='{}' bytes={} max={} — degraded to status/headers only",
+                            + "pattern='{}' url='{}' bytes={} max={} - degraded to status/headers only",
                     spec.pattern(), exchange.url(), snapshot.bytes().length, assertBodyMaxBytes);
             finishWithoutBodyAssertion(exchange);
             return;
@@ -578,7 +578,7 @@ public final class MonitorSink {
     /**
      * <b>到达即读</b>（业务线程 main drain 收尾调用）：对"有 body 断言、响应已到达、未结算"的 exchange，
      * 就地读 body 成快照存入 exchange 并释放句柄——body 断言随后在 {@link #settleBodyAssertionNow}
-     * 消费快照而非活句柄，消除"持有句柄→延迟读取"的驱逐窗口（对齐《网络API分层指南》"立即读、自己存"）。
+     * 消费快照而非活句柄，消除"持有句柄->延迟读取"的驱逐窗口（对齐《网络API分层指南》"立即读、自己存"）。
      *
      * <p>与本类既有约定一致：<b>只读 body（{@link #takeBodySnapshot}），不在本方法跑断言</b>；
      * body() 是协议调用，故必须由业务线程调用（{@code RouteRuntimeImpl.drainMainThreadActions} 收尾）。
@@ -688,7 +688,7 @@ public final class MonitorSink {
                     // 需求为「monitor 在配置时间内没监控到 API 即停止监控、不报错」。规则生命周期上限
                     // 由 RouteRuntimeImpl.schedulePurposeDeadline 到点退役（retireByPurpose），此处只清观测。
                     if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("[Route] monitor timed out (no response captured within {}ms) — "
+                        LOGGER.debug("[Route] monitor timed out (no response captured within {}ms) - "
                                 + "stopping observation, not reported as failure: pattern='{}' url='{}'",
                                 timeoutMs, exchange.pattern(), exchange.url());
                     }
@@ -819,7 +819,7 @@ public final class MonitorSink {
                     exchange.markTimedOut();
                     // 同 drain()：监控超时仅停止观测，不进失败队列、不报错（规则退役由调度器负责）。
                     if (LOGGER.isDebugEnabled()) {
-                        LOGGER.debug("[Route] monitor timed out (no response captured within {}ms) — "
+                        LOGGER.debug("[Route] monitor timed out (no response captured within {}ms) - "
                                 + "stopping observation, not reported as failure: pattern='{}' url='{}'",
                                 timeoutMs, exchange.pattern(), exchange.url());
                     }

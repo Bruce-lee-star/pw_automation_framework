@@ -214,7 +214,7 @@ public class MonitorSinkAssertionSettlementTest {
 
     @Test
     public void concurrentAssertionsAreNeverDropped() throws Exception {
-        // 守卫"假绿"回归：同步化消除了"IO 队列满 → 断言被静默丢弃（rejectedBodyAssertions）"。
+        // 守卫"假绿"回归：同步化消除了"IO 队列满 -> 断言被静默丢弃（rejectedBodyAssertions）"。
         // N 路并发失败断言必须【全部】结算，任何一条丢失都意味着断言未执行而场景仍绿。
         ApiSpec spec = ApiSpec.builder("/api/conc", RouteCapability.MONITOR)
                 .expectStatus(200)

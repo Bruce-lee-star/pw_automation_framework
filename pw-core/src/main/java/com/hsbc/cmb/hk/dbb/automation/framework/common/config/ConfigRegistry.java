@@ -102,7 +102,7 @@ public enum ConfigRegistry {
     ),
     REPORT_TEST_FRAMEWORK(
         "pw.report.test.framework",
-        "Cucumber · JUnit",
+        "Cucumber . JUnit",
         "报告中展示的测试框架"
     ),
     REPORT_TARGET(
@@ -114,6 +114,11 @@ public enum ConfigRegistry {
         "pw.report.render.timeout.seconds",
         "300",
         "报告渲染超时（秒）"
+    ),
+    REPORT_PUBLISH_NAME(
+        "pw.report.publish.name",
+        "Test Report",
+        "Jenkins publishHTML 的 reportName（用于推导报告托管 URL）"
     ),
     CONSOLE_REPORT_ENABLED(
         "playwright.console.report.enabled",
@@ -621,11 +626,6 @@ public enum ConfigRegistry {
         "12000",
         "全页截图最大滚动高度（像素），<=0 表示不限制"
     ),
-    WEB_FRAMEWORK_LOGGING(
-        "framework.logging",
-        "VERBOSE",
-        "[deprecated] 旧报告动作录制设置；请改用 framework.recording.enabled"
-    ),
     FRAMEWORK_RECORDING_ENABLED(
         "framework.recording.enabled",
         "true",
@@ -651,7 +651,7 @@ public enum ConfigRegistry {
     WEB_FRAMEWORK_PLAYWRIGHT_HANG_WATCHDOG_INTERVAL_MS(
         "framework.playwright.hang.watchdog.interval.ms",
         "60000",
-        "卡住诊断看门狗采样间隔（毫秒，≤0 关闭）。用例运行超过该时长后，每间隔打印一次场景线程栈 + 其它线程概览，用于定位无日志的阻塞点"
+        "卡住诊断看门狗采样间隔（毫秒，<=0 关闭）。用例运行超过该时长后，每间隔打印一次场景线程栈 + 其它线程概览，用于定位无日志的阻塞点"
     ),
 
 
@@ -1235,7 +1235,7 @@ public enum ConfigRegistry {
             if (!seen.add(c.key)) {
                 throw new IllegalStateException(
                         "ConfigRegistry 注册表存在重复配置键: '" + c.key + "'"
-                                + " —— 新增配置键前请先查重，避免键名冲突（C-6 / M-2）");
+                                + " -- 新增配置键前请先查重，避免键名冲突（C-6 / M-2）");
             }
         }
     }

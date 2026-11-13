@@ -32,7 +32,7 @@ public class ShutdownCoordinatorFailureCountTest {
 
         ShutdownCoordinator.recordFailure("test/no-signal-guard", new IllegalStateException("simulated cleanup failure"));
 
-        assertEquals("清理失败必须递增计数 —— 否则『泄漏』只能靠人读日志，CI 无法兜住", before + 1, ShutdownCoordinator.getFailureCount());
+        assertEquals("清理失败必须递增计数 -- 否则『泄漏』只能靠人读日志，CI 无法兜住", before + 1, ShutdownCoordinator.getFailureCount());
     }
 
     @Test

@@ -310,7 +310,7 @@ public final class RouteDispatcher {
      * 单次命中的耗时上下文：随派发链向下传递（DELAY → MODIFY → MOCK/放行），
      * 最终由 {@link #reportOutcome} 写成证据里的 {@code elapsed} / {@code delay} 两行。
      *
-     * <p>起点是<b>进入派发</b>（含 claim、匹配、证据构造），所以 {@code elapsed} 是"浏览器请求 → 框架动作落地"
+     * <p>起点是<b>进入派发</b>（含 claim、匹配、证据构造），所以 {@code elapsed} 是"浏览器请求 -> 框架动作落地"
      * 的实际停顿；{@code delay} 的 {@code actual} 从"投递调度之前"起算，因此<b>包含调度池排队</b> ——
      * 这是判断"延迟不准"是网络还是调度饱和的唯一直接证据（配合 {@code RouteDelayScheduler.rejectedCount()}）。</p>
      */
@@ -336,7 +336,7 @@ public final class RouteDispatcher {
 
         /** 耗时行（始终有值）。 */
         String elapsedLine() {
-            return "elapsed   : " + elapsedMs() + "ms (route hit → applied)";
+            return "elapsed   : " + elapsedMs() + "ms (route hit -> applied)";
         }
 
         /** 延迟实测行；非 DELAY 命中返回 {@code null}（{@code detailWith} 会跳过空行）。 */

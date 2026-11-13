@@ -16,21 +16,19 @@ import static org.junit.Assert.assertNotSame;
  */
 public class PageRecorderTest {
 
-    private String prevLogging;
+    private static final String RECORDING_KEY = "framework.recording.enabled";
+    private String prevRecording;
 
     @Before
     public void setUp() {
-        prevLogging = System.getProperty("framework.logging");
-        System.setProperty("framework.logging", "VERBOSE"); // 开启录制开关，使 per-page 测试数据被写入
+        prevRecording = System.getProperty(RECORDING_KEY);
+        System.setProperty(RECORDING_KEY, "true"); // 开启录制开关，使 per-page 测试数据被写入
     }
 
     @After
     public void tearDown() {
-        if (prevLogging == null) {
-            System.clearProperty("framework.logging");
-        } else {
-            System.setProperty("framework.logging", prevLogging);
-        }
+        // 显式恢复默认值：Serenity 配置快照会让 clearProperty 无法回落到默认值
+        System.setProperty(RECORDING_KEY, prevRecording == null ? "true" : prevRecording);
     }
 
     /** 浏览器无关的 fake BasePage：仅作真实 BasePage 子类（无浏览器初始化）。 */

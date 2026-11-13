@@ -32,6 +32,9 @@ import java.util.Set;
  * @param origin               请求归属三元组（所属 Page / Frame / 主文档导航代次）；
  *                             不可归属时为 {@link RequestOriginView#UNKNOWN}。
  *                             注意：owner/frame id 只在本次 JVM 运行内稳定，不可跨进程持久化
+ * @param stage                采集生命周期阶段；经业务 SPI 返回的记录恒为
+ *                             {@link CaptureStage#BODY_MATERIALIZED}
+ * @param bodyUnavailableReason body 为空/未物化的原因（固定英文文案）；null = 无异常
  */
 public record CapturedApiCallView(
         String pattern,
@@ -49,7 +52,26 @@ public record CapturedApiCallView(
         Set<String> channels,
         String contentType,
         byte[] responseBodyBytes,
-        RequestOriginView origin) {
+        RequestOriginView origin,
+        CaptureStage stage,
+        String bodyUnavailableReason) {
+
+    /**
+     * 兼容构造（旧 16 参签名）：测试夹具与非采集路径沿用"已完成"阶段，业务只读过滤不会误伤。
+     */
+    public CapturedApiCallView(
+            String pattern, String method, String url,
+            Map<String, String> requestHeaders, String requestBodyPreview,
+            Integer responseStatus, Map<String, String> responseHeaders,
+            String responseBody, boolean responseBodyTruncated,
+            long durationMs, boolean timedOut, long recordedAtMillis,
+            Set<String> channels, String contentType, byte[] responseBodyBytes,
+            RequestOriginView origin) {
+        this(pattern, method, url, requestHeaders, requestBodyPreview, responseStatus, responseHeaders,
+                responseBody, responseBodyTruncated, durationMs, timedOut, recordedAtMillis,
+                channels, contentType, responseBodyBytes, origin,
+                CaptureStage.BODY_MATERIALIZED, null);
+    }
 
     /**
      * 紧凑构造：对可变集合做防御性拷贝并包成不可修改视图。
@@ -68,6 +90,8 @@ public record CapturedApiCallView(
                 : Collections.unmodifiableSet(new LinkedHashSet<>(channels));
         // 数组同样防御性拷贝：不拷贝会被静态分析判为暴露内部表示（EI_EXPOSE_REP / REP2）。
         responseBodyBytes = responseBodyBytes == null ? null : responseBodyBytes.clone();
+        // null 兜底：兼容构造显式传已完成阶段，全参构造也要防止 null 让业务只读过滤失效。
+        stage = stage == null ? CaptureStage.BODY_MATERIALIZED : stage;
     }
 
     /** 原始响应体字节的<b>副本</b>（仅开启 captureBody 时有值；文本型与二进制型均有值）。 */
@@ -95,6 +119,11 @@ public record CapturedApiCallView(
     @Override
     public Set<String> channels() {
         return Collections.unmodifiableSet(channels);
+    }
+
+    /** 业务只读契约：经 SPI 返回的记录恒为 {@link CaptureStage#BODY_MATERIALIZED}。 */
+    public boolean isBodyMaterialized() {
+        return stage != null && stage.isBusinessVisible();
     }
 
     /** 业务侧常用判据：该记录是否由指定渠道产生（渠道名见类注释）。 */

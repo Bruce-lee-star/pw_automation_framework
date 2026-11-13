@@ -200,7 +200,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
             int originalTimeout = timeout;
             timeout = Math.max(timeout, 30000);  // 最小 30s
             if (timeout < 45000)  {timeout = (int)(originalTimeout * 1.5);} 
-            logger.debug("[Browser Init] Firefox detected: auto-adjusting launch timeout {}ms → {}ms", originalTimeout, timeout);
+            logger.debug("[Browser Init] Firefox detected: auto-adjusting launch timeout {}ms -> {}ms", originalTimeout, timeout);
         }
 
         BrowserType.LaunchOptions launchOptions = new BrowserType.LaunchOptions()
@@ -272,6 +272,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
             System.setProperty("pw.report.browsers", merged);
         } catch (Throwable ignored) {
             // 报告环境信息为可观测性增强，缺失不影响执行
+            logger.debug("recordBrowserForReport failed; ignored (non-critical)", ignored);
         }
     }
 
@@ -354,7 +355,7 @@ public final class BrowserStartupImpl implements BrowserStartup {
         String executablePath = PlaywrightManager.config().getBrowserExecutablePath();
         if (executablePath != null && !executablePath.trim().isEmpty()) {
             launchOptions.setExecutablePath(Paths.get(executablePath.trim()));
-            logger.info("Browser executable path: {}", executablePath);  // 保留浏览器路径日志，这很重要
+            logger.info("Browser executable path: {}", executablePath);  // keep this log: browser path is key diagnostic evidence
         }
     }
 

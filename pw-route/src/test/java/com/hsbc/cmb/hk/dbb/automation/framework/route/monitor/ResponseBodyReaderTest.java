@@ -52,7 +52,7 @@ public class ResponseBodyReaderTest {
         when(r.body()).thenReturn(new byte[0]); // 合法空体，未抛错
 
         ResponseBodyReader.Result result = new ResponseBodyReader().read(r);
-        assertFalse("未抛错（即便空体）不得判失败——保持'只有抛错才 fail-open'口径", result.failed());
+        assertFalse("未抛错（即便空体）不得判失败--保持'只有抛错才 fail-open'口径", result.failed());
         assertNotNull(result.bytes);
         assertEquals(0, result.bytes.length);
         verify(r, times(1)).body();

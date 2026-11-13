@@ -18,10 +18,21 @@
         if (t === 'button') return 'button';
         if (t === 'a' && e.getAttribute('href')) return 'link';
         if (t === 'input') {
-            var ty = (e.getAttribute('type') || '').toLowerCase();
+            // 按 HTML-AAM 的隐式 role 映射。绝不能一律兜底成 textbox：
+            // hidden/file/color/date 等没有隐式 role，判成 textbox 会生成
+            // @RoleElement(role = TEXTBOX)，而 Playwright 的 getByRole 对它们恒 0 命中（静默失效）。
+            var ty = (e.getAttribute('type') || 'text').toLowerCase();
             if (ty === 'checkbox') return 'checkbox';
             if (ty === 'radio') return 'radio';
-            if (ty === 'submit' || ty === 'button' || ty === 'reset') return 'button';
+            if (ty === 'submit' || ty === 'button' || ty === 'reset' || ty === 'image') return 'button';
+            if (ty === 'range') return 'slider';
+            if (ty === 'number') return 'spinbutton';
+            if (ty === 'search') return 'searchbox';
+            // 无隐式 role（含 hidden）：归为 generic（下游按"无语义角色"回退 CSS）；
+            // hidden 元素同时不在 AX 树里，role 定位永远不成立。
+            if (ty === 'hidden' || ty === 'file' || ty === 'color'
+                    || ty === 'date' || ty === 'time' || ty === 'month'
+                    || ty === 'week' || ty === 'datetime-local') return 'generic';
             return 'textbox';
         }
         if (t === 'textarea') return 'textbox';
@@ -117,8 +128,19 @@
         return String(v).replace(/["\\]/g, function (c) { return '\\' + c; });
     }
     /** 可见性判定：hidden、aria-hidden="true"、display:none / visibility:hidden（含祖先，经计算样式）、
-     * visibility:collapse、opacity:0（含祖先链，不继承需逐级查，限 5 层）、clip 裁零 / clip-path 裁零、
-     * 零尺寸或整体移出视口（响应式/移动端隐藏副本常见）均视为隐藏。 */
+     * visibility:collapse、opacity:0（含祖先链，不继承需逐级查）、clip 裁零 / clip-path 裁零、
+     * 零尺寸或整体移出视口（响应式/移动端隐藏副本常见）均视为隐藏。
+     *
+     * <p><b>祖先链必须逐级查 display / visibility</b>（2026-11-11）：{@code getComputedStyle(child).display}
+     * 返回的是该元素自身的计算值，父级 {@code display:none} 不会传递下来——只看自身会把「藏在
+     * {@code style="display: none;"} 面板里的副本」判成可见。祖先深度上限 10 层（5 层截断会漏判）。
+     *
+     * <p><b>本函数只回答「渲染是否可见」，不等于「应从候选排除」</b>：{@code class="accessibleHidden"} /
+     * {@code .sr-only} 这类元素渲染不可见，但<b>仍在可访问性树里</b>（{@code getByRole} 能命中，往往是唯一的
+     * 可访问名来源）。把「不可见」当成「垃圾副本」去排除，等于丢掉无障碍语义。
+     * 只有「从渲染树剔除 ⇒ 同时从 AX 树剔除」的形态（{@code display:none} / {@code visibility:hidden} /
+     * {@code hidden} 属性 / {@code aria-hidden="true"}）才可以作为排除依据。
+     */
     function isVisible(e) {
         if (!e || e.nodeType !== 1) return false;
         if (e.hidden) return false;
@@ -132,8 +154,9 @@
                 if (cs.clip && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clip.indexOf('rect(0') === 0)) return false;
                 if (cs.clipPath && (/inset\(0%\)/.test(cs.clipPath) || /inset\(50%\)/.test(cs.clipPath) || /circle\(0/.test(cs.clipPath))) return false;
                 var p = e.parentElement, d = 0;
-                while (p && p.nodeType === 1 && d < 5) {
+                while (p && p.nodeType === 1 && d < 10) {
                     var pcs = window.getComputedStyle(p);
+                    if (pcs.display === 'none' || pcs.visibility === 'hidden' || pcs.visibility === 'collapse') return false;
                     if (pcs.opacity === '0' || pcs.opacity === '0.0' || pcs.opacity === '0.00') return false;
                     p = p.parentElement; d++;
                 }
@@ -152,14 +175,24 @@
     }
 
 
-    /** 当前文档中唯一性校验：只统计可见元素（供 id 前缀/包含/组内索引兜底使用）。 */
-    function uniqueSel(sel) {
+    /**
+     * 匹配总数（<b>含隐藏元素</b>）。
+     *
+     * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
+     * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
+     * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配
+     * （2026-11-11：重复面板定位不准的根因）。
+     */
+    function totalCount(sel) {
         try {
-            if (!sel) return false;
-            var nodes = document.querySelectorAll(sel), n = 0;
-            for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
-            return n === 1;
-        } catch (e) { return false; }
+            if (!sel) return 0;
+            return document.querySelectorAll(sel).length;
+        } catch (e) { return 0; }
+    }
+
+    /** 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。 */
+    function uniqueSel(sel) {
+        return totalCount(sel) === 1;
     }
 
 
@@ -284,11 +317,17 @@
         return '';
     }
 
-    /** 唯一或组内索引：候选可见唯一即用；可见不唯一（一组元素）时取组内索引并校验可见唯一，失败返回空串。 */
+    /**
+     * 唯一或组内索引。
+     *
+     * <p>① 全量唯一（含隐藏）直接用；② 否则只要存在「有限个可见匹配」就尝试 {@code :nth-of-type(k)} 收窄，
+     * 再用全量计数复核。② 的下界是 {@code > 0} 而非 {@code > 1}：隐藏面板 + 可见面板各一个同名
+     * "Continue" 时可见计数只有 1（旧逻辑直接放弃 → 退化成长结构路径），组内索引能稳定收窄。
+     */
     function uniqueOrGroup(sel, e) {
         if (uniqueSel(sel)) return sel;
         var cnt = visibleCount(sel);
-        if (cnt > 1 && cnt <= 10) {
+        if (cnt > 0 && cnt <= 10) {
             var g = groupIndexSel(sel, e);
             if (g && uniqueSel(g)) return g;
         }
@@ -391,11 +430,32 @@
         }
         return '';
     }
+    /** 结构链上溯层数上限。深层页面（弹窗套卡片套表格）6 层常不足以覆盖到带 id 的容器。 */
+    var MAX_PATH_DEPTH = 8;
+
+    /**
+     * 结构链里允许的「裸 {@code tag:nth-of-type(n)}」补位层数上限。
+     *
+     * <p>历史策略是「任何一层无锚点即整条作废」（v2.12 收紧），理由是纯 tag 链又长又脆。
+     * 但复杂页面里第 3~5 层常是纯布局 {@code div}（无 id / 无 data-*），整条作废后只能退到
+     * <b>绝对 XPath</b>（全 nth 路径，更脆）或干脆无候选。折中：允许 ≤2 层补位，且整条链
+     * 仍须至少有 1 个锚点——「锚点 + 2 层 nth」远比「绝对路径」可控。
+     */
+    var MAX_FILLER_LAYERS = 2;
+
+    /** 单层兜底段：{@code tag:nth-of-type(k)}（无父级时退化为裸 tag，如 {@code html}）。 */
+    function fallbackSeg(n) {
+        if (!n || !n.tagName) return '';
+        var tag = n.tagName.toLowerCase();
+        return groupIndexSel(tag, n) || tag;
+    }
+
     /**
      * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用）；
-     * 否则结构链逐层上溯——每层只接受稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引），
-     * 任何一层既无锚点也无可用属性段（裸 tag:nth-of-type(n)）时整条链不产出，返回空串
-     * 交给 Java 侧 XPath 兜底（属性优先：稳定属性精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体）。
+     * 否则结构链逐层上溯——每层优先接受稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引），
+     * 无锚点层用 {@code :nth-of-type} 补位（上限 {@link MAX_FILLER_LAYERS} 层）；
+     * 补位超限才返回空串，交给 Java 侧 XPath 兜底（属性优先：稳定属性精确 → 双/三精确 AND →
+     * 含随机值属性 ^=/*=$= 变体）。
      */
     function cssSel(e) {
         if (!e || e.nodeType !== 1) return '';
@@ -409,7 +469,8 @@
         var parts = [];
         var n = e;
         var anchored = false;
-        while (n && n.nodeType === 1 && parts.length < 6) {
+        var filler = 0;
+        while (n && n.nodeType === 1 && parts.length < MAX_PATH_DEPTH) {
             if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); anchored = true; break; }
             if (n.id) {
                 var pf = dynamicIdFallbackSel(n.id);
@@ -417,8 +478,13 @@
             }
             var seg = attrFallbackSel(n);
             if (seg) { parts.unshift(seg); n = n.parentElement; continue; }
-            // 该层既无稳定锚点也无可用属性段：裸 tag:nth-of-type(n) 段不再产出，整条链作废交 XPath。
-            return '';
+            // 该层无稳定锚点也无可用属性段：用 :nth-of-type 补位，超过上限才整条作废。
+            if (filler >= MAX_FILLER_LAYERS) return '';
+            var fs = fallbackSeg(n);
+            if (!fs) return '';
+            parts.unshift(fs);
+            filler++;
+            n = n.parentElement;
         }
         if (!anchored) return '';
         return parts.join(' > ');
@@ -435,9 +501,10 @@
      * 拾取目标归一化：点 <label> / 标签内文本 / 链接内 <span> / 装饰性图标（alt="" 或 aria-hidden）时，
      * 上溯到真正可操作的控件或「带可访问名的语义祖先」。
      *
-     * <p>为什么要归一：<label> 在 Playwright {@code AriaRole} 枚举里没有对应常量，<span>/<div> 只是 generic ——
-     * 直接拾取它们只能生成又长又脆的结构 CSS；归一到控件后即可用 role（radio/checkbox/textbox）+ label 文本
-     * （即 AX 可访问名）定位，产物既短又稳。
+     * <p><b>2026-11-11 定稿规则：拾取对象必须 = 用户实际点击的 DOM 对象。</b>
+     * {@code <label>} 一律保留自身，<b>不再</b>转发到 {@code label.control} / 内部控件——关联控件是另一个
+     * DOM 对象，转发会让产物定位到用户没点的元素（点"用户名"标签却生成 input 定位器）。label 自身带
+     * 可访问名（其文本），命中 NLS 时可走文本语义策略定位。
      *
      * <p>装饰性节点（如 {@code <img alt="" aria-hidden="true">} 信息图标、空 {@code <span>}）：自身无可访问名，
      * 拾取只会产出 {@code role=img} 这类既无名又易碎的定位器。故当<b>被点元素自身无可访问名</b>时，继续上溯到
@@ -452,14 +519,15 @@
         while (n && n.nodeType === 1 && depth < 5) {
             var t = n.tagName ? n.tagName.toLowerCase() : '';
             if (t === 'input' || t === 'select' || t === 'textarea' || t === 'button') return n;
-            if (t === 'label') {
-                var ctrl = n.control || (n.querySelector && n.querySelector('input,select,textarea,button'));
-                if (ctrl) return ctrl;
-            }
+            // 点 <label> 就保留 <label> 本身：绝不转发到 label.control（关联控件是另一个 DOM 对象，
+            // 转发会让拾取对象 != 用户点击对象）。label 自身带可访问名，命中 NLS 可走文本语义策略。
+            if (t === 'label') return n;
             if (t === 'a' && n.getAttribute && n.getAttribute('href')) return n;
             if (n.getAttribute && n.getAttribute('role')) return n;
-            // 仅当被点元素自身无名（装饰/空白）时，上溯到最近「带名」祖先，避免产出 role=img 这类无用定位器
-            if (depth > 0 && !eHasName && (accessibleName(n) || '').trim()) return n;
+            // 2026-11-12：上溯只接受「带稳定 #id 的语义容器」，拒绝无 id 的纯布局容器（content-wrapper / section /
+            // 大段文本 div / span）——它们只是把大段文本包起来，落到这类容器会让产物定位过广。找不到稳定 id 容器
+            // 则保留点击对象本身（precise = 用户实际点击的 DOM 对象）。
+            if (depth > 0 && !eHasName && (accessibleName(n) || '').trim() && n.id && !isDynamicId(n.id)) return n;
             n = n.parentElement;
             depth++;
         }
@@ -544,6 +612,19 @@
         return out;
     }
 
+    /**
+     * 勾选态（评审 N-02）：原生 input 读 .checked；组件库常用的
+     * {@code <div role="checkbox" aria-checked="true">} 没有 .checked 属性，必须回退到 aria-checked，
+     * 否则「已选中项再点一次取消」会被两边都读成 false，产物恒出 check() + 断言恒 true。
+     * aria-checked="mixed" 不算选中。捕获阶段读到的是「点击前」状态，Java 侧据此推导终态。
+     */
+    function checkedStateOf(el) {
+        if (!el) return false;
+        if (typeof el.checked === 'boolean') return el.checked;
+        var aria = el.getAttribute && el.getAttribute('aria-checked');
+        return aria === 'true';
+    }
+
     /** 单个元素的事实快照（Java 侧打分所需原始材料）。 */
     function factsOf(el) {
         if (!el || el.nodeType !== 1) return null;
@@ -559,6 +640,7 @@
             alt: (el.getAttribute && el.getAttribute('alt')) || '',
             title: (el.getAttribute && el.getAttribute('title')) || '',
             value: (typeof el.value === 'string') ? el.value : '',
+            checked: checkedStateOf(el),
             text: normalizedText(el),
             label: labelTextOf(el),
             nth: siblingIndex(el),
@@ -597,17 +679,82 @@
      * <p>只回传 {@code cssSelector}：祖先不需要 role/name/xpath/shadowHosts —— 为每层重复算全量事实
      * 是白付多轮 DOM 遍历。
      */
+    /**
+     * 后代锚点（供 Java 侧拼 {@code 祖先:has(锚点) 目标}）。
+     *
+     * <p>结构相同、文案相同的双胞胎靠祖先自身属性区分不了；但祖先内部通常有唯一子锚点
+     * （面板标题的 {@code data-i18n}、表格行的 {@code data-testid}）。深度取 4、最多 4 个、
+     * 最多访问 200 个节点——账户卡片/分页容器常嵌套 3~4 层，再深收益低而扫描成本线性上升。
+     * 值是否真稳定仍由 Java 侧 {@code SelectorStability} 复核，这里只做形态过滤。
+     */
+    function descendantAnchorsOf(root, maxDepth, maxCount) {
+        var out = [];
+        if (!root || !root.children) return out;
+        var queue = [], visited = 0;
+        for (var i = 0; i < root.children.length; i++) queue.push({ n: root.children[i], d: 1 });
+        while (queue.length && out.length < maxCount && visited < 200) {
+            var cur = queue.shift();
+            var n = cur.n;
+            if (!n || n.nodeType !== 1) continue;
+            visited++;
+            var seg = '';
+            if (n.id && !isDynamicId(n.id)) {
+                seg = '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+            } else {
+                var attrs = stableAttrs(n);
+                for (var j = 0; j < attrs.length; j++) {
+                    if (attrs[j].rand) continue;
+                    seg = '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"]';
+                    break;
+                }
+            }
+            if (seg) out.push(seg);
+            if (cur.d < maxDepth) {
+                for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
+            }
+        }
+        return out;
+    }
+
+    /** 祖先事实（比 factsOf 轻）：供 Java 侧 {@code :has()} 作用域与祖先属性前缀使用。 */
+    function ancestorFacts(n, path) {
+        return {
+            cssSelector: path,
+            id: n.id || '',
+            tag: n.tagName ? n.tagName.toLowerCase() : '',
+            testid: (n.getAttribute && n.getAttribute('data-testid')) || '',
+            attrs: semanticAttrsOf(n, 6),
+            // 深度 6 / 最多 6 个：4 层时「卡片 > 列表 > 行 > 单元格 > 标题」这类行级锚点采不到，
+            // 而 :has() 作用域恰恰依赖这些深层锚点。节点访问上限 200 不变，成本可控。
+            childAnchors: descendantAnchorsOf(n, 6, 6)
+        };
+    }
+
+    /**
+     * 祖先链：从近到远的「从该祖先到目标的完整路径」。
+     *
+     * <p><b>无锚点层改为补位而非整条作废</b>（2026-11-11）：历史上任一层 {@code segOf} 失败即
+     * 返回空数组，复杂页面（中间 2~3 层是纯布局 div）因此<strong>一条祖先候选都产不出</strong>，
+     * 唯一性降级只能落到绝对 XPath。现在该层用 {@code :nth-of-type} 补位，累计超过
+     * {@link MAX_FILLER_LAYERS} 层才停止上溯（<strong>截断而非清空</strong>：已收集的近端路径仍有效）。
+     */
     function ancestorChain(el, maxDepth) {
-        var first = segOf(el);
+        var first = segOf(el) || fallbackSeg(el);
         if (!first) return [];
         var chain = [first], out = [], last = '';
+        var filler = segOf(el) ? 0 : 1;
         var p = el.parentElement, d = 0;
         while (p && p.nodeType === 1) {
             var seg = segOf(p);
-            if (!seg) return [];
+            if (!seg) {
+                if (filler >= MAX_FILLER_LAYERS) break;   // 补位超限：截断，保留已有近端路径
+                seg = fallbackSeg(p);
+                if (!seg) break;
+                filler++;
+            }
             chain.unshift(seg);
             last = chain.join(' > ');
-            if (d < maxDepth) out.push({ cssSelector: last, id: p.id || '' });
+            if (d < maxDepth) out.push(ancestorFacts(p, last));
             p = p.parentElement;
             d++;
         }
@@ -748,6 +895,58 @@
                             coordSkipped: !off2,
                             framePath: framePathOf(),
                             value: ev.target.value, info: infoOf(ev.target) });
+                    } catch (e) {}
+                }, true);
+                // 语义事件（评审 P0-4 最小集）：change 是 select / 文本域 / file 的权威值事件，
+                // 不再依赖 Chromium「select 变更会连带触发 input」这一实现细节。
+                // checkbox / radio 不在此上报：click 已携带 checked，这里只会产生 value="on" 伪数据。
+                window.addEventListener('change', function (ev) {
+                    try {
+                        var el = ev.target;
+                        var kind = (el && el.type ? String(el.type).toLowerCase() : '');
+                        if (kind === 'checkbox' || kind === 'radio') return;
+                        var off3 = topFrameOffset();
+                        var pt3 = off3 ? centerOf(el, off3) : null;
+                        var semantic = 'change';
+                        var values = null;
+                        if (kind === 'file') {
+                            // 安全模型只暴露 C:\fakepath\xxx：这个值落进产物就是「录得出、跑不了」。
+                            // 标记为 file 动作、值留空，由生成侧出 uploadFile("TODO…") 提示人工补资源路径。
+                            semantic = 'file';
+                        } else if (el && el.multiple && el.selectedOptions) {
+                            // 多选 select 的 el.value 只是首项；全量放进 values，生成侧据此提示其余项。
+                            values = Array.prototype.map.call(el.selectedOptions,
+                                function (o) { return o.value; });
+                            semantic = 'multiple';
+                        }
+                        var single = kind === 'file' ? ''
+                            : (values && values.length ? values[0]
+                                : ((typeof el.value === 'string') ? el.value : ''));
+                        window.__codegenEvent({ type: 'fill', semantic: semantic, tag: el && el.tagName,
+                            x: pt3 ? pt3.x : null, y: pt3 ? pt3.y : null,
+                            coordSkipped: !off3, framePath: framePathOf(),
+                            value: single, valueCount: values ? values.length : 1,
+                            info: infoOf(el) });
+                    } catch (e) {}
+                }, true);
+                // 键盘：只有 Enter / Escape / Tab 生成可回放动作，逐字符输入仍由 input 承载，不污染录制。
+                // 修饰键按 Playwright 的 "Control+Enter" 形式拼接，否则 Ctrl+Enter 会退化成普通回车。
+                window.addEventListener('keydown', function (ev) {
+                    try {
+                        var key = (ev.key === 'Enter' || ev.key === 'Escape' || ev.key === 'Tab') ? ev.key : null;
+                        if (!key) return;
+                        var mods = [];
+                        if (ev.ctrlKey) mods.push('Control');
+                        if (ev.metaKey) mods.push('Meta');
+                        if (ev.altKey) mods.push('Alt');
+                        if (ev.shiftKey) mods.push('Shift');
+                        var combo = mods.concat([key]).join('+');
+                        var el2 = ev.target;
+                        var off4 = topFrameOffset();
+                        var pt4 = off4 ? centerOf(el2, off4) : null;
+                        window.__codegenEvent({ type: 'press', value: combo, tag: el2 && el2.tagName,
+                            x: pt4 ? pt4.x : null, y: pt4 ? pt4.y : null,
+                            coordSkipped: !off4, framePath: framePathOf(), info: infoOf(el2) });
                     } catch (e) {}
                 }, true);
             }

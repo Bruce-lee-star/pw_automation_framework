@@ -7,14 +7,15 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /**
- * {@link GuardedDriverCallImpl} 超时文案契约（T5 文案去误导）：FAIL_FAST 超时必须说明
- * "未收到回包（驱动忙 / 客户端共享连接被并发占用）" 并提示 {@code DEBUG=pw:channel} 排查协议层，
- * 不得再用误导性的 "driver unresponsive"。
+ * Timeout message contract for {@link GuardedDriverCallImpl}: FAIL_FAST must state that no
+ * driver reply was received (driver busy / shared client connection under concurrent load)
+ * and point to {@code DEBUG=pw:channel} for protocol-level inspection, without the
+ * misleading legacy phrase "driver unresponsive".
  */
 public class GuardedDriverCallMessageTest {
 
     @Test
-    public void failFastTimeoutMessageIsAccurateChinese() throws Exception {
+    public void failFastTimeoutMessageIsAccurate() throws Exception {
         GuardedDriverCallImpl call = new GuardedDriverCallImpl();
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
@@ -24,9 +25,10 @@ public class GuardedDriverCallMessageTest {
                 }));
 
         String msg = ex.getMessage();
-        assertTrue("应说明未收到回包 + 驱动忙/连接被并发占用: " + msg,
-                msg.contains("未收到回包") && msg.contains("驱动忙"));
-        assertTrue("应提示 DEBUG=pw:channel 排查协议层收发: " + msg, msg.contains("DEBUG=pw:channel"));
-        assertTrue("旧误导文案 driver unresponsive 应已替换: " + msg, !msg.contains("driver unresponsive"));
+        assertTrue("Must state no driver reply + driver busy / concurrent connection use: " + msg,
+                msg.contains("no driver reply") && msg.contains("driver busy"));
+        assertTrue("Must point to DEBUG=pw:channel for protocol inspection: " + msg,
+                msg.contains("DEBUG=pw:channel"));
+        assertTrue("Misleading legacy phrase must be gone: " + msg, !msg.contains("driver unresponsive"));
     }
 }

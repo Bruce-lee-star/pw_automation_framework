@@ -43,11 +43,36 @@ public final class SelectorStability {
      */
     private static final Pattern RADIX_INFIX = Pattern.compile("_R_[A-Za-z0-9]{4,}_");
 
-    /** 纯十六进制（≥8 位且字母数字混合）——打包器 hash 的典型形态。 */
+    /**
+     * 纯十六进制（≥8 位）——打包器 hash 的典型形态。
+     *
+     * <p><b>只看字符集，不要求「数字与字母混排」</b>：hash 的字母段完全可能是纯字母，
+     * 历史实现额外要求 {@code hasDigit && hasLetter}，导致 {@code deadbeef} / {@code feedface} /
+     * {@code cafebabe} 这类<b>最典型</b>的 hash 形态全部漏放——它们会被当作稳定值生成精确选择器
+     * {@code [id="deadbeef"]}，本次能跑、下次构建即失效，正好违背本类存在的目的。
+     *
+     * <p>代价是极少数恰好只由 {@code a}-{@code f} 组成的英文词被顺手判为随机。方向是对的：
+     * 误判只退到<b>部分匹配</b>（定位器仍可用），漏判才会产出必然失效的定位器。
+     */
     private static final Pattern HEX_HASH = Pattern.compile("^[0-9a-f]{8,}$", Pattern.CASE_INSENSITIVE);
 
-    /** 片段级十六进制 hash（≥4 位）：{@code a1b2}、{@code 9f3c} 这类短 hash 片段同样不可用。 */
+    /**
+     * 片段级十六进制 hash（≥4 位）：{@code a1b2}、{@code 9f3c} 这类短 hash 片段同样不可用。
+     *
+     * <p>段级判定比整串更保守：4~7 位同时要求字母数字混排，否则 {@code face} / {@code cafe} /
+     * {@code beef} 这类<b>合法语义词</b>会被误杀（{@code class="card-face"} 的 {@code face} 段仍应可用）。
+     * 纯字母的 4~7 位段信息量不足，交给唯一性校验兜底。
+     */
     private static final Pattern SHORT_HEX = Pattern.compile("^[0-9a-f]{4,}$", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * leet 变体 hex hash：把 {@code o} 当作 {@code 0} 的手写 hash，典型 {@code c0ffee} / {@code d00d}。
+     *
+     * <p><b>必须额外要求至少一位数字</b>：字符集里含 {@code o} 后，{@code coffee} / {@code food} /
+     * {@code face} 这类真实语义词也会匹配该模式，仅凭字符集无法区分。有数字才是"刻意把字母换成数字"
+     * 的 leet 特征；没有数字一律当语义值保留。这样既拦住 {@code c0ffee}，又不会误杀 {@code coffee}。
+     */
+    private static final Pattern LEET_HEX = Pattern.compile("^[0-9a-fo]{6,}$", Pattern.CASE_INSENSITIVE);
 
     /** 纯数字（≥6 位）——自增序号 / 时间戳。 */
     private static final Pattern PURE_DIGITS = Pattern.compile("^\\d{6,}$");
@@ -100,7 +125,19 @@ public final class SelectorStability {
         for (Pattern p : FRAMEWORK_GENERATED) {
             if (p.matcher(v).matches()) return true;
         }
-        if (HEX_HASH.matcher(v).matches() && hasDigit(v) && hasLetter(v)) return true;
+        // 纯 hex（≥8 位）本身就是 hash 特征，不再要求"同时含数字与字母"——见 HEX_HASH 的说明。
+        if (HEX_HASH.matcher(v).matches()) return true;
+        // 4~7 位整值同样可能是短 hash（a1b2 / d00d）：段级早有此规则，整串却漏了，
+        // 导致这种值被当稳定 id 生成 #a1b2。要求字母数字混排以避开 beef / face 这类语义词。
+        if (SHORT_HEX.matcher(v).matches() && hasDigit(v) && hasLetter(v)) return true;
+        if (LEET_HEX.matcher(v).matches() && hasDigit(v)) return true;
+        // 组合值同样要判：「语义前缀 + hash 段」（userName-deadbeef / btn-c0ffee）整串不匹配任何
+        // 整值模式，却是打包器最常见的命名形态。只按段判 hash 特征，不用「任一段随机」——
+        // 后者会把 WP7UAT2_2 里的序号碎片当成随机，误杀合法语义 id。
+        for (Part p : parts(v)) {
+            if (HEX_HASH.matcher(p.text).matches()) return true;
+            if (LEET_HEX.matcher(p.text).matches() && hasDigit(p.text)) return true;
+        }
         return isHighEntropy(v);
     }
 
@@ -126,11 +163,19 @@ public final class SelectorStability {
     /**
      * 稳定前缀（用于 {@code ^=}）：从头开始连续稳定片段拼成的原文片段。
      *
-     * <p>例：{@code mat-input-3} → {@code mat-input}；{@code a3f9c1d2-userName} → 空（首段随机）。
+     * <p>例：{@code mat-input-3} → {@code mat-input}；{@code a3f9c1d2-userName} → 空（首段随机）；
+     * {@code userName-input} → <b>空</b>（整值都稳定，没有前缀可言）。
      *
-     * @return 前缀；不足 {@link #MIN_FRAGMENT_LENGTH} 位或等于整值时返回空串
+     * <p><b>为什么整值稳定必须返回空</b>：{@code [attr^="whole"]} 与 {@code [attr="whole"]} 等价，
+     * 前者只是后者的退化写法，没有任何收益。而整值稳定时 {@code CodegenScorer#addAttribute} 本就走
+     * 精确 {@code =} 候选（更强、更可读）；前缀匹配是为「值含随机尾段」准备的，不该在此出现。
+     * 历史实现在此分支返回整串、与下方 {@code @return} 契约自相矛盾，只能靠调用方
+     * {@code CodegenScorer#usable} 兜住，属于把不变量外包给调用方——这里直接收敛到本方法内。
+     *
+     * @return 前缀；不足 {@link #MIN_FRAGMENT_LENGTH} 位、或连续稳定片段已覆盖整值时返回空串
      */
     public static String stablePrefix(String value) {
+        if (value == null || value.isBlank()) return "";
         List<Part> ps = parts(value);
         int end = -1;
         for (Part p : ps) {
@@ -138,7 +183,9 @@ public final class SelectorStability {
             end = p.end;
         }
         if (end <= 0) return "";
-        return trimTrailingSeparators(value.substring(0, end));
+        String prefix = trimTrailingSeparators(value.substring(0, end));
+        if (prefix.length() < MIN_FRAGMENT_LENGTH || prefix.equals(value.trim())) return "";
+        return prefix;
     }
 
     /**
@@ -246,7 +293,11 @@ public final class SelectorStability {
         if (text.isEmpty()) return true;
         if (PURE_DIGITS.matcher(text).matches()) return true;
         if (text.length() < MIN_FRAGMENT_LENGTH) return true;   // "1"/"x9" 之类的碎片
+        // 段级：≥8 位纯 hex 直接判随机（deadbeef）；4~7 位仍要求字母数字混排，
+        // 避免误杀 face / cafe / beef 这类合法语义词（见 SHORT_HEX 的说明）。
+        if (HEX_HASH.matcher(text).matches()) return true;
         if (SHORT_HEX.matcher(text).matches() && hasDigit(text) && hasLetter(text)) return true;
+        if (LEET_HEX.matcher(text).matches() && hasDigit(text)) return true;
         if (isHighEntropy(text)) return true;
         for (Pattern p : FRAMEWORK_GENERATED) {
             if (p.matcher(text).matches()) return true;

@@ -299,7 +299,7 @@ public final class RouteAction {
         }
         if (!stripped.isEmpty()) {
             // 可观测：说明"这三个头由框架接管"，避免排障时误以为头被莫名吞掉
-            LOGGER.debug("[Route] stripped body-encoding headers {} — Playwright recomputes them for the delivered body",
+            LOGGER.debug("[Route] stripped body-encoding headers {} - Playwright recomputes them for the delivered body",
                     stripped);
         }
         return out;
@@ -350,7 +350,7 @@ public final class RouteAction {
     public static boolean fallback(RouteClaim claim, Route route) {
         if (claim != null && claim.isIssued()) {
             LOGGER.warn("[Route] fallback suppressed for url='{}': business request already issued upstream "
-                    + "(issued claim) — suppressing to prevent duplicate send", route.request().url());
+                    + "(issued claim) - suppressing to prevent duplicate send", route.request().url());
             return false;
         }
         return fallback(route);

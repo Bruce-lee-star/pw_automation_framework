@@ -4,7 +4,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 测试替身（真实实现类，满足"每接口≥2实现：生产 GuardedDriverCallImpl + 测试替身"验收）。
+ * 测试替身（真实实现类，满足"每接口>=2实现：生产 GuardedDriverCallImpl + 测试替身"验收）。
  *
  * <p>直接执行 action（无 daemon 守护），记录调用次数，按 {@link GuardedDriverCall.OnTimeout} 策略
  * 模拟超时等价语义（清理侧异常返回 {@code null}，注册侧异常抛出）—— 用于验证工厂/SPI 换实现全链路生效。

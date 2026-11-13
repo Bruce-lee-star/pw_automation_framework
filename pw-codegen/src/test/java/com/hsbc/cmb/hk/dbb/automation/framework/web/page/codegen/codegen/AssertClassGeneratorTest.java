@@ -30,6 +30,17 @@ public class AssertClassGeneratorTest {
                 nlsKey, index);
     }
 
+    private static CodegenEntry checked(String role, String name, String css, boolean checked) {
+        return new CodegenEntry(role + "|" + name + "#0", role, name, "ROLE", 100,
+                "role=" + role, css, null, 0, List.of(), List.of(), 1, null, checked);
+    }
+
+    private static CodegenEntry checkedWithKey(String role, String name, String css, String nlsKey,
+                                               boolean checked) {
+        return new CodegenEntry(role + "|" + name + "#0", role, name, "ROLE", 100,
+                "role=" + role, css, nlsKey, 0, List.of(), List.of(), 1, null, checked);
+    }
+
     private static Path writeBundle(String json) throws Exception {
         Path dir = Files.createTempDirectory("nls-assert");
         Path f = dir.resolve("x.nls.json");
@@ -49,7 +60,12 @@ public class AssertClassGeneratorTest {
 
     /** 单会话（= 一个 assert 方法）的 Assert 类：构造一个 session 单元再渲染。 */
     private static String assertClass(List<CodegenEntry> entries, String[] nlsFiles) {
-        CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(entries, nlsFiles, Map.of());
+        return assertClass(entries, nlsFiles, Map.of());
+    }
+
+    private static String assertClass(List<CodegenEntry> entries, String[] nlsFiles,
+                                     Map<String, String> fillValues) {
+        CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(entries, nlsFiles, fillValues);
         MultiPageCodegen.SessionUnit s = new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET), List.of(),
                 List.of(new MultiPageCodegen.PageEntries(TARGET, entries, plan)));
         return AssertClassGenerator.generateSessions(TARGET, List.of(s), nlsFiles);
@@ -89,7 +105,7 @@ public class AssertClassGeneratorTest {
     public void assertionDerivesFromRole() {
         List<CodegenEntry> es = Arrays.asList(
                 role("button", "Sign in", "#btn", 0),
-                role("checkbox", "Remember me", "#r", 0),
+                checked("checkbox", "Remember me", "#r", true),
                 role("generic", "", "#wrap", 0));
         String out = assertClass(es, new String[]{});
         Assert.assertTrue(out.contains(
@@ -98,6 +114,15 @@ public class AssertClassGeneratorTest {
                 "assertThat(loginPage.rememberMe.isChecked(), is(true));"));
         Assert.assertTrue(out.contains(
                 "assertThat(loginPage.wrap.isVisible(), is(true));"));
+    }
+
+    /** 取消勾选的断言期望值是 {@code is(false)}，不能恒 {@code is(true)}（否则回放必红）。 */
+    @Test
+    public void uncheckedCheckboxAssertionExpectsFalse() {
+        List<CodegenEntry> es = List.of(checked("checkbox", "Remember me", "#r", false));
+        String out = assertClass(es, new String[]{});
+
+        Assert.assertTrue(out.contains("assertThat(loginPage.rememberMe.isChecked(), is(false));"));
     }
 
     /** 方法体顺序 = 传入 entries 顺序（调用方已按真实操作序列排好）。 */
@@ -110,12 +135,30 @@ public class AssertClassGeneratorTest {
         Assert.assertTrue(out.indexOf("loginPage.second") < out.indexOf("loginPage.first"));
     }
 
-    /** 取值型角色（textbox 等）取 getValue() 而非 getText()。 */
+    /**
+     * 取值型角色（textbox 等）的期望值必须来自<b>录制到的输入值</b>，不能是可访问名。
+     *
+     * <p>回归评审 P0-2：历史实现用 {@code entry.name}（label / placeholder / aria-label）当期望值，
+     * 只有在「用户恰好把标签文字敲进框里」的 demo 场景才成立；真实业务（账号框输入 HSBC001、
+     * 标签是 Username）产物从第一次运行就是红的。
+     */
     @Test
-    public void valueRoleUsesGetValue() {
+    public void valueRoleUsesRecordedValue() {
+        List<CodegenEntry> es = List.of(role("textbox", "Username", "#u", 0));
+        String out = assertClass(es, new String[]{}, Map.of("textbox|Username#0", "HSBC001"));
+        Assert.assertTrue(out.contains("assertThat(loginPage.username.getValue(), is(\"HSBC001\"));"));
+        Assert.assertFalse("可访问名不得被当成输入值",
+                out.contains("getValue(), is(\"Username\")"));
+    }
+
+    /** 没有录制到输入值时，不得编造期望值：退化为可见性断言并标 TODO。 */
+    @Test
+    public void valueRoleWithoutRecordedValueFallsBackToVisibility() {
         List<CodegenEntry> es = List.of(role("textbox", "Username", "#u", 0));
         String out = assertClass(es, new String[]{});
-        Assert.assertTrue(out.contains("assertThat(loginPage.username.getValue(), is(\"Username\"));"));
+        Assert.assertTrue(out.contains("assertThat(loginPage.username.isVisible(), is(true));"));
+        Assert.assertTrue(out.contains("no recorded value for this input"));
+        Assert.assertFalse(out.contains("getValue()"));
     }
 
     /** 断言产物使用 hamcrest，失败时由 JUnit 打印 expected 与 actual 文本差异。 */
@@ -200,7 +243,7 @@ public class AssertClassGeneratorTest {
     public void checkboxStillAssertsIsCheckedWithNlsKeyPresent() throws Exception {
         Path f = writeBundle("{\"en\":{\"remember\":\"Remember me\"}}");
         NLSUtils.setLanguage("en");
-        String out = assertClass(List.of(roleWithKey("checkbox", "Remember me", "#r", 0, "remember")),
+        String out = assertClass(List.of(checkedWithKey("checkbox", "Remember me", "#r", "remember", true)),
                 new String[]{f.toString()});
         Assert.assertTrue(out.contains("assertThat(loginPage.rememberMe.isChecked(), is(true));"));
     }

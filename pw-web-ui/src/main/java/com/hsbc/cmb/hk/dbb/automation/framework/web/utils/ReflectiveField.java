@@ -30,9 +30,9 @@ public final class ReflectiveField {
             field.setAccessible(true);
             field.set(owner, value);
         } catch (IllegalAccessException e) {
-            throw new IllegalStateException("无法写入字段 " + describe(field)
-                    + "（JPMS 强封装：需为包 " + field.getDeclaringClass().getPackageName()
-                    + " 配置 --add-opens）", e);
+            throw new IllegalStateException("Cannot write field " + describe(field)
+                    + " (JPMS strong encapsulation: add --add-opens for package " + field.getDeclaringClass().getPackageName()
+                    + ")", e);
         }
     }
 
@@ -46,9 +46,9 @@ public final class ReflectiveField {
             field.setAccessible(true);
             return field.get(owner);
         } catch (IllegalAccessException e) {
-            throw new IllegalStateException("无法读取字段 " + describe(field)
-                    + "（JPMS 强封装：需为包 " + field.getDeclaringClass().getPackageName()
-                    + " 配置 --add-opens）", e);
+            throw new IllegalStateException("Cannot read field " + describe(field)
+                    + " (JPMS strong encapsulation: add --add-opens for package " + field.getDeclaringClass().getPackageName()
+                    + ")", e);
         }
     }
 

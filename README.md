@@ -95,8 +95,8 @@ Web / API / Monitor 三侧配置类（`WebFrameworkConfig` / `ApiFrameworkConfig
 例如设置 `-Dlogging.root.level=DEBUG`、环境变量 `LOGGING_ROOT_LEVEL=DEBUG`，或在框架配置文件中设置
 `logging.root.level = DEBUG`，可开启 DEBUG 及以上级别的框架诊断日志；TRACE 同理。级别在框架启动时生效。
 DEBUG 启动时会打印注册表中的框架配置生效值及其来源；密码、令牌等敏感值会脱敏。
-报告中的浏览器动作录制使用独立开关 `framework.recording.enabled`（默认开启），与日志级别互不影响；
-旧配置 `framework.logging=VERBOSE|TRACE|QUIET` 仍作为兼容回退。
+报告中的浏览器动作录制使用独立开关 `framework.recording.enabled`（默认开启），只由该键决定，与日志级别互不影响。
+日志阈值请统一使用 `logging.root.level`。
 
 > 说明：框架自身不依赖 Spring；Spring Boot 仅用于 `route-demo-service` 演示后端。
 

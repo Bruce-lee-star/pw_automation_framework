@@ -25,10 +25,10 @@ public class HangWatchdogRenderTest {
         assertTrue("必须有可 grep 的固定前缀", text.contains("[HangWatchdog]"));
         assertTrue("必须能看出是哪个用例卡住", text.contains("case-xyz"));
         assertTrue("必须给出已运行时长（判断是否真的卡住）", text.contains("123456"));
-        assertTrue("必须指明被采样的场景线程名（并行时必须能区分线程）", text.contains("场景线程 『" + owner.getName() + "』"));
-        assertTrue("必须包含场景线程的完整栈帧 —— 否则定位不到阻塞点", text.contains("\n    at "));
+        assertTrue("必须指明被采样的场景线程名（并行时必须能区分线程）", text.contains("scenario thread '" + owner.getName() + "'"));
+        assertTrue("必须包含场景线程的完整栈帧 -- 否则定位不到阻塞点", text.contains("\n    at "));
         assertTrue("必须自带关闭方式，便于现场快速止血", text.contains("hang.watchdog.interval.ms=0"));
-        assertTrue("必须有结束标记，避免与后续日志粘连", text.contains("采样结束"));
+        assertTrue("必须有结束标记，避免与后续日志粘连", text.contains("sampling ended"));
     }
 
     @Test
@@ -37,7 +37,7 @@ public class HangWatchdogRenderTest {
         String text = HangWatchdog.renderSample(Thread.currentThread(), null, 1L, 1L);
 
         assertNotNull(text);
-        assertTrue("无标识时应显式标注未知，而不是打印 null", text.contains("(未知)"));
+        assertTrue("无标识时应显式标注未知，而不是打印 null", text.contains("(unknown)"));
     }
 
     @Test

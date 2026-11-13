@@ -69,7 +69,7 @@ public class ConfigReaderTest {
 
     @Test
     public void getPropertyRespectsRegisteredKeyPrecedence() {
-        String registeredKey = ConfigRegistry.WEB_FRAMEWORK_LOGGING.key();
+        String registeredKey = ConfigRegistry.FRAMEWORK_RECORDING_ENABLED.key();
         setProp(registeredKey, "false");
         assertEquals("false", ConfigReader.getProperty(registeredKey));
         assertEquals("false", ConfigReader.getProperty(registeredKey, "true"));

@@ -275,16 +275,16 @@ public final class ConcurrencyGate {
             });
             String detail = String.format(
                     "identity %s waited %dms but did NOT acquire the gate on thread %s "
-                            + "(通常为前序同身份场景未释放许可，请检查其收口)",
+                            + "(usually a preceding scenario with the same identity did not release the permit; check its teardown)",
                     key, maxWait, Thread.currentThread().getName());
             if (failClosedLive()) {
-                //  fail-closed（默认）：如实判失败 —— 避免"串行化静默失效 → SSO 互踢/随机 401 却仍可能绿"（F-11）
+                //  fail-closed（默认）：如实判失败 —— 避免"串行化静默失效 -> SSO 互踢/随机 401 却仍可能绿"（F-11）
                 LOGGER.error("[concurrency-gate] {}", detail);
                 throw new ConcurrencyGateTimeoutException("[concurrency-gate] " + detail);
             }
             //  逃生舱（partition.fail.closed=false）：放行并打 ERROR，代价是本场景串行化失效
-            LOGGER.error("[concurrency-gate] {} — proceeding WITHOUT gate "
-                    + "(逃生舱已开启：本场景串行化失效，请确认无会话破坏风险)", detail);
+            LOGGER.error("[concurrency-gate] {} - proceeding WITHOUT gate "
+                    + "(escape hatch enabled: serialization disabled for this scenario; verify no session corruption risk)", detail);
             return;
         }
         recordHeld(key);

@@ -12,6 +12,7 @@ import org.junit.Test;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -71,6 +72,24 @@ public class CodegenCdpNodeExtractorAxTest {
         assertNotNull("AX 不可用不能导致拾取失败", entry);
         assertEquals("label", entry.role);
         assertEquals(LocatorStrategy.CSS, entry.strategy);
+    }
+
+    /**
+     * 勾选态从注入脚本事实透传到条目：录制「取消勾选」时 {@code checked=false} 必须保住，
+     * 否则生成侧只能退回恒 {@code check()}，产物终态与录制相反。
+     */
+    @Test
+    public void checkedStatePropagatesFromFactsToEntry() {
+        FakeAx cdp = new FakeAx();
+        cdp.facts = json("{\"self\":{\"role\":\"checkbox\",\"name\":\"Remember me\",\"tag\":\"input\","
+                + "\"cssSelector\":\"#rm\",\"nth\":0,\"checked\":false},\"ancestors\":[]}");
+        cdp.axNode = axNode("checkbox", "Remember me", false);
+
+        CodegenEntry entry = extractor(cdp).extract(300L);
+
+        assertNotNull(entry);
+        assertFalse("取消勾选必须透传 checked=false", entry.checked);
+        assertEquals("input", entry.tag);
     }
 
     @Test

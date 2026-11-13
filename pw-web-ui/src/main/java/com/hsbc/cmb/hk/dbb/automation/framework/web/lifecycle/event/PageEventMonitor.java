@@ -169,7 +169,7 @@ public final class PageEventMonitor {
         if (WebFrameworkConfig.PLAYWRIGHT_PAGE_ERROR_FAIL.getBooleanValue()
                 && !pageErrorEnabled()
                 && FAIL_ON_ERROR_WARNED.compareAndSet(false, true)) {
-            logger.warn("[page-error] '{}' is true but '{}' is false — page errors are NOT collected, "
+            logger.warn("[page-error] '{}' is true but '{}' is false - page errors are NOT collected, "
                             + "so fail-on-page-error cannot take effect. Enable the subscription or disable the fail switch.",
                     WebFrameworkConfig.PLAYWRIGHT_PAGE_ERROR_FAIL.getKey(),
                     WebFrameworkConfig.PLAYWRIGHT_PAGE_EVENTS_PAGE_ERROR_ENABLED.getKey());

@@ -79,8 +79,8 @@ public final class SoftAssertions {
 
         private void add(AssertionFailure failure) {
             if (closed) {
-                LOGGER.warn("[SoftAssertions] soft assertion recorded AFTER scenario end — this failure will NOT be "
-                        + "reported (典型的异步任务晚于 assertAll() 返回). failure: {}", failure.describe());
+                LOGGER.warn("[SoftAssertions] soft assertion recorded AFTER scenario end - this failure will NOT be "
+                        + "reported (typical async task completing after assertAll() returned). failure: {}", failure.describe());
             }
             failures.add(failure);
         }

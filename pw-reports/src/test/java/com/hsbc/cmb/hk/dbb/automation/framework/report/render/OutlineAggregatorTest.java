@@ -52,7 +52,7 @@ class OutlineAggregatorTest {
     }
 
     @Test
-    @DisplayName("全绿 outline → 父 SUCCESS，时长求和")
+    @DisplayName("全绿 outline -> 父 SUCCESS，时长求和")
     void allPassOutlineParentSuccess() {
         List<TestOutcome> in = new ArrayList<>(List.of(
                 row("a-1", "F/O", 1, TestResult.SUCCESS, 10),
@@ -95,7 +95,7 @@ class OutlineAggregatorTest {
     }
 
     @Test
-    @DisplayName("无 outline 输入 → 原列表引用零成本返回")
+    @DisplayName("无 outline 输入 -> 原列表引用零成本返回")
     void noOutlineReturnsSameReference() {
         TestOutcome normal = new TestOutcome();
         normal.setOutcomeId("n-1");

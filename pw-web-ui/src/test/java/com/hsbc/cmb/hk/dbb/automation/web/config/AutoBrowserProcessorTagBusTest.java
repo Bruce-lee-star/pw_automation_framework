@@ -21,7 +21,7 @@ import static org.junit.Assert.assertTrue;
  *
  * <p>DEV-V5 改为：Cucumber 标签经 {@link AutoBrowserProcessor#setScenarioTags(List)} 注入原生 holder，
  * 由 {@link AutoBrowserProcessor#processAutoBrowserAnnotation()} 在 {@code getBrowserType()} 时消费。
- * 本用例直接验证"holder 注入 → 注解驱动 → 标签生效"链路。</p>
+ * 本用例直接验证"holder 注入 -> 注解驱动 -> 标签生效"链路。</p>
  *
  * <p>注：测试类故意放在 {@code com.hsbc...web.config}（非 {@code framework.} 前缀），
  * 因为 {@link AutoBrowserProcessor#processAutoBrowserAnnotation()} 的栈扫描会跳过 {@code framework.} 包，

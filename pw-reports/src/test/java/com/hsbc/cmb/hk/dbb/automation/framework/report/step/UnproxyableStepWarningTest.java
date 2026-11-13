@@ -81,7 +81,7 @@ class UnproxyableStepWarningTest {
     }
 
     @Test
-    @DisplayName("全部可代理 → 告警清单为空（不制造噪音）")
+    @DisplayName("全部可代理 -> 告警清单为空（不制造噪音）")
     void cleanClassProducesNoWarnings() {
         assertThat(PwStepFactory.unproxyableStepWarnings(CleanSteps.class)).isEmpty();
     }

@@ -44,6 +44,23 @@ public final class TestOutcome {
     /** ISO-8601。 */
     private String endTime;
 
+    /**
+     * 该用例<b>首次</b>执行的开始时间（ISO-8601）。
+     *
+     * <p>Surefire {@code rerunFailingTestsCount} 重跑时，{@link #startTime} 会被覆盖成重跑时刻；
+     * 若报告运行窗口继续用 {@code startTime}，整个运行的 Started 会退化成最后一轮
+     * （2026-11-11 用户反馈"rerun 之后 index 中 start 时间是 rerun 的时间"）。
+     * 故单独保留首轮开始时间，供 index / feature / per-case 的窗口计算使用。
+     * 未经历重跑时等于 {@link #startTime}。additive-only。</p>
+     */
+    private String firstStartTime;
+
+    /**
+     * 该用例被执行过的次数（1 = 未重跑；每次 rerun 覆盖 +1）。additive-only（默认 1，
+     * 旧 JSON 无此字段时保持 1）。
+     */
+    private int attempt = 1;
+
     /** 毫秒。 */
     private long duration;
 
@@ -240,6 +257,22 @@ public final class TestOutcome {
 
     public void setEndTime(String endTime) {
         this.endTime = endTime;
+    }
+
+    public String getFirstStartTime() {
+        return firstStartTime;
+    }
+
+    public void setFirstStartTime(String firstStartTime) {
+        this.firstStartTime = firstStartTime;
+    }
+
+    public int getAttempt() {
+        return attempt;
+    }
+
+    public void setAttempt(int attempt) {
+        this.attempt = attempt;
     }
 
     public long getDuration() {

@@ -1,5 +1,8 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.common.reporting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ServiceLoader;
 
 /**
@@ -11,6 +14,8 @@ import java.util.ServiceLoader;
  * <p>解析结果惰性缓存（首个 {@link #get()} 调用时定格），避免每次调用都走 ServiceLoader 扫描。
  */
 public final class ReportingBridgeRegistry {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ReportingBridgeRegistry.class);
 
     private static volatile ReportingBridge instance;
 
@@ -41,7 +46,11 @@ public final class ReportingBridgeRegistry {
                 return candidate;
             }
         } catch (Throwable t) {
-            //  任何异常（含 LinkageError / 实现类构造失败）都视为"无实现"，回落 no-op
+            //  SPI 装配失败（实现类不可加载 / 构造异常 / ServiceConfigurationError）⇒ 回落 no-op 桥。
+            //  注意：classpath 上「没有实现」时 ServiceLoader 只是迭代为空、<b>不会</b>进 catch，
+            //  故此分支必属真实异常（含 Error 子类，如 ServiceConfigurationError 并非 LinkageError）。
+            //  按 checkstyle D7-3，catch 内不得只有注释，须有真实动作（这里以 WARN 以上级别留痕）。
+            LOGGER.warn("ReportingBridge SPI resolution failed; falling back to no-op bridge: {}", t.toString());
         }
         return new ReportingBridge() {
         };

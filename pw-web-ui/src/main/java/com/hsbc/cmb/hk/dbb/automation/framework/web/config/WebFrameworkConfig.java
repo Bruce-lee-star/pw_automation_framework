@@ -632,9 +632,6 @@ public enum WebFrameworkConfig {
     /** Whether browser actions are added to the test report. */
     FRAMEWORK_RECORDING_ENABLED(ConfigRegistry.FRAMEWORK_RECORDING_ENABLED),
 
-    /** Deprecated legacy report recording setting; use {@code framework.recording.enabled}. */
-    FRAMEWORK_LOGGING(ConfigRegistry.WEB_FRAMEWORK_LOGGING),
-
     // ==================== 报告配置 ====================
 
     /**

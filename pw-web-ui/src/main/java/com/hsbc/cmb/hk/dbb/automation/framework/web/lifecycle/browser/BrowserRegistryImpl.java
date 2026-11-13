@@ -105,7 +105,7 @@ public final class BrowserRegistryImpl implements BrowserRegistry {
         if (PlaywrightRuntime.instance().state.isConnectionDirty(key)) {
             PlaywrightRuntime.instance().state.clearConnectionDirty(key);
             abandonDirtyConnection(key);
-            logger.warn("[getBrowser] connection key={} was marked DIRTY (previous close timed out) — "
+            logger.warn("[getBrowser] connection key={} was marked DIRTY (previous close timed out) - "
                     + "abandoning stalled Playwright+Browser (no protocol calls on dirty connection) and rebuilding", key);
         }
 
