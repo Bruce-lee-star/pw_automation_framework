@@ -14,9 +14,11 @@ import java.util.Map;
  * 单页 CDP 会话封装（V3 重写，摒弃 v2 的 setContent 面板方案）。
  *
  * <p>基于 Playwright 的 {@code BrowserContext.newCDPSession(page)} 建立与渲染进程的直接通道，启用
- * {@code DOM}/{@code Accessibility}/{@code Runtime} 域，供「按坐标反查元素」使用：注入脚本在 DOM 捕获阶段
- * 上报真实点击的文档坐标，本类经 {@code DOM.getNodeForLocation}（与 DevTools 的 element-from-point 同源）
- * 得到 {@code backendNodeId}，再交给 {@code CodegenCdpNodeExtractor} 组装 {@code CodegenEntry}。
+ * {@code DOM}/{@code Accessibility}/{@code Runtime} 域，供「从点击捕获的 {@code ev.target} 抽取元素」使用：
+ * 注入脚本在 DOM 捕获阶段上报真实点击的目标元素（cssSel / 绝对 XPath / role / name 等 facts），本类经
+ * {@code DOM.getDocument}/{@code DOM.describeNode}/{@code DOM.requestNode} 反查 {@code backendNodeId}，再交给
+ * {@code CodegenCdpNodeExtractor} 组装 {@code CodegenEntry}。<b>坐标反查（{@code DOM.getNodeForLocation}）已被移除</b>：
+ * 它对着可能已变化的实时 DOM 重新命中、与 {@code ev.target} 已提供的信息重复，且曾产出死选择器（#alttext-container）。
  *
  * <p><b>刻意不使用 {@code Overlay.setInspectMode} 的 inspect 模式</b>：它会接管鼠标事件，使被测页
  * 完全无法交互（用户表现为「一进拾取页面就点不动」）。拾取与页面交互必须同时可用。
@@ -64,9 +66,11 @@ public final class CodegenCdpSession {
      *
      * <p><b>为什么不再用 {@code Overlay.setInspectMode("searchForNode")}</b>：该模式让 Chromium 的 Overlay
      * 接管鼠标事件，被测页收不到任何 click/pointer 事件，用户侧表现就是「一进拾取，页面完全点不动」。
-     * 而拾取的真实需求是<b>边操作页面、边把点到的元素记下来</b>，所以改为：注入脚本在 DOM 捕获阶段上报
-     * 真实点击的文档坐标，Java 侧用 {@link #backendNodeIdAt(double, double)} 反查 backendNodeId
-     * （与 DevTools 的 element-from-point 同源），页面交互完全不受影响。
+     * 而拾取的真实需求是<b>边操作页面、边把点到的元素记下来</b>，所以改为：注入脚本在 DOM 捕获阶段直接上报
+     * 真实点击的目标元素事实（cssSel / 绝对 XPath / role / name / alt 等），Java 侧用选择器在对应 frame 求值得到
+     * {@code backendNodeId}（跨 frame / shadow 由 {@code CdpFrameLocator} 处理），页面交互完全不受影响。
+     * <b>不再使用 {@code DOM.getNodeForLocation} 坐标反查</b>：它对着可能已变化的实时 DOM 重新命中、且会与
+     * 上报的点击事实重复，曾产出死选择器（#alttext-container）。
      *
      * <p><b>失败必须上浮，绝不静默吞掉</b>：返回 {@code true/false} 让调用方在面板显示 "inspecting"
      * 或 "start failed"，避免「徽标显示拾取中、实际没建立通道」的静默失效。
@@ -86,33 +90,6 @@ public final class CodegenCdpSession {
         } catch (Exception e) {
             log.error("[codegen][cdp] failed to enable pick channel on {}: {}", page.url(), e.getMessage(), e);
             return false;
-        }
-    }
-
-    /**
-     * 以文档坐标（CSS 像素、含滚动偏移，即 DOM 事件里的 {@code pageX/pageY}）反查元素，并带回其所属 frameId。
-     *
-     * <p>走 {@code DOM.getNodeForLocation}：与 Chrome DevTools 的「按坐标取节点」同源，<b>不往页面 DOM 打标记</b>
-     * （零属性污染，不触发业务的 MutationObserver），也不要求元素在点击后仍挂在原父节点上。
-     *
-     * <p><b>不能依赖它命中跨源 iframe</b>：该命令在根 frame 坐标下做 hit-test，跨源 iframe（OOPIF）内只会命中
-     * 宿主 {@code <iframe>} 元素甚至直接返回空。跨 frame 定位请用 {@link #elementBySelector(String)}。
-     *
-     * @return 命中元素（含所属 frameId）；未命中/调用失败返回 {@code null}
-     */
-    public ElementRef elementAt(double x, double y) {
-        try {
-            JsonObject params = new JsonObject();
-            params.addProperty("x", x);
-            params.addProperty("y", y);
-            params.addProperty("includeUserAgentShadowDOM", true);
-            JsonObject payload = cdp.send("DOM.getNodeForLocation", params);
-            Long backendNodeId = CdpJson.longField(payload, "backendNodeId");
-            if (backendNodeId == null) return null;
-            return new ElementRef(backendNodeId, CdpJson.stringField(payload, "frameId"));
-        } catch (Exception e) {
-            log.debug("[codegen][cdp] getNodeForLocation({}, {}) failed: {}", x, y, e.getMessage());
-            return null;
         }
     }
 

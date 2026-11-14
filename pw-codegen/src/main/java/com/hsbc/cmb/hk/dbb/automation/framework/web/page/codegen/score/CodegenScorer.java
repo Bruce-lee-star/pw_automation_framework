@@ -8,9 +8,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -27,6 +29,7 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li>{@code [data-testid="v"]} / 该属性值的部分匹配（{@code ^=}/{@code $=}/{@code *=}）；</li>
  *   <li>{@code #id} / {@code [id^=…]} 等；</li>
+ *   <li>{@code tag:has([data-i18n="…"])}（<b>子代锚点短形式</b>：目标自身无属性、内部有唯一语义锚点）；</li>
  *   <li>{@code [name="v"]}（表单字段名，与语言无关，比可访问名稳定）/ 部分匹配；</li>
  *   <li>{@code [placeholder=…]}/{@code [alt=…]}/{@code [title=…]}——<b>仅单语言模式</b>：
  *       多语言环境下这些属性随语言变化，传 {@code textAttributesAllowed=false} 关闭；</li>
@@ -86,6 +89,11 @@ public final class CodegenScorer {
     /**
      * {@code img} 的 {@code src} 尾部文件名（{@code [src$="…"]}）：URL 末段稳定且通常唯一，
      * 比 {@code alt}（文案属性，多语言环境会变）更可靠；排在 alt 与 text 之间。
+     *
+     * <p><b>语言变体例外</b>：文件名带语言尾标（{@code xxx_EN.png} / {@code xxx_zh-HK.png} /
+     * {@code xxx.en.png}）时，切换语言后 {@code src} 会变成 {@code xxx_ZH.png}，{@code $=} 精确匹配随即失效。
+     * 这类文件名改用「语言段之前的稳定前缀」+ {@code *=}（{@code img[src*="img_username"]}），
+     * 见 {@link #localeNeutralSrcPrefix(String)}。
      */
     public static final int SRC_TAIL = 170;
     public static final int TEXT = 180;
@@ -106,6 +114,17 @@ public final class CodegenScorer {
      */
     public static final int CSS_DATA_ATTR = 508;
     public static final int CSS_DATA_ATTR_PARTIAL = 509;
+    /**
+     * 子代锚点<b>短形式</b>：{@code tag:has([data-i18n="…"])} / {@code tag:has([data-testid="…"])}。
+     *
+     * <p>目标自身没有稳定属性、但浅层后代带业务语义锚点时（{@code <button><span data-i18n="x">},
+     * 图标按钮、卡片容器），这是<b>零结构层级</b>的定位方式：不受 {@code :nth-of-type} 序号与层级重排
+     * 影响，且 {@code data-i18n} 的 key 跨语言不变。
+     *
+     * <p>分数排在自身强属性之后、{@code name}/{@code class}/结构链之前：后代锚点是目标<b>内部</b>的业务
+     * 事实（比祖先作用域更贴近目标），但毕竟多一跳 {@code :has()} 关系，略弱于"直接写在目标身上"的属性。
+     */
+    public static final int CSS_DESC_ANCHOR = 512;
     /**
      * <b>状态类</b> ARIA 属性：值通常是共享的布尔/枚举状态（{@code true}/{@code false}/{@code expanded}…）。
      *
@@ -145,6 +164,8 @@ public final class CodegenScorer {
     public static final int CSS_TAG = 530;
     /** 绝对 XPath 兜底（结构 CSS 无法唯一时）。 */
     public static final int XPATH = 1100;
+    /** 稳健 XPath 兜底（借父级 / 子级属性锚定，优先于绝对路径）。 */
+    public static final int XPATH_ANCHORED = 1000;
     public static final int NTH = 10000;
     public static final int CSS_FALLBACK = 10000000;
 
@@ -176,6 +197,14 @@ public final class CodegenScorer {
     private static final int MAX_HAS_PREFIXES = 4;
 
     /**
+     * 目标自身最多生成几个 {@code tag:has(后代锚点)} 短形式候选。
+     *
+     * <p>注入脚本对目标自身采集深度 ≤3、最多 6 个锚点；每个锚点一次计数往返，
+     * 取前 4 个已足够覆盖 {@code data-i18n} / {@code data-testid} 等首选项。
+     */
+    private static final int MAX_SELF_HAS_ANCHORS = 4;
+
+    /**
      * 最多尝试几个单条 {@code :not()} 否定条件（只约束 CDP 往返次数，超出部分不尝试）。
      *
      * <p>候选全部是「<b>从渲染树剔除、同时从可访问性树剔除</b>」的形态：{@code [disabled]} /
@@ -201,6 +230,22 @@ public final class CodegenScorer {
      */
     private static final Pattern HAS_ANCHOR = Pattern.compile(
             "^(#[A-Za-z0-9_-]{1,80}|\\[[A-Za-z_:][A-Za-z0-9_:.\\-]*=\"[^\"\\\\]{1,80}\"\\])$");
+
+    /** 合法 HTML 标签名（用于 {@code tag:has(...)} 短形式的标签头，拒绝注入非法字符）。 */
+    private static final Pattern SIMPLE_TAG = Pattern.compile("[a-z][a-z0-9-]{0,15}");
+
+    /**
+     * 图片文件名尾部的「语言 + 可选地区」段（大小写不敏感，分隔符 {@code . _ -} 均可）。
+     *
+     * <p>用 lazy 前缀 + 锚定结尾，保证只吃掉<b>最后一个</b>语言段：
+     * {@code Search_HSBC_HK_Business_Express_EN} 只把尾部 {@code _EN} 视为语言码，
+     * 中间的 {@code _HK} 是业务名的一部分，不能被剥掉。
+     */
+    private static final Pattern SRC_TRAILING_LOCALE = Pattern.compile(
+            "(?i)^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw)(?:[._-](?:us|gb|hk|cn|tw|hans|hant))?$");
+
+    /** 文件扩展名（{@code .png} / {@code .svg} / {@code .jpg} …）。 */
+    private static final Pattern FILE_EXT = Pattern.compile("\\.[A-Za-z0-9]{1,5}$");
 
     /** 合法 HTML 属性名（用于 {@code [name="value"]} 选择器，拒绝注入非法字符）。 */
     private static final Pattern ATTR_NAME = Pattern.compile("[A-Za-z_:][A-Za-z0-9_:.\\-]*");
@@ -263,6 +308,15 @@ public final class CodegenScorer {
         CodegenFacts.Fact self = facts.self;
 
         List<Candidate> candidates = cssCandidates(self, textAttributesAllowed);
+        // 稳健 XPath（父级 / 子级属性锚定）：优先级低于所有 CSS 候选、高于绝对路径，
+        // 仅当 CSS（含 descendantAnchorSel / 祖先作用域前缀）全部失效时才被采用——比绝对路径更稳。
+        if (facts.robustXpaths != null) {
+            for (String rx : facts.robustXpaths) {
+                if (rx != null && !rx.isBlank()) {
+                    candidates.add(new Candidate(XPATH_ANCHORED, "xpath=" + rx));
+                }
+            }
+        }
         // 按分数排序（稳定排序：同分组内保持 前缀→后缀→包含 的顺序）
         candidates.sort(Comparator.comparingInt(Candidate::score));
         // 预热：实现方（CDP）可把整条候选链合并成一次协议往返；桩实现为空操作，语义不受影响。
@@ -431,7 +485,7 @@ public final class CodegenScorer {
         // 阶段 2：完整祖先路径逐级加长（<b>确定性最强</b>的结构证据：逐级 :nth-of-type 必然指向目标）。
         int tried = 0;
         for (CodegenFacts.Fact a : facts.ancestors) {
-            if (a.cssSelector == null || a.cssSelector.isEmpty()) continue;
+            if (a.cssSelector == null || a.cssSelector.isEmpty() || isMalformedCssSelector(a.cssSelector)) continue;
             if (tried >= MAX_NEST_DEPTH + 1) break;
             tried++;
             best = a.cssSelector;
@@ -507,6 +561,24 @@ public final class CodegenScorer {
             addAttribute(out, attr, e.getValue(), CSS_DATA_ATTR, CSS_DATA_ATTR_PARTIAL);
         }
 
+        // 2c) 子代锚点短形式（:has）：目标自身无稳定属性时，借浅层后代携带的业务语义锚点
+        //     （data-i18n / data-testid / aria-label …）把目标自身绑定成定位器：
+        //     button:has([data-i18n="forgot_username_button"])。
+        //     零结构层级 ⇒ 不受 :nth-of-type 序号与层级重排影响；data-i18n 的 key 跨语言不变。
+        //     这正是「长结构链命中 0」时的首选替代：modal footer 里 .button-panel 的直接子元素是
+        //     <button> 而非 <div>，任何按 div 序号拼出的链都是死链，而 :has(后代锚点) 仍然精确。
+        String selfTag = self.tag == null ? "" : self.tag.toLowerCase(Locale.ROOT);
+        if (SIMPLE_TAG.matcher(selfTag).matches()
+                && !"html".equals(selfTag) && !"body".equals(selfTag)) {
+            int selfHas = 0;
+            for (String anchor : self.childAnchors) {
+                if (selfHas >= MAX_SELF_HAS_ANCHORS) break;
+                if (anchor == null || !HAS_ANCHOR.matcher(anchor).matches()) continue;
+                selfHas++;
+                out.add(new Candidate(CSS_DESC_ANCHOR, selfTag + ":has(" + anchor + ")"));
+            }
+        }
+
         // 3) 表单 name 属性（与语言无关）
         addAttribute(out, "name", self.nameAttr, CSS_NAME, CSS_NAME_PARTIAL);
 
@@ -530,7 +602,12 @@ public final class CodegenScorer {
         if (isImg(self)) {
             String tail = srcTail(self.src);
             if (tail != null) {
-                if (SelectorStability.isStable(tail)) {
+                // 4b-1) 文件名带语言尾标（_EN / _zh-HK / .en）：切换语言后 src 整体换名，
+                //       $= 精确匹配必然失效 ⇒ 只锚定语言段之前的稳定前缀，用 *= 覆盖全部语言变体。
+                String neutral = localeNeutralSrcPrefix(tail);
+                if (neutral != null) {
+                    out.add(new Candidate(SRC_TAIL, "img" + attrSelector("src", "*=", neutral)));
+                } else if (SelectorStability.isStable(tail)) {
                     out.add(new Candidate(SRC_TAIL, "img" + attrSelector("src", "$=", tail)));
                 } else {
                     int used = 0;
@@ -553,7 +630,7 @@ public final class CodegenScorer {
         addCombos(out, self, textAttributesAllowed);
 
         // 6) 结构 CSS（标签 + nth-of-type，必要时逐级拼祖先）
-        if (self.cssSelector != null && !self.cssSelector.isEmpty()) {
+        if (self.cssSelector != null && !self.cssSelector.isEmpty() && !isMalformedCssSelector(self.cssSelector)) {
             out.add(new Candidate(CSS_TAG, self.cssSelector));
         }
 
@@ -610,8 +687,13 @@ public final class CodegenScorer {
         }
         if (isImg(self)) {
             String tail = srcTail(self.src);
-            if (tail != null && SelectorStability.isStable(tail)) {
-                exact.add(attrSelector("src", "$=", tail));
+            if (tail != null) {
+                String neutral = localeNeutralSrcPrefix(tail);
+                if (neutral != null) {
+                    exact.add(attrSelector("src", "*=", neutral));
+                } else if (SelectorStability.isStable(tail)) {
+                    exact.add(attrSelector("src", "$=", tail));
+                }
             }
         }
 
@@ -858,6 +940,45 @@ public final class CodegenScorer {
     }
 
     /**
+     * 提取「语言无关的 {@code src} 文件名前缀」：文件名尾部带语言/地区段时，返回该段之前的部分，
+     * 否则返回 {@code null}（表示保持原样，可安全使用 {@code [src$="…"]}）。
+     *
+     * <p>动机：HSBC 侧图片按语言分文件——{@code img_username_EN.png} / {@code img_username_ZH.png} /
+     * {@code img_username_TC.png}。用 {@code [src$="img_username_EN.png"]} 定位后，用户一切语言就整条失效
+     * （回放等不到元素）。锚定语言段之前的前缀 {@code img[src*="img_username"]} 可覆盖全部语言变体，
+     * 且与查询串/环境域名无关。
+     *
+     * <p>识别范围（大小写不敏感，分隔符 {@code . _ -} 均可）：尾部一段语言码（{@code en/zh/tc/sc/hk/cn/tw}），
+     * 其后可再跟一段地区码（{@code us/gb/hk/cn/tw/hans/hant}）。例：
+     * <ul>
+     *   <li>{@code img_username_EN.png} → {@code img_username}</li>
+     *   <li>{@code banner_zh-HK.png} → {@code banner}</li>
+     *   <li>{@code Search_HSBC_HK_Business_Express_EN.png} → {@code Search_HSBC_HK_Business_Express}（只吃尾部 {@code _EN}）</li>
+     * </ul>
+     *
+     * <p>前缀过短（&lt; 4 字符，如 {@code seo_EN} → {@code seo}）时不归一化：{@code *=} 太宽，
+     * 容易在日后资源增多时误命中，宁可保留精确 {@code $=}。
+     *
+     * @param tail {@link #srcTail(String)} 的结果（已去 query/hash/目录）
+     * @return 语言无关前缀；无语言尾标或前缀过短时返回 {@code null}
+     */
+    static String localeNeutralSrcPrefix(String tail) {
+        if (tail == null || tail.isBlank()) {
+            return null;
+        }
+        String stem = FILE_EXT.matcher(tail).replaceFirst("");
+        Matcher m = SRC_TRAILING_LOCALE.matcher(stem);
+        if (!m.matches()) {
+            return null;
+        }
+        String prefix = m.group(1).replaceAll("[._-]+$", "");
+        if (prefix.length() < 4 || !SelectorStability.isStable(prefix)) {
+            return null;
+        }
+        return prefix;
+    }
+
+    /**
      * 取 {@code src} 的尾部文件名：URL 末段，去掉 query 与 hash，且至少 3 个字符。
      *
      * <p>{@code /x/y/Search_HSBC_HK_Business_Express_EN.png?t=1} → {@code Search_HSBC_HK_Business_Express_EN.png}；
@@ -891,5 +1012,25 @@ public final class CodegenScorer {
     /** 兼容旧签名：精确属性选择器。 */
     static String attrSelector(String name, String value) {
         return attrSelector(name, "=", value);
+    }
+
+    /**
+     * 非法 CSS 选择器护栏（与浏览器侧 {@code codegen-inject.js#validCssSel} 同源，纵深防御）：
+     * 识别「单个 {@code [ ]} 内出现两个属性条件、中间以空白相接、无 {@code ]} 分隔」的畸形形态
+     * （如 {@code [data-i18n="x" data-i18n="x"]}，缺 {@code ][}，属非法 CSS，会令运行期
+     * {@code querySelectorAll} 抛 {@code SyntaxError} 或零匹配 → 表现为"未定位到"）。
+     *
+     * <p>合法的选择器（{@code [a][b]} 的 {@code ][} 复合、引号内含空格的 {@code [class*="btn primary"]}、
+     * 后代组合 {@code div[a] span[b]}、{@code #id}、{@code :has()} 等）均不被误伤——判据是
+     * 「{@code =} 与下一个 {@code =} 之间存在空白且二者处于同一对方括号内」。
+     *
+     * <p>本方法只判定<b>语法</b>畸形；唯一性 / 匹配数量由 {@link LocatorCounter} 负责。任何被判定为
+     * 畸形的 {@code cssSelector} 都应在候选阶段被跳过，绝不进入最终 {@code @Element(...)} 产物。
+     */
+    private static final Pattern MALFORMED_CSS = Pattern.compile("\\[[^\\]]*=[^\\]]*\\s+[^\\]]*=");
+
+    static boolean isMalformedCssSelector(String sel) {
+        if (sel == null || sel.isEmpty()) return false;
+        return MALFORMED_CSS.matcher(sel).find();
     }
 }

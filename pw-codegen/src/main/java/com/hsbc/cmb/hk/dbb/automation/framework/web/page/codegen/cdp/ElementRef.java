@@ -7,7 +7,7 @@ import java.util.Map;
  * + （可选）frame 树快照。
  *
  * <p>带回 {@code frameId} 是<b>跨域 iframe 可运行</b>的前提：{@code DOM.describeNode} 的 {@code node.frameId}
- * 只对 frame owner 元素填充，普通元素要靠定位过程本身（逐 frame 求值 / {@code DOM.getNodeForLocation}）告知归属，
+ * 只对 frame owner 元素填充，普通元素要靠定位过程本身（选择器逐 frame 求值）告知归属，
  * 再据此沿 {@code Page.getFrameTree} 的 {@code parentId} 链生成 {@code frame=SELa :: SELb :: <内层 css>}。
  *
  * <p>带回 {@link FrameScope} 的作用是<b>省掉一次多余的 {@code Page.getFrameTree}</b>，并让下游能区分

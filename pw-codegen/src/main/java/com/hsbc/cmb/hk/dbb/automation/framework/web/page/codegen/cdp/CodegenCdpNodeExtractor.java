@@ -128,6 +128,13 @@ public final class CodegenCdpNodeExtractor {
                     if (/^react-select-/.test(id)) return true;
                     if (/^mui-\\d+$/.test(id)) return true;
                     if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
+                    if (/\\d{4,}-id$/.test(id)) return true;
+                    if (/^[a-z]+(-[a-z]+)*\\d{4,}$/.test(id)) return true; // 通用: 段前缀 + ≥4 位尾随数字（无连字符）
+                    if (/[0-9a-f]{8,}/i.test(id)) return true;            // 十六进制/哈希 token
+                    if (/[A-Za-z0-9]{8,}/.test(id)) {                      // 高熵 base62 token：≥8 位无分隔符，且（含大小写+≥2 数字）或（≥3 数字），且数字非纯尾随
+                        var d = (id.match(/[0-9]/g) || []).length;
+                        if (/[0-9][A-Za-z]/.test(id) && ((/[A-Z]/.test(id) && /[a-z]/.test(id) && d >= 2) || d >= 3)) return true;
+                    }
                     return false;
                 }
                 /** 结构链上溯层数上限（深层页面 6 层常覆盖不到带 id 的容器）。 */
@@ -148,13 +155,23 @@ public final class CodegenCdpNodeExtractor {
                  */
                 function cssSel(e) {
                     if (!e || e.nodeType !== 1) return '';
-                    if (e.id && !isDynamicId(e.id)) return '#' + (window.CSS ? CSS.escape(e.id) : e.id);
+                    if (e.id && !isDynamicId(e.id)) {
+                        var idSel = '#' + (window.CSS ? CSS.escape(e.id) : e.id);
+                        if (validCssSel(idSel)) return idSel;
+                    }
                     if (e.id) {
                         var fb = dynamicIdFallbackSel(e.id);
-                        if (fb) return fb;
+                        if (fb && validCssSel(fb)) return fb;
                     }
-                    var ab = attrFallbackSel(e);
-                    if (ab) return ab;
+                    // 自身层（Tier 1）：只接受不挂祖先即全局唯一的自身选择器（属性 / 组合，均经严格唯一校验）。
+                    var selfNoScope = attrFallbackSel(e, false);
+                    if (selfNoScope && validCssSel(selfNoScope)) return selfNoScope;
+                    // 子代锚点层（Tier 2）：元素自身无稳定属性时，借后代的 data-i18n/data-testid/aria-label 等经 :has() 唯一定位。
+                    var da = descendantAnchorSel(e);
+                    if (da && validCssSel(da)) return da;
+                    // 父/祖先作用域层（Tier 3）：把自身选择器挂到最近的、组合后全量唯一的祖先上（隐藏副本短路补丁）。
+                    var ab = attrFallbackSel(e, true);
+                    if (ab && validCssSel(ab)) return ab;
                     var parts = [];
                     var n = e;
                     var anchored = false;
@@ -166,26 +183,39 @@ public final class CodegenCdpNodeExtractor {
                             if (pf) { parts.unshift(pf); anchored = true; break; }
                         }
                         var seg = attrFallbackSel(n);
-                        if (seg) { parts.unshift(seg); n = n.parentElement; continue; }
+                        // 祖先的稳定 class/属性段（如 modal 的 forgot-username-modal）作为作用域锚点并停止上溯。
+                        if (seg) { parts.unshift(seg); anchored = true; break; }
                         // 该层无稳定锚点也无可用属性段：用 :nth-of-type 补位，超过上限才整条作废。
                         if (filler >= MAX_FILLER_LAYERS) return '';
                         var fs = fallbackSeg(n);
                         if (!fs) return '';
+                        // 加固：若该层有稳定 class token，给位置段加 class 收窄（更抗 DOM 重排）。
+                        var fcls = (typeof n.className === 'string') ? n.className : '';
+                        var ftoks = stableClassTokens(fcls);
+                        if (ftoks.length) {
+                            var ftag = n.tagName.toLowerCase();
+                            fs = fs.replace(ftag, ftag + '[class*="' + attrEsc(ftoks[0]) + '"]');
+                        }
                         parts.unshift(fs);
                         filler++;
                         n = n.parentElement;
                     }
                     if (!anchored) return '';
-                    return parts.join(' > ');
+                    var pathSel = parts.join(' > ');
+                    // 终极护栏（双重）：① 语法非法（回归式畸形拼接）⇒ 作废；② 当前零命中 ⇒ 同样作废。
+                    // ② 防的是"层级错位死链"（如 … > div:nth-of-type(3) button 而父级子元素实为 button）：
+                    // 语法合法但一个都匹配不到，回放必然等不到元素，交给带唯一性校验的 XPath / role 兜底更好。
+                    if (!validCssSel(pathSel) || totalCount(pathSel) <= 0) return '';
+                    return pathSel;
                 }
                 // 动态 id 稳定前缀/包含选择器兜底（唯一才用）；无前缀/不唯一返回空串交给结构链
                 function stableIdPrefix(id) {
-                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,})/);
+                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,}|\\d{4,}$|[0-9a-f]{8,})/i);
                     return m ? m[1] : '';
                 }
                 // 动态 id 的稳定后缀：截掉开头随机段（Radix 夹心/`:rN:`/数字段+连字符）后，剩余尾部在组件语义上稳定。
                 function stableIdSuffix(id) {
-                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-)(.*)$/);
+                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|[0-9a-f]{8,})(.*)$/i);
                     return m ? m[1] : '';
                 }
                 function attrEsc(v) {
@@ -245,6 +275,14 @@ public final class CodegenCdpNodeExtractor {
                  * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配。
                  * 这是"重复面板里 Continue 按钮定位不准"的根因（2026-11-11 用户反馈）。
                  */
+                /**
+                 * 匹配总数（<b>含隐藏元素</b>）。
+                 *
+                 * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
+                 * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
+                 * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配。
+                 * 这是"重复面板里 Continue 按钮定位不准"的根因（2026-11-11 用户反馈）。
+                 */
                 function totalCount(sel) {
                     try {
                         if (!sel) return 0;
@@ -252,7 +290,10 @@ public final class CodegenCdpNodeExtractor {
                     } catch (e) { return 0; }
                 }
 
-                /** 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。 */
+                /**
+                 * 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。
+                 * 绝不使用 Playwright 专有可见性伪类（原生 {@code document} 不识别，会抛 SyntaxError）。
+                 */
                 function uniqueSel(sel) {
                     return totalCount(sel) === 1;
                 }
@@ -285,6 +326,17 @@ public final class CodegenCdpNodeExtractor {
                     var sl = s.lastIndexOf('/'); if (sl >= 0) s = s.substring(sl + 1);
                     return s.length >= 3 ? s : '';
                 }
+                // 语言无关的 src 文件名前缀：xxx_EN.png / xxx_zh-HK.png / xxx.en_US.png 切语言后整条换名，
+                // 必须锚定「语言段之前」的前缀（img[src*="xxx"]）；只吃最后一个语言段，前缀 < 4 字符不归一化。
+                var SRC_TRAILING_LOCALE = /^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw)(?:[._-](?:us|gb|hk|cn|tw|hans|hant))?$/i;
+                function srcLocaleNeutralPrefix(tail) {
+                    if (!tail) return '';
+                    var stem = String(tail).replace(/[.][A-Za-z0-9]{1,5}$/, '');
+                    var m = SRC_TRAILING_LOCALE.exec(stem);
+                    if (!m) return '';
+                    var prefix = m[1].replace(/[._-]+$/, '');
+                    return prefix.length >= 4 ? prefix : '';
+                }
                 // class 里的稳定类名（空格切分，滤掉框架随机 token 与过短碎片）。
                 function stableClassTokens(cls) {
                     var out = [], seen = {};
@@ -308,7 +360,7 @@ public final class CodegenCdpNodeExtractor {
                     if (!v) return [];
                     v = String(v).trim();
                     if (!v || v.length > 40) return [];
-                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}/;
+                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}|\\d{6,}|[0-9a-fA-F]{10,}|(?=[A-Za-z0-9]*[0-9][A-Za-z])(?:(?=(?:[^0-9]*[0-9]){3})|(?=[^A-Z]*[A-Z])(?=[^a-z]*[a-z])(?=(?:[^0-9]*[0-9]){2}))[A-Za-z0-9]{8,}/;
                     if (!rand.test(v)) return [{ op: '=', seg: v }];
                     var parts = v.split(rand);
                     var head = (parts[0] || '').replace(/^[-_ :]+|[-_ :]+$/g, '');
@@ -326,7 +378,7 @@ public final class CodegenCdpNodeExtractor {
                     var out = [], seen = {};
                     var attrs = e.attributes;
                     if (!attrs) return out;
-                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}/;
+                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}|\\d{6,}|[0-9a-fA-F]{10,}|(?=[A-Za-z0-9]*[0-9][A-Za-z])(?:(?=(?:[^0-9]*[0-9]){3})|(?=[^A-Z]*[A-Z])(?=[^a-z]*[a-z])(?=(?:[^0-9]*[0-9]){2}))[A-Za-z0-9]{8,}/;
                     for (var i = 0; i < attrs.length; i++) {
                         var a = attrs[i];
                         var n = a.name;
@@ -372,18 +424,225 @@ public final class CodegenCdpNodeExtractor {
                 }
 
                 /**
-                 * 唯一或组内索引。
-                 *
-                 * <p>① 全量唯一（含隐藏）直接用；② 否则只要是「有限个可见匹配」就尝试 {@code :nth-of-type(k)} 收窄，
-                 * 再用全量计数复核。② 的下界刻意是 {@code > 0} 而非 {@code > 1}：隐藏面板 + 可见面板各一个同名
-                 * "Continue" 时，可见计数只有 1（旧逻辑直接放弃 → 一路退化成长结构路径），而组内索引能稳定收窄。
+                 * CSS 选择器语法合法性护栏：拦截一切非法选择器（如把两个属性塞进同一方括号），杜绝畸形串写进 cssSelector。
+                 * 全部为原生合法 CSS —— 绝不使用 Playwright 专有可见性伪类（原生 document 不识别，会抛 SyntaxError）。
                  */
-                function uniqueOrGroup(sel, e) {
+                function validCssSel(sel) {
+                    if (typeof sel !== 'string' || !sel) return false;
+                    // 结构性畸形：同一方括号内出现两个以空白分隔的 name=value 段（把两个属性塞进同一方括号），杜绝畸形串写进 cssSelector。
+                    var depth = 0, seg = '';
+                    for (var i = 0; i < sel.length; i++) {
+                        var ch = sel.charAt(i);
+                        if (ch === '[') { depth++; seg = ''; }
+                        else if (ch === ']') { depth--; seg = ''; }
+                        else if (depth > 0) {
+                            seg += ch;
+                            if (ch === ' ' || ch === '\\t' || ch === '\\n' || ch === '\\r') {
+                                var f = seg.indexOf('=');
+                                if (f >= 0 && seg.indexOf('=', f + 1) >= 0) return false;
+                            }
+                        }
+                    }
+                    try {
+                        document.querySelectorAll(sel);
+                        return true;
+                    } catch (e) {
+                        return false;
+                    }
+                }
+
+                /** 隐藏副本判别符（按优先级）：d-none / aria-hidden / hidden / 行内 display:none。
+                 *  全部为原生合法 CSS —— 绝不使用 Playwright 专有可见性伪类（原生 document 不识别，会抛 SyntaxError）。 */
+                var HIDDEN_EXCLUDES = [':not(.d-none)', ':not([aria-hidden="true"])', ':not([hidden])',
+                    ':not([style*="display: none"])', ':not([style*="display:none"])'];
+                function scopeSegExcludingHidden(seg) {
+                    if (!seg) return '';
+                    for (var i = 0; i < HIDDEN_EXCLUDES.length; i++) {
+                        var ex = HIDDEN_EXCLUDES[i];
+                        var s2 = seg + ex;
+                        // 仅在「判别符确实剔除了隐藏副本（总匹配下降且仍 >0）」时采纳，避免误把可见副本也排除。
+                        var c2 = totalCount(s2);
+                        if (c2 > 0 && c2 < totalCount(seg)) return s2;
+                    }
+                    return '';
+                }
+
+                /** 祖先作用域收窄（隐藏副本短路补丁）：把 sel 挂到最近的、组合后全量唯一的祖先作用域上；
+                 *  候选集叠加“后代锚点”候选（按钮内子元素往往更精确）。只接受组合后全量唯一 / 可见唯一的结果。 */
+                function scopeUnderUniqueAncestor(sel, e) {
+                    if (!sel || !e) return '';
+                    var cands = [sel];
+                    if (sel.indexOf(':has') === -1) {
+                        var dacs = descendantAnchorCandidates(e);
+                        for (var d = 0; d < dacs.length; d++) cands.push(dacs[d]);
+                    }
+                    var n = e.parentElement;
+                    var guard = 0;
+                    while (n && n.nodeType === 1 && guard++ < 12) {
+                        var t = n.tagName ? n.tagName.toLowerCase() : '';
+                        if (!t || t === 'html') break;
+                        var seg = '';
+                        if (n.id && !isDynamicId(n.id)) {
+                            seg = '#' + (window.CSS ? CSS.escape(n.id) : n.id);
+                        } else if (n.id) {
+                            var pf = dynamicIdFallbackSel(n.id);
+                            if (pf) seg = pf;
+                        }
+                        if (!seg && t) {
+                            var cls = (typeof n.className === 'string') ? n.className : '';
+                            var toks = stableClassTokens(cls);
+                            for (var i = 0; i < toks.length && !seg; i++) {
+                                var ts = t + '[class*="' + attrEsc(toks[i]) + '"]';
+                                if (uniqueSel(ts)) seg = ts;
+                            }
+                        }
+                        if (!seg && t) {
+                            var nas = stableAttrs(n);
+                            for (var a = 0; a < nas.length && !nas[a].rand && !seg; a++) {
+                                var as = t + '[' + nas[a].name + '="' + attrEsc(nas[a].value) + '"]';
+                                if (uniqueSel(as)) seg = as;
+                            }
+                        }
+                        if (!seg) {
+                            var f = fallbackSeg(n);
+                            if (f) seg = f;
+                        }
+                        if (seg) {
+                            var isDirectParent = (n === e.parentElement);
+                            for (var c = 0; c < cands.length; c++) {
+                                var combined = seg + ' ' + cands[c];
+                                if (uniqueSel(combined)) return combined;
+                                if (isDirectParent) {
+                                    // 直接父级 + 子代轴（>）：隐藏副本常是目标的兄弟，用父级差异（如 body vs div[display:none]）
+                                    // 即可把「该父级下唯一」的目标单独摘出——这是「父级标签+属性」兜底档。
+                                    var childCombined = seg + ' > ' + cands[c];
+                                    if (uniqueSel(childCombined)) return childCombined;
+                                    var parentRefined = scopeSegExcludingHidden(seg);
+                                    if (parentRefined) {
+                                        var prc = parentRefined + ' > ' + cands[c];
+                                        if (uniqueSel(prc)) return prc;
+                                    }
+                                }
+                                if (visibleCount(combined) === 1) {
+                                    // 隐藏副本短路补丁（生成侧）：给祖先段附加原生排除判别符，收窄到可见副本。
+                                    var refined = scopeSegExcludingHidden(seg);
+                                    if (refined) {
+                                        var rc = refined + ' ' + cands[c];
+                                        if (uniqueSel(rc)) return rc;
+                                    }
+                                }
+                            }
+                        }
+                        n = n.parentElement;
+                    }
+                    return '';
+                }
+
+                /** 子代锚点候选：用目标后代（深度≤3、稳定属性元素）构造 t:has(后代[稳定属性="值"]) 形式的选择器，
+                 *  并追加“自身稳定信号 × 后代锚点”的 AND 复合加固。 */
+                function descendantAnchorCandidates(e) {
+                    var t = e.tagName ? e.tagName.toLowerCase() : '';
+                    var out = [];
+                    if (!t || t === 'html' || t === 'body') return out;
+                    var selfAttrs = [];
+                    var sa = stableAttrs(e);
+                    for (var z = 0; z < sa.length && selfAttrs.length < 2; z++) {
+                        if (!sa[z].rand) selfAttrs.push(sa[z]);
+                    }
+                    var selfCls = [];
+                    var cls = (typeof e.className === 'string') ? e.className : '';
+                    var ctoks = stableClassTokens(cls);
+                    for (var c0 = 0; c0 < ctoks.length && selfCls.length < 2; c0++) {
+                        selfCls.push(ctoks[c0]);
+                    }
+                    var plainDescs = [];
+                    var queue = [], visited = 0, seen = new Set();
+                    for (var i = 0; i < e.children.length; i++) queue.push({ n: e.children[i], d: 1 });
+                    while (queue.length && visited < 120) {
+                        var cur = queue.shift();
+                        var n = cur.n;
+                        if (!n || n.nodeType !== 1) continue;
+                        visited++;
+                        var attrs = stableAttrs(n);
+                        for (var j = 0; j < attrs.length; j++) {
+                            if (attrs[j].rand) continue;
+                            if (seen.has(attrs[j].name)) continue;
+                            seen.add(attrs[j].name);
+                            var ds = t + ':has(' + n.tagName.toLowerCase() + '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"])';
+                            plainDescs.push(ds);
+                            out.push(ds);
+                        }
+                        if (cur.d < 3) {
+                            for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
+                        }
+                    }
+                    for (var p = 0; p < plainDescs.length; p++) {
+                        var idx = plainDescs[p].indexOf(':has(');
+                        if (idx < 0) continue;
+                        var hasPart = plainDescs[p].slice(idx);
+                        for (var a = 0; a < selfAttrs.length; a++) {
+                            var ownA = '[' + selfAttrs[a].name + '="' + attrEsc(selfAttrs[a].value) + '"]';
+                            out.push(t + ownA + hasPart);
+                            for (var b = a + 1; b < selfAttrs.length; b++) {
+                                var ownB = '[' + selfAttrs[b].name + '="' + attrEsc(selfAttrs[b].value) + '"]';
+                                out.push(t + ownA + ownB + hasPart);
+                            }
+                        }
+                        for (var x = 0; x < selfCls.length; x++) {
+                            var ownC = '[class*="' + attrEsc(selfCls[x]) + '"]';
+                            out.push(t + ownC + hasPart);
+                            for (var y = x + 1; y < selfCls.length; y++) {
+                                var ownD = '[class*="' + attrEsc(selfCls[y]) + '"]';
+                                out.push(t + ownC + ownD + hasPart);
+                            }
+                        }
+                        for (var a2 = 0; a2 < selfAttrs.length; a2++) {
+                            var oa = '[' + selfAttrs[a2].name + '="' + attrEsc(selfAttrs[a2].value) + '"]';
+                            for (var x2 = 0; x2 < selfCls.length; x2++) {
+                                var oc = '[class*="' + attrEsc(selfCls[x2]) + '"]';
+                                out.push(t + oa + oc + hasPart);
+                            }
+                        }
+                    }
+                    return out;
+                }
+
+                function descendantAnchorSel(e) {
+                    var cands = descendantAnchorCandidates(e);
+                    for (var i = 0; i < cands.length; i++) {
+                        if (uniqueSel(cands[i])) return cands[i];
+                        var vc = visibleCount(cands[i]);
+                        if (vc > 0 && vc <= 10) {
+                            var sc = scopeUnderUniqueAncestor(cands[i], e);
+                            if (sc) return sc;
+                        }
+                    }
+                    return '';
+                }
+
+                /**
+                 * 唯一或组内索引（allowScope 控制是否允许祖先作用域收窄）。
+                 *
+                 * <p>① 全量唯一（含隐藏）直接用；② 否则只要存在“有限个可见匹配”就尝试 :nth-of-type(k) 收窄；
+                 * ③ 隐藏副本导致的非唯一：尝试祖先作用域收窄（scopeUnderUniqueAncestor）；
+                 * ④ 祖先作用域也失效时（隐藏副本与可见副本祖先结构相同）：本层自身即“可见命中恰 1”，
+                 * 直接用排除隐藏副本的原生判别符收窄本层自身段（如 :not(.d-none)），恢复 strict mode 唯一性。
+                 */
+                function uniqueOrGroup(sel, e, allowScope) {
+                    if (allowScope === undefined) allowScope = true;
+                    if (!sel || !e) return '';
                     if (uniqueSel(sel)) return sel;
+                    if (!allowScope) return '';
                     var cnt = visibleCount(sel);
                     if (cnt > 0 && cnt <= 10) {
                         var g = groupIndexSel(sel, e);
                         if (g && uniqueSel(g)) return g;
+                        var sc = scopeUnderUniqueAncestor(sel, e);
+                        if (sc) return sc;
+                        if (cnt === 1) {
+                            var refined = scopeSegExcludingHidden(sel);
+                            if (refined) return refined;
+                        }
                     }
                     return '';
                 }
@@ -396,14 +655,19 @@ public final class CodegenCdpNodeExtractor {
                  * 每个候选先做<b>全量</b>唯一性校验（含隐藏元素，对齐 Playwright strict mode）——唯一即采用；
                  * 否则尝试组内索引再复核；全部失败返回空串交给结构链/XPath。
                  */
-                function attrFallbackSel(e) {
+                function attrFallbackSel(e, allowScope) {
+                    if (allowScope === undefined) allowScope = true;
                     if (!e || e.nodeType !== 1) return '';
                     var t = e.tagName.toLowerCase();
                     if (t === 'img') {
                         var tail = srcTail(e.getAttribute && e.getAttribute('src'));
                         if (tail) {
-                            var byTail = 'img[src$="' + attrEsc(tail) + '"]';
-                            var s0 = uniqueOrGroup(byTail, e);
+                            // 语言变体文件名改锚定语言段之前的前缀，否则切语言后 src 换名即失效
+                            var neutral = srcLocaleNeutralPrefix(tail);
+                            var byTail = neutral
+                                ? 'img[src*="' + attrEsc(neutral) + '"]'
+                                : 'img[src$="' + attrEsc(tail) + '"]';
+                            var s0 = uniqueOrGroup(byTail, e, allowScope);
                             if (s0) return s0;
                         }
                     }
@@ -411,28 +675,28 @@ public final class CodegenCdpNodeExtractor {
                     var toks = stableClassTokens(cls);
                     for (var i = 0; i < toks.length; i++) {
                         var byCls = t + '[class*="' + attrEsc(toks[i]) + '"]';
-                        var s1 = uniqueOrGroup(byCls, e);
+                        var s1 = uniqueOrGroup(byCls, e, allowScope);
                         if (s1) return s1;
                     }
                     // class 双 token AND：单 token 不唯一时，两个稳定 token 组合常能收敛。
                     for (var i = 0; i < toks.length && i < 4; i++) {
                         for (var j = i + 1; j < toks.length && j < 4; j++) {
                             var byCls2 = t + '[class*="' + attrEsc(toks[i]) + '"][class*="' + attrEsc(toks[j]) + '"]';
-                            var s2 = uniqueOrGroup(byCls2, e);
+                            var s2 = uniqueOrGroup(byCls2, e, allowScope);
                             if (s2) return s2;
                         }
                     }
-                                        // 跨属性：按「最稳定优先」用属性——稳定属性（值无随机段）单精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体。
+                    // 跨属性：按「最稳定优先」用属性——稳定属性（值无随机段）单精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体。
                     var names = stableAttrs(e);
                     for (var i = 0; i < names.length && !names[i].rand; i++) {
                         var by1 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"]';
-                        var s3 = uniqueOrGroup(by1, e);
+                        var s3 = uniqueOrGroup(by1, e, allowScope);
                         if (s3) return s3;
                     }
                     for (var i = 0; i < names.length && !names[i].rand; i++) {
                         for (var j = i + 1; j < names.length && !names[j].rand; j++) {
                             var by2 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"][' + names[j].name + '="' + attrEsc(names[j].value) + '"]';
-                            var s4 = uniqueOrGroup(by2, e);
+                            var s4 = uniqueOrGroup(by2, e, allowScope);
                             if (s4) return s4;
                         }
                     }
@@ -440,7 +704,7 @@ public final class CodegenCdpNodeExtractor {
                         for (var j = i + 1; j < names.length && !names[j].rand; j++) {
                             for (var k = j + 1; k < names.length && !names[k].rand; k++) {
                                 var by3 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"][' + names[j].name + '="' + attrEsc(names[j].value) + '"][' + names[k].name + '="' + attrEsc(names[k].value) + '"]';
-                                var s6 = uniqueOrGroup(by3, e);
+                                var s6 = uniqueOrGroup(by3, e, allowScope);
                                 if (s6) return s6;
                             }
                         }
@@ -450,13 +714,11 @@ public final class CodegenCdpNodeExtractor {
                         var segs = attrValueSegments(names[i].value);
                         for (var m = 0; m < segs.length; m++) {
                             var byV = t + '[' + names[i].name + segs[m].op + '"' + attrEsc(segs[m].seg) + '"]';
-                            var s5 = uniqueOrGroup(byV, e);
+                            var s5 = uniqueOrGroup(byV, e, allowScope);
                             if (s5) return s5;
                         }
                     }
-                    // 组合层：单属性仍不唯一时多个属性共同定位——① 稳定属性精确 AND 随机属性变体
-                    // （稳定取前 2、随机取前 2，随机变体按 ^= → *= → $=）；② 随机变体 × 随机变体 AND。
-                    // 全部经全量唯一校验（含隐藏元素，必要时加组内索引）；命中即返回。
+                    // 组合层：单属性仍不唯一时多个属性共同定位——稳定属性精确 AND 随机属性变体 / 随机变体 × 随机变体 AND。
                     var randNames = [], stabNames = [];
                     for (var i = 0; i < names.length; i++) if (names[i].rand) randNames.push(names[i]);
                     for (var i = 0; i < names.length && !names[i].rand && i < 2; i++) stabNames.push(names[i]);
@@ -465,7 +727,7 @@ public final class CodegenCdpNodeExtractor {
                             var rbSegs = attrValueSegments(randNames[b].value);
                             for (var m = 0; m < rbSegs.length; m++) {
                                 var byMix = t + '[' + stabNames[a].name + '="' + attrEsc(stabNames[a].value) + '"][' + randNames[b].name + rbSegs[m].op + '"' + attrEsc(rbSegs[m].seg) + '"]';
-                                var s7 = uniqueOrGroup(byMix, e);
+                                var s7 = uniqueOrGroup(byMix, e, allowScope);
                                 if (s7) return s7;
                             }
                         }
@@ -477,7 +739,7 @@ public final class CodegenCdpNodeExtractor {
                             for (var m = 0; m < rb2Segs.length; m++) {
                                 for (var m2 = 0; m2 < rcSegs.length; m2++) {
                                     var byRand = t + '[' + randNames[b].name + rb2Segs[m].op + '"' + attrEsc(rb2Segs[m].seg) + '"][' + randNames[c].name + rcSegs[m2].op + '"' + attrEsc(rcSegs[m2].seg) + '"]';
-                                    var s8 = uniqueOrGroup(byRand, e);
+                                    var s8 = uniqueOrGroup(byRand, e, allowScope);
                                     if (s8) return s8;
                                 }
                             }
@@ -520,7 +782,20 @@ public final class CodegenCdpNodeExtractor {
                 // label 自身有可访问名，命中 NLS 时可走文本语义策略生成 @RoleElement(key=...)。
                 //
                 // eHasName 守卫保证「自身已有名的元素」（文本 div、按钮、带 data-i18n 的 span 等）行为不变，避免无谓上溯。
+                function hasIdentityAttr(e) {
+                    if (!e || e.nodeType !== 1) return false;
+                    if (e.id && !isDynamicId(e.id)) return true;
+                    var attrs = stableAttrs(e);
+                    for (var i = 0; i < attrs.length; i++) {
+                        if (attrs[i].rand) continue;
+                        var n = attrs[i].name.toLowerCase();
+                        if (/^data-/.test(n) || n === 'aria-label' || n === 'name' || n === 'type') return true;
+                    }
+                    return false;
+                }
+
                 function pickTarget(e) {
+                    if (e && e.nodeType === 1 && hasIdentityAttr(e)) return e;
                     var eHasName = (accessibleName(e) || '').trim();
                     var n = e, depth = 0;
                     while (n && n.nodeType === 1 && depth < 5) {
@@ -532,7 +807,16 @@ public final class CodegenCdpNodeExtractor {
                         //  label 自身带可访问名（其文本），命中 NLS 时可走文本语义策略定位。
                         if (t === 'label') return n;
                         if (t === 'a' && n.getAttribute && n.getAttribute('href')) return n;
-                        if (n.getAttribute && n.getAttribute('role')) return n;
+                        // 2026-11-13：容器/地标类 role（document/dialog/group/region/...）不是可交互目标，
+                        // 不应把「用户点的标题/正文」上溯到它们——Bootstrap .modal-dialog=role=document、.modal=role=dialog
+                        // 会把 modal 内点击提升为对话框容器，再被 isContainerRoot 当背景误杀，导致 modal 内拾取静默无结果。
+                        // 仅对交互/语义控件角色（button/tab/checkbox/...）保留上溯提升。
+                        var __role = n.getAttribute && n.getAttribute('role');
+                        if (__role) {
+                            var __rl = String(__role).toLowerCase();
+                            var __containerRole = /^(document|dialog|alertdialog|application|group|region|banner|main|navigation|contentinfo|complementary|form|section|generic|none|presentation|article|aside|header|footer|search|tooltip|status|log|list|listitem)$/.test(__rl);
+                            if (!__containerRole) return n;
+                        }
                         // 2026-11-12：上溯只接受「带稳定 #id 的语义容器」（如提示区 div#newPasswordHint），
                         // 拒绝无 id 的纯布局容器（content-wrapper / section / 文本 div / span）——它们只是把大段文本
                         // 包起来，落到这类容器会让产物定位过广且不稳健。找不到稳定 id 容器则保留点击对象本身
@@ -600,7 +884,10 @@ public final class CodegenCdpNodeExtractor {
                         xpath: absXPath(x),
                         nameAttr: (x.getAttribute && x.getAttribute('name')) || '',
                         src: (x.getAttribute && x.getAttribute('src')) || '',
-                        attrs: semanticAttrsOf(x, 10)
+                        attrs: semanticAttrsOf(x, 10),
+                        // 目标自身的后代锚点：供 Java 侧生成 `tag:has([data-i18n="x"])` 短形式。
+                        // 深度 3 / 最多 6 个，与注入脚本 factsOf 同口径（两端必须同步）。
+                        childAnchors: descendantAnchorsOf(x, 3, 6)
                     };
                 }
                 // 单层选择器段：稳定 id 优先，动态 id 试稳定前缀（唯一才用），否则稳定属性段（含组内索引）；
@@ -724,18 +1011,25 @@ public final class CodegenCdpNodeExtractor {
                     if (/^react-select-/.test(id)) return true;
                     if (/^mui-\\d+$/.test(id)) return true;
                     if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
+                    if (/\\d{4,}-id$/.test(id)) return true;
+                    if (/^[a-z]+(-[a-z]+)*\\d{4,}$/.test(id)) return true; // 通用: 段前缀 + ≥4 位尾随数字（无连字符）
+                    if (/[0-9a-f]{8,}/i.test(id)) return true;            // 十六进制/哈希 token
+                    if (/[A-Za-z0-9]{8,}/.test(id)) {                      // 高熵 base62 token：≥8 位无分隔符，且（含大小写+≥2 数字）或（≥3 数字），且数字非纯尾随
+                        var d = (id.match(/[0-9]/g) || []).length;
+                        if (/[0-9][A-Za-z]/.test(id) && ((/[A-Z]/.test(id) && /[a-z]/.test(id) && d >= 2) || d >= 3)) return true;
+                    }
                     return false;
                 }
                 function unique(sel) {
                     try { return sel && document.querySelectorAll(sel).length === 1; } catch (e) { return false; }
                 }
                 function stableIdPrefix(id) {
-                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,})/);
+                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,}|\\d{4,}$|[0-9a-f]{8,})/i);
                     return m ? m[1] : '';
                 }
                 // 动态 id 的稳定后缀：截掉开头随机段后，剩余尾部在组件语义上稳定。
                 function stableIdSuffix(id) {
-                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-)(.*)$/);
+                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|[0-9a-f]{8,})(.*)$/i);
                     return m ? m[1] : '';
                 }
                 function attrEsc(v) {
@@ -839,7 +1133,7 @@ public final class CodegenCdpNodeExtractor {
      * 同上，并由调用方给出元素<b>所属 frameId</b>（{@link ElementRef#frameId()}）。
      *
      * <p>这是跨域 iframe 可运行的关键：{@code DOM.describeNode} 的 {@code node.frameId} 只对 frame owner 元素
-     * 填充，普通元素拿不到归属；由定位过程（逐 frame 求值 / {@code DOM.getNodeForLocation}）告知后，
+     * 填充，普通元素拿不到归属；由定位过程（选择器逐 frame 求值）告知后，
      * 才能沿 {@code Page.getFrameTree} 的 {@code parentId} 链生成穿透路径。
      *
      * @param frameIdHint 元素所属 frameId；{@code null} 表示未知（回退 {@code node.frameId}，仅 frame owner 可靠）
@@ -924,7 +1218,7 @@ public final class CodegenCdpNodeExtractor {
             // AriaRole 里不存在或无语义的角色，最终只能生成又长又脆的结构 CSS）；AX 给出的才是浏览器实际
             // 暴露给辅助技术的 role（radio/link/textbox/...）与可访问名。
             CodegenFacts scoredFacts = new CodegenFacts(
-                    withAxSemantics(facts.self, axSemantics(objectId)), facts.ancestors);
+                    withAxSemantics(facts.self, axSemantics(objectId)), facts.ancestors, facts.robustXpaths);
             long afterAx = System.nanoTime();
 
             // frame 归属：主 frame 元素不必读 frame 树（定位阶段已告知），子 frame 元素才需要为穿透路径读一次。
@@ -1200,8 +1494,8 @@ public final class CodegenCdpNodeExtractor {
      * 跨 frame 穿透路径（outermost-first）：元素位于（跨源）iframe 内时，沿父 frame 上行取每层
      * {@code <iframe>} 宿主元素的 CSS 选择器；元素在主 frame 时返回空列表。
      *
-     * <p><b>归属来源</b>：优先用调用方给的 {@code frameIdHint}（由 {@link CdpFrameLocator} 逐 frame 求值、
-     * 或 {@code DOM.getNodeForLocation} 给出，<b>跨域 iframe 同样可靠</b>）；为空时回退
+     * <p><b>归属来源</b>：优先用调用方给的 {@code frameIdHint}（由 {@link CdpFrameLocator} 逐 frame 求值给出，
+     * <b>跨域 iframe 同样可靠</b>）；为空时回退
      * {@code DOM.describeNode} 的 {@code node.frameId}（CDP 只对 frame owner 元素填充，普通元素可能为空）。
      *
      * <p><b>上行链路</b>：不再逐层读 {@code describeNode.frameId}，改用 {@code Page.getFrameTree} 的
@@ -1307,7 +1601,7 @@ public final class CodegenCdpNodeExtractor {
      * 元素所属 frameId 的兜底来源（{@code DOM.describeNode} 的 {@code node.frameId}）。
      *
      * <p>CDP 仅对 frame owner 元素（{@code <iframe>/<frame>}）可靠填充该字段；普通元素的归属必须由定位过程
-     * （{@link CdpFrameLocator} 逐 frame 求值 / {@code DOM.getNodeForLocation}）提供。
+     * （{@link CdpFrameLocator} 逐 frame 求值）提供。
      */
     private String frameIdOfNode(long backendNodeId) {
         JsonObject desc = sender.send("DOM.describeNode", Map.of("backendNodeId", backendNodeId));

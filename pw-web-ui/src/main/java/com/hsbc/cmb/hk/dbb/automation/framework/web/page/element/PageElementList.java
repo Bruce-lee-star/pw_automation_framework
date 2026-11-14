@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.element;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.lifecycle.PlaywrightManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.engine.BasePage;
 import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.WaitForSelectorState;
 import org.slf4j.Logger;
@@ -167,7 +168,7 @@ public final class PageElementList extends AbstractList<PageElement> {
      * <p>实现：对首个匹配元素 {@code waitFor(VISIBLE)} 做存活保护（确保列表非空时不会因首元素隐藏而抛错），
      * 随后返回 {@code count()} —— {@code count()} 统计的是 DOM 匹配总数，<b>不过滤</b>可见性，
      * 因此隐藏（display:none / visibility:hidden / 落在隐藏容器内）的元素也会被计入。
-     * 若需「只统计肉眼可见项」，请改用 {@link #visibleSize()} / {@link #visibleSizeStrict()}。</p>
+     * 若需「只统计可见项」，请改用 {@link #visibleSize()}。</p>
      * <p>注意：{@link #get(int)} 的上界即本方法返回值（总数），调用方若期望「只取可见项」需自行结合
      * {@link #visibleSize()} 约束索引范围。</p>
      */
@@ -199,37 +200,21 @@ public final class PageElementList extends AbstractList<PageElement> {
 
     // ========================== 可见数量（实时查询 DOM） ==========================
     /**
-     * 返回当前【真正可见】元素数量（排除 display:none / visibility:hidden / 零尺寸祖先隐藏，
-     * 对齐 Playwright {@code :visible}，等价于 {@link ElementVisibility#isVisible(Locator)} 宽松档）。
-     * <p>与 {@link #size()} 的区别：{@code size()} 返回 DOM 匹配总数（含隐藏），本方法只计肉眼可见项。
-     * 实现：遍历每个匹配项，用框架 {@link ElementVisibility} 严格可见性探针逐元素判定并计数
-     * （对较大列表有一定 evaluate 开销，列表规模通常可控）。</p>
+     * 返回当前【真正可见】元素数量（排除 display:none / visibility:hidden / 零尺寸祖先隐藏）。
+     * <p>与 {@link #size()} 的区别：{@code size()} 返回 DOM 匹配总数（含隐藏），本方法只计可见项。</p>
+     * <p>实现：Playwright 原生可见性过滤 {@code locator.filter(setVisible(true))} 后 {@code count()}，
+     * 单次往返、零 JS 注入，判定口径与原生 {@code :visible} 完全同源（浏览器层执行，识别全部祖先隐藏）。
+     * 查询失败（页面已关闭 / 元素 detached）降级为 {@code 0}，不抛异常。</p>
      */
     public int visibleSize() {
-        return countVisible(false);
-    }
-
-    /**
-     * 严格可见数量：在 {@link #visibleSize()} 基础上额外排除 opacity:0 / 视口外 / 被遮挡
-     * （{@link ElementVisibility#isVisibleStrict(Locator)}），用于「多份重叠 / 离屏副本只计真正可交互项」的场景。
-     */
-    public int visibleSizeStrict() {
-        return countVisible(true);
-    }
-
-    private int countVisible(boolean strict) {
-        Locator base = locatorInternal();
-        int total = base.count();
-        int visible = 0;
-        for (int i = 0; i < total; i++) {
-            Locator nth = base.nth(i);
-            boolean isVis = strict ? ElementVisibility.isVisibleStrict(nth)
-                                   : ElementVisibility.isVisible(nth);
-            if (isVis) {
-                visible++;
-            }
+        try {
+            return locatorInternal()
+                    .filter(new Locator.FilterOptions().setVisible(true))
+                    .count();
+        } catch (PlaywrightException e) {
+            logger.debug("visibleSize probe failed; treating as zero: {}", selector, e);
+            return 0;
         }
-        return visible;
     }
 
     // ========================== 获取元素（一次等待） ==========================

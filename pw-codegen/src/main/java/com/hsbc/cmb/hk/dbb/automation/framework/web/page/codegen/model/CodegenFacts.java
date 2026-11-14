@@ -183,10 +183,19 @@ public final class CodegenFacts {
 
     public final Fact self;
     public final List<Fact> ancestors;
+    /**
+     * 稳健 XPath 兜底候选（借父级 / 子级属性锚定，由注入脚本 {@code codegen-inject.js#robustXPaths} 生成，
+     * 每个都已在校验文档内恰好命中 1 个元素）。仅当 CSS 候选（含 descendantAnchorSel / 祖先作用域前缀）全部
+     * 失效时才被 {@code CodegenScorer} 采用——比脆弱的绝对路径（{@code /html/body/div[9]/…}）更稳。
+     */
+    public final List<String> robustXpaths;
 
-    public CodegenFacts(Fact self, List<Fact> ancestors) {
+    public CodegenFacts(Fact self, List<Fact> ancestors, List<String> robustXpaths) {
         this.self = self;
         this.ancestors = ancestors;
+        this.robustXpaths = (robustXpaths == null || robustXpaths.isEmpty())
+                ? List.of()
+                : Collections.unmodifiableList(new ArrayList<>(robustXpaths));
     }
 
     /** 从注入脚本 {@code getInfo} 的 JSON 载荷解析（{@code {self:{...}, ancestors:[...]}}）。 */
@@ -201,7 +210,7 @@ public final class CodegenFacts {
                 if (el.isJsonObject()) ancestors.add(factFrom(el.getAsJsonObject()));
             }
         }
-        return new CodegenFacts(self, ancestors);
+        return new CodegenFacts(self, ancestors, strList(value, "robustXpaths"));
     }
 
     private static Fact factFrom(JsonObject o) {

@@ -469,8 +469,8 @@ public final class CodegenLauncher {
              *
              * <p>仅限共享引擎线程调用（会话与通道已由 {@link #submitPick} 包装内建好）。
              */
-            CodegenEntry pickAt(String type, Object x, Object y, Object cssSelector, List<String> shadowHosts,
-                                List<Integer> framePath) {
+            CodegenEntry pickAt(String type, Object x, Object y, Object cssSelector, String xpath,
+                                List<String> shadowHosts, List<Integer> framePath, List<String> robustXpaths) {
                 cdpSession();   // 防御性保证会话已建（正常由 submitPick 包装已建）
                 Double px = asDouble(x);
                 Double py = asDouble(y);
@@ -480,26 +480,44 @@ public final class CodegenLauncher {
                     log.debug("[codegen][cdp] resolved by selector ({}) '{}' shadowHosts={} -> frame={}",
                             type, selector, shadowHosts, ref.frameId());
                 }
-                if (ref == null) {
-                    if (selector != null) {
-                        // 诊断：页侧 cssSelector 在任意 frame 都查不到（多半是元素在点击与 CDP 探测之间被重渲染替换，
-                        // 或 cssSel 口径偏差）。记下选择器与 framePath，便于定位这类动态按钮失配根因；
-                        // 随后走坐标兜底——抽取阶段会从命中的节点重新派生稳定选择器（role/name/cssSel），不影响最终产物。
-                        log.debug("[codegen][cdp] page selector '{}' (framePath={}) not found in any frame - "
-                                + "falling back to coordinates (type={}, x={}, y={})", selector, framePath, type, px, py);
+                // 稳健 XPath 兜底（父级 / 子级属性锚定）：优先于绝对路径，仅在 CSS 全部失效时尝试。
+                if (ref == null && robustXpaths != null) {
+                    for (String rx : robustXpaths) {
+                        if (rx == null || rx.isBlank()) continue;
+                        ElementRef r = session.elementBySelector("xpath=" + rx, List.of(), framePath);
+                        if (r != null) {
+                            ref = r;
+                            log.info("[codegen][cdp] resolved by anchored xpath ({}) '{}' -> frame={}",
+                                    type, rx, ref.frameId());
+                            break;
+                        }
                     }
-                    ref = elementAt(px, py);
+                }
+                // cssSel 缺失/未命中：用「点击捕获的 ev.target 绝对 XPath」兜底——它来自点击瞬间算好的 facts，
+                // 稳定且不受"弹窗关闭 / DOM 重渲染"影响。坐标反查（DOM.getNodeForLocation）已彻底移除：对着可能已
+                // 变化的实时 DOM 重新命中不可靠，与 ev.target 已提供的信息重复，还曾产出死选择器（#alttext-container）。
+                if (ref == null && xpath != null && !xpath.isBlank()) {
+                    String xpathSel = "xpath=" + xpath;
+                    ref = session.elementBySelector(xpathSel, List.of(), framePath);
                     if (ref != null) {
-                        log.info("[codegen][cdp] resolved by coordinates ({}) at ({}, {}) -> frame={}",
-                                type, px, py, ref.frameId());
+                        log.info("[codegen][cdp] resolved by xpath ({}) '{}' -> frame={}", type, xpath, ref.frameId());
+                    } else if (selector != null) {
+                        log.debug("[codegen][cdp] selector '{}' missed and xpath fallback '{}' also missed"
+                                + " (no coordinate fallback) - type={}, x={}, y={}", selector, xpath, type, px, py);
+                    } else {
+                        log.debug("[codegen][cdp] no cssSelector; xpath fallback '{}' missed"
+                                + " (no coordinate fallback) - type={}, x={}, y={}", xpath, type, px, py);
                     }
                 }
                 if (ref == null) {
-                    // 必须可见：静默失败时用户只看到「点了没反应」，无从判断是坐标偏差、页面已导航还是选择器失配。
-                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {} (selector='{}', shadowHosts={}) - "
-                                    + "Selector not found in any frame and coordinate hit-test missed: "
-                                    + "page may have navigated / element removed / closed shadow root (not traversable)",
-                            type, px, py, page.url(), selector, shadowHosts);
+                    // 必须可见：静默失败时用户只看到「点了没反应」，无从判断是选择器失配、页面已导航还是元素被移除。
+                    // 定位完全依赖点击捕获的 ev.target 事实（cssSel / xpath），不再走坐标兜底，避免坐标反查的误判。
+                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {}"
+                                    + " (selector='{}', xpath='{}', shadowHosts={}) - "
+                                    + "cssSel and ev.target xpath both unresolved: "
+                                    + "page may have navigated / element removed / dynamic rewrite"
+                                    + " (coordinate hit-test removed)",
+                            type, px, py, page.url(), selector, xpath, shadowHosts);
                     return null;
                 }
                 try {
@@ -511,11 +529,6 @@ public final class CodegenLauncher {
                             type, ref.backendNodeId(), e.getMessage());
                     return null;
                 }
-            }
-
-            /** 坐标反查（缺坐标即视为不可用）。 */
-            private ElementRef elementAt(Double px, Double py) {
-                return (px != null && py != null) ? session.elementAt(px, py) : null;
             }
 
             /** 关闭本页：detach CDP 会话（懒加载可能为 null，即该页从未被拾取）；残留拾取由共享引擎按序排空。 */
@@ -1139,13 +1152,24 @@ public final class CodegenLauncher {
             pickSession.submitPick(fingerprint, () -> {
                 CodegenEntry e = null;
                 try {
+                    // 执行期暂停闸门（而非只判入队时刻）：点击事件进 engine 队列后，可能排队到「暂停」
+                    // 之后才真正执行（队列里还有前一次 CDP 往返）。只判入队会让暂停后仍有元素陆续落进
+                    // Elements，用户观感就是「点了暂停还在拾取」。这里再判一次：
+                    // 已暂停 ⇒ 动作照常录制（与暂停语义一致：动作仍进 Step 时间线），但不新增 Elements 条目。
+                    // 代价：暂停瞬间仍在队列里的那次点击不会成为新元素（若确实需要，重新点该元素即可）。
+                    if (!sessions.pickOn.get()) {
+                        log.debug("[codegen] pick skipped (paused before execution): {}", fingerprint);
+                        recordAction.accept(payload, null);
+                        return;
+                    }
                     // P0-1 新页拾取兜底：极少数情况下（外网页加载慢、注入脚本尚未就绪 / addInitScript 尚未生效）
                     // 页面上 __CODEGEN__ 缺失，录制器与坐标辅助函数不可用 → 拾取静默失效。拾取执行前先自检，
                     // 缺失则同线程补注后再解析（不额外起线程、不阻塞派发线程）。注入脚本首行有幂等保护，重复求值安全。
                     ensureInstrumented(eventPage);
                     e = pickSession.pickAt(actionType, payload.get("x"), payload.get("y"),
-                            info != null ? info.get("cssSelector") : null, shadowHostsOf(info),
-                            framePathOf(payload));
+                            info != null ? info.get("cssSelector") : null,
+                            info != null ? (String) info.get("xpath") : null,
+                            shadowHostsOf(info), framePathOf(payload), robustXpathsOf(info));
                     if (e != null) addPick.accept(eventPage, resolveCheckedState(e, info, actionType));
                     recordAction.accept(payload, e);
                 } finally {
@@ -1537,6 +1561,21 @@ public final class CodegenLauncher {
             hosts.add(item == null ? "" : String.valueOf(item));
         }
         return hosts;
+    }
+
+    /**
+     * 从事件事实取稳健 XPath 兜底列表（借父级 / 子级属性锚定，由注入脚本生成，已逐一校验唯一）。
+     * 缺失 / 非数组 / 含非字符串项一律回落空列表（保守：无锚定 XPath 时退回绝对 XPath / 失败日志）。
+     */
+    static List<String> robustXpathsOf(Map<String, Object> info) {
+        if (info == null) return List.of();
+        Object raw = info.get("robustXpaths");
+        if (!(raw instanceof List<?> items)) return List.of();
+        List<String> paths = new ArrayList<>(items.size());
+        for (Object item : items) {
+            if (item instanceof String s && !s.isBlank()) paths.add(s);
+        }
+        return paths;
     }
 
     /**

@@ -165,7 +165,7 @@ public class CdpFrameLocatorTest {
         locator.findBySelector("#userName");
         locator.findBySelector("#userName");
 
-        assertEquals("每个 frame 只应创建一个隔离世界", List.of("MAIN", "F1"), cdp.createdWorlds);
+        assertEquals("主 frame 走默认主世界（不建隔离世界），子 frame 只应创建一个隔离世界", List.of("F1"), cdp.createdWorlds);
     }
 
     @Test
@@ -303,11 +303,14 @@ public class CdpFrameLocatorTest {
                     frameByContext.put(contextId, frameId);
                     return contextPayload(contextId);
                 }
-                case "Runtime.evaluate":
-                    return evaluate(
-                            ((Number) params.get("contextId")).intValue(),
-                            String.valueOf(params.get("expression")),
+                case "Runtime.evaluate": {
+                    // 主 frame 走默认主世界（CdpFrameLocator.contextId 返回 -1，不传 contextId）；
+                    // 子 frame 传隔离世界 executionContextId。两种都被本 mock 正确路由到对应 frame。
+                    Object ctxObj = params.get("contextId");
+                    int ctx = (ctxObj instanceof Number) ? ((Number) ctxObj).intValue() : -1;
+                    return evaluate(ctx, String.valueOf(params.get("expression")),
                             Boolean.TRUE.equals(params.get("returnByValue")));
+                }
                 case "DOM.getDocument": {
                     getDocumentCalls++;
                     JsonObject root = new JsonObject();
@@ -331,7 +334,8 @@ public class CdpFrameLocatorTest {
 
         /** 求值：模拟 {@code document.querySelector} 在该 frame 文档内的结果（或批量计数的返回值）。 */
         private JsonObject evaluate(int contextId, String expression, boolean returnByValue) {
-            String frameId = frameByContext.get(contextId);
+            // contextId == -1 ⇒ 主 frame 默认主世界（与生产端 CdpFrameLocator.contextId 约定一致）。
+            String frameId = (contextId == -1) ? "MAIN" : frameByContext.get(contextId);
             if (frameId == null) return null;
             evaluateCalls++;
             lastExpression = expression;

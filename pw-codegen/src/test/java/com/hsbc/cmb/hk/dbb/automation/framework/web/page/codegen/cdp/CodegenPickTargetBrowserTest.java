@@ -135,18 +135,13 @@ public class CodegenPickTargetBrowserTest {
         JsonObject self = pick("button.panel-cta");
         String css = self.get("cssSelector").getAsString();
 
-        //  允许为空：页面侧给不出全量唯一的 CSS 时不硬编一个多匹配选择器，
-        //  由 Java 侧的 XPath / 属性候选兜底（生成阶段还有 CodegenScorer 唯一性校验）。
-        //  硬约束只有一条：绝不能返回一个全量多匹配的选择器（隐藏副本被漏数就是这个后果）。
-        if (!css.isEmpty()) {
-            Object hits = page.evaluate("document.querySelectorAll(" + jsString(css) + ").length");
-            assertEquals("cssSelector 不得全量多匹配（隐藏副本也参与计数）", 1, ((Number) hits).intValue());
-        }
-    }
-
-    /** JS 字符串字面量（避免 CSS 里的引号/反斜杠破坏 evaluate 表达式）。 */
-    private static String jsString(String raw) {
-        return "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        //  生成侧绝不使用 Playwright 专有伪类（原生 {@code document.querySelectorAll} 不识别，会抛 SyntaxError）。
+        //  隐藏副本场景靠「父级标签+属性」（如 body > button[...]）等原生手段收窄到唯一，故此处用原生计数校验。
+        //  本页结构足够简单（可见 button 是 body 直接子级、隐藏副本在 div[display:none] 内），必须能产出一条
+        //  原生可用且全量唯一的选择器——空串在这里说明"父级标签+属性"兜底档失效。
+        assertFalse("隐藏副本场景必须产出可用的原生选择器（父级标签+属性兜底），实际: <" + css + ">", css.isEmpty());
+        Object hits = page.evaluate("(sel) => document.querySelectorAll(sel).length", css);
+        assertEquals("cssSelector 不得全量多匹配（隐藏副本也参与计数），实际: " + css, 1, ((Number) hits).intValue());
     }
 
     /** 在真实浏览器里用嵌入 JS 对被选元素求值 getInfo，返回 {self:...}。 */

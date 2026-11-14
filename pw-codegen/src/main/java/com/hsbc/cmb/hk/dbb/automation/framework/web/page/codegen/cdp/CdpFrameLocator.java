@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -19,8 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>为什么必须逐 frame 查</b>：
  * <ul>
  *   <li>主 frame 的 {@code document.querySelector} 看不到 iframe 内部文档 —— 旧兜底恒为 null；</li>
- *   <li>{@code DOM.getNodeForLocation} 命中的是<b>根 frame 坐标</b>下的节点；跨源 iframe（OOPIF）里只会命中
- *       宿主 {@code <iframe>} 元素，甚至直接返回空 —— 这就是「坐标法打空」的根因；</li>
+ *   <li>坐标反查（{@code DOM.getNodeForLocation}）不可行：它命中<b>根 frame 坐标</b>下的节点，跨源 iframe（OOPIF）
+ *       里只会命中宿主 {@code <iframe>} 元素甚至返回空 —— 坐标法因此打空，故定位<b>完全改用选择器 / XPath 逐 frame 求值</b>；</li>
  *   <li>而页面侧上报的 cssSelector 是相对于元素<b>自身文档</b>算出来的（同一 frame 内唯一），
  *       所以在该 frame 的执行上下文里求值必然命中。</li>
  * </ul>
@@ -148,6 +149,7 @@ public final class CdpFrameLocator {
      * @param framePath 浏览器侧算出的 iframe 序号链（主 frame 为 []）；{@code null}/不可信 ⇒ 回退
      */
     public ElementRef findBySelector(String cssSelector, List<String> shadowHosts, List<Integer> framePath) {
+        if (cssSelector == null || cssSelector.isBlank()) return null;
         List<String> hosts = shadowHosts == null ? List.of() : shadowHosts;
         for (String host : hosts) {
             if (host == null || host.isBlank()) {
@@ -264,11 +266,12 @@ public final class CdpFrameLocator {
         List<String> hosts = shadowHosts == null ? List.of() : shadowHosts;
         String expression = buildCountExpression(hosts, selectors);
         int contextId = contextId(frameId);
-        if (contextId <= 0) return Map.of();
-        JsonObject evaluated = transport.send("Runtime.evaluate", Map.of(
-                "expression", expression,
-                "contextId", contextId,
-                "returnByValue", true));
+        if (contextId == 0) return Map.of();
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("expression", expression);
+        params.put("returnByValue", true);
+        if (contextId > 0) params.put("contextId", contextId);  // -1 = 默认主世界，不传 contextId
+        JsonObject evaluated = transport.send("Runtime.evaluate", params);
         if (evaluated == null) {
             contextByFrame.remove(frameId);   // 上下文随导航销毁：摘缓存，下一次重建
             return Map.of();
@@ -370,26 +373,34 @@ public final class CdpFrameLocator {
     private record Probe(ElementRef hit, boolean degraded) {
     }
 
-    /** 在指定 frame 的隔离世界里求值；contextId 失效时重建并重试一次。 */
+    /**
+     * 在指定 frame 求值：主 frame 用默认主世界（隔离世界 objectId 无法被 callFunctionOn / describeNode 可靠使用）；
+     * 子 frame 用隔离世界；contextId 失效时重建并重试一次。
+     */
     private Probe probe(String frameId, String cssSelector, List<String> shadowHosts) {
         String expression = buildExpression(cssSelector, shadowHosts);
+        if (expression == null) return new Probe(null, false);   // 无选择器可探测 ⇒ 未命中（非基础设施失败）
         boolean degraded = false;
         for (int attempt = 0; attempt < 2; attempt++) {
             int contextId = contextId(frameId);
-            if (contextId <= 0) return new Probe(null, true);
-            JsonObject evaluated = transport.send("Runtime.evaluate", Map.of(
-                    "expression", expression,
-                    "contextId", contextId,
-                    "returnByValue", false));
+            if (contextId == 0) return new Probe(null, true);   // 建隔离世界失败 ⇒ 基础设施失败
+            Map<String, Object> params = new java.util.LinkedHashMap<>();
+            params.put("expression", expression);
+            params.put("returnByValue", false);
+            if (contextId > 0) params.put("contextId", contextId);  // -1 = 默认主世界，不传 contextId
+            JsonObject evaluated = transport.send("Runtime.evaluate", params);
             if (evaluated == null) {
-                // 上下文已随导航销毁：摘掉缓存，下一轮重建隔离世界。
-                contextByFrame.remove(frameId);
+                if (contextId > 0) contextByFrame.remove(frameId);   // 仅隔离世界失效才清缓存重试
                 degraded = true;
                 continue;
             }
-            if (CdpJson.field(evaluated, "exceptionDetails") != null) {
-                log.debug("[codegen][cdp] evaluate threw in frame {} for '{}': {}", frameId, cssSelector,
-                        CdpJson.stringField(CdpJson.objectField(evaluated, "exceptionDetails"), "text"));
+            JsonObject exc = CdpJson.objectField(evaluated, "exceptionDetails");
+            if (exc != null) {
+                String text = CdpJson.stringField(exc, "text");
+                JsonObject ex = CdpJson.objectField(exc, "exception");
+                String desc = ex == null ? null : CdpJson.stringField(ex, "description");
+                log.debug("[codegen][cdp] evaluate threw in frame {} for '{}': text={}{}", frameId, cssSelector,
+                        text, desc == null ? "" : ("; " + desc));
                 return new Probe(null, false);   // 选择器/表达式在该 frame 无效 ⇒ 视作未命中
             }
             JsonObject remote = CdpJson.remoteObject(evaluated);
@@ -421,6 +432,21 @@ public final class CdpFrameLocator {
      * <p>选择器一律经 {@link CdpJson#jsStringLiteral} 转义，宿主链来自页面侧事实，不排除含引号的 id。
      */
     static String buildExpression(String cssSelector, List<String> shadowHosts) {
+        // cssSelector 为空：无选择器可探测，返回 null 交由 probe 视作未命中（避免对 null 解引用引发 NPE）。
+        if (cssSelector == null) return null;
+        // xpath= 前缀：用 document.evaluate 求值「点击捕获的 ev.target 绝对 XPath」——稳定且非坐标，
+        // 仅在 cssSel 缺失/未命中时由调用方作为坐标反查之前的兜底（坐标法对"已变化/已关闭的实时 DOM"不可靠）。
+        if (cssSelector.startsWith("xpath=")) {
+            String xpath = cssSelector.substring("xpath=".length());
+            if (shadowHosts == null || shadowHosts.isEmpty()) {
+                // 结果类型 9 = FIRST_ORDERED_NODE_TYPE：与 .singleNodeValue 配套；类型 7（SNAPSHOT）按规范
+                // 访问 singleNodeValue 会抛 InvalidStateError（日志表现为 "Uncaught"），故不可用。
+                return "document.evaluate(" + CdpJson.jsStringLiteral(xpath)
+                        + ", document, null, 9, null).singleNodeValue";
+            }
+            // 含 shadow 宿主链时 xpath 无法跨 shadow 边界：表达式无效，返回 null 视作未命中，避免误判。
+            return null;
+        }
         if (shadowHosts == null || shadowHosts.isEmpty()) {
             return "document.querySelector(" + CdpJson.jsStringLiteral(cssSelector) + ")";
         }
@@ -490,8 +516,15 @@ public final class CdpFrameLocator {
         return ok;
     }
 
-    /** 取（并缓存）frame 的隔离世界 executionContextId；失败返回 {@code -1}。 */
+    /**
+     * 取 frame 的求值上下文：主 frame 返回 {@code -1}（用默认主世界，隔离世界的 objectId 无法被 callFunctionOn /
+     * describeNode 可靠使用）；子 frame 返回隔离世界 executionContextId（{@code >0}）；建隔离世界失败返回 {@code 0}。
+     */
     private int contextId(String frameId) {
+        FrameTree t = tree();
+        if (frameId != null && t != null && frameId.equals(t.mainFrameId)) {
+            return -1;   // 主 frame：默认主世界（不建隔离世界，objectId 可被下游 CDP 命令可靠使用）
+        }
         Integer cached = contextByFrame.get(frameId);
         if (cached != null && cached > 0) return cached;
         JsonObject created = transport.send("Page.createIsolatedWorld",
@@ -501,7 +534,7 @@ public final class CdpFrameLocator {
             log.debug("[codegen][cdp] createIsolatedWorld failed for frame {} - frame may be stale, invalidating frame tree for rebuild",
                     frameId);
             invalidateTree();   // 建隔离世界失败 ⇒ 该 frame 多半已随导航/移除消失，帧树可能过期，下次 tree() 重建
-            return -1;
+            return 0;
         }
         contextByFrame.put(frameId, id.intValue());
         return id.intValue();

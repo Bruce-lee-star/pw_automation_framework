@@ -205,13 +205,23 @@ public class CodegenScorerTest {
                 "", "", -1, css, List.of(), "", "", "", attrs, "", false, List.of());
     }
 
+    private static CodegenFacts.Fact selfWithSrc(String tag, String css, String src) {
+        return new CodegenFacts.Fact("generic", "", tag, "", "", "", "", "", "", "",
+                "", "", -1, css, List.of(), "", "", "", java.util.Map.of(), src, false, List.of());
+    }
+
+    private static CodegenFacts.Fact selfWithAnchors(String tag, String css, List<String> anchors) {
+        return new CodegenFacts.Fact("generic", "", tag, "", "", "", "", "", "", "",
+                "", "", -1, css, List.of(), "", "", "", java.util.Map.of(), "", false, anchors);
+    }
+
     private static CodegenFacts.Fact ancestor(String tag, String id, String testid, List<String> anchors) {
         return new CodegenFacts.Fact("generic", "", tag, id, testid, "", "", "", "", "", "", "", -1,
                 "", List.of(), "", "", "", java.util.Map.of(), "", false, anchors);
     }
 
     private static CodegenFacts facts(CodegenFacts.Fact self, CodegenFacts.Fact... ancestors) {
-        return new CodegenFacts(self, List.of(ancestors));
+        return new CodegenFacts(self, List.of(ancestors), List.of());
     }
 
     /** 角色可定位（button + name）⇒ 角色策略，分数 105（优于 CSS 链 530）。 */
@@ -861,5 +871,186 @@ public class CodegenScorerTest {
 
         Assert.assertEquals("产物不得随 JSON 键序变化", s1.uniqueCss, s2.uniqueCss);
         Assert.assertEquals("按属性名排序 ⇒ data-a 胜出", "[data-a=\"1\"]", s1.uniqueCss);
+    }
+
+    // ------------------------------------------------------------------
+    // 非法 CSS 护栏（与浏览器侧 codegen-inject.js#validCssSel 同源）
+    // ------------------------------------------------------------------
+
+    /**
+     * 回归护栏：把两个属性塞进同一个方括号（缺 {@code ][}，非法 CSS）必须被识别为畸形，
+     * 不得在打分产物里出现。典型即 {@code [data-i18n="x" data-i18n="x"]}——运行期
+     * {@code querySelectorAll} 抛 {@code SyntaxError} 或零匹配，表现为"未定位到"。
+     */
+    @Test
+    public void malformedDoubleAttrInSingleBracket_isDetected() {
+        Assert.assertTrue("单括号双属性必须判为畸形",
+                CodegenScorer.isMalformedCssSelector(
+                        "[data-i18n=\"forgot_username_button\" data-i18n=\"forgot_username_button\"]"));
+        Assert.assertTrue("不同属性同括号也必须判为畸形",
+                CodegenScorer.isMalformedCssSelector("[data-x=\"a\" data-y=\"b\"]"));
+    }
+
+    /**
+     * 合法选择器不得被护栏误伤：{@code ][} 复合、引号内含空格、后代组合、{@code #id}、{@code :has()} 全部放行。
+     */
+    @Test
+    public void validSelectorsAreNotFlagged() {
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector("button:has(span[data-i18n=\"x\"])"));
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector("[data-i18n=\"x\"][data-i18n=\"x\"]"));
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector("[class*=\"btn primary\"]"));
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector("div[class*=\"a\"] span[class*=\"b\"]"));
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector("#loginBtn"));
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector(""));
+        Assert.assertFalse(CodegenScorer.isMalformedCssSelector(null));
+    }
+
+    /**
+     * 含畸形 {@code cssSelector} 的祖先不得参与选优（阶段 2 直接跳过），更不会成为最终产物。
+     */
+    @Test
+    public void malformedAncestorCssSelector_isSkipped() {
+        CodegenFacts.Fact self = rich("generic", "", "", "user-box", "div", "", "div:nth-of-type(1)", "", "", "");
+        CodegenFacts.Fact badAncestor = ancestor("div", "", "",
+                List.of("[data-i18n=\"x\" data-i18n=\"x\"]"));
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self, badAncestor), css -> 1);
+
+        Assert.assertFalse("畸形祖先选择器不得进入产物", s.uniqueCss.contains("data-i18n=\"x\""));
+    }
+
+    /**
+     * 含畸形 {@code cssSelector} 的目标自身不得成为 CSS 候选（阶段 6 直接不加入），
+     * 退化到角色 / XPath 兜底而非产出畸形 {@code @Element(...)}。
+     */
+    @Test
+    public void malformedSelfCssSelector_isExcludedFromCandidates() {
+        CodegenFacts.Fact self = selfFact("div", "[data-i18n=\"x\" data-i18n=\"x\"]", new LinkedHashMap<>());
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), css -> 1);
+
+        Assert.assertFalse("畸形自身选择器不得成为产物",
+                s.uniqueCss != null && s.uniqueCss.contains("data-i18n=\"x\""));
+    }
+
+    // ------------------------------------------------------------------
+    // 子代锚点短形式 tag:has(后代锚点)（2026-11-14）
+    // ------------------------------------------------------------------
+
+    /**
+     * 真实场景（HSBC logon 的 Forgot-username overlay）：目标 `<button>` 自身没有任何稳定属性，
+     * 内部却有唯一的业务锚点 `<span data-i18n="forgot_username_button">`；而结构链按 div 序号拼出的
+     * `… > div:nth-of-type(3) button` 在当前 DOM（`.button-panel` 的直接子元素是 button）命中 0。
+     *
+     * <p>期望产物：{@code button:has([data-i18n="forgot_username_button"])}——零结构层级、跨语言稳定，
+     * 而不是那条回放必然等不到元素的死链。
+     */
+    @Test
+    public void deadStructureChain_losesToSelfHasDescendantAnchor() {
+        String deadChain = "div:nth-of-type(1) div[class*=\"button-panel\"] > div:nth-of-type(3) button";
+        String shortForm = "button:has([data-i18n=\"forgot_username_button\"])";
+        CodegenFacts.Fact self = selfWithAnchors("button", deadChain,
+                List.of("[data-i18n=\"forgot_username_button\"]"));
+        LocatorCounter counter = css -> {
+            if (css.equals(shortForm)) return 1;
+            if (css.contains("button-panel")) return 0;   // 死链：当前一个都匹配不到
+            return 3;
+        };
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(shortForm, s.uniqueCss);
+        Assert.assertEquals("短形式按单元素处理", 1, s.matchCount);
+        Assert.assertEquals(CodegenScorer.CSS_DESC_ANCHOR, s.score);
+        Assert.assertEquals(LocatorStrategy.CSS, s.strategy);
+        Assert.assertFalse("产物不得保留 0 命中的结构链", s.uniqueCss.contains("button-panel"));
+    }
+
+    /**
+     * 短形式必须如实回报命中数：后代锚点并非唯一（页面上多个按钮都含该锚点）时，
+     * 它仍可作为「比结构链更窄」的尽力而为候选胜出，但 {@code matchCount} 必须是真实值
+     * （下游据此生成 {@code PageElementList}），绝不能冒充唯一。
+     */
+    @Test
+    public void selfHasAnchor_notUnique_keepsRealCountInsteadOfClaimingUnique() {
+        String shortForm = "button:has([data-i18n=\"close\"])";
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(2)", List.of("[data-i18n=\"close\"]"));
+        LocatorCounter counter = css -> css.equals(shortForm) ? 2 : 3;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals("2 命中比 3 命中的结构链更窄，可作为尽力而为候选胜出", shortForm, s.uniqueCss);
+        Assert.assertEquals("必须如实回报 2 命中（下游生成 PageElementList）", 2, s.matchCount);
+    }
+
+    /**
+     * 锚点含非法字符 / 标签名非法时一律不得拼进选择器（注入纵深防御，与祖先锚点同源白名单）。
+     */
+    @Test
+    public void invalidSelfAnchorOrTag_isIgnored() {
+        CodegenFacts.Fact badAnchor = selfWithAnchors("button", "button:nth-of-type(1)",
+                List.of("[data-i18n=\"a\\\"]\"]"));
+        Assert.assertFalse("非法锚点不得拼进产物",
+                CodegenScorer.score(facts(badAnchor), css -> 2).uniqueCss.contains(":has("));
+
+        CodegenFacts.Fact badTag = selfWithAnchors("but ton>", "button:nth-of-type(1)",
+                List.of("[data-i18n=\"x\"]"));
+        Assert.assertFalse("非法标签名不得拼进产物",
+                CodegenScorer.score(facts(badTag), css -> 2).uniqueCss.contains(":has("));
+    }
+
+    // ------------------------------------------------------------------
+    // 图片 src 的语言变体（2026-11-14）
+    // ------------------------------------------------------------------
+
+    /**
+     * HSBC 图片按语言分文件（{@code img_username_EN.png} / {@code _ZH.png} / {@code _TC.png}）。
+     * 用 {@code [src$="img_username_EN.png"]} 定位，用户一切语言整条就失效（回放等不到元素）。
+     * 期望改为锚定语言段之前的前缀：{@code img[src*="img_username"]}。
+     */
+    @Test
+    public void localizedImgSrc_dropsLanguageSuffix() {
+        CodegenFacts.Fact self = selfWithSrc("img", "div:nth-of-type(1) img",
+                "/portalserver/hsbc/content/commercial/online/gbb/pre-logon/img_username_EN.png");
+        String expected = "img[src*=\"img_username\"]";
+        LocatorCounter counter = css -> {
+            if (css.equals(expected)) return 1;
+            if (css.contains("img_username_EN.png")) return 1;   // 拾取当时 EN 确实唯一
+            return 3;
+        };
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(expected, s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.SRC_TAIL, s.score);
+        Assert.assertFalse("产物不得绑定语言后缀", s.uniqueCss.contains("_EN"));
+    }
+
+    /** 无语言尾标的文件名仍走精确 {@code $=}（不要为了"通用"把强定位降级成宽包含）。 */
+    @Test
+    public void plainImgSrc_keepsExactSuffix() {
+        CodegenFacts.Fact self = selfWithSrc("img", "img", "/static/brand/hsbc_badge.png");
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), css -> 1);
+
+        Assert.assertEquals("img[src$=\"hsbc_badge.png\"]", s.uniqueCss);
+    }
+
+    /** 语言段识别：只吃<b>最后一个</b>语言段；前缀过短 / 无语言段时不动。 */
+    @Test
+    public void localeNeutralPrefix_detection() {
+        Assert.assertEquals("img_username",
+                CodegenScorer.localeNeutralSrcPrefix("img_username_EN.png"));
+        Assert.assertEquals("banner",
+                CodegenScorer.localeNeutralSrcPrefix("banner_zh-HK.png"));
+        Assert.assertEquals("Search_HSBC_HK_Business_Express",
+                CodegenScorer.localeNeutralSrcPrefix("Search_HSBC_HK_Business_Express_EN.png"));
+        Assert.assertEquals("logo",
+                CodegenScorer.localeNeutralSrcPrefix("logo.en_US.svg"));
+
+        Assert.assertNull("无语言段：保持精确匹配",
+                CodegenScorer.localeNeutralSrcPrefix("hsbc_badge.png"));
+        Assert.assertNull("前缀过短不归一化（*= 过宽）",
+                CodegenScorer.localeNeutralSrcPrefix("seo_EN.png"));
+        Assert.assertNull(CodegenScorer.localeNeutralSrcPrefix(null));
+        Assert.assertNull(CodegenScorer.localeNeutralSrcPrefix("  "));
     }
 }

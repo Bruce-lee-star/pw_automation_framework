@@ -191,14 +191,12 @@ public @interface RoleElement {
 
     /**
      * 可见性过滤，对齐 Playwright {@code Locator.filter(visible)}（浏览器层判定，识别所有祖先
-     * display:none / visibility:hidden / 零尺寸，等价于 {@link ElementVisibility} 的宽松档）。
+     * display:none / visibility:hidden / 零尺寸，与原生 {@code :visible} 同源）。
      * <ul>
      *   <li>{@link #ANY}：不限定（默认，匹配可见与隐藏元素，零回归）；</li>
      *   <li>{@link #YES}：只匹配可见元素——自动收敛多份隐藏副本，解决「多 Continue 仅一个可见」类 strict 冲突；</li>
      *   <li>{@link #NO}：只匹配隐藏元素（如定位「已折叠 / 未展开」区域）。</li>
      * </ul>
-     * <p>语义与框架 {@link ElementVisibility} 一致；若需额外排除 opacity:0 / 视口外 / 被遮挡，
-     * 请显式调用 {@link ElementVisibility#isVisibleStrict(Locator)}（严格档）。</p>
      * <pre>
      *     &#64;RoleElement(role = AriaRole.BUTTON, name = "Continue", visible = RoleElement.State.YES)
      *     public PageElement CONTINUE;   // 只匹配可见的 Continue，过滤掉其余隐藏副本
