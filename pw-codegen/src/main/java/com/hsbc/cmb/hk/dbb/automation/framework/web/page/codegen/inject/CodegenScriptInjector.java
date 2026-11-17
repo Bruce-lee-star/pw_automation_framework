@@ -1,14 +1,12 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.inject;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.quiet.CodegenQuiet;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Frame;
 import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 
 /**
  * 把 {@code codegen-inject.js}（role 算法 + recorder）经 {@code addInitScript} 注入被测页。
@@ -23,19 +21,15 @@ public final class CodegenScriptInjector {
 
     private CodegenScriptInjector() {}
 
-    /** 读取 classpath 上的 codegen-inject.js 内容。 */
+    /**
+     * 注入脚本 = {@code locator-core.js}（公共定位逻辑，唯一来源）+ 注入侧模板，由
+     * {@link LocatorCoreScript} 在类加载期拼装。
+     *
+     * <p>拼装失败抛的是 {@link ExceptionInInitializerError}（{@code Error} 而非 {@code Exception}），
+     * 下面的 {@code catch (Exception)} 不会把它吞成「静默不注入」——静默失效是这类脚本最难查的故障。
+     */
     private static String readScript() {
-        try (InputStream in = CodegenScriptInjector.class.getClassLoader()
-                .getResourceAsStream("codegen/codegen-inject.js")) {
-            if (in == null) {
-                log.warn("[codegen][inject] codegen-inject.js not found on classpath");
-                return "";
-            }
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            CodegenQuiet.ignore("CodegenScriptInjector#readScript", e);
-            return "";
-        }
+        return LocatorCoreScript.inject();
     }
 
     /**

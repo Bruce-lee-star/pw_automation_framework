@@ -1173,7 +1173,7 @@ public final class CodegenScorer {
     }
 
     /**
-     * 非法 CSS 选择器护栏（与浏览器侧 {@code codegen-inject.js#validCssSel} 同源，纵深防御）：
+     * 非法 CSS 选择器护栏（与浏览器侧 {@code locator-core.js#validCssSel} 同源，纵深防御）：
      * 识别「单个 {@code [ ]} 内出现两个属性条件、中间以空白相接、无 {@code ]} 分隔」的畸形形态
      * （如 {@code [data-i18n="x" data-i18n="x"]}，缺 {@code ][}，属非法 CSS，会令运行期
      * {@code querySelectorAll} 抛 {@code SyntaxError} 或零匹配 → 表现为"未定位到"）。

@@ -1,12 +1,11 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
 import org.junit.Test;
 
-import java.io.InputStream;
 import java.lang.reflect.Field;
-import java.nio.charset.StandardCharsets;
 
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -21,7 +20,7 @@ public class CodegenCheckedStateContractTest {
 
     @Test
     public void injectedFactsReadAriaChecked() throws Exception {
-        String js = resource("codegen/codegen-inject.js");
+        String js = LocatorCoreScript.inject();
         assertTrue("注入脚本必须提供 checkedStateOf",
                 js.contains("function checkedStateOf("));
         assertTrue("注入脚本必须读取 aria-checked", js.contains("aria-checked"));
@@ -42,11 +41,4 @@ public class CodegenCheckedStateContractTest {
                 js.contains("checked: checkedStateOf(x)"));
     }
 
-    private static String resource(String name) throws Exception {
-        try (InputStream in = CodegenCheckedStateContractTest.class.getClassLoader()
-                .getResourceAsStream(name)) {
-            assertNotNull("注入脚本必须在测试 classpath 上: " + name, in);
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
 }

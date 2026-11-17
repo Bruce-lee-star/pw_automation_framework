@@ -3,6 +3,7 @@ package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.AriaRoles;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.LocatorStrategy;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
@@ -58,29 +59,13 @@ public final class CodegenCdpNodeExtractor {
      * 自包含的元素事实收集函数（经 CDP {@code Runtime.callFunctionOn} 注入，{@code this} 绑定到目标元素）。
      *
      * <p>必须<b>不依赖</b> {@code window.__CODEGEN__}：跨源 iframe 内 addInitScript 不会运行，只有自包含函数才能
-     * 在元素所属的 frame 执行上下文里完成求值。逻辑与 {@code codegen-inject.js} 的 {@code factsOf/ancestorChain}
-     * 保持同源（改一处须同步另一处）。
-     */
-    private static final String SELF_CONTAINED_GET_INFO_FN = loadScript("cdp-extract-fn.js");
-
-    /**
-     * 从 classpath 读取注入脚本。
+     * 在元素所属的 frame 执行上下文里完成求值。
      *
-     * <p>为什么放资源文件而不是 text block：脚本已超 60KB，JVM 常量池单字符串上限 65535 字节，
-     * 任何注释增补都会触发 {@code is too long for the constant pool} 编译失败；资源化同时让
-     * {@code node --check} 与两处（DOM 注入 / CDP 提取）共享同一份实现成为可能。
+     * <p>内容 = {@code codegen/locator-core.js}（公共定位逻辑，唯一来源）+ {@code codegen/cdp-extract-fn.js}
+     * 模板，由 {@link LocatorCoreScript} 在类加载期拼装并做结构校验。禁止在本类或模板里另存一份公共定位逻辑——
+     * 两份副本的漂移不会有编译错误，只会让注入路径与拾取路径对同一元素给出不同结论。
      */
-    private static String loadScript(String name) {
-        String path = "/codegen/" + name;
-        try (java.io.InputStream in = CodegenCdpNodeExtractor.class.getResourceAsStream(path)) {
-            if (in == null) {
-                throw new IllegalStateException("Missing codegen script resource: " + path);
-            }
-            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (java.io.IOException e) {
-            throw new IllegalStateException("Failed to load codegen script resource: " + path, e);
-        }
-    }
+    private static final String SELF_CONTAINED_GET_INFO_FN = LocatorCoreScript.cdp();
 
     /**
      * 跨 frame 穿透：给定 `<iframe>` 宿主元素（在父 frame 文档内），返回其"优先、可读<b>且唯一</b>"的 CSS 选择器。

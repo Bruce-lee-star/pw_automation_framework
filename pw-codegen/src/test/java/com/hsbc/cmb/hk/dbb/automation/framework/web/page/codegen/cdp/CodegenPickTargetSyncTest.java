@@ -1,12 +1,10 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
 import org.junit.Test;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.lang.reflect.Field;
-import java.nio.charset.StandardCharsets;
-import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -23,21 +21,13 @@ public class CodegenPickTargetSyncTest {
 
     @Test
     public void injectJsAndSelfContainedPickTargetAreInSync() throws Exception {
-        String injectTarget = extractPickTarget(loadResource("/codegen/codegen-inject.js"));
+        String injectTarget = extractPickTarget(LocatorCoreScript.inject());
         String embeddedTarget = extractPickTarget(loadSelfContained());
 
         assertNotNull("inject.js 应包含 pickTarget", injectTarget);
         assertNotNull("SELF_CONTAINED_GET_INFO_FN 应包含 pickTarget", embeddedTarget);
         assertEquals("pickTarget 两处实现必须一致（剥离注释/空白后）；改一处须同步另一处",
                 injectTarget, embeddedTarget);
-    }
-
-    /** 从 classpath 读取注入脚本资源。 */
-    private static String loadResource(String path) throws Exception {
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(
-                CodegenPickTargetSyncTest.class.getResourceAsStream(path), StandardCharsets.UTF_8))) {
-            return r.lines().collect(Collectors.joining("\n"));
-        }
     }
 
     /** 反射读取 {@link CodegenCdpNodeExtractor} 的私有常量 {@code SELF_CONTAINED_GET_INFO_FN}。 */

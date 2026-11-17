@@ -1,14 +1,12 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
 import org.junit.Test;
 
-import java.io.InputStream;
 import java.lang.reflect.Field;
-import java.nio.charset.StandardCharsets;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -23,7 +21,7 @@ public class CodegenHasScopeContractTest {
 
     @Test
     public void injectedFactsCollectDescendantAnchors() throws Exception {
-        String js = resource("codegen/codegen-inject.js");
+        String js = LocatorCoreScript.inject();
         assertTrue("注入脚本必须采集后代锚点", js.contains("function descendantAnchorsOf("));
         assertTrue("祖先事实必须带 childAnchors", js.contains("childAnchors: descendantAnchorsOf("));
         assertTrue("生成侧不得使用 Playwright 专有伪类别名", !js.contains(":visible"));
@@ -51,7 +49,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void scopeHeadFactsAndStateAnchorAreSyncedAcrossBothJsCopies() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         Field f = CodegenCdpNodeExtractor.class.getDeclaredField("SELF_CONTAINED_GET_INFO_FN");
         f.setAccessible(true);
         String cdp = (String) f.get(null);
@@ -92,7 +90,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void selfFactsCarryAnchors_andZeroMatchChainsAreDropped() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         assertTrue("注入脚本：目标自身必须采集 childAnchors",
                 inject.contains("childAnchors: descendantAnchorsOf(el, 3, 6)"));
         assertTrue("注入脚本：结构链必须做零命中校验", inject.contains("totalCount(pathSel) <= 0"));
@@ -117,7 +115,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void codegenOwnUi_isExcludedFromRecordingAndPick() throws Exception {
-        String js = resource("codegen/codegen-inject.js");
+        String js = LocatorCoreScript.inject();
 
         assertTrue("必须存在框架 UI 判定助手", js.contains("function isCodegenUi(node)"));
         assertTrue("高亮框必须打 data-codegen-ui 标记",
@@ -137,7 +135,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void localizedImgSrcIsNormalizedOnBothJsCopies() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         assertTrue("注入脚本：必须有语言段归一化助手",
                 inject.contains("function srcLocaleNeutralPrefix(tail)"));
         assertTrue("注入脚本：img 分支必须使用它",
@@ -184,7 +182,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void sharedLocatorCoreIsSyncedAcrossBothCopies() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         Field f = CodegenCdpNodeExtractor.class.getDeclaredField("SELF_CONTAINED_GET_INFO_FN");
         f.setAccessible(true);
         String cdp = (String) f.get(null);
@@ -223,7 +221,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void sharedLocatorDataIsIdenticalAcrossBothCopies() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         Field f = CodegenCdpNodeExtractor.class.getDeclaredField("SELF_CONTAINED_GET_INFO_FN");
         f.setAccessible(true);
         String cdp = (String) f.get(null);
@@ -270,7 +268,7 @@ public class CodegenHasScopeContractTest {
     /** 右键录制链路的存在性契约：注入侧必须监听 contextmenu 并上报同名动作类型。 */
     @Test
     public void rightClickIsRecordedByInjectScript() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         assertTrue("注入脚本必须监听右键", inject.contains("addEventListener('contextmenu'"));
         assertTrue("右键必须上报 contextmenu 动作类型", inject.contains("type: 'contextmenu'"));
     }
@@ -300,7 +298,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void visualOnlyHiddenClassesAreNotCollectedAsExclusions() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         assertFalse("注入脚本不得采集 class 型视觉隐藏标记", inject.contains("hiddenPeerMarks"));
         assertTrue("可见性判定必须写明 AX 树语义边界", inject.contains("仍在可访问性树里"));
 
@@ -318,7 +316,7 @@ public class CodegenHasScopeContractTest {
      */
     @Test
     public void bothSidesSupportBoundedFillerSegments() throws Exception {
-        String inject = resource("codegen/codegen-inject.js");
+        String inject = LocatorCoreScript.inject();
         assertTrue(inject.contains("function fallbackSeg("));
         assertTrue(inject.contains("MAX_FILLER_LAYERS"));
         assertTrue("可见性必须判祖先 display:none", inject.contains("pcs.display === 'none'"));
@@ -331,11 +329,4 @@ public class CodegenHasScopeContractTest {
         assertTrue("CDP 可见性必须判祖先 display:none", cdp.contains("pcs.display === 'none'"));
     }
 
-    private static String resource(String name) throws Exception {
-        try (InputStream in = CodegenHasScopeContractTest.class.getClassLoader()
-                .getResourceAsStream(name)) {
-            assertNotNull("注入脚本必须在测试 classpath 上: " + name, in);
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-        }
-    }
 }

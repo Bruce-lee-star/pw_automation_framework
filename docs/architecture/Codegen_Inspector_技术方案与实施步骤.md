@@ -327,8 +327,14 @@ pw-codegen-v3/                                          ← 全新模块，与 v
     ├── panel.html                    // 面板 UI（flex 响应式，窗口可 OS 拖拽缩放）
     ├── panel.js                      // 面板逻辑（Monaco CDN + 离线降级 + 行点击高亮交互）
     ├── panel.css                     // 面板样式
-    └── codegen-inject.js            // 注入被测页：role/name 算法子集 + recorder
+    ├── locator-core.js               // 公共定位逻辑（单一来源：55 函数 + 11 常量）
+    ├── codegen-inject.js            // 注入侧模板（占位符 ← locator-core）+ recorder
+    └── cdp-extract-fn.js            // CDP 侧模板（占位符 ← locator-core）+ factsOf
 ```
+
+> 脚本装配：`LocatorCoreScript` 在<b>类加载期</b>把 `locator-core.js` 拼进两个模板，并校验
+> 「占位符唯一 / 长度守恒 / 关键标记齐全」，失败即抛 `IllegalStateException`（不会静默产出空脚本）。
+> 公共定位逻辑<b>只改 `locator-core.js`</b>；两端模板只保留各自独有的入口与装配段落。
 
 > 注：`StepClassGenerator` / `AssertClassGenerator` / `CodegenRecorder`（独立类）本轮未落地，
 > recorder 逻辑暂内嵌于 `codegen-inject.js`，Step/Assert 生成按计划（D13/D14）后续迭代。
@@ -635,7 +641,7 @@ iframe 内元素 `page=0 / frameScoped=1`（唯一性从"未校验"变为可校�
 
 ### 15.5 14.5 两项遗留的落地方式
 
-- **facts 精简**（`SELF_CONTAINED_GET_INFO_FN` 与 `codegen-inject.js` 同步）：祖先链只回传
+- **facts 精简**（公共逻辑统一在 `codegen/locator-core.js`，两端加载期拼接）：祖先链只回传
   `{"cssSelector": "<从该祖先到目标的完整路径>"}`，不再为每层祖先重复计算
   `accessibleName` / `absXPath` / `labelTextOf` / `shadowHosts`（每层 × 多轮 DOM 遍历）。
   祖先项只有 `cssSelector` 被消费；Java 侧 `CodegenFacts.factFrom` 对缺失字段保持默认值，仍兼容旧载荷。
@@ -694,7 +700,7 @@ html:nth-of-type(1) > body:nth-of-type(1) > … > div:nth-of-type(7) body:nth-of
 
 **修法**（两层一起改，缺一不可）：
 
-1. 页面侧（`SELF_CONTAINED_GET_INFO_FN` 与 `codegen-inject.js` 同步）：新增 `segOf`（单层段：`#id` 或
+1. 页面侧（`codegen/locator-core.js`，两端共用）：新增 `segOf`（单层段：`#id` 或
    `tag:nth-of-type(k)`），`ancestorChain` 回传「**从该祖先到目标的完整路径**」——段链用 ` > ` 连接、
    由近及远逐级加长；深度超过上限时追加一条 `documentElement` 起的绝对路径兜底
    （逐级 `:nth-of-type` 精确 ⇒ 必然唯一）。

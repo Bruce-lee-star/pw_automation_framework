@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.recorder;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.LocatorCoreScript;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
@@ -8,14 +9,9 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -117,16 +113,13 @@ public class CodegenRecorderLabelClickTest {
         return (List<Map<String, Object>>) raw;
     }
 
-    /** 读取 classpath 上的注入脚本（与被测运行期同一份资源）。 */
+    /**
+     * 注入脚本（{@code locator-core.js} + 注入侧模板的拼装产物）——与被测运行期同一份内容。
+     *
+     * <p>不能直接读 {@code codegen/codegen-inject.js}：该文件已是模板，公共定位函数在
+     * {@code codegen/locator-core.js} 里（见 {@link LocatorCoreScript}）。
+     */
     private static String readScript() {
-        try (InputStream in = CodegenRecorderLabelClickTest.class.getClassLoader()
-                .getResourceAsStream("codegen/codegen-inject.js")) {
-            assertTrue("codegen-inject.js 必须在 classpath 上", in != null);
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                return r.lines().collect(Collectors.joining("\n"));
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("读取 codegen-inject.js 失败", e);
-        }
+        return LocatorCoreScript.inject();
     }
 }
