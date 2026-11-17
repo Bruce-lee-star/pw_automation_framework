@@ -82,9 +82,10 @@ public class StepClassGeneratorTest {
         // 一次 Start→Pause 只产出一个 @Step 方法：step1
         Assert.assertEquals("一次会话只生成一个 @Step 方法", 1, countOccurrences(out, "@Step"));
         Assert.assertTrue(out.contains("public void step1() {"));
-        Assert.assertTrue(out.contains("loginPage.signIn.click();"));
-        Assert.assertTrue(out.contains("loginPage.username.fill(\"\");"));
-        Assert.assertTrue(out.contains("loginPage.rememberMe.check();"));
+        // 命名规范（2026-11-15）：button→Btn / textbox→Input / checkbox→Checkbox
+        Assert.assertTrue(out.contains("loginPage.signInBtn.click();"));
+        Assert.assertTrue(out.contains("loginPage.usernameInput.fill(\"\");"));
+        Assert.assertTrue(out.contains("loginPage.rememberMeCheckbox.check();"));
         // 占位值必须显式留 TODO，不能静默提交空值
         Assert.assertTrue(out.contains("TODO(review): replace the empty placeholder with the real input value"));
     }
@@ -108,10 +109,10 @@ public class StepClassGeneratorTest {
                 role("textbox", "Username", "#u", 0));
         String page = PageClassGenerator.generate(TARGET, es, new String[]{});
         String step = stepClass(es);
-        Assert.assertTrue(page.contains("public PageElement signIn;"));
-        Assert.assertTrue(page.contains("public PageElement username;"));
-        Assert.assertTrue(step.contains("loginPage.signIn."));
-        Assert.assertTrue(step.contains("loginPage.username."));
+        Assert.assertTrue(page.contains("public PageElement signInBtn;"));
+        Assert.assertTrue(page.contains("public PageElement usernameInput;"));
+        Assert.assertTrue(step.contains("loginPage.signInBtn."));
+        Assert.assertTrue(step.contains("loginPage.usernameInput."));
     }
 
     @Test
@@ -133,8 +134,8 @@ public class StepClassGeneratorTest {
                 "textbox|Username#0", "alice",
                 "textbox|Password#0", "S3cret!");
         String out = stepClass(es, values);
-        Assert.assertTrue(out.contains("loginPage.username.fill(\"alice\");"));
-        Assert.assertTrue(out.contains("loginPage.password.fill(\"S3cret!\");"));
+        Assert.assertTrue(out.contains("loginPage.usernameInput.fill(\"alice\");"));
+        Assert.assertTrue(out.contains("loginPage.passwordInput.fill(\"S3cret!\");"));
         Assert.assertFalse("已回填真实值不应再出现空占位 TODO",
                 out.contains("replace the empty placeholder with the real input value"));
     }
@@ -150,7 +151,7 @@ public class StepClassGeneratorTest {
         CodegenEntry e = withTag("combobox", "Province", "#prov", 0, "select");
         String out = stepClass(List.of(e), Map.of("combobox|Province#0", "HK"));
 
-        Assert.assertTrue(out.contains("loginPage.province.selectByValue(\"HK\");"));
+        Assert.assertTrue(out.contains("loginPage.provinceSelect.selectByValue(\"HK\");"));
         Assert.assertFalse("原生 select 不得生成 fill()", out.contains(".fill("));
     }
 
@@ -160,7 +161,7 @@ public class StepClassGeneratorTest {
         CodegenEntry e = withTag("combobox", "Province", "div.select", 0, "div");
         String out = stepClass(List.of(e), Map.of("combobox|Province#0", "HK"));
 
-        Assert.assertTrue(out.contains("loginPage.province.click();"));
+        Assert.assertTrue(out.contains("loginPage.provinceSelect.click();"));
         Assert.assertFalse("自定义下拉不得生成 fill()", out.contains(".fill("));
     }
 
@@ -180,7 +181,7 @@ public class StepClassGeneratorTest {
         CodegenEntry e = withChecked("checkbox", "Remember me", "#rm", false);
         String out = stepClass(List.of(e));
 
-        Assert.assertTrue(out.contains("loginPage.rememberMe.uncheck();"));
+        Assert.assertTrue(out.contains("loginPage.rememberMeCheckbox.uncheck();"));
         Assert.assertFalse(out.contains(".check();"));
     }
 
@@ -190,7 +191,7 @@ public class StepClassGeneratorTest {
         CodegenEntry e = withChecked("checkbox", "Remember me", "#rm", true);
         String out = stepClass(List.of(e));
 
-        Assert.assertTrue(out.contains("loginPage.rememberMe.check();"));
+        Assert.assertTrue(out.contains("loginPage.rememberMeCheckbox.check();"));
     }
 
     private static CodegenEntry withChecked(String role, String name, String css, boolean checked) {

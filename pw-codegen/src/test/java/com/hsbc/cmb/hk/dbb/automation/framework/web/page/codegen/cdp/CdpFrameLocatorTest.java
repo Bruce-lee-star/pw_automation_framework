@@ -57,7 +57,7 @@ public class CdpFrameLocatorTest {
 
     /**
      * DOM agent 尚未持有文档树时（历史缺陷形态：{@code DOM.enable} 之后没调 {@code DOM.getDocument}），
-     * {@code DOM.describeNode} 拿不到 backendNodeId —— 必须自愈一次后成功，绝不静默退回坐标法。
+     * {@code DOM.describeNode} 拿不到 backendNodeId —— 必须自愈一次后成功，绝不静默放弃本次拾取。
      */
     @Test
     public void nodeResolutionSelfHealsByPrimingDocument() {
@@ -86,7 +86,7 @@ public class CdpFrameLocatorTest {
         assertEquals("DOM.getDocument 是幂等预热，不应每次拾取都发", 1, cdp.getDocumentCalls);
     }
 
-    /** 节点解析彻底失败（文档树也拉不到）⇒ 返回 null 让调用方走坐标兜底，不抛异常。 */
+    /** 节点解析彻底失败（文档树也拉不到）⇒ 返回 null 让调用方按「未拾取」处理，不抛异常。 */
     @Test
     public void nodeResolutionFailureReturnsNull() {
         FakeFrames cdp = new FakeFrames();
@@ -224,7 +224,7 @@ public class CdpFrameLocatorTest {
         FakeFrames cdp = new FakeFrames();
         cdp.addFrame("F1", "MAIN", "#inner", 500L);
 
-        assertNull("宿主链含空项时不可信，应放弃选择器路径（回退坐标兜底）",
+        assertNull("宿主链含空项时不可信，应放弃选择器路径（本次拾取失败，无坐标兜底）",
                 new CdpFrameLocator(cdp).findBySelector("#inner", List.of("#host", "")));
         assertNull(cdp.lastExpression);
         assertEquals("不应发起任何 frame 探测", List.of(), cdp.probedFrames);

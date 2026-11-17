@@ -43,13 +43,24 @@ final class PickGuard {
      * 抢占一次拾取。
      *
      * @param fingerprint 元素指纹（{@link #fingerprint(Map)}）；{@code null} 表示无法识别，直接放行
-     * @param type        动作类型（{@code click} / {@code fill}）
+     * @param type        动作类型（{@code click} / {@code contextmenu} / {@code dblclick} / {@code fill} …）
      * @return {@code true} 可真正执行；{@code false} 表示同元素正在拾取中或仍在失败冷却期
      */
     boolean begin(String fingerprint, String type) {
         if (fingerprint == null) return true;
-        if (!"click".equals(type) && coolingDown(fingerprint)) return false;
+        if (!isClickIntent(type) && coolingDown(fingerprint)) return false;
         return inFlight.add(fingerprint);
+    }
+
+    /**
+     * 是否为「用户明确意图的点击类动作」：{@code click} / {@code contextmenu} / {@code dblclick}。
+     *
+     * <p>这类动作不参与失败冷却压制——冷却是为了抑制「同一输入框被每个按键重试一遍」，
+     * 而点击是离散的明确动作，冷却会让用户以为点了没反应。此前只认 {@code click}，
+     * 右键在失败后 1.5s 内会被静默吞掉。
+     */
+    static boolean isClickIntent(String type) {
+        return "click".equals(type) || "contextmenu".equals(type) || "dblclick".equals(type);
     }
 
     /** 结束一次拾取：释放占位；失败则进入冷却，成功则清掉历史失败。 */

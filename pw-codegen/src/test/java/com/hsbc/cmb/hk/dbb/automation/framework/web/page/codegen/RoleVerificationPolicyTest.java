@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
 import org.junit.Test;
 
 import static org.junit.Assert.assertFalse;
@@ -41,5 +42,37 @@ public class RoleVerificationPolicyTest {
     public void nonPositiveExpectedDegradesToSingleElementSemantics() {
         assertTrue(RoleVerificationPolicy.keepRole(1, 0));
         assertFalse(RoleVerificationPolicy.keepRole(2, 0));
+    }
+
+    /**
+     * 复核不通过后的第二道闸门：只有"现在的 DOM 还是拾取时的 DOM"才允许把 role 改写成 CSS。
+     *
+     * <p>现场（HSBC 重置密码多步向导）：点 Continue 翻到下一步后上一步的按钮被 {@code display:none} 隐藏，
+     * 生成时复核命中 0。这条本来完全可用的 role 定位器曾被改写成
+     * {@code div:nth-of-type(5) ... button[class*='float-right']}，属把"页面翻页"误判成"定位器不可用"。
+     */
+    @Test
+    public void multiHitIsAlwaysAmbiguousAndFallsBack() {
+        assertTrue("命中>1 是真歧义（运行期 strict violation），与元素此刻是否可见无关",
+                RoleVerificationPolicy.fallBackToCssAfterMismatch(2, TriState.TRUE));
+        assertTrue(RoleVerificationPolicy.fallBackToCssAfterMismatch(2, TriState.FALSE));
+        assertTrue(RoleVerificationPolicy.fallBackToCssAfterMismatch(2, TriState.UNKNOWN));
+    }
+
+    @Test
+    public void zeroHitFallsBackOnlyWhenPickStateIsIntact() {
+        assertTrue("0 命中且元素此刻仍可见 ⇒ 命中数是真实事实（名字口径不符/ARIA 隐藏），回退 CSS",
+                RoleVerificationPolicy.fallBackToCssAfterMismatch(0, TriState.TRUE));
+        assertFalse("0 命中且元素已消失/被隐藏 ⇒ 页面已翻页，保留 role 并标记未校验",
+                RoleVerificationPolicy.fallBackToCssAfterMismatch(0, TriState.FALSE));
+        assertFalse("状态不可判定（无 extractor / 计数失败）时保守保留 role：误退化比留 TODO 更伤",
+                RoleVerificationPolicy.fallBackToCssAfterMismatch(0, TriState.UNKNOWN));
+    }
+
+    @Test
+    public void undeterminableHitCountIsNotTreatedAsMismatch() {
+        // 调用方已在更早的分支处理 hits<0（直接标 UNDETERMINABLE 并放行），此处仅固化"不误伤"。
+        assertFalse(RoleVerificationPolicy.fallBackToCssAfterMismatch(-1, TriState.UNKNOWN));
+        assertFalse(RoleVerificationPolicy.fallBackToCssAfterMismatch(-1, TriState.FALSE));
     }
 }

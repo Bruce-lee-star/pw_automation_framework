@@ -85,6 +85,18 @@ public final class CodegenFacts {
          * {@code :has()} 是原生 CSS（Chromium 105+），{@code querySelectorAll} 与 Playwright 引擎都支持。
          */
         public final List<String> childAnchors;
+        /**
+         * 元素内部「状态播报区」（{@code aria-live} / {@code role=status|alert|log}）的文本，
+         * 多个以空格拼接；没有则为空串。
+         *
+         * <p><b>为什么单独采集</b>：这类节点是给读屏器播报「正在加载 / 出错」的公告，不是控件标签，
+         * 却会混进浏览器算出的可访问名（HSBC 的按钮里常驻 {@code "Loading, please wait."}，
+         * AX 名成了 {@code "Loading, please wait. Continue"}）。页面侧算名时已跳过它们，
+         * 这里把播报文本一并带出，供 Java 侧校验「AX 名 = 播报文本 + 稳定标签」后收窄名字
+         * （见 {@code PickNamePolicy#stableName}）——否则产物会得到 {@code name="Loading, please wait. Continue"}
+         * 与字段名 {@code loadingPleaseWaitContinueBtn}。
+         */
+        public final String statusText;
 
         public Fact(String role, String name, String tag, String id, String testid, String type,
                     String placeholder, String alt, String title, String value,
@@ -138,6 +150,21 @@ public final class CodegenFacts {
                     String text, String label, int nth, String cssSelector, List<String> shadowHosts,
                     String className, String xpath, String nameAttr, Map<String, String> attrs,
                     String src, boolean checked, List<String> childAnchors) {
+            this(role, name, tag, id, testid, type, placeholder, alt, title, value, text, label, nth,
+                    cssSelector, shadowHosts, className, xpath, nameAttr, attrs, src, checked,
+                    childAnchors, "");
+        }
+
+        /**
+         * 全字段构造（含状态播报区文本）。
+         *
+         * @param statusText 元素内部 {@code aria-live} / {@code role=status|alert|log} 节点文本；{@code null} 视为空
+         */
+        public Fact(String role, String name, String tag, String id, String testid, String type,
+                    String placeholder, String alt, String title, String value,
+                    String text, String label, int nth, String cssSelector, List<String> shadowHosts,
+                    String className, String xpath, String nameAttr, Map<String, String> attrs,
+                    String src, boolean checked, List<String> childAnchors, String statusText) {
             this.role = role;
             this.name = name;
             this.tag = tag;
@@ -167,6 +194,7 @@ public final class CodegenFacts {
             this.childAnchors = (childAnchors == null || childAnchors.isEmpty())
                     ? List.of()
                     : Collections.unmodifiableList(new ArrayList<>(childAnchors));
+            this.statusText = statusText == null ? "" : statusText.trim();
         }
 
         /**
@@ -189,16 +217,68 @@ public final class CodegenFacts {
      * 失效时才被 {@code CodegenScorer} 采用——比脆弱的绝对路径（{@code /html/body/div[9]/…}）更稳。
      */
     public final List<String> robustXpaths;
+    /**
+     * 「这是一组元素」的整组提示；{@code null} = 目标不是集合项（或容器无法唯一定位）。
+     *
+     * <p>由注入脚本在元素所属文档内判定（见 {@link ListHint}），不是一个"猜测"：
+     * 只有「目标角色是集合项 + 容器可唯一定位 + 容器子节点全是同类项」时才给出，
+     * 三者缺一都会让 {@code get(i)} 的序号与运行期不一致（点错项），故一律不给。
+     */
+    public final ListHint list;
 
     public CodegenFacts(Fact self, List<Fact> ancestors, List<String> robustXpaths) {
+        this(self, ancestors, robustXpaths, null);
+    }
+
+    public CodegenFacts(Fact self, List<Fact> ancestors, List<String> robustXpaths, ListHint list) {
         this.self = self;
         this.ancestors = ancestors;
         this.robustXpaths = (robustXpaths == null || robustXpaths.isEmpty())
                 ? List.of()
                 : Collections.unmodifiableList(new ArrayList<>(robustXpaths));
+        this.list = list;
     }
 
-    /** 从注入脚本 {@code getInfo} 的 JSON 载荷解析（{@code {self:{...}, ancestors:[...]}}）。 */
+    /**
+     * 列表项成组提示（一次拾取 ⇒ 一个 {@code PageElementList}）。
+     *
+     * <p><b>现场（2026-11-15）</b>：HSBC 重置密码的密保问题下拉里，10 个 {@code li[role=option]}
+     * 的可访问名各不相同（"Name a memorable city or country" / "…television character"…）。
+     * 旧的组判定以 {@code role|name} 为基座，名字不同 ⇒ 永远成不了组，于是用户点一个选项只得到
+     * {@code @Element("#security-question-1_option_4") public PageElement page;}——
+     * 既看不到整组，也无法 {@code get(i)} 按题号取项。
+     *
+     * <p>三条字段的语义：
+     * <ul>
+     *   <li>{@code selector} —— 作用域 + {@code tag[role=...]}（如
+     *       {@code ul[aria-labelledby="label_sq1"] > li[role="option"]}），命中<b>整组</b>；</li>
+     *   <li>{@code count} —— 整组成员数（{@code >=2} 才有意义）；</li>
+     *   <li>{@code index} —— <b>用户实际拾取的那一项</b>在组内的 0 基序号，Step 里据此生成
+     *       {@code get(index)}，保证回放点的还是同一个选项。</li>
+     * </ul>
+     *
+     * @param selector 整组定位器（相对元素自身文档 / shadow root）
+     * @param count    整组成员数
+     * @param index    被拾取项在组内的 0 基序号
+     */
+    public record ListHint(String selector, int count, int index) {
+
+        /**
+         * 是否可用于生成一组元素。
+         *
+         * <p>{@code selector} 非空 + 至少 2 项 + 序号落在组内，三条同时成立才可信：
+         * 缺一条就退化为单元素（旧行为），绝不生成"序号对不上"的 {@code get(n)}。
+         */
+        public boolean usable() {
+            return selector != null && !selector.isBlank() && count >= 2 && index >= 0 && index < count;
+        }
+    }
+
+    /**
+     * 从注入脚本 {@code getInfo} 的 JSON 载荷解析（{@code {self:{...}, ancestors:[...], list:{...}}}）。
+     *
+     * <p>{@code list} 为可选字段：旧版注入脚本没有它 ⇒ {@code null} ⇒ 行为与之前完全一致。
+     */
     public static CodegenFacts fromJson(JsonObject value) {
         if (value == null || !value.has("self") || value.get("self").isJsonNull()) {
             return null;
@@ -210,7 +290,16 @@ public final class CodegenFacts {
                 if (el.isJsonObject()) ancestors.add(factFrom(el.getAsJsonObject()));
             }
         }
-        return new CodegenFacts(self, ancestors, strList(value, "robustXpaths"));
+        return new CodegenFacts(self, ancestors, strList(value, "robustXpaths"), listHint(value));
+    }
+
+    /** 解析可选的 {@code list} 提示；缺字段 / 类型不符一律 {@code null}（视作"不是集合项"）。 */
+    private static ListHint listHint(JsonObject value) {
+        if (!value.has("list") || !value.get("list").isJsonObject()) return null;
+        JsonObject o = value.getAsJsonObject("list");
+        String selector = str(o, "selector", "");
+        if (selector.isBlank()) return null;
+        return new ListHint(selector, intOf(o, "count", 0), intOf(o, "index", -1));
     }
 
     private static Fact factFrom(JsonObject o) {
@@ -236,7 +325,8 @@ public final class CodegenFacts {
                 mapOf(o, "attrs"),
                 str(o, "src", ""),
                 boolOf(o, "checked", false),
-                strList(o, "childAnchors"));
+                strList(o, "childAnchors"),
+                str(o, "statusText", ""));
     }
 
     /** 布尔取值：缺失 / 非布尔一律回落默认值（旧版注入脚本没有该字段）。 */
@@ -266,8 +356,8 @@ public final class CodegenFacts {
     /**
      * 字符串数组取值：缺失 / 非数组返回空链（旧版注入脚本没有该字段即退化为普通查找）。
      *
-     * <p>空字符串项<b>原样保留</b>：链上任一层失效即说明事实不可信，必须由定位侧判定"不可用并回退坐标"，
-     * 静默丢掉中间层会去错误的 shadow root 里找元素。
+     * <p>空字符串项<b>原样保留</b>：链上任一层失效即说明事实不可信，必须由定位侧判定"不可用"
+     * （本次拾取按失败处理，<b>没有坐标兜底</b>），静默丢掉中间层会去错误的 shadow root 里找元素。
      */
     private static List<String> strList(JsonObject o, String k) {
         if (!o.has(k) || o.get(k).isJsonNull()) return List.of();
@@ -279,7 +369,7 @@ public final class CodegenFacts {
             // 与 str() 同源：数组元素若是对象/数组，getAsString() 会抛 IllegalStateException，
             // 进而让整条拾取被 extract 的 catch 吞掉。类型不符不能抛，也不能"丢掉一层"
             // （shadow 链丢层会错指向别的 shadow root），按本方法既有契约记为「失效层」空串，
-            // 由定位侧判不可用并回退坐标。
+            // 由定位侧判不可用（无坐标兜底）。
             if (!item.isJsonPrimitive()) {
                 out.add("");
                 continue;

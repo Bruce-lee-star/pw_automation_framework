@@ -10,9 +10,49 @@
     'use strict';
     if (window.__CODEGEN__) return;
 
-    // 2026-11-13：记录最近一次 label 点击及其关联控件，用于抑制 label 默认行为向控件
-    // 转发的「合成 click」——否则点 label 会同时生成 label 与控件两条记录。
+    // 2026-11-13 / 2026-11-15：记录最近一次「会被 label 转发」的勾选类控件，用于抑制 label 默认行为
+    // 向控件转发的「合成 click」——否则点一次 radio/checkbox 的 label（含 label 内任意文本/svg）
+    // 会同时生成两条元素定位。
     var __codegenLastLabel = null;
+
+    /**
+     * 元素身份（文档标识 + 元素标识）：供 Java 侧 {@code CodegenLauncher#matchFieldKey} 判定
+     * 「这次操作的是不是<b>已经拾取过的那一个</b>元素」。
+     *
+     * <p><b>为什么不能用 role+name 判等</b>：页面里常有「双胞胎按钮」（同一表单的两处
+     * {@code <button>Continue</button>}、分区各一个 Next/Cancel）。它们的 role+name 完全一致，
+     * 用 role+name 反查会把<b>第二个按钮的操作记到第一个元素上</b>，用户看到的就是
+     * 「点第二个按钮没有任何定位生成」——拾取被静默吞掉，且日志里连一行痕迹都没有。
+     *
+     * <p>文档标识每次文档加载重新生成（导航后元素集合完全不同，跨文档复用 eid 会误判成同一元素）；
+     * eid 用 {@link WeakMap} 绑定节点对象，节点本身被回收即自动释放，不产生泄漏。
+     * 两者一起构成「同一文档里的同一个节点」——这正是去重该用的粒度：<b>路径/文案变了仍认同一元素，
+     * 路径不同（哪怕是同 role+name 的孪生元素）绝不合并</b>。
+     */
+    var __codegenDocId = (function () {
+        try {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+        } catch (e) { }
+        return 'd' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    })();
+    var __codegenEidSeq = 0;
+    var __codegenEids = (typeof WeakMap === 'function') ? new WeakMap() : null;
+
+    /** 取（首次调用则分配）元素在本文档内的唯一标识；无 WeakMap 环境退化为空串（Java 侧回退旧判据）。 */
+    function eidOf(el) {
+        if (!el || el.nodeType !== 1 || !__codegenEids) return '';
+        try {
+            var id = __codegenEids.get(el);
+            if (id) return id;
+            id = 'e' + (++__codegenEidSeq);
+            __codegenEids.set(el, id);
+            return id;
+        } catch (e) {
+            return '';
+        }
+    }
 
     /** ARIA role 判定（显式 role 或 HTML 标签映射）。 */
     function roleOf(e) {
@@ -48,29 +88,159 @@
         if (t === 'table') return 'table';
         if (t === 'li') return 'listitem';
         if (t === 'label') return 'label';
+        // 其余隐式 role 按 HTML-AAM 补齐：此前只映射 11 个 tag，dialog / 表格子元素 / 列表容器
+        // 等恒为 generic，只能退化成 CSS/结构链。只收「隐式 role 明确且 Playwright getByRole 支持」的映射。
+        if (t === 'dialog') return 'dialog';
+        if (t === 'progress') return 'progressbar';
+        if (t === 'meter') return 'meter';
+        if (t === 'details' || t === 'fieldset') return 'group';
+        if (t === 'figure') return 'figure';
+        if (t === 'form') return 'form';
+        if (t === 'header') return 'banner';
+        if (t === 'footer') return 'contentinfo';
+        if (t === 'aside') return 'complementary';
+        if (t === 'article') return 'article';
+        // section 只有带可访问名时才成为 region，否则仍是通用容器
+        if (t === 'section') {
+            return (e.getAttribute('aria-label') || e.getAttribute('aria-labelledby')) ? 'region' : 'generic';
+        }
+        if (t === 'ul' || t === 'ol') return 'list';
+        if (t === 'tr') return 'row';
+        if (t === 'td') return 'cell';
+        if (t === 'th') return (e.getAttribute('scope') === 'row') ? 'rowheader' : 'columnheader';
+        if (t === 'output') return 'status';
+        if (t === 'hr') return 'separator';
         return 'generic';
     }
 
-    /** 可访问名（accessible name）：aria-label → aria-labelledby → label[for] → 包裹 label → title 兜底。 */
+    /**
+     * 元素是否「状态播报区」（{@code aria-live} / {@code role=status|alert|log}）。
+     *
+     * <p>这类节点是给读屏器播报「正在加载 / 出错」的公告，<b>不是控件标签</b>，算可访问名时必须跳过。
+     * HSBC 的按钮里常驻一个 {@code aria-live} 的 {@code "Loading, please wait."} span：
+     * 算进名字会得到 {@code name = "Loading, please wait. Continue"}（字段名 {@code loadingPleaseWaitContinueBtn}），
+     * 而点击后标签被 loading 文案顶掉，名字进一步只剩 {@code "Loading, please wait."}——定位器直接失效。
+     *
+     * <p>必须与 {@code CodegenCdpNodeExtractor} 内自包含脚本的 {@code isStatusRegion} 保持同源（改一处须同步另一处）。
+     */
+    function isStatusRegion(n) {
+        if (!n || !n.getAttribute) return false;
+        var live = n.getAttribute('aria-live');
+        if (live && String(live).toLowerCase() !== 'off') return true;
+        var r = (n.getAttribute('role') || '').toLowerCase();
+        return r === 'status' || r === 'alert' || r === 'log';
+    }
+
+    /**
+     * 节点是否被<b>渲染树剔除</b>（同时从可访问性树剔除）：{@code hidden} 属性、
+     * {@code aria-hidden="true"}、计算样式 {@code display:none} / {@code visibility:hidden|collapse}。
+     *
+     * <p>这是 name from content 的通用规则（规范要求跳过隐藏在 AX 树之外的子树），此前只做了
+     * status region 一条特例：藏在 {@code d-none} 面板里的错误提示文案会被拼进控件名，
+     * 生成的名字在回放时对不上。
+     *
+     * <p>刻意<b>不</b>排除 {@code .sr-only} / {@code role=presentation}：前者仍在 AX 树里（常是唯一
+     * 名字来源），后者只移除语义、子内容仍参与 name from content。
+     */
+    function isRenderingHidden(n) {
+        if (!n || n.nodeType !== 1) return false;
+        if (n.hidden) return true;
+        if (n.getAttribute && n.getAttribute('aria-hidden') === 'true') return true;
+        if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+            try {
+                var cs = window.getComputedStyle(n);
+                if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse')) return true;
+            } catch (e) { }
+        }
+        return false;
+    }
+
+    /**
+     * name from content：拼接后代文本，<b>跳过状态播报区与渲染剔除子树</b>。
+     *
+     * <p>保留 {@code textContent} 的拼接语义（不额外插入分隔符），只是把无关节点整段剔除——
+     * 这样 {@code "<span aria-live>Loading, please wait.</span>Continue"} 得到 {@code "Continue"}。
+     */
+    function nameTextOf(e) {
+        var parts = [];
+        (function walk(node) {
+            var kids = node.childNodes || [];
+            for (var i = 0; i < kids.length; i++) {
+                var c = kids[i];
+                if (!c) continue;
+                if (c.nodeType === 3) { parts.push(c.nodeValue || ''); continue; }
+                if (c.nodeType !== 1) continue;
+                if (isStatusRegion(c)) continue;
+                if (isRenderingHidden(c)) continue;
+                walk(c);
+            }
+        })(e);
+        return parts.join('').replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * {@code aria-labelledby} 的文本（空格分隔的 id 列表 → 逐个取元素文本拼接）。
+     *
+     * <p>这是「一类」而非单个：属性值天然可以是多个 id，历史实现只做
+     * {@code document.getElementById(e.id)}（恒等于 e 自身，等价于什么都没做），等于把整类命名来源丢掉。
+     */
+    function labelledByText(e) {
+        var ids = (e.getAttribute && e.getAttribute('aria-labelledby') || '').trim();
+        if (!ids) return '';
+        var parts = [], list = ids.split(/\s+/);
+        for (var i = 0; i < list.length; i++) {
+            if (!list[i]) continue;
+            var n = document.getElementById(list[i]);
+            if (!n) continue;
+            var t = (n.textContent || '').replace(/\s+/g, ' ').trim();
+            if (t) parts.push(t);
+        }
+        return parts.join(' ').trim();
+    }
+
+    /**
+     * 可访问名（accessible name），按规范优先级：
+     * {@code aria-labelledby} → {@code aria-label} → {@code label[for]} → 包裹 label →
+     * img[alt] / 提交类控件的 value / caption|legend|figcaption → name from content →
+     * {@code placeholder} → {@code title}。
+     */
     function accessibleName(e) {
+        var by = labelledByText(e);
+        if (by) return by;
         var a = e.getAttribute && e.getAttribute('aria-label');
         if (a && a.trim()) return a.trim();
         if (e.id) {
-            var byId = document.getElementById(e.id);
-            if (byId && byId !== e) {
-                var bid = byId.getAttribute('aria-label');
-                if (bid && bid.trim()) return bid.trim();
-            }
             var l = document.querySelector('label[for="' + (window.CSS ? CSS.escape(e.id) : e.id) + '"]');
             if (l && l.textContent.trim()) return l.textContent.trim();
         }
-        if (e.tagName && e.tagName.toLowerCase() === 'img') {
+        // 包裹式 label：文本在祖先里，name from content 只看后代，必须单独处理
+        var lb = e.closest ? e.closest('label') : null;
+        if (lb && lb !== e && lb.textContent.trim()) return lb.textContent.trim();
+        var tag = e.tagName ? e.tagName.toLowerCase() : '';
+        if (tag === 'img') {
             var alt = e.getAttribute('alt');
             if (alt && alt.trim()) return alt.trim();
         }
+        // 提交类控件的显示值就是它的名字（input[type=submit|button|reset]），此前整类漏掉
+        if (tag === 'input') {
+            var ty = ((e.getAttribute('type') || 'text') + '').toLowerCase();
+            if (ty === 'submit' || ty === 'button' || ty === 'reset') {
+                var val = (typeof e.value === 'string') ? e.value.trim() : '';
+                if (val) return val;
+            }
+        }
+        // 表格 / 图 / 字段集的名字来源
+        var cap = e.querySelector ? e.querySelector('caption, legend, figcaption') : null;
+        if (cap) {
+            var ct = (cap.textContent || '').replace(/\s+/g, ' ').trim();
+            if (ct) return ct;
+        }
         // name from content（button/link/heading 等允许从子内容算 name；不截断长度，完整文本才利于 NLS 反查）
-        var t = (e.textContent || '').replace(/\s+/g, ' ').trim();
+        // 跳过状态播报区与渲染剔除子树（见 nameTextOf）。
+        var t = nameTextOf(e);
         if (t) return t;
+        var ph = e.getAttribute && e.getAttribute('placeholder');
+        if (ph && ph.trim()) return ph.trim();
         var title = e.getAttribute && e.getAttribute('title');
         if (title && title.trim()) return title.trim();
         return '';
@@ -152,6 +322,30 @@
      * 只有「从渲染树剔除 ⇒ 同时从 AX 树剔除」的形态（{@code display:none} / {@code visibility:hidden} /
      * {@code hidden} 属性 / {@code aria-hidden="true"}）才可以作为排除依据。
      */
+    /** CSS clip 是否「裁成零尺寸」：rect(t r b l) 四个值全 0（px / % 均可，逗号或空格分隔）。 */
+    function isZeroClip(clip) {
+        var m = /^rect\(([^)]*)\)$/i.exec(String(clip || '').trim());
+        if (!m) return false;
+        var parts = m[1].split(/[\s,]+/);
+        if (parts.length !== 4) return false;
+        for (var i = 0; i < 4; i++) {
+            if (!/^0(?:px|%)?$/i.test(parts[i])) return false;
+        }
+        return true;
+    }
+
+    /** clip-path 是否「裁成零尺寸」：四边全 0 的 inset / inset(50%) / circle(0) / 全 0 的 polygon。 */
+    function isZeroClipPath(cp) {
+        var s = String(cp || '').trim().toLowerCase();
+        if (!s) return false;
+        if (/^inset\(\s*(?:0(?:px|%)?[\s,]*){4}\)$/.test(s)) return true;
+        if (/^inset\(\s*0(?:px|%)?\s*\)$/.test(s)) return true;
+        if (/^inset\(\s*50%\s*\)$/.test(s)) return true;
+        if (/^circle\(\s*0(?:px|%)?\s*(?:at\b[^)]*)?\)$/.test(s)) return true;
+        if (/^polygon\(\s*(?:0(?:px|%)?\s+0(?:px|%)?\s*,?\s*)+\)$/.test(s)) return true;
+        return false;
+    }
+
     function isVisible(e) {
         if (!e || e.nodeType !== 1) return false;
         if (e.hidden) return false;
@@ -162,8 +356,8 @@
                 var cs = window.getComputedStyle(e);
                 if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
                 if (cs.opacity === '0' || cs.opacity === '0.0' || cs.opacity === '0.00') return false;
-                if (cs.clip && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clip.indexOf('rect(0') === 0)) return false;
-                if (cs.clipPath && (/inset\(0%\)/.test(cs.clipPath) || /inset\(50%\)/.test(cs.clipPath) || /circle\(0/.test(cs.clipPath))) return false;
+                if (cs.clip && isZeroClip(cs.clip)) return false;
+                if (cs.clipPath && isZeroClipPath(cs.clipPath)) return false;
                 var p = e.parentElement, d = 0;
                 while (p && p.nodeType === 1 && d < 10) {
                     var pcs = window.getComputedStyle(p);
@@ -264,6 +458,24 @@
         return '';
     }
 
+    /**
+     * 资源 URL 锚点池：标签 → 承载 URL 的属性（同类问题一次覆盖，新增标签只加一行）。
+     * 刻意不含 {@code a[href]}：链接尾段与 SPA 路由强相关，稳定性未经样本验证，
+     * 且 a 已有 class / 属性 / role 三层候选。
+     */
+    var RESOURCE_URL_ATTRS = {
+        img: ['src'], video: ['poster', 'src'], audio: ['src'], source: ['src'],
+        embed: ['src'], object: ['data'], form: ['action'], track: ['src']
+    };
+
+    /** 资源 URL 的尾部文件名（img.src / video.poster / form.action … 共用）；非路径型 URL 返回空串。 */
+    function resourceUrlTail(url) {
+        var s = String(url || '').trim();
+        if (!s) return '';
+        if (/^(javascript:|#|mailto:|tel:|data:|blob:)/i.test(s)) return '';
+        return srcTail(s);
+    }
+
     /** 取 src 尾部文件名（URL 末段，去 query/hash）；data URI / 空值返回空串。 */
     function srcTail(s) {
         if (!s) return '';
@@ -287,7 +499,9 @@
      * {@code Search_HSBC_HK_Business_Express}（中间 {@code _HK} 属业务名）。
      * 前缀 &lt; 4 字符不归一化（{@code *=} 过宽，易在日后资源增多时误命中）。
      */
-    var SRC_TRAILING_LOCALE = /^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw)(?:[._-](?:us|gb|hk|cn|tw|hans|hant))?$/i;
+    // 语言/地区段：此前只列中英文几种（en/zh/tc/sc/hk/cn/tw），FR/DE/ES/PT/JA/KO 等站点的图片
+    // 走不了 [src*=] 归一。新增语言只改这一处；「只吃最后一个语言段」的语义不变。
+    var SRC_TRAILING_LOCALE = /^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw|ja|jp|ko|kr|fr|de|es|pt|it|nl|ru|ar|th|vi|id|ms|hi|tr|pl|sv|da|fi|no|cs|el|he|hu|ro|sk|uk)(?:[._-](?:us|gb|uk|hk|cn|tw|sg|au|ca|in|jp|kr|de|fr|es|pt|br|mx|it|nl|ru|ae|sa|th|vn|id|my|tr|pl|hans|hant))?$/i;
     function srcLocaleNeutralPrefix(tail) {
         if (!tail) return '';
         var stem = String(tail).replace(/[.][A-Za-z0-9]{1,5}$/, '');
@@ -305,10 +519,12 @@
         for (var i = 0; i < raw.length; i++) {
             var t = raw[i];
             if (t.length < 3) continue;
+            // 随机 token 判据与 id / 属性值同源（RAND_RE）：此前 class 自有一套更宽的正则，导致
+            // 同一字符串「作 id 判随机、作 class 判稳定」（如 aZ3kM9xQ），且会把 container 这类
+            // 长语义类名当 hash 删掉（/^[a-z0-9]{8,}$/ 的误伤）。
+            if (RAND_RE.test(t)) continue;                          // Radix 夹心 / 数字段 / 长 hash / 高熵 base62
             if (/^(css|sc)-[a-z0-9]{5,}$/i.test(t)) continue;      // Emotion css-xxx
-            if (/^[a-z0-9]{8,}$/i.test(t)) continue;                // 长 hash
-            if (/_R_[A-Za-z0-9]{4,}_/.test(t)) continue;            // Radix 夹心
-            if (/^[a-z]+(-[a-z]+)*-\d{4,}$/.test(t)) continue;      // 数字后缀
+            if (/^[a-z]{16,}$/.test(t)) continue;                   // 无数字的长纯字母 hash（RAND_RE 无法判定）
             if (seen[t]) continue;
             seen[t] = true;
             out.push(t);
@@ -343,7 +559,86 @@
     }
 
     /** 稳定属性候选（id/class/style/src 各走专档）：值非空且 ≤40 字符、非纯数字长串；含随机段的属性不再丢弃，标 rand=1（值用 ^=/*=$= 变体）；稳定（rand=0）排前、按文档顺序，上限 6。 */
-    function stableAttrs(e) {
+    /**
+     * 状态类 ARIA：值恒为 {@code true}/{@code false}/枚举态，页面上到处都是
+     * （{@code aria-hidden="true"} 遍布装饰节点与隐藏副本）。用它当定位锚点<b>毫无区分度</b>：
+     * 唯一性只能靠再叠 {@code :nth-of-type} 补位来凑，产物「看起来唯一」却只在拾取那一刻的 DOM 成立。
+     *
+     * <p>与 Java 侧 {@code CodegenScorer#ARIA_STATE_ONLY} 完全同口径（那边规定「只允许进组合、
+     * 绝不生成独立候选」）；页面侧若不同口径，就会把 {@code :has(hr[aria-hidden="true"])} 这种
+     * 空语义锚点当"稳定锚点"喂给打分器，正是 2026-11-16 「第一个 Continue 定位回放不可用」的成因。
+     * 身份类 ARIA（{@code aria-label}/{@code aria-labelledby}/{@code aria-describedby}/
+     * {@code aria-roledescription}/{@code aria-placeholder}）不在此列，仍是合法锚点。
+     */
+    var STATE_ONLY_ARIA = {
+        'aria-hidden': 1, 'aria-modal': 1, 'aria-expanded': 1, 'aria-selected': 1, 'aria-checked': 1,
+        'aria-pressed': 1, 'aria-disabled': 1, 'aria-invalid': 1, 'aria-readonly': 1, 'aria-required': 1,
+        'aria-busy': 1, 'aria-multiselectable': 1, 'aria-grabbed': 1, 'aria-dropeffect': 1,
+        'aria-orientation': 1, 'aria-haspopup': 1, 'aria-live': 1, 'aria-atomic': 1, 'aria-relevant': 1,
+        'aria-sort': 1, 'aria-valuemax': 1, 'aria-valuemin': 1, 'aria-valuenow': 1
+    };
+
+    /** 纯装饰/无语义标签：作为 {@code :has()} 锚点没有任何业务区分度（{@code hr} 只是分隔线）。 */
+    var DECORATIVE_TAGS = {
+        'hr': 1, 'br': 1, 'script': 1, 'style': 1, 'meta': 1, 'link': 1, 'source': 1, 'track': 1, 'wbr': 1
+    };
+
+    /**
+     * 状态 / 布尔属性：值随页面状态变化（{@code aria-expanded}、{@code data-state}），
+     * 或本身只是存在性标记（{@code hidden}、{@code disabled}、{@code style=""}）。
+     *
+     * <p>它们进锚点池但固定最低档：能唯一命中，但语义上标识的是「当前处于什么状态」而非「这是哪个区块」，
+     * 页面推进后值可能变。真正的判据仍是数据/文案类属性（{@code data-i18n}、{@code data-testid}、{@code name}…）。
+     */
+    var STATE_ATTRS = {
+        'style': 1, 'hidden': 1, 'disabled': 1, 'readonly': 1, 'required': 1, 'multiple': 1,
+        'selected': 1, 'open': 1, 'checked': 1, 'novalidate': 1, 'tabindex': 1, 'autofocus': 1,
+        'data-state': 1, 'data-status': 1, 'data-active': 1, 'data-selected': 1, 'data-open': 1,
+        'data-collapsed': 1, 'data-expanded': 1, 'data-loading': 1, 'data-disabled': 1, 'data-visible': 1
+    };
+
+    /**
+     * 锚点属性优先级（越小越优先）：<b>语义身份 > 通用属性 > 状态/存在性</b>。
+     *
+     * <p>这是「一类问题」的统一解法：不再按属性名白名单挑锚点，而是让<b>所有属性</b>进候选池，
+     * 由这里的档位决定尝试顺序，最终唯一性由 Playwright 引擎裁决。换一个属性（{@code title}、
+     * {@code aria-labelledby}、{@code data-state}、任意自定义属性）都不需要再改代码。
+     */
+    /** 状态/存在性属性判定（状态属性表 + 状态类 ARIA 的单一判据，三处调用共用，避免口径漂移）。 */
+    function isStateAttr(name) {
+        return !!(STATE_ATTRS[name] || STATE_ONLY_ARIA[name]);
+    }
+
+    function attrAnchorPriority(name) {
+        if (name === 'data-testid') return 0;
+        if (name === 'data-i18n') return 1;
+        if (name === 'name') return 2;
+        if (name.indexOf('data-') === 0) return 4;
+        if (name === 'aria-label' || name === 'aria-labelledby' || name === 'aria-describedby') return 6;
+        if (name === 'title' || name === 'alt' || name === 'placeholder' || name === 'for'
+            || name === 'type' || name === 'role' || name === 'scope' || name === 'colspan') return 8;
+        if (isStateAttr(name)) return 40;
+        return 10;
+    }
+
+    /** 锚点段里的属性名（`[attr="v"]` / `tag[attr="v"]` / `#id` → 小写属性名，`#id` 返回 `id`）。 */
+    function segAttrName(seg) {
+        if (!seg) return '';
+        if (seg.charAt(0) === '#') return 'id';
+        var m = /\[\s*([A-Za-z_:][A-Za-z0-9_:.\-]*)\s*=/.exec(seg);
+        return m ? m[1].toLowerCase() : '';
+    }
+
+    /** 该锚点段是否属状态/存在性档（值可变，或空值存在性）——统一由属性名与值判定。 */
+    function isStateAnchorSeg(seg) {
+        var name = segAttrName(seg);
+        if (!name) return false;
+        if (isStateAttr(name)) return true;
+        var m = /=\"\s*\]/.exec(seg);
+        return !!m;   // 空值 = 存在性锚点
+    }
+
+    function stableAttrs(e, withState) {
         var out = [], seen = {};
         var attrs = e.attributes;
         if (!attrs) return out;
@@ -351,19 +646,69 @@
         for (var i = 0; i < attrs.length; i++) {
             var a = attrs[i];
             var n = a.name;
-            if (n === 'id' || n === 'class' || n === 'style' || n === 'src') continue;
-            var v = a.value;
-            if (!v) continue;
-            v = String(v).trim();
-            if (!v || v.length > 40) continue;
+            if (n === 'id' || n === 'class' || n === 'src') continue;
+            var state = isStateAttr(n);
+            var v = (a.value == null) ? '' : String(a.value);
+            v = v.trim();
+            // 非空 style 不猜：`display:block` / `; display: none` 之类随组件版本漂移。
+            // 空值（`style=""`）作为「存在性锚点」保留，见下。
+            if (n === 'style' && v) continue;
+            if (!v) {
+                // 空值只在锚点池里、且只收状态/布尔属性（`style=""`、`hidden=""`、`readonly=""`…）：
+                // 其它属性的空值（`alt=""`、`value=""`）遍布全站，零区分度。
+                if (!withState || !state || seen[n]) continue;
+                seen[n] = true;
+                out.push({ name: n, value: '', rand: 0, pri: 40, state: 1 });
+                continue;
+            }
+            if (v.length > (withState ? 60 : 40)) continue;
             if (/^[\d.,-]+$/.test(v) && v.length > 6) continue;
+            if (!withState && state) continue;
             if (seen[n]) continue;
             seen[n] = true;
-            out.push({ name: n, value: v, rand: rand.test(v) ? 1 : 0 });
+            out.push({
+                name: n, value: v, rand: rand.test(v) ? 1 : 0,
+                pri: withState ? attrAnchorPriority(n) : 0,
+                state: state ? 1 : 0
+            });
         }
-        out.sort(function (a, b) { return a.rand - b.rand; });
+        out.sort(function (x, y) { return (x.pri - y.pri) || (x.rand - y.rand); });
         if (out.length > 6) out.length = 6;
         return out;
+    }
+
+    /**
+     * 单节点的「属性锚点候选段」（按 attrAnchorPriority 排序；withState 时状态/存在性锚点排最后）。
+     *
+     * <p><b>锚点收集的唯一事实来源</b>：{@link descendantAnchorsOf} / {@link descendantAnchorCandidates}
+     * / {@link scopeUnderUniqueAncestor} 此前各写一遍「取哪个属性」，口径漂移（一处含状态锚点、
+     * 一处不含、一处不排序），同一元素在不同兜底层会选到不同属性。新增属性只需在
+     * {@link attrAnchorPriority} 定档，这里自动跟随。
+     */
+    function anchorSegsOf(n, withState) {
+        var out = [], states = [];
+        if (!n || !n.attributes) return out;
+        var attrs = stableAttrs(n, !!withState);
+        for (var i = 0; i < attrs.length; i++) {
+            if (attrs[i].rand) continue;
+            var seg = '[' + attrs[i].name + '="' + attrEsc(attrs[i].value) + '"]';
+            if (isStateAnchorSeg(seg)) {
+                if (withState) states.push({ seg: seg, state: 1 });
+                continue;
+            }
+            out.push({ seg: seg, state: 0 });
+        }
+        return out.concat(states);
+    }
+
+    /** 单节点的最佳锚点段（稳定 id 优先；动态 id 由调用方走 {@link dynamicIdFallbackSel}）。 */
+    function bestAnchorSeg(n, withState) {
+        if (!n) return { seg: '', state: 0 };
+        if (n.id && !isDynamicId(n.id)) {
+            return { seg: '#' + (window.CSS ? CSS.escape(n.id) : n.id), state: 0 };
+        }
+        var list = anchorSegsOf(n, withState);
+        return list.length ? list[0] : { seg: '', state: 0 };
     }
 
     /** 可见匹配计数（唯一性之外，用于识别"一组元素"场景）。 */
@@ -421,10 +766,36 @@
      * {@code hidden} 属性、行内 {@code display:none}。仅当附加后该段确实更窄（{@code totalCount} 下降）才采纳，
      * 组合后的<b>全局唯一性</b>由调用方复核——不破坏 Playwright strict mode。
      */
-    // 隐藏副本判别符（按优先级）：d-none / aria-hidden / hidden / 行内 display:none。
-    // 全部为原生合法 CSS —— 绝不使用 Playwright 专有可见性伪类（原生 document 不识别，会抛 SyntaxError）。
-    var HIDDEN_EXCLUDES = [':not(.d-none)', ':not([aria-hidden="true"])', ':not([hidden])',
-        ':not([style*="display: none"])', ':not([style*="display:none"])'];
+    /**
+     * 隐藏副本判别符（按优先级）。
+     *
+     * <p><b>这是一类问题，不是五个字面量</b>：能表达「该副本被隐藏」的形态有 class 工具类
+     * （{@code d-none} / {@code hide} / {@code hidden} / {@code invisible}）、Bootstrap 响应式变体
+     * （{@code d-sm-none} …）、行内 style（{@code display:none} / {@code visibility:hidden}）、
+     * 布尔属性（{@code hidden}）与 ARIA（{@code aria-hidden="true"}）。逐条硬编码必漏，
+     * 故按语义分组生成，新增工具类只需加进 {@link HIDDEN_CLASS_TOKENS}。
+     *
+     * <p>刻意<b>不</b>收 {@code opacity:0}（子串匹配 {@code opacity: 0} 会误命中 {@code opacity: 0.5}，
+     * 过宽的判别符会「降计数但选错元素」）与 {@code .sr-only}（仍在 AX 树里，是合法的名字来源）。
+     * 全部为原生合法 CSS —— 绝不使用 Playwright 专有可见性伪类（原生 document 不识别，会抛 SyntaxError）。
+     * 真正是否采纳仍由 {@link scopeSegExcludingHidden} 的「总匹配数下降」复核。
+     */
+    var HIDDEN_CLASS_TOKENS = ['d-none', 'hide', 'hidden', 'is-hidden', 'u-hidden', 'invisible'];
+    var HIDDEN_RESPONSIVE_BREAKPOINTS = ['sm', 'md', 'lg', 'xl', 'xxl'];
+    var HIDDEN_EXCLUDES = (function () {
+        var out = [];
+        for (var i = 0; i < HIDDEN_CLASS_TOKENS.length; i++) out.push(':not(.' + HIDDEN_CLASS_TOKENS[i] + ')');
+        for (var j = 0; j < HIDDEN_RESPONSIVE_BREAKPOINTS.length; j++) {
+            out.push(':not(.d-' + HIDDEN_RESPONSIVE_BREAKPOINTS[j] + '-none)');
+        }
+        out.push(':not([aria-hidden="true"])');
+        out.push(':not([hidden])');
+        out.push(':not([style*="display: none"])');
+        out.push(':not([style*="display:none"])');
+        out.push(':not([style*="visibility: hidden"])');
+        out.push(':not([style*="visibility:hidden"])');
+        return out;
+    })();
     function scopeSegExcludingHidden(seg) {
         if (!seg) return '';
         for (var i = 0; i < HIDDEN_EXCLUDES.length; i++) {
@@ -467,9 +838,9 @@
                 }
             }
             if (!seg && t) {
-                var nas = stableAttrs(n);
-                for (var a = 0; a < nas.length && !nas[a].rand && !seg; a++) {
-                    var as = t + '[' + nas[a].name + '="' + attrEsc(nas[a].value) + '"]';
+                var aSegs = anchorSegsOf(n, false);
+                for (var a = 0; a < aSegs.length && !seg; a++) {
+                    var as = t + aSegs[a].seg;
                     if (uniqueSel(as)) seg = as;
                 }
             }
@@ -548,14 +919,17 @@
         if (allowScope === undefined) allowScope = true;
         if (!e || e.nodeType !== 1) return '';
         var t = e.tagName.toLowerCase();
-        if (t === 'img') {
-            var tail = srcTail(e.getAttribute && e.getAttribute('src'));
-            if (tail) {
+        // 资源 URL 锚点（img/video/audio/source/embed/object/form/track）：原先只处理 img.src，
+        // 其余同类标签直接落到 class/结构链。用尾部文件名（去语言段）作锚点，抗资源换版本。
+        var urlAttrs = RESOURCE_URL_ATTRS[t];
+        if (urlAttrs) {
+            for (var u = 0; u < urlAttrs.length; u++) {
+                var tail = resourceUrlTail(e.getAttribute && e.getAttribute(urlAttrs[u]));
+                if (!tail || RAND_RE.test(tail)) continue;
                 // 语言变体文件名（xxx_EN.png）改锚定语言段之前的前缀，否则切语言后 src 换名即失效
                 var neutral = srcLocaleNeutralPrefix(tail);
-                var byTail = neutral
-                    ? 'img[src*="' + attrEsc(neutral) + '"]'
-                    : 'img[src$="' + attrEsc(tail) + '"]';
+                var byTail = t + '[' + urlAttrs[u] + (neutral ? '*=' : '$=') + '"'
+                    + attrEsc(neutral || tail) + '"]';
                 var s0 = uniqueOrGroup(byTail, e, allowScope);
                 if (s0) return s0;
             }
@@ -704,26 +1078,32 @@
             var cur = queue.shift();
             var n = cur.n;
             if (!n || n.nodeType !== 1) continue;
+            // 装饰标签不产 :has 候选（同 descendantAnchorsOf：hr 的分隔线语义不能当锚点）。
+            if (DECORATIVE_TAGS[(n.tagName || '').toLowerCase()]) continue;
             visited++;
-            var attrs = stableAttrs(n);
-            for (var j = 0; j < attrs.length; j++) {
-                if (attrs[j].rand) continue;
-                if (seen.has(attrs[j].name)) continue;
-                seen.add(attrs[j].name);
-                var ds = t + ':has(' + n.tagName.toLowerCase() + '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"])';
-                plainDescs.push(ds);
-                out.push(ds);
+            var segs = anchorSegsOf(n, false);
+            for (var j = 0; j < segs.length; j++) {
+                var key = segAttrName(segs[j].seg);
+                if (!key || seen.has(key)) continue;
+                seen.add(key);
+                plainDescs.push({
+                    ds: t + ':has(' + n.tagName.toLowerCase() + segs[j].seg + ')',
+                    pri: anchorPriority(n, segs[j].seg)
+                });
             }
             if (cur.d < 3) {
                 for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
             }
         }
+        // 标题型锚点（分区标识）优先于任意后代（见 anchorPriority）；同优先级保持 DOM 顺序。
+        plainDescs.sort(function (a, b) { return a.pri - b.pri; });
+        for (var q0 = 0; q0 < plainDescs.length; q0++) out.push(plainDescs[q0].ds);
         // 加固层（AND 复合，非 :is 的 OR）：把目标自身稳定属性 / 稳定 class token 与每个后代锚点复合。
         // 纯 :has 在前（保持原行为，优先返回更短选择器）；复合仅在其非唯一时作为更窄的兜底。
         for (var p = 0; p < plainDescs.length; p++) {
-            var idx = plainDescs[p].indexOf(':has(');
+            var idx = plainDescs[p].ds.indexOf(':has(');
             if (idx < 0) continue;
-            var hasPart = plainDescs[p].slice(idx); // ':has(...)'
+            var hasPart = plainDescs[p].ds.slice(idx); // ':has(...)'
             // 自身属性复合：t[ownA]:has(...) 与 t[ownA][ownB]:has(...)
             for (var a = 0; a < selfAttrs.length; a++) {
                 var ownA = '[' + selfAttrs[a].name + '="' + attrEsc(selfAttrs[a].value) + '"]';
@@ -808,7 +1188,7 @@
             var seg = attrFallbackSel(n);
             // 2026-11-13：祖先的稳定 class/属性段（如 modal 的 forgot-username-modal）本身已是全量唯一锚点，
             // 直接作为作用域锚点并停止上溯——即便目标自身属性因"隐藏副本"全局不唯一（全量计数仍计入隐藏），
-            // 也能靠父类/祖先类的差异把选择器收窄到正确作用域，而非退化成坐标兜底。
+            // 也能靠父类/祖先类的差异把选择器收窄到正确作用域，而非退化成又长又脆的整链结构选择器。
             if (seg) { parts.unshift(seg); anchored = true; break; }
             // 该层无稳定锚点也无可用属性段：用 :nth-of-type 补位，超过上限才整条作废。
             if (filler >= MAX_FILLER_LAYERS) return '';
@@ -912,7 +1292,9 @@
         while (p && p.nodeType === 1 && depth < 8 && out.length === 0) {
             var ancTag = p.tagName.toLowerCase();
             var preds = xpathSelfAttrPreds(p);
-            var achild = descendantAnchorsOf(p, 3, 4);
+            // 排除目标子树：父级锚点若取自目标内部的 span/aria 描述，产出的
+            // `//div[.//*[@data-i18n="continue"]]//button` 与"按钮属于哪个分区"无关。
+            var achild = descendantAnchorsOf(p, 3, 4, e);
             var real = [];
             for (var a = 0; a < preds.length; a++) real.push(preds[a]);
             for (var b = 0; b < achild.length; b++) {
@@ -939,13 +1321,20 @@
     }
 
     /**
-     * 拾取目标归一化：点 <label> / 标签内文本 / 链接内 <span> / 装饰性图标（alt="" 或 aria-hidden）时，
-     * 上溯到真正可操作的控件或「带可访问名的语义祖先」。
+     * 拾取目标归一化：先把「交互控件内的装饰性子节点」归一到控件本身
+     * （见 {@link interactiveAncestor}），再处理装饰性图标 / 带可访问名的语义容器。
      *
-     * <p><b>2026-11-11 定稿规则：拾取对象必须 = 用户实际点击的 DOM 对象。</b>
-     * {@code <label>} 一律保留自身，<b>不再</b>转发到 {@code label.control} / 内部控件——关联控件是另一个
-     * DOM 对象，转发会让产物定位到用户没点的元素（点"用户名"标签却生成 input 定位器）。label 自身带
-     * 可访问名（其文本），命中 NLS 时可走文本语义策略定位。
+     * <p><b>2026-11-15 用户反馈修订</b>：HSBC 的按钮/链接文案几乎都包在 {@code <span data-i18n>} 里，
+     * 而 radio / checkbox 的可点区域是 {@code <label>} 包裹的整块（含 svg / h2 / 文本 div）。若仍按
+     * 「点哪个 DOM 对象就拾取哪个」处理，会得到两个坏结果：
+     * <ul>
+     *   <li>点按钮文案 ⇒ 拾取到 {@code role=generic} 的 {@code <span>}，AriaRole 里没有对应常量，
+     *       只能退化成 {@code div:nth-of-type(3) > button[class*="float-right"]} 这类长结构链；</li>
+     *   <li>点 radio 的 label 文本 ⇒ 记录「label 内文本」+ 浏览器补发的「控件 click」两条定位。</li>
+     * </ul>
+     * 故先归一到<b>可交互控件本身</b>（button / a[href] / 包裹式 label 的被包裹控件 / 自定义控件 role）。
+     * 键位规则不变：<b>{@code label[for]} 指向 label 之外控件的场景仍保留 label 自身</b>（那个控件是另一个
+     * DOM 对象，替换它会让产物定位到用户没点的元素）。
      *
      * <p>装饰性节点（如 {@code <img alt="" aria-hidden="true">} 信息图标、空 {@code <span>}）：自身无可访问名，
      * 拾取只会产出 {@code role=img} 这类既无名又易碎的定位器。故当<b>被点元素自身无可访问名</b>时，继续上溯到
@@ -954,28 +1343,105 @@
      * {@code #id} 定位器。<b>注意</b>：{@code eHasName} 守卫保证「自身已有名的元素」（文本 div、按钮、带 data-i18n
      * 的 span 等）行为完全不变，避免无谓上溯。
      */
+    /** 身份锚点档位上限（与 attrAnchorPriority 同源）：≤ 此档才算「足以唯一定位的强语义属性」。 */
+    var IDENTITY_MAX_PRIORITY = 6;
+
     /**
-     * 被点元素自身是否带「身份锚点」属性（足以唯一定位的强语义属性）：稳定 id、data-*（data-i18n /
-     * data-testid / data-qa …）、aria-label、表单 name、控件 type。刻意<b>排除</b>状态类 ARIA
-     * （aria-hidden / aria-expanded …，随交互状态变化、装饰性元素常带）与 class——这些不算身份。
-     * 仅当返回 true 时 pickTarget 才保留被点元素，避免把装饰性 img（带 aria-hidden）误判为可唯一定位。
+     * 被点元素自身是否带「身份锚点」属性（足以唯一定位的强语义属性）。
+     *
+     * <p>判据不再维护第二份属性白名单，直接复用 {@link attrAnchorPriority} 的档位：语义身份档
+     * （data-testid / data-i18n / name / 业务 data-* / aria-label / aria-labelledby / aria-describedby）
+     * 才算；状态与存在性档（aria-hidden / aria-expanded / hidden / style="" …）不算；
+     * 形态属性（title / alt / placeholder / type …）也不算——它们不足以唯一定位，且装饰性元素常带，
+     * 误判会破坏「装饰性节点上溯」。新增属性时只需在 attrAnchorPriority 定档，这里自动跟随。
      */
     function hasIdentityAttr(e) {
         if (!e || e.nodeType !== 1) return false;
         if (e.id && !isDynamicId(e.id)) return true;
-        var attrs = stableAttrs(e);
+        var attrs = stableAttrs(e, true);
         for (var i = 0; i < attrs.length; i++) {
-            if (attrs[i].rand) continue;
-            var n = attrs[i].name.toLowerCase();
-            // 仅这些才算「身份锚点」：业务 data-*（data-i18n / data-testid / …）、aria-label、
-            // 表单 name、控件 type。排除 width/height/title 等形态属性与状态类 ARIA——
-            // 它们不足以唯一定位，且装饰性元素（如 aria-hidden 的信息图标）常带，误判会破坏「装饰性节点上溯」。
-            if (/^data-/.test(n) || n === 'aria-label' || n === 'name' || n === 'type') return true;
+            if (attrs[i].rand || attrs[i].state) continue;
+            if (attrAnchorPriority(attrs[i].name) <= IDENTITY_MAX_PRIORITY) return true;
         }
         return false;
     }
 
+    /**
+     * label 包裹的控件（仅当控件是 label 后代时成立）。
+     *
+     * <p>点 label 区域 = 操作被包裹的控件（浏览器默认行为，radio/checkbox 还会补发一次合成 click）；
+     * 而 {@code label[for]} 指向 label <b>之外</b>的控件时，那个控件是另一个 DOM 对象，绝不替换点击对象。
+     */
+    function nestedControlOf(lb) {
+        if (!lb || !lb.querySelector) return null;
+        var c = lb.querySelector('input:not([type=hidden]), select, textarea');
+        return (c && lb.contains(c)) ? c : null;
+    }
+
+    /**
+     * 交互目标归一：点击落在交互控件的装饰性子节点上时，返回控件本身。
+     *
+     * <p>覆盖的「类似场景」（均属同一根因：可点区域是容器，文案/图标是叶子）：
+     * <ul>
+     *   <li>{@code <button><span data-i18n>...</span><svg/></button>} ⇒ 返回 button；</li>
+     *   <li>{@code <a href><span>...</span><img/></a>} ⇒ 返回 a（含链接卡片整块文本）；</li>
+     *   <li>{@code <label><input type=radio>...</label>} 内任意文本/svg ⇒ 返回被包裹的控件；</li>
+     *   <li>自定义控件 {@code <div role="radio|checkbox|tab|option|combobox">} 内的子节点 ⇒ 返回该 div；</li>
+     *   <li>{@code <input type=hidden>} 不是交互目标（命中即停，避免把隐藏域当控件）。</li>
+     * </ul>
+     *
+     * @return 可交互控件；{@code null} 表示上溯链上没有可交互元素（交回既有锚点/上溯逻辑）
+     */
+    function interactiveAncestor(e) {
+        // 交互角色（一类）：补 treeitem / gridcell / row —— 树、表格行/单元格常是点击目标，
+        // 此前不在名单里会被继续上溯到外层容器，丢掉行级语义。
+        var INTERACTIVE_ROLE = /^(button|link|checkbox|radio|switch|tab|menuitem|menuitemcheckbox|menuitemradio|option|combobox|listbox|textbox|searchbox|spinbutton|treeitem|gridcell|row)$/;
+        var n = e, depth = 0;
+        while (n && n.nodeType === 1 && depth < 6) {
+            var t = n.tagName ? n.tagName.toLowerCase() : '';
+            if (t === 'input') {
+                var ty = ((n.getAttribute && n.getAttribute('type')) || '').toLowerCase();
+                return ty === 'hidden' ? null : n;
+            }
+            if (t === 'select' || t === 'textarea' || t === 'button') return n;
+            if (t === 'a') {
+                if (n.getAttribute && n.getAttribute('href')) return n;
+            } else if (t === 'label') {
+                return nestedControlOf(n);
+            } else {
+                var r = n.getAttribute && n.getAttribute('role');
+                if (r && INTERACTIVE_ROLE.test(String(r).toLowerCase())) return n;
+            }
+            n = n.parentElement;
+            depth++;
+        }
+        return null;
+    }
+
+    /**
+     * 本次点击是否会让浏览器向「勾选类控件」补发一次合成 click？
+     *
+     * <p>只有 {@code <label>} 的激活行为会对 radio/checkbox 派发 click（文本框只聚焦、不派发 click），
+     * 且必须是 {@link nestedControlOf} 认定的<b>被包裹</b>控件。返回 {@code {ctrl, t}} 供随后的
+     * 合成 click 抑制；其余情形返回 {@code null}。
+     */
+    function forwardedControl(target, resolved) {
+        if (!target || !resolved || resolved === target) return null;
+        var ty = ((resolved.getAttribute && resolved.getAttribute('type')) || '').toLowerCase();
+        if (ty !== 'radio' && ty !== 'checkbox') return null;
+        var lb = (target.tagName === 'LABEL') ? target
+            : (target.closest ? target.closest('label') : null);
+        if (!lb) return null;
+        if (nestedControlOf(lb) !== resolved) return null;
+        return { ctrl: resolved,
+                 t: (typeof performance !== 'undefined') ? performance.now() : Date.now() };
+    }
+
     function pickTarget(e) {
+        // 交互控件优先：点按钮文案 span / 链接内 img / 包裹式 label 内文本时，产物必须落在控件上
+        // （否则 role 恒为 generic，只能退化成结构 CSS；点 radio 的 label 还会产出两条定位）。
+        var interactive = interactiveAncestor(e);
+        if (interactive) return interactive;
         // 被点元素自身若已带身份锚点（data-i18n / data-testid / aria-label / name / type / 稳定 id）足以唯一定位，
         // 直接保留——不无意义上溯到祖先控件，避免丢失业务锚点。典型场景：modal「Close」按钮内带
         // data-i18n 的 <span> 被点，若上溯到 <button> 会丢掉 data-i18n、且按钮自身 class 不唯一，
@@ -998,7 +1464,7 @@
             var __role = n.getAttribute && n.getAttribute('role');
             if (__role) {
                 var __rl = String(__role).toLowerCase();
-                var __containerRole = /^(document|dialog|alertdialog|application|group|region|banner|main|navigation|contentinfo|complementary|form|section|generic|none|presentation|article|aside|header|footer|search|tooltip|status|log|list|listitem)$/.test(__rl);
+                var __containerRole = /^(document|dialog|alertdialog|application|group|region|banner|main|navigation|contentinfo|complementary|form|section|generic|none|presentation|article|aside|header|footer|search|tooltip|status|log|list|listitem|figure|tree|tablist|menu|menubar|toolbar|grid|table|rowgroup|row|columnheader|rowheader|feed|timer)$/.test(__rl);
                 if (!__containerRole) return n;
             }
             // 2026-11-12：上溯只接受「带稳定 #id 的语义容器」，拒绝无 id 的纯布局容器（content-wrapper / section /
@@ -1090,16 +1556,30 @@
     }
 
     /**
-     * 勾选态（评审 N-02）：原生 input 读 .checked；组件库常用的
-     * {@code <div role="checkbox" aria-checked="true">} 没有 .checked 属性，必须回退到 aria-checked，
-     * 否则「已选中项再点一次取消」会被两边都读成 false，产物恒出 check() + 断言恒 true。
-     * aria-checked="mixed" 不算选中。捕获阶段读到的是「点击前」状态，Java 侧据此推导终态。
+     * 勾选态（评审 N-02）。<b>语义边界 = checkbox / radio 族的勾选状态</b>：
+     * Java 侧用它决定 {@code check() / uncheck()} 与 {@code isChecked()} 断言
+     * （{@code CodegenFieldPlanner#actionFor}），因此不能把「任何激活态」都塞进来。
+     *
+     * <p>同类但<b>不同语义</b>的激活态 —— {@code aria-pressed}（toggle 按钮）、
+     * {@code aria-selected}（tab / option）、{@code aria-current}（导航当前项）、
+     * {@code aria-expanded}（折叠面板）—— 刻意<b>不</b>计入：混入会让 role=button 的 toggle
+     * 被生成 {@code check() / isChecked()}，回放语义错误。它们由各自 role 的 click 动作表达。
+     *
+     * <p>原生 input 读 {@code .checked}；组件库常用的 {@code <div role="checkbox" aria-checked="true">}
+     * 没有 {@code .checked} 属性，必须回退到 aria-checked，否则「已选中项再点一次取消」会被两边
+     * 都读成 false，产物恒出 check() + 断言恒 true。{@code aria-checked="mixed"} 不算选中。
+     * 捕获阶段读到的是「点击前」状态，Java 侧据此推导终态。
      */
+    var CHECKABLE_STATE_ATTRS = ['aria-checked'];
+
     function checkedStateOf(el) {
         if (!el) return false;
         if (typeof el.checked === 'boolean') return el.checked;
-        var aria = el.getAttribute && el.getAttribute('aria-checked');
-        return aria === 'true';
+        if (!el.getAttribute) return false;
+        for (var i = 0; i < CHECKABLE_STATE_ATTRS.length; i++) {
+            if (el.getAttribute(CHECKABLE_STATE_ATTRS[i]) === 'true') return true;
+        }
+        return false;
     }
 
     /** 单个元素的事实快照（Java 侧打分所需原始材料）。 */
@@ -1107,6 +1587,11 @@
         if (!el || el.nodeType !== 1) return null;
         var tag = el.tagName ? el.tagName.toLowerCase() : '';
         return {
+            // 元素身份（文档 + 元素）：Java 侧据此判定「是不是已拾取过的同一个元素」。
+            // 必须随每次事件回传——同一元素即使结构路径/文案被页面改写（loading、列表插入兄弟节点），
+            // eid 不变；而 role+name 相同的孪生元素 eid 必然不同，不会被并成一条。
+            docId: __codegenDocId,
+            eid: eidOf(el),
             role: roleOf(el),
             name: accessibleName(el),
             tag: tag,
@@ -1171,46 +1656,100 @@
      * 最多访问 200 个节点——账户卡片/分页容器常嵌套 3~4 层，再深收益低而扫描成本线性上升。
      * 值是否真稳定仍由 Java 侧 {@code SelectorStability} 复核，这里只做形态过滤。
      */
-    function descendantAnchorsOf(root, maxDepth, maxCount) {
+    function descendantAnchorsOf(root, maxDepth, maxCount, exclude) {
         var out = [];
         if (!root || !root.children) return out;
-        var queue = [], visited = 0;
+        var items = [], queue = [], visited = 0;
         for (var i = 0; i < root.children.length; i++) queue.push({ n: root.children[i], d: 1 });
-        while (queue.length && out.length < maxCount && visited < 200) {
+        // 收集上限放宽到 maxCount*3：先收全再按「锚点质量」排序（标题 > 任意后代），最后截断。
+        while (queue.length && items.length < maxCount * 3 && visited < 200) {
             var cur = queue.shift();
             var n = cur.n;
             if (!n || n.nodeType !== 1) continue;
+            // 父级锚点必须来自「目标子树之外」：目标 button 内部的 span 也会被广度遍历收进来
+            // （`button > span[data-i18n="continue"]`、`#please-wait-loading`），把它当父级锚点会产出
+            // `div:has(span[data-i18n="continue"]) button:has(span[data-i18n="continue"])` ——
+            // 父谓词与子谓词同指目标内部，对「该按钮属于哪个分区」零区分度，还白占候选额度，
+            // 把真正有区分力的外层标题锚点（`h1[data-i18n="title_triage"]`）挤出额度。
+            if (exclude && (n === exclude || (n.contains && n.contains(exclude)))) continue;
+            // 装饰标签（hr/br/…）不产锚点：`hr[aria-hidden="true"]` 这类"锚点"零区分度，
+            // 只会让打分器误以为找到了作用域，再多叠几层 nth-of-type 去凑唯一。
+            if (DECORATIVE_TAGS[(n.tagName || '').toLowerCase()]) continue;
             visited++;
-            var seg = '';
-            if (n.id && !isDynamicId(n.id)) {
-                seg = '#' + (window.CSS ? CSS.escape(n.id) : n.id);
-            } else {
-                var attrs = stableAttrs(n);
-                for (var j = 0; j < attrs.length; j++) {
-                    if (attrs[j].rand) continue;
-                    seg = '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"]';
-                    break;
-                }
+            // 锚点选段统一走 bestAnchorSeg（泛化池 + 状态锚点兜底，单一事实来源）。
+            var pick = bestAnchorSeg(n, true);
+            if (pick.seg) {
+                items.push({ seg: pick.seg, pri: anchorPriority(n, pick.seg), st: pick.state });
             }
-            if (seg) out.push(seg);
             if (cur.d < maxDepth) {
                 for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
             }
         }
+        // 稳定排序：同优先级保持 DOM 顺序（近的先），避免同一页面两次拾取产出不同选择器。
+        items.sort(function (a, b) { return a.pri - b.pri; });
+        // 状态型锚点（`[style=""]`、`[data-state="active"]`…）单独保底：分区容器里语义锚点往往
+        // 超过 maxCount（列表行、卡片、单选项文案…），按序号截断会把它丢掉，而它恰恰是
+        // 「没有任何语义锚点」时的兜底。语义锚点让出 1 个名额给它，它固定排在最后（最低优先）。
+        // 判据用收集时打好的 `st` 标记，不再特判具体形态。
+        var stateAnchor = '';
+        items = items.filter(function (it) {
+            if (!it.st) return true;
+            if (!stateAnchor) stateAnchor = it.seg;
+            return false;
+        });
+        var limit = stateAnchor ? Math.max(0, maxCount - 1) : maxCount;
+        for (var m = 0; m < items.length && out.length < limit; m++) out.push(items[m].seg);
+        if (stateAnchor && out.length < maxCount) out.push(stateAnchor);
         return out;
     }
 
+    /**
+     * 锚点质量排序（数值越小越优先）：决定 {@code 祖先:has(锚点)} 里该用哪个后代做作用域标识。
+     *
+     * <p><b>为什么必须排序</b>：原先按 DOM 广度优先取「第一个带稳定属性的后代」，于是
+     * {@code <span data-i18n="back">}（分区里一个"返回"链接）会排在分区标题之前被选中——生成出
+     * {@code div:has(span[data-i18n='back'])} 这种「锚点与目标无关、只能靠序号凑唯一」的链。
+     * 真正能标识分区的是**标题**（{@code h1~h6}/{@code legend}/{@code caption}/{@code label}/
+     * {@code role=heading}），所以它们固定排最前；同类型里再按属性语义排（{@code data-i18n} 是 NLS key，
+     * 跨语言稳定；{@code data-testid}/{@code id}/{@code aria-label} 次之）。
+     *
+     * <p>只做便宜的形态判断，不在这里查文档计数（那会把一次拾取放大成几十次查询）；
+     * 是否真唯一仍由下游（Java 侧 Playwright 引擎计数）裁决。
+     */
+    function anchorPriority(n, seg) {
+        var t = (n.tagName || '').toLowerCase();
+        var role = ((n.getAttribute && n.getAttribute('role')) || '').toLowerCase();
+        var heading = /^h[1-6]$/.test(t) || t === 'legend' || t === 'caption' || t === 'label'
+            || role === 'heading';
+        var p = heading ? 0 : 20;
+        // 状态型锚点（`[style=""]`、`[data-state="active"]`、`[aria-expanded="true"]`…）最低优先：
+        // 它标识的是「当前激活态」，不是区块语义，只在没有任何语义/标题锚点时才该被采用。
+        // 判据统一交给 isStateAnchorSeg（属性名 + 空值存在性），不再逐个特判具体形态。
+        if (isStateAnchorSeg(seg)) return p + 40;
+        if (seg.indexOf('[data-i18n=') === 0) return p;
+        if (seg.indexOf('[data-testid=') === 0) return p + 2;
+        if (seg.charAt(0) === '#') return p + 4;
+        if (seg.indexOf('[aria-label=') === 0) return p + 6;
+        return p + 10;
+    }
+
     /** 祖先事实（比 factsOf 轻）：供 Java 侧 {@code :has()} 作用域与祖先属性前缀使用。 */
-    function ancestorFacts(n, path) {
+    function ancestorFacts(n, path, target) {
         return {
             cssSelector: path,
             id: n.id || '',
             tag: n.tagName ? n.tagName.toLowerCase() : '',
             testid: (n.getAttribute && n.getAttribute('data-testid')) || '',
+            // 稳定 class token 是「作用域头」的中间档（Java 侧取第一个稳定 token 拼 `div.page`）：
+            // 裸 tag 头 `div:has(标题)` 会命中 html/body/分区容器等所有含该标题的祖先层，
+            // 计数必然 > 1 而被丢弃；带上分区容器的 class 才是真作用域。
+            // SVG 元素的 className 是 SVGAnimatedString（非字符串），此处按空串处理。
+            className: (typeof n.className === 'string') ? n.className : '',
             attrs: semanticAttrsOf(n, 6),
             // 深度 6 / 最多 6 个：4 层时「卡片 > 列表 > 行 > 单元格 > 标题」这类行级锚点采不到，
             // 而 :has() 作用域恰恰依赖这些深层锚点。节点访问上限 200 不变，成本可控。
-            childAnchors: descendantAnchorsOf(n, 6, 6)
+            // target 作为排除子树传入：父级锚点不得取自目标自身内部（见 descendantAnchorsOf）。
+            childAnchors: descendantAnchorsOf(n, 6, 6, target)
         };
     }
 
@@ -1238,7 +1777,7 @@
             }
             chain.unshift(seg);
             last = chain.join(' > ');
-            if (d < maxDepth) out.push(ancestorFacts(p, last));
+            if (d < maxDepth) out.push(ancestorFacts(p, last, el));
             p = p.parentElement;
             d++;
         }
@@ -1279,53 +1818,6 @@
                     } catch (e) { return null; }
                 }
                 /**
-                 * 把本 frame 的文档坐标换算到<b>顶层文档坐标</b>的偏移量。
-                 *
-                 * <p>CDP {@code DOM.getNodeForLocation} 只认主 frame 的文档坐标，而事件在 iframe 内触发时
-                 * {@code pageX/pageY} 是相对该 iframe 文档的。逐层向上累加宿主 iframe 的位置即可换算；
-                 * 跨源 iframe 读不到 {@code frameElement}（或无 frameElement 对象）时返回 null ⇒ 放弃拾取，
-                 * 避免用一个错误坐标去命中无关元素。
-                 */
-                function topFrameOffset() {
-                    var dx = 0, dy = 0, w = window;
-                    try {
-                        while (w !== w.parent) {
-                            var fe = w.frameElement;
-                            if (!fe) return null;
-                            var r = fe.getBoundingClientRect();
-                            var cs = w.parent.getComputedStyle(fe);
-                            // 视口坐标转换：iframe 元素在父文档视口里的位置即可，不叠加父/自身滚动——
-                            // clientX/clientY 已是 iframe 内视口坐标，叠加 rect.left 即得顶层视口坐标；
-                            // 此前叠加 scrollX/scrollY 把文档坐标误当视口坐标，页面滚动后坐标兜底命中错位元素。
-                            dx += r.left + (parseFloat(cs.borderLeftWidth) || 0);
-                            dy += r.top + (parseFloat(cs.borderTopWidth) || 0);
-                            w = w.parent;
-                        }
-                        return { x: dx, y: dy };
-                    } catch (e) {
-                        return null;   // 跨源 iframe：SecurityError / frameElement 为 null
-                    }
-                }
-                /** 元素中心点的顶层视口坐标（CSS 像素、不含滚动）：fill 这类没有可靠 pointer 坐标的事件用它。 */
-                function centerOf(el, off) {
-                    try {
-                        if (!el || !el.getBoundingClientRect) return null;
-                        var r = el.getBoundingClientRect();
-                        if (!r || (r.width === 0 && r.height === 0)) return null;
-                        // rect 已是视口坐标，不叠加滚动（与 pointOf 的 clientX/clientY 口径一致）
-                        return { x: r.left + r.width / 2 + off.x,
-                                 y: r.top + r.height / 2 + off.y };
-                    } catch (e) { return null; }
-                }
-                /** 点击点优先用真实 pointer 坐标，缺失（键盘触发/合成事件）时回退元素中心。 */
-                function pointOf(ev, el, off) {
-                    var x = ev.clientX, y = ev.clientY;   // 视口坐标（非 pageX/pageY 文档坐标）：DOM.getNodeForLocation 要视口坐标，页面滚动后文档坐标会命中错位元素
-                    if (typeof x === 'number' && typeof y === 'number' && (x !== 0 || y !== 0)) {
-                        return { x: x + off.x, y: y + off.y };
-                    }
-                    return centerOf(el, off);
-                }
-                /**
                  * 元素所属 frame 的稳定路径：从内到外每层 iframe 在其父文档中的序号（outer→inner）。
                  * 例：[2, 0] = 「顶层文档第 3 个 iframe」里的「第 1 个 iframe」。
                  * 与 Java 侧 Page.getFrameTree 的 childFrames 文档顺序一致，可据此映射到 CDP frameId，从而只探命中帧、
@@ -1342,7 +1834,9 @@
                             if (!fe) return null;
                             var doc = fe.ownerDocument;
                             if (!doc || !doc.querySelectorAll) return null;
-                            var iframes = doc.querySelectorAll('iframe');
+                            // iframe 与旧式 frameset 的 frame 同属「子浏览上下文」，序号映射到 CDP frameId 时
+                            // 由 Page.getFrameTree 的 childFrames 文档顺序对齐——只数 iframe 会漏 frame。
+                            var iframes = doc.querySelectorAll('iframe, frame');
                             var idx = -1;
                             for (var i = 0; i < iframes.length; i++) {
                                 if (iframes[i] === fe) { idx = i; break; }
@@ -1368,11 +1862,12 @@
                         // 的 onclick 执行，若照常上报，「点暂停」会把暂停按钮自己拾取进面板
                         // （此刻 Java 侧 pickOn 尚未被 pause 命令置 false）。
                         if (isCodegenUi(target)) return;
-                        // 2026-11-13：<label> 被点击时，浏览器会向关联控件（input/textarea/select）
-                        // 再派发一次「合成 click」（label 默认行为）。该合成 click 与真实 label click
-                        // 几乎同时、目标即 label.control，若照常上报会生成「label + 控件」两条记录，
-                        // 违背「拾取对象 = 用户点击对象」。这里抑制被 label 转发的控件 click，
-                        // 仅保留用户真正点的 label 记录（不 preventDefault，真实聚焦/交互照常发生）。
+                        // 2026-11-13 / 2026-11-15：<label> 被点击时，浏览器会向关联控件
+                        // （radio/checkbox）再派发一次「合成 click」（label 默认行为）。该合成 click
+                        // 与真实点击几乎同时、目标即控件；若照常上报会生成「label + 控件」两条记录
+                        // （用户 2026-11-15 反馈：点 radio 的 label 会产出两个元素定位）。
+                        // 这里抑制被 label 转发的控件 click，仅保留用户真正点的那一次（归一后的控件），
+                        // 绝不 preventDefault —— 真实勾选/聚焦照常发生。
                         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
                                 || target.tagName === 'SELECT')) {
                             var now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
@@ -1384,35 +1879,36 @@
                         }
                         // 诊断计数：Java 侧事件泵据此区分「DOM 事件没进来」与「事件进来了但 binding 没派发」。
                         window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
-                        var off = topFrameOffset();
-                        var pt = off ? pointOf(ev, target, off) : null;
+                        var resolved = null;
+                        try { resolved = pickTarget(target); } catch (ignore) { resolved = null; }
+                        // 只上报「事件目标 + 其事实（选择器 / XPath / frame 路径）」：拾取按选择器逐 frame 求值，
+                        // 绝不带坐标——坐标随滚动/重排漂移，且对跨源 iframe 必然打空。
                         window.__codegenEvent({ type: 'click', tag: target && target.tagName,
-                            x: pt ? pt.x : null, y: pt ? pt.y : null,
-                            coordSkipped: !off,
                             framePath: framePathOf(),
                             info: infoOf(target) });
-                        // 记录 label 点击（含其关联控件），供识别随后浏览器自动转发的控件 click 并抑制。
-                        if (target && target.tagName === 'LABEL') {
-                            var ctrl = target.control
-                                || (target.getAttribute && target.getAttribute('for')
-                                    ? document.getElementById(target.getAttribute('for')) : null);
-                            __codegenLastLabel = ctrl ? {
-                                ctrl: ctrl,
-                                t: (typeof performance !== 'undefined') ? performance.now() : Date.now()
-                            } : null;
-                        } else {
-                            __codegenLastLabel = null;
-                        }
+                        // 登记「即将到来的合成 click」：点包裹式 label（或其内部任意文本/svg）且归一到的控件是
+                        // radio/checkbox 时，浏览器随后会向该控件补发一次 click，必须抑制掉（否则两条定位）。
+                        // 直接点控件本身不会触发转发，故不做登记——避免把用户随后的真实点击误吞。
+                        __codegenLastLabel = forwardedControl(target, resolved);
+                    } catch (e) {}
+                }, true);
+                // 右键（contextmenu）：与 click 同层的拾取入口，动作由生成侧映射为 rightClick()。
+                // 绝不 preventDefault —— 浏览器右键菜单照常弹出（拾取必须与页面交互共存）。
+                // 不做 label 合成抑制（右键不会向关联控件转发 click），故不需要 __codegenLastLabel 登记。
+                window.addEventListener('contextmenu', function (ev) {
+                    try {
+                        var target = ev.target;
+                        if (isCodegenUi(target)) return;
+                        window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
+                        window.__codegenEvent({ type: 'contextmenu', tag: target && target.tagName,
+                            framePath: framePathOf(),
+                            info: infoOf(target) });
                     } catch (e) {}
                 }, true);
                 window.addEventListener('input', function (ev) {
                     try {
                         if (isCodegenUi(ev.target)) return;   // 框架自绘 UI 不录制
-                        var off2 = topFrameOffset();
-                        var pt2 = off2 ? centerOf(ev.target, off2) : null;
                         window.__codegenEvent({ type: 'fill', tag: ev.target && ev.target.tagName,
-                            x: pt2 ? pt2.x : null, y: pt2 ? pt2.y : null,
-                            coordSkipped: !off2,
                             framePath: framePathOf(),
                             value: ev.target.value, info: infoOf(ev.target) });
                     } catch (e) {}
@@ -1426,8 +1922,6 @@
                         var el = ev.target;
                         var kind = (el && el.type ? String(el.type).toLowerCase() : '');
                         if (kind === 'checkbox' || kind === 'radio') return;
-                        var off3 = topFrameOffset();
-                        var pt3 = off3 ? centerOf(el, off3) : null;
                         var semantic = 'change';
                         var values = null;
                         if (kind === 'file') {
@@ -1444,8 +1938,7 @@
                             : (values && values.length ? values[0]
                                 : ((typeof el.value === 'string') ? el.value : ''));
                         window.__codegenEvent({ type: 'fill', semantic: semantic, tag: el && el.tagName,
-                            x: pt3 ? pt3.x : null, y: pt3 ? pt3.y : null,
-                            coordSkipped: !off3, framePath: framePathOf(),
+                            framePath: framePathOf(),
                             value: single, valueCount: values ? values.length : 1,
                             info: infoOf(el) });
                     } catch (e) {}
@@ -1464,11 +1957,8 @@
                         if (ev.shiftKey) mods.push('Shift');
                         var combo = mods.concat([key]).join('+');
                         var el2 = ev.target;
-                        var off4 = topFrameOffset();
-                        var pt4 = off4 ? centerOf(el2, off4) : null;
                         window.__codegenEvent({ type: 'press', value: combo, tag: el2 && el2.tagName,
-                            x: pt4 ? pt4.x : null, y: pt4 ? pt4.y : null,
-                            coordSkipped: !off4, framePath: framePathOf(), info: infoOf(el2) });
+                            framePath: framePathOf(), info: infoOf(el2) });
                     } catch (e) {}
                 }, true);
             }
@@ -1671,7 +2161,9 @@
                 bar.__txt.textContent = '拾取中 · 点击元素加入 Elements；点「暂停」仅停止收集元素，交互与录制保持';
                 toggle.textContent = '暂停拾取';
             } else { // paused
-                bar.__txt.textContent = '已暂停 · 页面交互与录制保持，点「继续拾取」恢复收集元素';
+                // 措辞要能自解释「为什么点了页面按钮却没有新代码」：暂停 = 不收集新元素，
+                // 只是页面交互与「已拾取元素」的操作仍被记录（旧文案"录制保持"容易被读成"点击照常收集"）。
+                bar.__txt.textContent = '已暂停 · 不再收集新元素（页面可正常操作），点「继续拾取」恢复';
                 toggle.textContent = '继续拾取';
             }
             bar.dataset.state = state;

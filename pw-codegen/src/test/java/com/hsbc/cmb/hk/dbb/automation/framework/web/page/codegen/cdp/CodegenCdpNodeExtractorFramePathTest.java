@@ -136,7 +136,7 @@ public class CodegenCdpNodeExtractorFramePathTest {
                 LocatorStrategy.CSS, entry.strategy);
     }
 
-    /** 归属未知（坐标反查路径）时保持历史语义：读 frame 树判定，并按结论决定是否复核。 */
+    /** 归属未知（调用方未提供 scope 快照）时保持历史语义：读 frame 树判定，并按结论决定是否复核。 */
     @Test
     public void unknownScopeResolvesFrameScopeFromTree() {
         FakeCdp cdp = nested();

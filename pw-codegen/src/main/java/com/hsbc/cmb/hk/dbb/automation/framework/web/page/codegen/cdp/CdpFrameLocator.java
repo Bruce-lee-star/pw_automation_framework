@@ -34,7 +34,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>contextId 按 frameId 缓存（导航会令其失效）：求值失败即摘除缓存并重试一次（自愈，不残留坏缓存）；</li>
  *   <li>元素若在 open shadow root 内，{@code document.querySelector} <b>不穿透 shadow 边界</b>：需用页面侧给出的
  *       宿主链拼成 {@code document.querySelector(h0)?.shadowRoot?.querySelector(h1)…} 后求值；
- *       closed shadow root 的 {@code shadowRoot} 为 {@code null}，属不可达（按未命中处理，由坐标兜底）。</li>
+ *       closed shadow root 的 {@code shadowRoot} 为 {@code null}，属不可达（按未命中处理；没有坐标兜底，
+ *       本次拾取按失败告警，绝不产出指向别处的死选择器）。</li>
  * </ul>
  *
  * <p>线程安全：由拾取执行器（单线程）调用；内部缓存用并发容器，避免误用带来的可见性问题。
@@ -84,7 +85,7 @@ public final class CdpFrameLocator {
      * 才能命中。宿主与内层选择器都相对「自身文档 / 外层 shadow root」计算，故可逐层拼接。
      *
      * <p><b>closed shadow root 不可达</b>（{@code host.shadowRoot} 为 {@code null}）：可选链使表达式返回
-     * {@code undefined}，等价「未命中」而不抛异常，由坐标兜底。
+     * {@code undefined}，等价「未命中」而不抛异常（调用方按未拾取处理，无坐标兜底）。
      *
      * @param cssSelector 页面侧算出的内层 CSS 选择器（相对其自身文档 / 最内层 shadow root）
      * @param shadowHosts 宿主选择器链（outermost-first）；{@code null}/空等价于普通文档内查找
@@ -95,7 +96,7 @@ public final class CdpFrameLocator {
         List<String> hosts = shadowHosts == null ? List.of() : shadowHosts;
         for (String host : hosts) {
             if (host == null || host.isBlank()) {
-                // 宿主链不可信（拼进表达式就是非法选择器）：放弃选择器路径，让调用方走坐标兜底。
+                // 宿主链不可信（拼进表达式就是非法选择器）：放弃选择器路径，让调用方按「未拾取」处理。
                 log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' - skipped",
                         hosts, cssSelector);
                 return null;
@@ -107,32 +108,34 @@ public final class CdpFrameLocator {
             log.warn("[codegen][cdp] Page.getFrameTree returned no frame - CDP session unavailable, selector reverse lookup skipped");
             return null;
         }
-        int degradedFrames = 0;
-        for (int i = 0; i < t.frameIds.size(); i++) {
-            String frameId = t.frameIds.get(i);
-            Probe outcome = probe(frameId, cssSelector, hosts);
-            if (outcome.hit() != null) {
-                if (i > 0) {
-                    log.info("[codegen][cdp] selector '{}' matched in sub frame {} ({}/{} frame(s) probed)",
-                            cssSelector, frameId, i + 1, t.frameIds.size());
+        ScanResult first = scanAllFrames(t, cssSelector, hosts);
+        if (first.hit() != null) return first.hit();
+        if (first.degradedAll()) {
+            // 全部 frame 都是「基础设施失败」（建隔离世界失败 / 求值失败），而不是「元素不存在」。
+            // 最典型成因：会话期间导航过（logon → 新页 → 回 logon），缓存里的 frame 树与执行上下文整体过期。
+            // 必须清缓存重建再扫一次——否则「导航后的第一次拾取」必然失败，用户看到的就是"点了没反应"
+            // （旧实现只在下一次 tree() 调用才重建，本次循环用的是旧 frameId，必然全军覆没）。
+            log.info("[codegen][cdp] all {} frame(s) degraded for '{}' - frame tree likely stale after navigation, "
+                    + "rebuilding and retrying once", t.frameIds.size(), cssSelector);
+            invalidateTree();
+            FrameTree fresh = tree();
+            if (fresh != null && !fresh.frameIds.isEmpty()) {
+                ScanResult retry = scanAllFrames(fresh, cssSelector, hosts);
+                if (retry.hit() != null) {
+                    log.info("[codegen][cdp] recovered after frame-tree rebuild: '{}' -> frame {}",
+                            cssSelector, retry.hit().frameId());
+                    return retry.hit();
                 }
-                if (!hosts.isEmpty()) {
-                    log.debug("[codegen][cdp] selector '{}' resolved through {} shadow host(s) in frame {}",
-                            cssSelector, hosts.size(), frameId);
-                }
-                ElementRef.FrameScope scope = (i == 0)
-                        ? ElementRef.FrameScope.MAIN : ElementRef.FrameScope.SUB;
-                ElementRef hit = outcome.hit();
-                ElementRef.Frames snap = new ElementRef.Frames(t.frameIds.get(0), t.parentByFrame);
-                return new ElementRef(hit.backendNodeId(), hit.frameId(), scope, hit.objectId(), snap);
             }
-            if (outcome.degraded()) degradedFrames++;
         }
+        int degradedFrames = first.degradedCount();
         if (degradedFrames == t.frameIds.size()) {
             // 全部 frame 都是"基础设施失败"而非"元素不存在"：必须显性告警，否则看起来和"页面上没这个元素"一样，
             // 排查时无从区分（这是历史上 selector 反查静默失效、全部退化到坐标法的原因）。
+            // 现在没有坐标兜底：本次拾取会直接失败，所以告警必须把"为什么定位不到"讲清楚。
             log.warn("[codegen][cdp] selector '{}' could not be probed in any of {} frame(s) - "
-                            + "isolated world / CDP evaluation failed (page navigating / frame not ready / CDP session error), falling back to coordinate hit-test",
+                            + "isolated world / CDP evaluation failed (page navigating / frame not ready / CDP session error); "
+                            + "no coordinate fallback, this pick will fail",
                     cssSelector, t.frameIds.size());
         } else {
             log.debug("[codegen][cdp] selector '{}' matched no element in {} frame(s)", cssSelector, t.frameIds.size());
@@ -153,7 +156,7 @@ public final class CdpFrameLocator {
         List<String> hosts = shadowHosts == null ? List.of() : shadowHosts;
         for (String host : hosts) {
             if (host == null || host.isBlank()) {
-                // 宿主链不可信：放弃选择器路径，直接回退全帧扫描（由被调方法走坐标兜底）。
+                // 宿主链不可信：放弃选择器路径，直接回退全帧扫描（同样没有坐标兜底，最坏情况是本次拾取失败）。
                 log.debug("[codegen][cdp] unusable shadow host chain {} for selector '{}' - fall back",
                         hosts, cssSelector);
                 return findBySelector(cssSelector, shadowHosts);
@@ -179,6 +182,64 @@ public final class CdpFrameLocator {
                     framePath);
         }
         return findBySelector(cssSelector, hosts);
+    }
+
+    /**
+     * 全帧扫描（主 frame 优先）：命中即返回带 frame 归属快照的元素引用。
+     *
+     * <p>同时统计「基础设施失败」的 frame 数，供调用方判断这次"未命中"到底是
+     * <b>元素不存在</b>（degraded=0）还是 <b>frame 已随导航失效</b>（degraded=全部）。
+     */
+    private ScanResult scanAllFrames(FrameTree t, String cssSelector, List<String> hosts) {
+        int degradedFrames = 0;
+        for (int i = 0; i < t.frameIds.size(); i++) {
+            String frameId = t.frameIds.get(i);
+            Probe outcome = probe(frameId, cssSelector, hosts);
+            if (outcome.hit() != null) {
+                if (i > 0) {
+                    log.info("[codegen][cdp] selector '{}' matched in sub frame {} ({}/{} frame(s) probed)",
+                            cssSelector, frameId, i + 1, t.frameIds.size());
+                }
+                if (!hosts.isEmpty()) {
+                    log.debug("[codegen][cdp] selector '{}' resolved through {} shadow host(s) in frame {}",
+                            cssSelector, hosts.size(), frameId);
+                }
+                ElementRef.FrameScope scope = (i == 0)
+                        ? ElementRef.FrameScope.MAIN : ElementRef.FrameScope.SUB;
+                ElementRef hit = outcome.hit();
+                ElementRef.Frames snap = new ElementRef.Frames(t.frameIds.get(0), t.parentByFrame);
+                return new ScanResult(new ElementRef(hit.backendNodeId(), hit.frameId(), scope,
+                        hit.objectId(), snap), degradedFrames, t.frameIds.size());
+            }
+            if (outcome.degraded()) degradedFrames++;
+        }
+        return new ScanResult(null, degradedFrames, t.frameIds.size());
+    }
+
+    /** 全帧扫描结果：命中元素（含归属快照）/ 未命中 + 基础设施失败计数。 */
+    private static final class ScanResult {
+        private final ElementRef hit;
+        private final int degradedFrames;
+        private final int totalFrames;
+
+        ScanResult(ElementRef hit, int degradedFrames, int totalFrames) {
+            this.hit = hit;
+            this.degradedFrames = degradedFrames;
+            this.totalFrames = totalFrames;
+        }
+
+        ElementRef hit() {
+            return hit;
+        }
+
+        int degradedCount() {
+            return degradedFrames;
+        }
+
+        /** 每一个 frame 都是"基础设施失败"（而非"元素不存在"）⇒ 帧树/上下文很可能整体过期。 */
+        boolean degradedAll() {
+            return hit == null && totalFrames > 0 && degradedFrames == totalFrames;
+        }
     }
 
     /** 按 iframe 序号链解析出 CDP frameId（outer→inner）；任一层序号越界/无匹配返回 null。 */
@@ -224,9 +285,15 @@ public final class CdpFrameLocator {
         }
     }
 
-    /** 使缓存的 frame 树失效（导航 / iframe 增删后由 {@link #contextId} 触发重建）。 */
+    /**
+     * 使缓存的 frame 树与执行上下文一起失效（导航 / iframe 增删后重建）。
+     *
+     * <p>执行上下文与文档同寿命：帧树过期通常意味着文档也换了，隔离世界 contextId 全部作废。
+     * 若只清帧树不清上下文，重建后的探测仍会拿旧 contextId 求值，继续失败。
+     */
     private void invalidateTree() {
         cachedTree = null;
+        contextByFrame.clear();
     }
 
     /** 缓存的 frame 树快照：主 frameId + 父子映射 + 文档顺序的 frameId 列表（主 frame 在最前）。 */
@@ -434,8 +501,8 @@ public final class CdpFrameLocator {
     static String buildExpression(String cssSelector, List<String> shadowHosts) {
         // cssSelector 为空：无选择器可探测，返回 null 交由 probe 视作未命中（避免对 null 解引用引发 NPE）。
         if (cssSelector == null) return null;
-        // xpath= 前缀：用 document.evaluate 求值「点击捕获的 ev.target 绝对 XPath」——稳定且非坐标，
-        // 仅在 cssSel 缺失/未命中时由调用方作为坐标反查之前的兜底（坐标法对"已变化/已关闭的实时 DOM"不可靠）。
+        // xpath= 前缀：用 document.evaluate 求值「点击捕获的 ev.target 绝对 XPath」——它来自点击瞬间的 facts，
+        // 仅在 cssSel 缺失/未命中时由调用方作为最后兜底（没有坐标反查这条退路）。
         if (cssSelector.startsWith("xpath=")) {
             String xpath = cssSelector.substring("xpath=".length());
             if (shadowHosts == null || shadowHosts.isEmpty()) {

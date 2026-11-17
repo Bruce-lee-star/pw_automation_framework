@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.score;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -20,6 +21,8 @@ public class LocatorCounterDefaultTest {
 
         assertEquals("复核没跑成 ≠ 确认唯一", -1, stub.countByRole("button", "Save"));
         assertEquals("纯 CSS 计数不受影响", 1, stub.count("[id=\"save\"]"));
+        assertEquals("可见性探测没跑成 ⇒ 不可判定，绝不能当成「不可见」", TriState.UNKNOWN,
+                stub.isVisible("[id=\"save\"]"));
     }
 
     /** 显式覆写的实现优先，接口默认值不得覆盖真实复核结果。 */

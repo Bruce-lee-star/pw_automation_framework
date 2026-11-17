@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
+
 /**
  * role 复核的判定规则（纯函数，无 IO）：把「Playwright 严格模式 + 元素可能是一组」的语义收敛到一处。
  *
@@ -39,5 +41,31 @@ final class RoleVerificationPolicy {
     static boolean keepRole(int hits, int expected) {
         if (hits < 0) return true;
         return hits == Math.max(expected, 1);
+    }
+
+    /**
+     * 复核<b>不通过</b>时，该不该把定位器改写成 CSS。
+     *
+     * <p><b>现场（2026-11-15）</b>：HSBC 重置密码是同一个 document 内的多步向导。用户点 Continue 走到下一步后，
+     * 拾取时的那个 Continue 被 {@code display:none} 隐藏；等到生成时复核 {@code getByRole(BUTTON, "Continue")}
+     * 命中 0，于是一条<b>本来完全可用</b>的 role 定位器被改写成
+     * {@code div:nth-of-type(5) div:has(hr[aria-hidden='true']) > div:nth-of-type(3) > button[class*='float-right']}。
+     * 也就是说：后置复核把"页面已经翻页"误判成"定位器不可用"。
+     *
+     * <p>故命中 0 时还要看<b>拾取时的元素此刻是否仍在且可见</b>：
+     * <ul>
+     *   <li>状态未变（仍可见）⇒ 0 命中属实（名字口径不符 / ARIA 隐藏）⇒ 回退 CSS；</li>
+     *   <li>状态已变（元素消失或被隐藏）／不可判定 ⇒ 现在的 DOM 不是拾取时的 DOM，计数说明不了运行期
+     *       （运行期回到那一步时元素可见且唯一）⇒ <b>保留 role</b> 并标记未校验（产物带 TODO(review)）；</li>
+     *   <li>命中 {@code >1} ⇒ 是真正的歧义（同一状态下确实多个匹配，运行期 strict violation），必须回退 CSS。</li>
+     * </ul>
+     *
+     * @param hits            引擎命中数
+     * @param pickStateIntact 拾取时的元素此刻是否仍在且可见；{@link TriState#UNKNOWN} = 不可判定
+     * @return {@code true}=回退 CSS；{@code false}=保留 role（按未校验处理）
+     */
+    static boolean fallBackToCssAfterMismatch(int hits, TriState pickStateIntact) {
+        if (hits > 0) return true;             // 真的多命中：歧义成立
+        return pickStateIntact.isTrue();       // 0 命中：只有确认"状态未变"才回退
     }
 }

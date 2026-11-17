@@ -170,7 +170,7 @@ public class CodegenCdpNodeExtractorAxTest {
     }
 
     /**
-     * 容器根（document / RootWebArea / &lt;html&gt; / &lt;body&gt;）不是真实交互目标：坐标拾取命中它们
+     * 容器根（document / RootWebArea / &lt;html&gt; / &lt;body&gt;）不是真实交互目标：命中它们
      * 实为点了页面背景或弹窗遮罩，必须判为无效拾取（不生成条目，动作一并忽略）。
      */
     @Test

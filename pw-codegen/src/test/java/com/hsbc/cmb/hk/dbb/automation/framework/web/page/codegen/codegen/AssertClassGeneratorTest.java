@@ -109,9 +109,9 @@ public class AssertClassGeneratorTest {
                 role("generic", "", "#wrap", 0));
         String out = assertClass(es, new String[]{});
         Assert.assertTrue(out.contains(
-                "assertThat(loginPage.signIn.getText(), is(\"Sign in\"));"));
+                "assertThat(loginPage.signInBtn.getText(), is(\"Sign in\"));"));
         Assert.assertTrue(out.contains(
-                "assertThat(loginPage.rememberMe.isChecked(), is(true));"));
+                "assertThat(loginPage.rememberMeCheckbox.isChecked(), is(true));"));
         Assert.assertTrue(out.contains(
                 "assertThat(loginPage.wrap.isVisible(), is(true));"));
     }
@@ -122,7 +122,7 @@ public class AssertClassGeneratorTest {
         List<CodegenEntry> es = List.of(checked("checkbox", "Remember me", "#r", false));
         String out = assertClass(es, new String[]{});
 
-        Assert.assertTrue(out.contains("assertThat(loginPage.rememberMe.isChecked(), is(false));"));
+        Assert.assertTrue(out.contains("assertThat(loginPage.rememberMeCheckbox.isChecked(), is(false));"));
     }
 
     /** 方法体顺序 = 传入 entries 顺序（调用方已按真实操作序列排好）。 */
@@ -146,7 +146,7 @@ public class AssertClassGeneratorTest {
     public void valueRoleUsesRecordedValue() {
         List<CodegenEntry> es = List.of(role("textbox", "Username", "#u", 0));
         String out = assertClass(es, new String[]{}, Map.of("textbox|Username#0", "HSBC001"));
-        Assert.assertTrue(out.contains("assertThat(loginPage.username.getValue(), is(\"HSBC001\"));"));
+        Assert.assertTrue(out.contains("assertThat(loginPage.usernameInput.getValue(), is(\"HSBC001\"));"));
         Assert.assertFalse("可访问名不得被当成输入值",
                 out.contains("getValue(), is(\"Username\")"));
     }
@@ -156,7 +156,7 @@ public class AssertClassGeneratorTest {
     public void valueRoleWithoutRecordedValueFallsBackToVisibility() {
         List<CodegenEntry> es = List.of(role("textbox", "Username", "#u", 0));
         String out = assertClass(es, new String[]{});
-        Assert.assertTrue(out.contains("assertThat(loginPage.username.isVisible(), is(true));"));
+        Assert.assertTrue(out.contains("assertThat(loginPage.usernameInput.isVisible(), is(true));"));
         Assert.assertTrue(out.contains("no recorded value for this input"));
         Assert.assertFalse(out.contains("getValue()"));
     }
@@ -189,7 +189,7 @@ public class AssertClassGeneratorTest {
         String page = PageClassGenerator.generate(TARGET, es, new String[]{});
         String step = StepClassGeneratorTest.stepClass(es);
         String asrt = assertClass(es, new String[]{});
-        for (String f : new String[]{"signIn", "username"}) {
+        for (String f : new String[]{"signInBtn", "usernameInput"}) {
             Assert.assertTrue(page.contains("public PageElement " + f + ";"));
             Assert.assertTrue(step.contains("loginPage." + f + "."));
             Assert.assertTrue(asrt.contains("loginPage." + f + "."));
@@ -220,7 +220,7 @@ public class AssertClassGeneratorTest {
         // 不再生成冗余的 getKey(key) 私有透传方法
         Assert.assertFalse(out.contains("private static String getKey("));
         // 断言处直接走 NLS.visibleText，无重复的 NLSUtils.bind(...)
-        Assert.assertTrue(out.contains("loginPage.signIn.getText(), equalTo(NLS.visibleText(\"signin\")));"));
+        Assert.assertTrue(out.contains("loginPage.signInBtn.getText(), equalTo(NLS.visibleText(\"signin\")));"));
         Assert.assertFalse("bind 不应出现在断言行", out.contains("equalTo(NLSUtils.bind("));
     }
 
@@ -234,7 +234,7 @@ public class AssertClassGeneratorTest {
         Assert.assertTrue(out.contains("import static org.hamcrest.Matchers.containsString;"));
         Assert.assertTrue(out.contains("private static final NLSUtils.NlsBundle NLS = NLSUtils.bind("));
         Assert.assertFalse(out.contains("private static String getKey("));
-        Assert.assertTrue(out.contains("assertThat(NLS.visibleText(\"greet\"), containsString(loginPage.world.getText()));"));
+        Assert.assertTrue(out.contains("assertThat(NLS.visibleText(\"greet\"), containsString(loginPage.worldTitle.getText()));"));
         Assert.assertFalse("bind 不应出现在断言行", out.contains("containsString(NLSUtils.bind("));
     }
 
@@ -245,6 +245,6 @@ public class AssertClassGeneratorTest {
         NLSUtils.setLanguage("en");
         String out = assertClass(List.of(checkedWithKey("checkbox", "Remember me", "#r", "remember", true)),
                 new String[]{f.toString()});
-        Assert.assertTrue(out.contains("assertThat(loginPage.rememberMe.isChecked(), is(true));"));
+        Assert.assertTrue(out.contains("assertThat(loginPage.rememberMeCheckbox.isChecked(), is(true));"));
     }
 }

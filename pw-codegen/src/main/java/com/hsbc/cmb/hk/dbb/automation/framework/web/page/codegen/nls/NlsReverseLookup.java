@@ -41,6 +41,8 @@ public final class NlsReverseLookup {
     private final Map<String, String> valueToKey = new LinkedHashMap<>();
     /** 当前语言包里存在的 key 集合：用于校验元素自带的 key（如 {@code data-i18n}）是否合法。 */
     private final Set<String> knownKeys = new HashSet<>();
+    /** key→归一化可见文本：校验「后代 key 是否确实是本元素的文案」（见 {@link #lookupByDescendantKey}）。 */
+    private final Map<String, String> keyVisible = new LinkedHashMap<>();
     private String loadedLang;
 
     public NlsReverseLookup(String[] nlsFiles) {
@@ -105,6 +107,35 @@ public final class NlsReverseLookup {
         return lookup(name);
     }
 
+    /**
+     * 采纳「目标<b>后代</b>节点上的 key」（如 {@code <button><span data-i18n="continue">Continue</span></button>}
+     * 里的 {@code continue}），但必须自证是<b>本元素</b>的文案。
+     *
+     * <p><b>为什么需要</b>：拾取归一后交互控件（button/a/包裹式 label 的控件）成为拾取对象，而 HSBC 把
+     * i18n 标在文案子节点上，控件自身没有 {@code data-i18n}。此时 {@link #lookup(String)} 只能按可见文案反查，
+     * 而同一文案往往对应多个 key（{@code reset.json} 里 8 个 key 的值都是 "Continue"），只能"文件顺序先到先得"，
+     * 拿到 {@code reset_password_5} 这类语义不对的 key。
+     *
+     * <p><b>为什么要校验</b>：后代里可能还有装饰性节点（图标 {@code aria-label} 旁配套的 {@code data-i18n}），
+     * 它的 key 值与本元素可访问名无关。故只有当 key 对应可见文本与该名<b>互相包含</b>（大小写不敏感）时才采纳，
+     * 否则退回 {@link #lookup(String)} 的文案反查——绝不冒险产出一个运行期解析不到文案的 key。
+     */
+    public String lookupByDescendantKey(String name, String descendantKey) {
+        if (nlsFiles.length == 0) return null;
+        ensureLoaded();
+        if (descendantKey == null || descendantKey.isBlank() || !knownKeys.contains(descendantKey)) {
+            return lookup(name);
+        }
+        String visible = keyVisible.get(descendantKey);
+        if (name == null || name.isBlank() || visible == null || visible.isEmpty()) return lookup(name);
+        String nl = name.trim().toLowerCase(Locale.ROOT);
+        String vl = visible.toLowerCase(Locale.ROOT);
+        if (nl.contains(vl) || vl.contains(nl)) return descendantKey;
+        log.debug("[codegen][nls] descendant key '{}' (visible='{}') does not match name '{}', "
+                + "falling back to text reverse lookup", descendantKey, visible, name);
+        return lookup(name);
+    }
+
     /** 当前语言。 */
     public String language() {
         return loadedLang;
@@ -125,6 +156,7 @@ public final class NlsReverseLookup {
         if (lang.equals(loadedLang)) return;
         valueToKey.clear();
         knownKeys.clear();
+        keyVisible.clear();
         for (String f : nlsFiles) load(f, lang);
         loadedLang = lang;
     }
@@ -145,6 +177,7 @@ public final class NlsReverseLookup {
                 knownKeys.add(en.getKey());
                 // 先登记"可见文本"（最可能被拾取到的形态），再登记原始值兜底。
                 String visible = NLSUtils.visibleText(value);
+                keyVisible.putIfAbsent(en.getKey(), visible.isEmpty() ? value.trim() : visible);
                 if (!visible.isEmpty() && valueToKey.putIfAbsent(visible, en.getKey()) == null) n++;
                 if (!value.trim().isEmpty() && valueToKey.putIfAbsent(value.trim(), en.getKey()) == null) n++;
             }

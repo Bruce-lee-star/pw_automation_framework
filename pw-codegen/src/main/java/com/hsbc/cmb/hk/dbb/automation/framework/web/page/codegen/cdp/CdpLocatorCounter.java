@@ -1,6 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.AriaRoles;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.score.LocatorCounter;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
@@ -149,22 +150,48 @@ public final class CdpLocatorCounter implements LocatorCounter {
     }
 
     /**
+     * 该 CSS 当前是否命中一个<b>可见</b>元素（Playwright 语义：有布局盒 + 非 {@code visibility:hidden}）。
+     *
+     * <p>只用于判断「页面还停在拾取时那一步吗」，不参与产物生成；异常/空选择器一律
+     * {@link TriState#UNKNOWN}（不可判定），调用方不得把不可判定当成「不可见」。
+     */
+    @Override
+    public TriState isVisible(String cssSelector) {
+        if (cssSelector == null || cssSelector.isBlank()) return TriState.UNKNOWN;
+        try {
+            return TriState.of(page.locator(cssSelector).first().isVisible());
+        } catch (Exception | LinkageError e) {
+            log.debug("[codegen] visibility check unavailable for '{}': {}", cssSelector, e.toString());
+            return TriState.UNKNOWN;
+        }
+    }
+
+    /**
      * role 复核：由 <b>Playwright 真实引擎</b>计数（{@code @RoleElement} 运行期走的就是它）。
      *
      * <p>只对主 frame 元素调用（子 frame 元素在抽取阶段已跳过复核：页级 {@code getByRole} 对它们恒 0 命中）。
      *
+     * <p><b>匹配口径必须与运行期一致：{@code name} 用 Playwright 默认的「子串、忽略大小写」</b>
+     * （{@code @RoleElement(role=…, name/key=…)} 生成时<b>不</b>带 {@code exact}，见
+     * {@code CodegenFieldPlanner}）。历史实现在这里加了 {@code setExact(true)}：
+     * 按钮里常有一个 {@code aria-live} 播报 {@code <span>}（HSBC 的 {@code "Loading, please wait."}），
+     * 它属于可访问名，实际名字是 {@code "Loading, please wait. Continue"} ⇒ 精确匹配 {@code "Continue"}
+     * 恒 0 命中，复核误判"role 不可用"并把定位器改写成脆弱长结构链；反过来运行期子串匹配会多命中
+     * （strict violation）时精确匹配又报唯一（假阳性）。
+     *
      * <p>异常/不可判定返回 {@code -1}，与本类其余方法（{@link #count} / {@link #countByText}）语义统一：
      * 调用方（{@code RoleVerificationPolicy#keepRole}）只把 {@code <0} 当"不可判定 ⇒ 放行"、
-     * 把 {@code ==1} 当"确认唯一"。历史实现异常返回 {@code 1} 把不确定伪装成确定：
-     * 复核<b>根本没跑成</b>却被判为通过，连 warn 都不会留下。
+     * 把 {@code ==1} 当"确认唯一"。历史实现异常返回 {@code 1} 把不确定伪装成确定。
      */
     @Override
     public int countByRole(String role, String name) {
         String constant = AriaRoles.ariaConstant(role);
         if (constant == null) return 0;   // 引擎侧不存在该角色 ⇒ 明确不可用
         try {
+            // 不设 exact：与 @RoleElement 运行期的 getByRole 默认（子串匹配）严格同源。
+            // 隐式可见性过滤也在这一层生效——display:none 的隐藏页/弹窗里的同名按钮不在 AX 树内，不参与计数。
             return page.getByRole(AriaRole.valueOf(constant),
-                    new Page.GetByRoleOptions().setName(name).setExact(true)).count();
+                    new Page.GetByRoleOptions().setName(name)).count();
         } catch (Exception | LinkageError e) {
             // LinkageError 也接：极简 classpath 下 AriaRole/Playwright 缺席是 Error 而非 Exception，
             // 让它逃出去会让整次拾取静默失败。复核属「尽力而为」，不可判定 ⇒ -1。

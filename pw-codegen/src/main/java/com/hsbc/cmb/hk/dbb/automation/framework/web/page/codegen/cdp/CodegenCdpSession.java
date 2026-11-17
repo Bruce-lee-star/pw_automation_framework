@@ -83,7 +83,7 @@ public final class CodegenCdpSession {
             cdp.send("Accessibility.enable");
             cdp.send("Runtime.enable");
             // 与 DOM.enable 成对：enable 只订阅事件，不会把文档树推给 DOM agent。缺这一步时
-            // DOM.requestNode 恒返回 nodeId=0（按选择器反查整体失效，只能退回坐标 hit-test）。
+            // DOM.requestNode 恒返回 nodeId=0（按选择器反查整体失效——没有坐标兜底，本次拾取直接失败）。
             frameLocator.ensureDocument();
             log.info("[codegen][cdp] pick channel enabled on page: {}", page.url());
             return true;

@@ -5,14 +5,17 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.CdpLocatorC
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.CodegenCdpNodeExtractor;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.CodegenCdpSession;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.ElementRef;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.PreClickSnapshot;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenFieldPlanner;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenFieldSpec;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenTarget;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.MultiPageCodegen;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.engine.CodegenEngine;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.inject.CodegenScriptInjector;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.AriaRoles;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.LocatorStrategy;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.nls.NlsReverseLookup;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPanelHandle;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPanelManager;
@@ -186,6 +189,35 @@ public final class CodegenLauncher {
         volatile boolean fillCommitted;
         /** 本次动作携带的值的个数（multiple select = 选中项数；其余 = 1），用于产物 TODO 提示。 */
         volatile int valueCount = 1;
+        /**
+         * 页面侧元素身份（{@code docId}）：元素所属<b>文档</b>的随机标识（注入脚本每次文档加载生成）。
+         *
+         * <p>与 {@link #eid} 一起构成「同一文档里的同一个节点」，是
+         * {@link CodegenLauncher#matchFieldKey} 判定「这次操作的是不是已拾取过的那个元素」的<b>唯一权威依据</b>。
+         * 空串 = 该条目没有身份信息（旧版注入脚本 / 单测构造），此时才回退到 role+name 判据。
+         */
+        volatile String docId = "";
+        /** 页面侧元素身份（{@code eid}）：元素在本文档内的编号（WeakMap 绑定节点，节点回收即释放）。 */
+        volatile String eid = "";
+
+        /**
+         * 登记页面侧元素身份。
+         *
+         * <p>为什么必须成对登记：{@code eid} 只在<b>同一个文档</b>内唯一。导航后 eid 会从 1 重新分配，
+         * 只比 eid 会把「上一页的第 1 个元素」和「新页的第 1 个元素」误判成同一个。
+         *
+         * @param docId 文档标识（页面侧回传）
+         * @param eid   元素标识（页面侧回传）
+         */
+        void identify(String docId, String eid) {
+            this.docId = docId == null ? "" : docId;
+            this.eid = eid == null ? "" : eid;
+        }
+
+        /** 是否带有可用的页面侧身份（两段都非空才可用）。 */
+        boolean identified() {
+            return !docId.isEmpty() && !eid.isEmpty();
+        }
 
         Pick(long id, long seq, int session, CodegenEntry entry, Page page, String url,
               CodegenCdpNodeExtractor extractor, boolean rolePending) {
@@ -206,6 +238,24 @@ public final class CodegenLauncher {
             this.actionOnly = actionOnly;
             this.actionType = actionType == null ? "click" : actionType;
         }
+    }
+
+    /**
+     * 拾取入库回调：把「本次解析出的条目 + 页面侧元素身份」落成一条 {@link Pick}。
+     *
+     * <p>单独定义而不是用 {@link java.util.function.BiFunction}：元素身份（docId/eid）必须与条目
+     * <b>同时</b>入库——分开传会让「孪生元素消歧」与「同一元素判定」拿到不一致的数据。
+     */
+    @FunctionalInterface
+    private interface PickSink {
+        /**
+         * @param page  元素所属被测页
+         * @param entry 解析结果
+         * @param docId 页面侧文档标识（可为空 = 无身份信息）
+         * @param eid   页面侧元素标识（可为空）
+         * @return 新建的 Pick（{@code entry == null} 时返回 {@code null}）
+         */
+        Pick add(Page page, CodegenEntry entry, String docId, String eid);
     }
 
     /** 一次原生对话框事件（已自动关闭）：记录所属页 / 类型 / accept，供步骤里生成 {@code acceptAlert/dismissAlert}。 */
@@ -455,25 +505,24 @@ public final class CodegenLauncher {
             /**
              * 解析被点元素。
              *
+             * <p><b>只用「点击事件目标」给出的定位事实，不做坐标反查</b>：坐标随滚动 / 重排 / 动画漂移，
+             * 且 CDP 的 {@code DOM.getNodeForLocation} 只在主 frame 做 hit-test——跨源 iframe 内必然打空，
+             * 一旦命中错位元素还会产出死选择器（历史事故：{@code #alttext-container}）。
+             *
              * <p><b>优先页面侧选择器（逐 frame 求值）</b>：cssSelector 是相对元素<b>自身文档</b>算出来的，
              * 经 {@link com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.CdpFrameLocator}
              * 在每个 frame（含跨源 iframe）的执行上下文里求值即可命中，并顺带返回元素所属 frameId——
              * 这是跨 frame 穿透（{@code frame=SELa :: SELb :: <内层 css>}）的必要输入。
              *
              * <p>元素若在 <b>open shadow root</b> 内，{@code document.querySelector} 穿不透 shadow 边界，
-             * 必须由 {@code shadowHosts}（页面侧给出的宿主链，outermost-first）拼成链式表达式求值——
-             * 否则必然落到坐标兜底甚至在 shadow + iframe 组合下彻底失败。
-             *
-             * <p>坐标法只在根 frame 坐标下 hit-test，<b>跨源 iframe 内必然打空</b>（OOPIF 只暴露宿主 iframe），
-             * 故仅作选择器不可用/未命中时的兜底。
+             * 必须由 {@code shadowHosts}（页面侧给出的宿主链，outermost-first）拼成链式表达式求值。
              *
              * <p>仅限共享引擎线程调用（会话与通道已由 {@link #submitPick} 包装内建好）。
              */
-            CodegenEntry pickAt(String type, Object x, Object y, Object cssSelector, String xpath,
-                                List<String> shadowHosts, List<Integer> framePath, List<String> robustXpaths) {
+            CodegenEntry pickAt(String type, Object cssSelector, String xpath,
+                                List<String> shadowHosts, List<Integer> framePath, List<String> robustXpaths,
+                                PreClickSnapshot preClick) {
                 cdpSession();   // 防御性保证会话已建（正常由 submitPick 包装已建）
-                Double px = asDouble(x);
-                Double py = asDouble(y);
                 String selector = cssSelector instanceof String ? (String) cssSelector : null;
                 ElementRef ref = session.elementBySelector(selector, shadowHosts, framePath);
                 if (ref != null) {
@@ -494,8 +543,7 @@ public final class CodegenLauncher {
                     }
                 }
                 // cssSel 缺失/未命中：用「点击捕获的 ev.target 绝对 XPath」兜底——它来自点击瞬间算好的 facts，
-                // 稳定且不受"弹窗关闭 / DOM 重渲染"影响。坐标反查（DOM.getNodeForLocation）已彻底移除：对着可能已
-                // 变化的实时 DOM 重新命中不可靠，与 ev.target 已提供的信息重复，还曾产出死选择器（#alttext-container）。
+                // 稳定且不受"弹窗关闭 / DOM 重渲染"影响。**没有坐标兜底**：不再按点击坐标回查元素。
                 if (ref == null && xpath != null && !xpath.isBlank()) {
                     String xpathSel = "xpath=" + xpath;
                     ref = session.elementBySelector(xpathSel, List.of(), framePath);
@@ -503,27 +551,26 @@ public final class CodegenLauncher {
                         log.info("[codegen][cdp] resolved by xpath ({}) '{}' -> frame={}", type, xpath, ref.frameId());
                     } else if (selector != null) {
                         log.debug("[codegen][cdp] selector '{}' missed and xpath fallback '{}' also missed"
-                                + " (no coordinate fallback) - type={}, x={}, y={}", selector, xpath, type, px, py);
+                                + " - type={}, page={}", selector, xpath, type, page.url());
                     } else {
                         log.debug("[codegen][cdp] no cssSelector; xpath fallback '{}' missed"
-                                + " (no coordinate fallback) - type={}, x={}, y={}", xpath, type, px, py);
+                                + " - type={}, page={}", xpath, type, page.url());
                     }
                 }
                 if (ref == null) {
                     // 必须可见：静默失败时用户只看到「点了没反应」，无从判断是选择器失配、页面已导航还是元素被移除。
-                    // 定位完全依赖点击捕获的 ev.target 事实（cssSel / xpath），不再走坐标兜底，避免坐标反查的误判。
-                    log.warn("[codegen][cdp] pick failed ({}) at point ({}, {}) on {}"
-                                    + " (selector='{}', xpath='{}', shadowHosts={}) - "
+                    log.warn("[codegen][cdp] pick failed ({}) on {} (selector='{}', xpath='{}', shadowHosts={}) - "
                                     + "cssSel and ev.target xpath both unresolved: "
-                                    + "page may have navigated / element removed / dynamic rewrite"
-                                    + " (coordinate hit-test removed)",
-                            type, px, py, page.url(), selector, xpath, shadowHosts);
+                                    + "page may have navigated / element removed / dynamic rewrite",
+                            type, page.url(), selector, xpath, shadowHosts);
                     return null;
                 }
                 try {
                     // 直接把定位结果（含 frame 归属）交给抽取：省掉一次 Page.getFrameTree，
                     // 并让子 frame 元素跳过必然失败的页级 role 复核（大页面上该复核 10~90ms）。
-                    return extractor.extract(ref);
+                    // preClick 是 window 捕获阶段同步采集的「点击前」事实：抽取跑在拾取引擎线程上，
+                    // 此时页面自身 click 处理器已把提交类按钮变成 loading，名字不可再用（见 PreClickSnapshot）。
+                    return extractor.extract(ref, preClick);
                 } catch (Exception e) {
                     log.warn("[codegen][cdp] extract failed ({}) for backendNodeId={}: {}",
                             type, ref.backendNodeId(), e.getMessage());
@@ -860,22 +907,28 @@ public final class CodegenLauncher {
         };
 
         // 拾取到元素 → Elements 表 + 增量生成（仅在共享引擎线程调用）。
-        final java.util.function.BiConsumer<Page, CodegenEntry> addPick = (pg, entry) -> {
-            if (entry == null) return;
+        // 入参带页面侧元素身份：① 落库到 Pick（后续「同一元素」判定用）；② sigKey 冲突消歧（孪生元素）。
+        final PickSink addPick = (pg, entry, docId, eid) -> {
+            if (entry == null) return null;
             PageSession ps = sessions.of(pg);
+            // 孪生元素（同 role+name、同组内序号）会算出相同 sigKey：字段规划按 sigKey 去重，
+            // 不去消歧的话第二个元素在产物里会被当「同元素重复点选」直接丢弃（用户看到「生成了但只有一个字段」）。
+            CodegenEntry effective = disambiguateSigKey(entry, docId, eid, picked);
             Pick pk = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(), currentSession(sessionSeq),
-                    entry, pg, safeUrl(pg), ps.extractor(),
-                    ps.extractor().requiresDeferredRoleVerification(entry));
+                    effective, pg, safeUrl(pg), ps.extractor(),
+                    ps.extractor().requiresDeferredRoleVerification(effective));
+            pk.identify(docId, eid);
             picked.add(pk);
             if (panelRef[0] == null) {
                 log.warn("[codegen][cdp] picked #{} but panelRef not ready (panel null)", pk.id);
-                return;
+                return pk;
             }
-            panelRef[0].onPicked(pk.id, entry);
+            panelRef[0].onPicked(pk.id, effective);
             // 实时增量生成：每次拾取后立即刷新 Page/Step/Assert，无需等到按 Stop 才看到代码。
             requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
             log.debug("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
-                    pk.id, entry.name, entry.role, entry.selector);
+                    pk.id, effective.name, effective.role, effective.selector);
+            return pk;
         };
 
         // ===== 命令分发器：面板按钮（经 __codegenOutbox）与 被测页控制条（经 __codegenEvent type=control）
@@ -900,14 +953,22 @@ public final class CodegenLauncher {
                         }
                         // 对"所有已登记页面"开启 CDP 拾取通道（不只活动页）：
                         // 否则后续弹窗/新标签在未显式 enablePick 前，其 DOM/Accessibility 域未启用，
-                        // 选择器反查与坐标 hit-test 双双失败，导致新页拾取静默无显示。
+                        // 选择器反查必然失败（没有坐标兜底），导致新页拾取静默无显示。
                         boolean anyEnabled = false;
+                        int enabledPages = 0;
                         for (Page p : sessions.map.keySet()) {
-                            if (sessions.enablePick(p)) anyEnabled = true;
+                            if (sessions.enablePick(p)) {
+                                anyEnabled = true;
+                                enabledPages++;
+                            }
                         }
                         if (!anyEnabled) {
                             throw new IllegalStateException("pick channel could not be enabled on any page (see logs)");
                         }
+                        // 恢复拾取必须留痕：此前成功路径一行日志都没有，用户点了「继续拾取」也无法从日志确认
+                        // （排查「点了按钮却始终不生成代码」时，无法区分"没点/点了没生效/点了但状态没切"）。
+                        log.info("[codegen] pick resumed (start): channel enabled on {} page(s); "
+                                + "subsequent clicks are collected again", enabledPages);
                         // 拾取哪个页面的元素，就聚焦哪个页面：Start 即把当前活动页带到前台，面板内容同步跟随。
                         Page act = sessions.active.get();
                         if (act != null && !act.isClosed()) {
@@ -1044,7 +1105,7 @@ public final class CodegenLauncher {
             }
         };
 
-        // 录制/拾取事件桥：注入脚本在 DOM 捕获阶段上报真实操作（click/fill）与点击坐标。
+        // 录制/拾取事件桥：注入脚本在 DOM 捕获阶段上报真实操作（click/fill）及其定位事实（选择器 / XPath / frame 路径）。
         // context 级 ⇒ 所有页面（含弹窗）可用；必须先于注入建立，否则首个事件会被丢弃。
         // 页面交互全程不受影响（不再用 Overlay inspect 拦截鼠标）。
         com.microsoft.playwright.options.BindingCallback bridge = (source, args) -> {
@@ -1085,6 +1146,14 @@ public final class CodegenLauncher {
                     log.warn("[codegen][bridge] no pick session for page {} - page is not in the pick channel (inactive page?)",
                             src != null ? src.url() : "null");
                 }
+                // 暂停态下点击「尚未拾取」的元素只会进动作时间线（无元素可绑定则丢弃），页面侧没有任何反馈。
+                // 这是「点了一次按钮却什么都没发生」最常见的原因，留一行可检索的痕迹便于区分
+                // 「事件没到 Java」与「到了但按暂停语义主动丢弃」。
+                if (!sessions.pickOn.get() && matchedKey == null
+                        && "click".equals(String.valueOf(payload.get("type")))) {
+                    log.debug("[codegen] click dropped: picking is paused and element is not collected yet ({})",
+                            info != null ? info.get("cssSelector") : "unknown");
+                }
                 recordAction.accept(payload, null);
                 // 已拾取元素不再重复 CDP 拾取，但「第二次操作」必须进入动作时间线：
                 // 否则勾→取消、同组 radio 改选、同字段两次不同值提交都只剩第一步（P0-3）。
@@ -1122,6 +1191,9 @@ public final class CodegenLauncher {
                                     existing.extractor, false, true, actionTag);
                             np.actionValue = fillEvent ? currentValue : null;
                             np.valueCount = Math.max(1, valueCount);
+                            // 重复动作同样要带上元素身份：否则「第三次点同一元素」只能靠 role+name 反查，
+                            // 又会把同 role+name 的孪生元素并进来。
+                            np.identify(docIdOf(info), eidOf(info));
                             picked.add(np);
                         }
                         // change = 「这次填写完成」的语义盖章：下一次出现非增量值必须另起一条动作。
@@ -1142,8 +1214,9 @@ public final class CodegenLauncher {
                 return null;
             }
             if ("click".equals(actionType)) {
-                log.debug("[codegen][bridge] click at ({}, {}) on {} (coordSkipped={})",
-                        payload.get("x"), payload.get("y"), ps.page.url(), payload.get("coordSkipped"));
+                // 只记选择器事实，不记坐标：定位链路里已经没有坐标这一环。
+                log.debug("[codegen][bridge] click on {} (selector='{}', fingerprint={})",
+                        ps.page.url(), info != null ? info.get("cssSelector") : null, fingerprint);
             }
             final Page eventPage = ps.page;
             final PageSession pickSession = ps;
@@ -1163,14 +1236,20 @@ public final class CodegenLauncher {
                         return;
                     }
                     // P0-1 新页拾取兜底：极少数情况下（外网页加载慢、注入脚本尚未就绪 / addInitScript 尚未生效）
-                    // 页面上 __CODEGEN__ 缺失，录制器与坐标辅助函数不可用 → 拾取静默失效。拾取执行前先自检，
+                    // 页面上 __CODEGEN__ 缺失，录制器与拾取辅助函数不可用 → 拾取静默失效。拾取执行前先自检，
                     // 缺失则同线程补注后再解析（不额外起线程、不阻塞派发线程）。注入脚本首行有幂等保护，重复求值安全。
                     ensureInstrumented(eventPage);
-                    e = pickSession.pickAt(actionType, payload.get("x"), payload.get("y"),
+                    e = pickSession.pickAt(actionType,
                             info != null ? info.get("cssSelector") : null,
                             info != null ? (String) info.get("xpath") : null,
-                            shadowHostsOf(info), framePathOf(payload), robustXpathsOf(info));
-                    if (e != null) addPick.accept(eventPage, resolveCheckedState(e, info, actionType));
+                            shadowHostsOf(info), framePathOf(payload), robustXpathsOf(info),
+                            preClickSnapshot(info));
+                    // addPick 内部按 (docId, eid) 落库元素身份 + 消歧孪生元素的 sigKey：
+                    // 后续对同一元素的重复操作（再点一次 / 继续输入）靠身份命中本条，
+                    // 而不是靠 role+name 反查（那样会把页面里同 role+name 的孪生元素并成一条）。
+                    if (e != null) {
+                        addPick.add(eventPage, resolveCheckedState(e, info, actionType), docIdOf(info), eidOf(info));
+                    }
                     recordAction.accept(payload, e);
                 } finally {
                     pickSession.guard.finish(fingerprint, e != null);
@@ -1526,31 +1605,11 @@ public final class CodegenLauncher {
     }
 
     /**
-     * 把注入脚本回传的 JSON 数值转成 {@code double}（可能是 {@code Integer}/{@code Long}/{@code Double}/{@code String}）。
-     * 缺省 / 非数值 / 非法值一律返回 {@code null}，由调用方降级为「本次不拾取」。
-     */
-    static Double asDouble(Object v) {
-        if (v instanceof Number) {
-            double d = ((Number) v).doubleValue();
-            return (Double.isFinite(d)) ? d : null;
-        }
-        if (v instanceof String) {
-            try {
-                double d = Double.parseDouble(((String) v).trim());
-                return Double.isFinite(d) ? d : null;
-            } catch (NumberFormatException ignore) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    /**
      * 从注入脚本回传的元素事实里取 open shadow 宿主链（outermost-first）。
      *
      * <p>缺失 / 非数组一律返回空列表（旧版注入脚本没有该字段时退化为普通查找）。
      * <b>不静默丢弃空项</b>：链上任一层为空即说明事实不可信，原样带下去由
-     * {@code CdpFrameLocator} 判定为不可用并回退坐标 hit-test——丢掉中间层会去错误的 root 里找元素。
+     * {@code CdpFrameLocator} 判定为不可用——丢掉中间层会去错误的 root 里找元素。
      */
     static List<String> shadowHostsOf(Map<String, Object> info) {
         if (info == null) return List.of();
@@ -1600,24 +1659,111 @@ public final class CodegenLauncher {
     // ------------------------------------------------------------------
 
     /**
-     * 把录制事件里的元素事实（role/name/cssSelector）匹配到某个已拾取条目，返回其 sigKey；
-     * 找不到匹配（用户点了未拾取区域）返回 {@code null}（该动作被忽略，不污染产物）。
-     * 优先按 CSS 选择器精确相等，其次按 role+name 完全相等。
+     * 把录制事件里的元素事实匹配到某个已拾取条目，返回其 sigKey；找不到返回 {@code null}
+     * （该动作被忽略，不污染产物）。
+     *
+     * <p><b>判据顺序（缺一不可）</b>：
+     * <ol>
+     *   <li><b>页面侧元素身份</b>（{@code docId + eid}）：同一文档里的同一个节点。最强判据——
+     *       元素结构路径被页面改写（loading 态、列表插入兄弟节点）时它仍然相同；</li>
+     *   <li><b>CSS 选择器精确相等</b>：兼容没有身份信息的事件（旧注入脚本 / 单测构造），
+     *       同时覆盖「同一元素、路径未变」的常规情况；</li>
+     *   <li><b>role+name 完全相等</b>：<b>仅在双方都没有身份信息时</b>兜底。</li>
+     * </ol>
+     *
+     * <p><b>为什么 role+name 不能作为常规判据（真实缺陷）</b>：页面里普遍存在「孪生按钮」——
+     * 同一表单上下两处 {@code <button><span data-i18n=...>Continue</span></button>}、各分区各一个
+     * Next/Cancel。它们的 role+name 完全一致，一旦用 role+name 反查，<b>用户点第二个按钮时会被判定为
+     * 「已在 Elements 里」而直接短路</b>：既不生成新定位、也不留任何日志（旧实现只有 DEBUG 级的
+     * 「[bridge] click」日志，且该日志在短路之后才打印）——现象就是「第二个 Continue 按钮点了没反应、
+     * 面板里永远只有一条」。这条判据因此必须收敛到「无身份信息的历史载荷」上。
      */
     static String matchFieldKey(Map<String, Object> info, List<Pick> picked) {
         if (info == null) return null;
+        String docId = docIdOf(info);
+        String eid = eidOf(info);
+        boolean identified = !docId.isEmpty() && !eid.isEmpty();
+        if (identified) {
+            for (Pick p : picked) {
+                if (docId.equals(p.docId) && eid.equals(p.eid)) return p.entry.sigKey;
+            }
+        }
         String css = str(info, "cssSelector", "");
-        String role = str(info, "role", "generic");
-        String name = str(info, "name", "");
         for (Pick p : picked) {
             CodegenEntry e = p.entry;
             if (e.cssSelector != null && e.cssSelector.equals(css)) return e.sigKey;
         }
-        for (Pick p : picked) {
-            CodegenEntry e = p.entry;
-            if (Objects.equals(e.role, role) && Objects.equals(e.name, name)) return e.sigKey;
+        if (!identified) {
+            // 历史载荷（无页面侧身份）才允许按 role+name 兜底，避免孪生元素被并成一条。
+            String role = str(info, "role", "generic");
+            String name = str(info, "name", "");
+            for (Pick p : picked) {
+                CodegenEntry e = p.entry;
+                if (Objects.equals(e.role, role) && Objects.equals(e.name, name)) return e.sigKey;
+            }
         }
         return null;
+    }
+
+    /** 事件载荷里的文档标识（页面侧 {@code __codegenDocId}）；缺失返回空串。 */
+    static String docIdOf(Map<String, Object> info) {
+        return info == null ? "" : str(info, "docId", "");
+    }
+
+    /** 事件载荷里的元素标识（页面侧 WeakMap 分配的 eid）；缺失返回空串。 */
+    static String eidOf(Map<String, Object> info) {
+        return info == null ? "" : str(info, "eid", "");
+    }
+
+    /**
+     * 孪生元素的 {@code sigKey} 消歧：同一 sigKey 已被<b>另一个元素</b>占用时，追加 {@code @n} 后缀。
+     *
+     * <p><b>为什么必须做</b>：{@code sigKey} = {@code role|name#组内序号}，两处「同名同角色」的按钮
+     * （各在自己的父容器里都是第 0 个）会算出完全相同的 sigKey。而 {@code CodegenFieldPlanner} 的第一步
+     * 就是「按 sigKey 精确去重（同元素重复点选只留首条）」——于是<b>第二个孪生元素在产物里被当成重复条目直接丢弃</b>，
+     * 用户看到的就是「两个 Continue、只生成了一个定位器」。
+     *
+     * <p>消歧只针对「同 sigKey 但<b>不同元素</b>」：同一元素（docId+eid 相同）的再次拾取保持原 sigKey
+     * （那本来就是重复条目，理应去重）。后缀形如 {@code @2/@3}，与组内序号 {@code #n} 互不干扰：
+     * {@code CodegenFieldPlanner#baseSigOf} 只剥末尾 {@code #数字}，故 {@code #0@2} 不会被误判成一组。
+     *
+     * @param entry  本次解析出的条目
+     * @param docId  本次元素的文档标识（空 = 无身份信息，退回原 sigKey）
+     * @param eid    本次元素的元素标识（空 = 无身份信息）
+     * @param picked 已拾取列表
+     * @return 需要消歧时返回替换了 sigKey 的副本，否则原样返回
+     */
+    static CodegenEntry disambiguateSigKey(CodegenEntry entry, String docId, String eid, List<Pick> picked) {
+        if (entry == null || entry.sigKey == null || entry.sigKey.isEmpty()) return entry;
+        if (picked == null || picked.isEmpty()) return entry;
+        boolean identified = docId != null && !docId.isEmpty() && eid != null && !eid.isEmpty();
+        if (!identified) return entry;   // 无身份信息 ⇒ 无法区分孪生，保持旧行为（交字段规划去重）
+        // 该元素自己在 Elements 里已有条目（重试/重复拾取）：保持原 sigKey，由字段规划按「同元素」去重。
+        for (Pick p : picked) {
+            if (p.entry == null) continue;
+            if (p.identified() && docId.equals(p.docId) && eid.equals(p.eid)) return entry;
+        }
+        int occupants = 0;
+        for (Pick p : picked) {
+            if (p.entry == null) continue;
+            if (entry.sigKey.equals(twinBaseOf(p.entry.sigKey))) occupants++;
+        }
+        if (occupants == 0) return entry;
+        String rewritten = entry.sigKey + "@" + (occupants + 1);
+        log.info("[codegen][cdp] twin element detected (sigKey '{}' already taken by another element) - "
+                + "signature rewritten to '{}' so both elements keep their own field", entry.sigKey, rewritten);
+        return entry.withSigKey(rewritten);
+    }
+
+    /** 去掉 {@code @n} 消歧后缀（{@link #disambiguateSigKey} 产出）后的 sigKey；无后缀则原样返回。 */
+    static String twinBaseOf(String sigKey) {
+        if (sigKey == null || sigKey.isEmpty()) return "";
+        int at = sigKey.lastIndexOf('@');
+        if (at <= 0 || at == sigKey.length() - 1) return sigKey;
+        for (int i = at + 1; i < sigKey.length(); i++) {
+            if (!Character.isDigit(sigKey.charAt(i))) return sigKey;
+        }
+        return sigKey.substring(0, at);
     }
 
     /**
@@ -1653,6 +1799,23 @@ public final class CodegenLauncher {
             dir = root.resolve(stamp + "-" + n++);
         }
         return dir;
+    }
+
+    /**
+     * 从注入脚本 click 事件的 {@code info}（window <b>捕获阶段</b>采集，早于页面自身处理器）提取
+     * 「点击前」快照。
+     *
+     * <p>唯一用途是纠正「点击会改写自己」的控件名字（提交按钮点一下就变 loading）。是否采信由
+     * {@code PickNamePolicy} 判定：只有元素自身文案在捕获与抽取之间确实变了，才用点击前的名字。
+     *
+     * @param info 事件载荷里的元素事实；{@code null} / 缺字段时返回 {@code null}（无证据）
+     */
+    static PreClickSnapshot preClickSnapshot(Map<String, Object> info) {
+        if (info == null) return null;
+        Object name = info.get("name");
+        Object text = info.get("text");
+        return PreClickSnapshot.of(name instanceof String ? (String) name : null,
+                text instanceof String ? (String) text : null);
     }
 
     /**
@@ -1770,7 +1933,7 @@ public final class CodegenLauncher {
      * 不阻塞派发线程。注入脚本首行带幂等保护（{@code if (window.__CODEGEN__) return;}），重复求值安全。
      *
      * <p>覆盖场景：外网页加载慢、{@code addInitScript} 尚未在新建弹窗/新标签页上生效前，用户已在上面点击，
-     * 此时录制器/坐标辅助函数不可用，若不补注则拾取静默失效。注意：本方法只能挽救「监听已挂但辅助函数缺失」
+     * 此时录制器/拾取辅助函数不可用，若不补注则拾取静默失效。注意：本方法只能挽救「监听已挂但辅助函数缺失」
      * 的情形；若点击发生在监听挂载之前（极窄窗口），该次点击已丢失，本方法为后续点击兜底。
      */
     private static void ensureInstrumented(Page page) {
@@ -2005,8 +2168,9 @@ public final class CodegenLauncher {
                     p.extractor, p.rolePending));
         }
 
-        // 1) 每个「标签页 + 拾取 URL」唯一目标（URL 派生，碰撞则追加 _2 / _3）。
-        //    同一个标签页内发生导航（A→B）会产生两个不同的键，因此 A、B 各自产出独立的 Page 类。
+        // 1) 每个「拾取 URL 的 path」唯一目标（键见 PageUrl：去 query / 去 hash、忽略标签页身份）。
+        //    path 变化（A→B）仍是两个键、两个 Page 类；hash/query 变化、同 URL 多标签页都归入同一个类，
+        //    不再派生 XPage_2 / XPage_3。只有「不同 path 派生出同名类」才追加 _2 / _3。
         Map<PageUrl, List<Pick>> byKey = new LinkedHashMap<>();
         for (Pick p : fieldPicks) byKey.computeIfAbsent(new PageUrl(p.page, p.url), k -> new ArrayList<>()).add(p);
         Map<PageUrl, CodegenTarget> targets = resolveTargets(byKey.keySet());
@@ -2066,33 +2230,55 @@ public final class CodegenLauncher {
      * <p>条件（缺一不可）：
      * <ul>
      *   <li>条目带 NLS key（多语言环境下才有跨语言稳定标识）；</li>
-     *   <li>主文档元素（页级 {@code getByText} 对 iframe / shadow 内元素不可靠）；</li>
-     *   <li>{@code getByText(可访问名, exact)} 恰好命中 <b>1</b> 个 —— 与运行期 key-only
-     *       {@code @RoleElement} 的解析路径同源。未通过校验一律不纳入，宁可退 CSS：
-     *       不做唯一性校验的文本定位会在 strict mode 下多命中失败（用户规则④）。</li>
+     *   <li>主文档元素（页级定位对 iframe / shadow 内元素不可靠）；</li>
+     *   <li>唯一性判定<b>按最终产物的形态计数</b>：role 可定位时按 {@code role + 可访问名} 计
+     *       （产物是 {@code @RoleElement(role=…, key=…)}，运行期走 {@code getByRole}），
+     *       否则才退回 {@code getByText}（产物是 key-only 文本策略）；</li>
+     *   <li>命中数必须恰好 <b>1</b>。未通过一律不纳入 NLS（宁可退 CSS）：
+     *       不做唯一性校验会在 strict mode 下多命中失败（用户规则④）。</li>
      * </ul>
-     * 同一文案只计数一次（生成期页面静态）；异常一律视为不通过。
+     *
+     * <p><b>为什么不能一律用 {@code getByText}</b>（2026-11-15 用户反馈「页上只有一个可见的 Continue，
+     * 面板却不显示 NLS」）：{@code getByText} 统计的是<b>整个 DOM</b>，把 SPA 里 {@code display:none}
+     * 的其它页面、隐藏弹窗里的同名按钮全部算进去（本例 "Continue" 命中 4~5 处），于是明明运行期
+     * {@code getByRole(button, name)} 只会命中唯一可见按钮，却被判成"文本不唯一"而降级成 CSS。
+     * 判定口径必须与产物同源，而不是比产物更严。
+     *
+     * <p>同一「role + 文案」只计数一次（生成期页面静态）；异常/不可判定一律视为不通过。
      */
     private static Set<String> resolveTextSemanticSigs(Collection<Pick> picks) {
         if (picks == null || picks.isEmpty()) {
             return Set.of();
         }
-        Map<String, Boolean> byText = new HashMap<>();
+        Map<String, Boolean> byKey = new HashMap<>();
         Set<String> out = new HashSet<>();
         for (Pick p : picks) {
             CodegenEntry e = p.entry;
             if (e == null || e.nlsKey == null || e.nlsKey.isEmpty()) continue;
             if (e.name == null || e.name.isBlank()) continue;
             if (!e.framePath.isEmpty() || !e.shadowHosts.isEmpty()) continue;
-            boolean unique = byText.computeIfAbsent(e.name, text -> countText(p.page, text) == 1);
+            // 缓存键含 role：同名不同角色的唯一定性本来就不同（如 label "Continue" vs button "Continue"）。
+            String cacheKey = e.role + "\u0000" + e.name;
+            boolean unique = byKey.computeIfAbsent(cacheKey, k -> isTextSemanticUnique(p, e));
             if (unique) {
                 out.add(e.sigKey);
             } else {
-                log.debug("[codegen] NLS text not unique for key={} name='{}' - keeping CSS fallback",
-                        e.nlsKey, e.name);
+                log.debug("[codegen] NLS text not unique for key={} name='{}' role={} - keeping CSS fallback",
+                        e.nlsKey, e.name, e.role);
             }
         }
         return out;
+    }
+
+    /** 唯一性判定：role 可定位 ⇒ 按引擎的 role+name 命中数；否则退回页级文本计数。只信 {@code == 1}。 */
+    private static boolean isTextSemanticUnique(Pick p, CodegenEntry e) {
+        if (AriaRoles.isLocatable(e.role) && p.extractor != null) {
+            int roleHits = p.extractor.countRoleMatches(e.role, e.name);
+            if (roleHits >= 0) {
+                return roleHits == 1;
+            }
+        }
+        return countText(p.page, e.name) == 1;
     }
 
     /** 页级文本计数；异常/不可判定返回 -1（调用方只信 {@code == 1}）。 */
@@ -2136,14 +2322,19 @@ public final class CodegenLauncher {
         Set<Long> triggerIds = new LinkedHashSet<>();
         Map<Long, CodegenTarget> triggerToPage = new LinkedHashMap<>();
         PageUrl currentKey = null;
+        Page currentPickPage = null;
         Pick lastOnKey = null;
         for (Pick p : timeline) {
             PageUrl key = new PageUrl(p.page, p.url);
+            // 切页判据用【标签页身份】，不能用分组键：同一 URL 的新标签页现在与旧页共用一个键
+            // （本来就是同一个 Page 类），但它仍是一次真实切页，必须保留 waitForNewPage 触发器，
+            // 否则「点链接开同 URL 新标签」的操作会被并入旧页、产物里凭空少一次切页。
+            boolean tabChanged = currentPickPage != null && p.page != currentPickPage;
             if (currentKey == null) {
                 currentKey = key;
                 lastOnKey = p;
-            } else if (!key.equals(currentKey)) {
-                if (lastOnKey != null && p.page != currentKey.page) {
+            } else if (tabChanged || !key.equals(currentKey)) {
+                if (tabChanged && lastOnKey != null) {
                     // 仅跨标签页才升级为 waitForNewPage 触发器；同标签页导航不在此处理
                     triggerIds.add(lastOnKey.id);
                     triggerToPage.put(lastOnKey.id, targets.get(key));
@@ -2153,6 +2344,7 @@ public final class CodegenLauncher {
             } else {
                 lastOnKey = p;
             }
+            currentPickPage = p.page;
         }
 
         // 动作序列：拾取 + dialog 合并后按全局序号排序（保证 dialog 落在真实发生位置）
@@ -2165,8 +2357,9 @@ public final class CodegenLauncher {
         Map<CodegenTarget, List<String>> frameByTarget = new LinkedHashMap<>();
         // dialog 没有 URL 快照，按「所属标签页的首个目标」解析（dialog 落在某个标签页上，取该页第一个 URL 的目标）。
         Map<Page, CodegenTarget> pageToTarget = new LinkedHashMap<>();
-        for (Map.Entry<PageUrl, CodegenTarget> e : targets.entrySet()) {
-            pageToTarget.putIfAbsent(e.getKey().page, e.getValue());
+        for (Pick p : timeline) {
+            CodegenTarget t = targets.get(new PageUrl(p.page, p.url));
+            if (t != null) pageToTarget.putIfAbsent(p.page, t);
         }
         // 目标 → 规划：Page / Step / Assert 共用同一份 plan，字段名严格一致（按目标对齐，而非按 URL 字符串）。
         Map<CodegenTarget, CodegenFieldPlanner.Plan> planByTarget = new LinkedHashMap<>();
@@ -2223,7 +2416,7 @@ public final class CodegenLauncher {
                 continue;
             }
             String previous = lastActionBySig.put(p.entry.sigKey, signature);
-            if (isRepeatedClick(previous, signature, spec.verb)) continue;   // 仅纯连点去重
+            if (isRepeatedClick(previous, signature, spec.verb, p.actionType)) continue;   // 仅纯连点去重
             boolean filled = fillValues != null && fillValues.get(p.entry.sigKey) != null;
             String todo = ("fill".equals(spec.verb) && !filled)
                     ? "replace the empty placeholder with the real input value" : "";
@@ -2282,19 +2475,34 @@ public final class CodegenLauncher {
     }
 
     /**
-     * 分组键：<b>标签页 + 该次拾取的 URL</b>。
+     * 分组键：<b>该次拾取的 URL（归一化：去 query / 去 hash）</b>，与标签页身份无关。
      *
-     * <p>生成粒度从「标签页」改为「URL」后，同一标签页内发生导航（A→B）会产生两个不同的键，
-     * 从而派生出两个不同的 Page 类（{@code APage} / {@code BPage}），旧类不再被吞掉。
-     * 不同标签页若落在同一 URL，仍视为不同键（类名靠 {@link #resolveTargets} 的 _2 去重）。
+     * <p>页面类的语义是「一个 URL path 一个类」，故键必须与
+     * {@link CodegenTarget#pageClassNameFromUrl(String)} 的派生口径一致——那边同样只看 path。
+     * 键与派生口径一旦不一致，就会出现「同一页面被拆成 {@code XPage} / {@code XPage_2} / {@code XPage_3}」：
+     * <ul>
+     *   <li>同一标签页内换成不同 path（A→B）⇒ 两个键、两个类，旧类不会被吞掉；</li>
+     *   <li>SPA 只改 hash（{@code /reset-password#/triage → #/password}）或换 query 参数
+     *       ⇒ <b>同一个键</b>，字段全部并入同一个 Page 类，不再派生 {@code _2}；</li>
+     *   <li>同一 URL 出现在多个标签页（或 Page 对象被框架重建）⇒ <b>同一个键</b>，
+     *       页面类型相同，重复类名只会制造噪声。</li>
+     * </ul>
+     *
+     * <p>真正需要 {@code _2} 的情形只剩「不同 path 恰好派生出同名类」（{@code /logon} 与 {@code /Logon}），
+     * 由 {@link #resolveTargets} 处理。
+     *
+     * <p>URL 不可读（页面已关闭 / 取不到）时退回标签页身份，避免把互不相关的「未知页」并成一个类。
      */
-    private static final class PageUrl {
+    static final class PageUrl {
         final Page page;
         final String url;
+        /** 归一化键（去 query / 去 hash / 去尾斜杠）；{@code url == null} 时为 null。 */
+        private final String key;
 
         PageUrl(Page page, String url) {
             this.page = page;
             this.url = url;
+            this.key = urlKey(url);
         }
 
         @Override
@@ -2302,13 +2510,34 @@ public final class CodegenLauncher {
             if (this == o) return true;
             if (!(o instanceof PageUrl)) return false;
             PageUrl that = (PageUrl) o;
-            return page == that.page && java.util.Objects.equals(url, that.url);
+            if (key != null && that.key != null) return key.equals(that.key);
+            return page == that.page;
         }
 
         @Override
         public int hashCode() {
-            return 31 * System.identityHashCode(page) + java.util.Objects.hashCode(url);
+            return key != null ? key.hashCode() : 31 * System.identityHashCode(page);
         }
+    }
+
+    /**
+     * 页面分组用的 URL 归一化：去掉 query（跟踪参数 / 表单态）与 hash（SPA 路由态）以及尾部斜杠。
+     *
+     * <p>刻意保留 host 与 path 的大小写：{@code /Logon} 与 {@code /logon} 是两个真实路径，
+     * 各自成类（重名时由 {@link #resolveTargets} 追加 {@code _2}）。
+     *
+     * @return 归一化键；{@code url == null} 时返回 {@code null}（调用方退回标签页身份）
+     */
+    static String urlKey(String url) {
+        if (url == null) return null;
+        String s = url.trim();
+        int cut = s.length();
+        int q = s.indexOf('?');
+        if (q >= 0) cut = Math.min(cut, q);
+        int h = s.indexOf('#');
+        if (h >= 0) cut = Math.min(cut, h);
+        while (cut > 0 && s.charAt(cut - 1) == '/') cut--;   // 尾斜杠不是不同的页面
+        return s.substring(0, cut);
     }
 
     /** 安全取页面 URL：页面已关闭 / 取不到时返回 null（走兜底类名），不抛异常。 */
@@ -2321,22 +2550,42 @@ public final class CodegenLauncher {
         }
     }
 
-    /** URL 派生目标，并对重名页面追加 _2 / _3 去重。 */
+    /** URL 派生目标；只有「不同 path 派生出同名类」才追加 {@code _2} / {@code _3}。 */
     private static Map<PageUrl, CodegenTarget> resolveTargets(java.util.Collection<PageUrl> keys) {
         Map<PageUrl, CodegenTarget> out = new LinkedHashMap<>();
-        Set<String> used = new LinkedHashSet<>();
-        for (PageUrl key : keys) {
+        List<PageUrl> ordered = new ArrayList<>(keys);
+        List<String> names = assignClassNames(ordered);
+        for (int i = 0; i < ordered.size(); i++) {
+            PageUrl key = ordered.get(i);
             // 关键点：类名由【拾取时】的 URL 派生，而非 Stop 时的当前 URL——否则同标签页导航后
             // 旧 URL 的元素会被并入最终 URL 的类，旧 Page 类名消失。
             CodegenTarget base = CodegenTarget.of(CodegenTarget.DEFAULT_PACKAGE, key.url);
-            String name = base.pageClassName;
+            String name = names.get(i);
+            out.put(key, name.equals(base.pageClassName) ? base : CodegenTarget.ofNamed(base.packageName, name));
+        }
+        return out;
+    }
+
+    /**
+     * 为若干分组键分配页面类名（保持入参顺序）。
+     *
+     * <p>「同一 URL」在分组阶段就已合并成一个键（{@link PageUrl} 按归一化 URL 判等），
+     * 所以这里不会因为「同一页面被拾取多次 / 落在多个标签页」而追加 {@code _2}：
+     * 后缀只在<b>不同 URL 派生出同名类</b>时才出现（{@code /logon} 与 {@code /Logon}）。
+     */
+    static List<String> assignClassNames(List<PageUrl> keys) {
+        List<String> out = new ArrayList<>(keys.size());
+        Set<String> used = new LinkedHashSet<>();
+        for (PageUrl key : keys) {
+            String base = CodegenTarget.of(CodegenTarget.DEFAULT_PACKAGE, key.url).pageClassName;
+            String name = base;
             int n = 2;
             while (used.contains(name)) {
-                name = base.pageClassName + "_" + n;
+                name = base + "_" + n;
                 n++;
             }
             used.add(name);
-            out.put(key, name.equals(base.pageClassName) ? base : CodegenTarget.ofNamed(base.packageName, name));
+            out.add(name);
         }
         return out;
     }
@@ -2356,6 +2605,18 @@ public final class CodegenLauncher {
      * 一律保留（P0-3）。抽成纯函数便于回归测试，不依赖 Playwright / 面板。
      */
     static boolean isRepeatedClick(String previous, String current, String verb) {
+        return isRepeatedClick(previous, current, verb, null);
+    }
+
+    /**
+     * 「同一动作签名紧邻重复」的纯连点去重。
+     *
+     * <p>只对<b>左键单击</b>成立：右键 / 双击是用户的离散明确动作（右击两次 = 两次 {@code rightClick()}），
+     * 去重会把第二次静默吞掉。此前只按字段模板的 {@code verb} 判断，而右键的 verb 同样是 {@code click}，
+     * 因此「右键两次」会被误当成连点去重。
+     */
+    static boolean isRepeatedClick(String previous, String current, String verb, String actionType) {
+        if ("contextmenu".equals(actionType) || "dblclick".equals(actionType)) return false;
         return previous != null && previous.equals(current) && "click".equals(verb);
     }
 
@@ -2366,17 +2627,26 @@ public final class CodegenLauncher {
     static String actionForPick(CodegenFieldSpec spec, Pick p) {
         if (spec == null || p == null || p.entry == null) return spec == null ? "" : spec.action;
         String role = p.entry.role == null ? "" : p.entry.role.toLowerCase(java.util.Locale.ROOT);
+        // 取单项前缀统一走 spec.listTarget()：自动成组的序号是用户实际点的那一项，绝不能在各分支各写 get(0)。
+        String target = spec.listTarget();
         if ("checkbox".equals(role) && "click".equals(p.actionType)) {
-            return (spec.isList ? "get(0)." : "") + (p.entry.checked ? "check()" : "uncheck()");
+            return target + (p.entry.checked ? "check()" : "uncheck()");
+        }
+        // 右键 / 双击：字段模板只承载 click 语义，这两个动作必须由本次录制动作决定。
+        // （右键走 contextmenu 事件，不会与 click 冲突；双击的时间线合并见 dblclick 说明。）
+        if ("contextmenu".equals(p.actionType)) {
+            return target + "rightClick()";
+        }
+        if ("dblclick".equals(p.actionType)) {
+            return target + "doubleClick()";
         }
         // 文件选择：fakepath 不可回放，产物给可编译的 uploadFile 占位 + TODO，由人工填资源路径。
         if ("file".equals(p.actionType)) {
-            return (spec.isList ? "get(0)." : "") + "uploadFile(\"TODO_REPLACE_WITH_RESOURCE_NAME\")";
+            return target + "uploadFile(\"TODO_REPLACE_WITH_RESOURCE_NAME\")";
         }
         // 按本次操作值生成 fill / selectByValue：字段模板里存的是「末值」，
         // 无法代表历史上每一次填写（填 A 提交 → 填 B 提交，两次的实参必须各自不同）。
         if ("fill".equals(p.actionType) && p.actionValue != null) {
-            String target = spec.isList ? "get(0)." : "";
             if ("select".equals(p.entry.tag)) {
                 return p.actionValue.isEmpty() ? spec.action
                         : target + "selectByValue(\"" + CodegenFieldPlanner.escapeJava(p.actionValue) + "\")";
@@ -2391,7 +2661,7 @@ public final class CodegenLauncher {
             String key = p.actionType.substring("press:".length());
             // 允许 "Control+Enter" 这类组合键；仍只接受字母与 '+'，杜绝拼入引号/分号。
             if (key.matches("[A-Za-z+]+")) {
-                return (spec.isList ? "get(0)." : "") + "press(\"" + key + "\")";
+                return target + "press(\"" + key + "\")";
             }
         }
         return spec.action;
@@ -2421,7 +2691,9 @@ public final class CodegenLauncher {
      * 一组元素（将生成 {@code PageElementList}）要求命中数<b>等于组内拾取数</b>——多一个少一个都说明组被污染
      * （不可见元素被 role 引擎排除、或页面还有未拾取的同类元素），此时 {@code get(i)} 会错位。
      *
-     * <p>复核不通过 ⇒ 该条目回退 CSS，并推面板就地修订该行（不新增行），随后重生成代码。
+     * <p>复核不通过<b>且此刻的 DOM 仍是拾取时的 DOM</b> ⇒ 该条目回退 CSS，并推面板就地修订该行（不新增行），
+     * 随后重生成代码；若页面已经推进（拾取元素已消失/被隐藏），此刻的命中数说明不了运行期那一步，
+     * 则<b>保留 role</b> 并标为未校验（判据见 {@link RoleVerificationPolicy#fallBackToCssAfterMismatch}）。
      * 复核不可判定（{@code -1}，CDP/页面异常）按"放行"处理，只告警不阻断——环境抖动不该把可靠产物
      * 退化成结构 CSS。
      */
@@ -2513,7 +2785,30 @@ public final class CodegenLauncher {
                     pk.id, entry.role, entry.name, hits);
             return;
         }
+        if (keepRoleBecausePageMovedOn(pk, entry, hits)) return;
         reviseToCss(panel, pk, hits, "expected exactly 1 hit");
+    }
+
+    /**
+     * 复核不通过时，先判断「此刻的页面还是拾取时的页面吗」。
+     *
+     * <p>多步向导（HSBC 重置密码）里，用户点了 Continue 之后上一步的按钮就被 {@code display:none} 隐藏；
+     * 等到生成时再复核，命中 0 只是"页面翻页了"，与定位器可用性无关。此时<b>保留 role</b> 并把
+     * {@code roleHits} 标成不可判定（生成侧会补 {@code TODO(review)} 注释），绝不改写成结构 CSS。
+     *
+     * @return {@code true} 表示已按「保留 role + 未校验」处置，调用方不得再回退 CSS
+     */
+    private static boolean keepRoleBecausePageMovedOn(Pick pk, CodegenEntry entry, int hits) {
+        TriState intact = (pk.extractor == null)
+                ? TriState.UNKNOWN : pk.extractor.isPickStateIntact(entry);
+        if (RoleVerificationPolicy.fallBackToCssAfterMismatch(hits, intact)) return false;
+        pk.entry = entry.withRoleHits(CodegenEntry.ROLE_HITS_UNDETERMINABLE);
+        log.warn("[codegen][cdp] role locator unverifiable for #{} (hits={}, role={}, name='{}', "
+                        + "pickStateIntact={}) - the page has moved on since the pick, "
+                        + "so this count does not reflect the step where the locator will be used; "
+                        + "keeping ROLE strategy and flagging it as unverified instead of degrading to CSS",
+                pk.id, hits, entry.role, entry.name, intact);
+        return true;
     }
 
     /**
@@ -2544,13 +2839,47 @@ public final class CodegenLauncher {
                     base, members, hits);
             return;
         }
-        log.warn("[codegen][cdp] group role locator mismatched (base={}, picked={}, hits={}) - "
-                        + "group element count differs from engine hits (invisible elements excluded / unpicked peers present), "
-                        + "index unreliable, falling back to CSS for the whole group",
-                base, members, hits);
-        for (Pick pk : group) {
-            reviseToCss(panel, pk, hits, "group picked=" + members);
+        if (RoleVerificationPolicy.fallBackToCssAfterMismatch(hits, groupPickStateIntact(group))) {
+            log.warn("[codegen][cdp] group role locator mismatched (base={}, picked={}, hits={}) - "
+                            + "group element count differs from engine hits (invisible elements excluded / unpicked peers present), "
+                            + "index unreliable, falling back to CSS for the whole group",
+                    base, members, hits);
+            for (Pick pk : group) {
+                reviseToCss(panel, pk, hits, "group picked=" + members);
+            }
+            return;
         }
+        // 整组已不在拾取态（多步向导翻页会把上一步的按钮一起 display:none）：命中 0 只说明"现在不是那一步"，
+        // 组内索引语义仍然成立。整组统一保留 role 并标未校验，避免把一组可靠定位器整体退化成结构 CSS。
+        for (Pick pk : group) {
+            if (pk.entry != null) pk.entry = pk.entry.withRoleHits(CodegenEntry.ROLE_HITS_UNDETERMINABLE);
+        }
+        log.warn("[codegen][cdp] group role locator unverifiable (base={}, picked={}, hits={}, role={}, name='{}') - "
+                        + "the page has moved on since the pick, so this count does not reflect the step where the "
+                        + "locator will be used; keeping ROLE strategy for the whole group and flagging it as "
+                        + "unverified instead of degrading to CSS",
+                base, members, hits, entry.role, entry.name);
+    }
+
+    /**
+     * 一组元素此刻是否仍全部处于拾取态（仍存在且可见）。
+     *
+     * <p>判据取"全部未变"才算未变：只要有一个成员已消失/被隐藏，就说明页面已经推进，此刻的命中数
+     * 不能代表定位器在运行期那一步的表现；而只要有一个成员不可判定，整组也就不能断言"状态未变"，
+     * 故返回 {@link TriState#UNKNOWN}（与单元素的保守口径一致）。
+     *
+     * @return {@link TriState#TRUE}=整组状态未变；{@link TriState#FALSE}=至少一个成员已变；
+     *         {@link TriState#UNKNOWN}=无法完整判定
+     */
+    private static TriState groupPickStateIntact(List<Pick> group) {
+        boolean undeterminable = false;
+        for (Pick pk : group) {
+            TriState state = (pk.extractor == null || pk.entry == null)
+                    ? TriState.UNKNOWN : pk.extractor.isPickStateIntact(pk.entry);
+            if (state.isFalse()) return TriState.FALSE;
+            if (state.isUnknown()) undeterminable = true;
+        }
+        return undeterminable ? TriState.UNKNOWN : TriState.TRUE;
     }
 
     /** 回退 CSS 并推面板就地修订该行（不新增行）。 */
@@ -2567,8 +2896,18 @@ public final class CodegenLauncher {
             panel.onPickedRevised(pk.id, revised, "hits=" + hits + ", " + because);
         }
         log.info("[codegen][cdp] role locator rejected for #{} (hits={}, role={}, name='{}', {}) - "
-                        + "strategy revised to CSS ('{}')",
-                pk.id, hits, entry.role, entry.name, because, revised.selector);
+                        + "strategy revised to CSS ('{}', engineHits={})",
+                pk.id, hits, entry.role, entry.name, because, revised.selector, cssHits);
+        // 唯一性的最终裁判是 Playwright 引擎（page.locator(...).count()），不是页面侧 document.querySelectorAll：
+        // 前者穿透 open shadow root、按 frame 语义计数；后者只看当前 document。两者不一致时以引擎为准，
+        // 并且必须显式告警——否则用户会在回放阶段才发现「这条链一个也命中不到」。
+        if (cssHits == 0) {
+            log.warn("[codegen][cdp] revised CSS for #{} matches 0 element(s) right now: '{}' "
+                    + "- 该定位器当前失效（位置链随页面推进已漂移），回放前务必人工复核", pk.id, revised.selector);
+        } else if (cssHits > 1) {
+            log.warn("[codegen][cdp] revised CSS for #{} matches {} element(s) right now: '{}' "
+                    + "- Playwright strict mode 会抛错，回放前务必收窄", pk.id, cssHits, revised.selector);
+        }
     }
 
     private static void pushTab(CodegenPanelHandle panel, String tab, java.util.function.Supplier<String> generator) {

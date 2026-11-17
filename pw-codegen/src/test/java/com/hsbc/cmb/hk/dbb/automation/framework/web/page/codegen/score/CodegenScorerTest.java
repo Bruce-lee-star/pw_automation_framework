@@ -615,7 +615,9 @@ public class CodegenScorerTest {
         CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), css -> 1);
 
         Assert.assertEquals("div:nth-of-type(2)", s.uniqueCss);
-        Assert.assertEquals(CodegenScorer.CSS_TAG, s.score);
+        // 位置型结构链按 CSS_STRUCT_POSITIONAL 计分（排在锚定 XPath 之后）：没有锚点可用时它仍然胜出，
+        // 但不得再压过「父级/子级稳定属性」方案——见 positionalStructureLosesToAnchoredXpath。
+        Assert.assertEquals(CodegenScorer.CSS_STRUCT_POSITIONAL, s.score);
     }
 
     /**
@@ -645,6 +647,45 @@ public class CodegenScorerTest {
 
         Assert.assertEquals("xpath=/html/body/div[1]/form[1]/div[2]", s.uniqueCss);
         Assert.assertEquals(CodegenScorer.XPATH, s.score);
+    }
+
+    /**
+     * <b>位置型结构链不得压过「父级/子级稳定属性」的锚定 XPath</b>（2026-11-16 实跑回归）。
+     *
+     * <p>故障现场：两个 Continue，第一个被形成为
+     * {@code div:nth-of-type(5) div:has(span[data-i18n='back']) > div:nth-of-type(3) > button[class*='float-right']}，
+     * 回放时 0 命中。根因是位置链按 {@code CSS_TAG}(530) 计分，永远优于锚定 XPath（1000）——
+     * 于是"按序号猜元素"总是赢，"父级/子级稳定属性"根本轮不到。
+     */
+    @Test
+    public void positionalStructureLosesToAnchoredXpath() {
+        CodegenFacts.Fact self = rich("generic", "", "", "", "button", "",
+                "div:nth-of-type(5) div:has(span[data-i18n='back']) > div:nth-of-type(3) > button[class*='float-right']",
+                "float-right", "", "");
+        String anchored = "//div[.//h3[@data-i18n=\"step3_title\"]]//button[.//*[@data-i18n=\"button_continue\"]]";
+        CodegenFacts f = new CodegenFacts(self, List.of(), List.of(anchored));
+        // 位置链在引擎侧已命中多个（页面推进后多出一份同名按钮），锚定 XPath 唯一。
+        LocatorCounter c = css -> css.startsWith("xpath=") ? 1 : 2;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(f, c);
+
+        Assert.assertEquals("xpath=" + anchored, s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.XPATH_ANCHORED, s.score);
+    }
+
+    /** 反过来：不含位置段的语义 CSS（{@code [data-i18n=…]}）仍须优先于锚定 XPath，不能被降权误伤。 */
+    @Test
+    public void semanticCssSelectorStillBeatsAnchoredXpath() {
+        CodegenFacts.Fact self = rich("generic", "", "", "", "button", "",
+                "[data-i18n=\"button_continue\"]", "", "", "");
+        CodegenFacts f = new CodegenFacts(self, List.of(),
+                List.of("//div[.//h3[@data-i18n=\"step3_title\"]]//button"));
+        LocatorCounter c = css -> 1;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(f, c);
+
+        Assert.assertEquals("[data-i18n=\"button_continue\"]", s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.CSS_TAG, s.score);
     }
 
     /** 稳定 class token 比长结构 CSS 更可读：class 命中唯一时优先。 */
@@ -1052,5 +1093,270 @@ public class CodegenScorerTest {
                 CodegenScorer.localeNeutralSrcPrefix("seo_EN.png"));
         Assert.assertNull(CodegenScorer.localeNeutralSrcPrefix(null));
         Assert.assertNull(CodegenScorer.localeNeutralSrcPrefix("  "));
+    }
+
+    // ------------------------------------------------------------------
+    // 「父级锚点 + 子级锚点」锚定 XPath（2026-11-16）
+    // ------------------------------------------------------------------
+
+    /** 带「有锚点的祖先」：{@code id/testid} 为空、{@code attrs} 为空，只给后代锚点 + 完整结构路径。 */
+    private static CodegenFacts.Fact anchorPanel(String css, List<String> anchors) {
+        return new CodegenFacts.Fact("generic", "", "div", "", "", "", "", "", "", "",
+                "", "", -1, css, List.of(), "", "", "", java.util.Map.of(), "", false, anchors);
+    }
+
+    /**
+     * 用户 2026-11-16 现场：两个 {@code Continue}（step3 / step4 分区各一个）在 role、name、
+     * {@code data-i18n}、class 上完全一致，目标按钮自身<b>没有任何属性</b>——
+     * 页面侧 {@code robustXPaths} 的「父级 × 目标自身属性」因此一条都产不出，
+     * 「目标 × 子级锚点」也必然 2 命中。
+     *
+     * <p>唯一能区分的是「所在分区标题锚点 + 按钮内部锚点」，即
+     * {@code //div[.//*[@data-i18n="step3_title"]]//button[.//*[@data-i18n="button_continue"]]}：
+     * XPath 的结果集是<b>目标节点</b>本身（CSS 写 {@code div:has(标题) button:has(锚点)} 时
+     * {@code div} 会命中 html/body 等所有含该标题的祖先层，计数必 >1 而被丢弃）。
+     */
+    @Test
+    public void parentAnchorTimesChildAnchor_distinguishesIdenticalTwins() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(2)",
+                List.of("[data-i18n=\"button_continue\"]"));
+        CodegenFacts.Fact panel = anchorPanel("div:nth-of-type(5) > div:nth-of-type(3)",
+                List.of("[data-i18n=\"step3_title\"]"));
+        String expected = "xpath=//div[.//*[@data-i18n=\"step3_title\"]]"
+                + "//button[.//*[@data-i18n=\"button_continue\"]]";
+        LocatorCounter counter = css -> css.equals(expected) ? 1 : 2;
+
+        CodegenScorer.ScoredLocator s =
+                CodegenScorer.score(new CodegenFacts(self, List.of(panel), List.of()), counter);
+
+        Assert.assertEquals(expected, s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.XPATH_ANCHORED, s.score);
+        Assert.assertEquals("锚定方案必须报出真实唯一命中", 1, s.matchCount);
+        Assert.assertEquals(LocatorStrategy.CSS, s.strategy);
+    }
+
+    /**
+     * 位置链的降级契约（正面）：靠「新引入 :nth-of-type」凑出的唯一不得就地胜出——
+     * 只要锚定 XPath 也唯一，赢的必须是锚定 XPath。
+     */
+    @Test
+    public void anchoredXpathBeatsPositionalLengthening() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(1)",
+                List.of("[data-i18n=\"button_continue\"]"));
+        CodegenFacts.Fact panel = anchorPanel("div:nth-of-type(5) > div:nth-of-type(3)",
+                List.of("[data-i18n=\"step3_title\"]"));
+        String anchored = "xpath=//div[.//*[@data-i18n=\"step3_title\"]]"
+                + "//button[.//*[@data-i18n=\"button_continue\"]]";
+        LocatorCounter counter = css -> {
+            if (css.equals(anchored)) return 1;
+            // 加长祖先完整路径后"恰好"唯一 —— 但那是按序号猜元素
+            if (css.equals("div:nth-of-type(5) > div:nth-of-type(3)")) return 1;
+            return 2;
+        };
+
+        CodegenScorer.ScoredLocator s =
+                CodegenScorer.score(new CodegenFacts(self, List.of(panel), List.of()), counter);
+
+        Assert.assertEquals(anchored, s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.XPATH_ANCHORED, s.score);
+    }
+
+    /**
+     * 位置链的降级契约（反向）：锚定方案不唯一时，位置链仍是<b>最后手段</b>——
+     * 不得因为「延后裁决」而彻底丢掉，否则页面会退化到 {@code :not()} 减法（弱证据，可能排除目标自身）
+     * 或绝对 XPath。此时分数必须降级为 {@link CodegenScorer#CSS_STRUCT_POSITIONAL}。
+     */
+    @Test
+    public void positionalLengtheningRemainsLastResortWhenNoAnchorIsUnique() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(1)",
+                List.of("[data-i18n=\"button_continue\"]"));
+        CodegenFacts.Fact panel = anchorPanel("div:nth-of-type(5) > div:nth-of-type(3)",
+                List.of("[data-i18n=\"step3_title\"]"));
+        String positional = "div:nth-of-type(5) > div:nth-of-type(3)";
+        LocatorCounter counter = css -> css.equals(positional) ? 1 : 2;
+
+        CodegenScorer.ScoredLocator s =
+                CodegenScorer.score(new CodegenFacts(self, List.of(panel), List.of()), counter);
+
+        Assert.assertEquals(positional, s.uniqueCss);
+        Assert.assertEquals("位置链必须如实标注低分档位", CodegenScorer.CSS_STRUCT_POSITIONAL, s.score);
+        Assert.assertEquals(1, s.matchCount);
+    }
+
+    /**
+     * 两个来源会产出同形候选（页面侧 {@code robustXPaths} 与 Java 侧组合）：必须去重，
+     * 否则同一条选择器被计数两次——违反「每个候选只查一次」的性能契约，预热载荷也会重复。
+     */
+    @Test
+    public void identicalAnchoredXpathFromBothSourcesIsCountedOnce() {
+        String xpath = "//button[.//*[@data-i18n=\"submit\"]]";
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(1)",
+                List.of("[data-i18n=\"submit\"]"));
+        List<String> counted = new java.util.ArrayList<>();
+
+        CodegenScorer.score(new CodegenFacts(self, List.of(), List.of(xpath)), css -> {
+            counted.add(css);
+            return 3;
+        });
+
+        Assert.assertEquals("同一选择器不得被重复计数",
+                counted.size(), new java.util.HashSet<>(counted).size());
+        Assert.assertEquals("两个来源的同形候选只能出现一次", 1L,
+                counted.stream().filter(c -> c.equals("xpath=" + xpath)).count());
+    }
+
+    /** 表单 {@code name}（{@code attrs} 只含 {@code data-}/{@code aria-} 前缀，故必须单列）也是身份谓词。 */
+    @Test
+    public void nameAttribute_becomesXpathIdentityPredicate() {
+        CodegenFacts.Fact self = new CodegenFacts.Fact("textbox", "", "input", "", "", "text",
+                "", "", "", "", "", "", -1, "input:nth-of-type(2)", List.of(), "", "", "userName");
+        String expected = "xpath=//input[@name=\"userName\"]";
+        LocatorCounter counter = css -> css.equals(expected) ? 1 : 2;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), counter);
+
+        Assert.assertEquals(expected, s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.XPATH_ANCHORED, s.score);
+    }
+
+    /**
+     * 锚点段 → XPath 谓词：无标签头必须落到通配符 {@code *}
+     * （{@code [.//[@data-i18n="x"]]} 缺少轴步，是非法 XPath，引擎直接抛 SyntaxError）；
+     * 非法锚点（值含引号/反斜杠）一律返回 {@code null}，绝不拼进产物。
+     */
+    @Test
+    public void anchorToXPathPredicate_convertsAnchorFormsSafely() {
+        Assert.assertEquals("[.//*[@data-i18n=\"continue\"]]",
+                CodegenScorer.anchorToXPathPredicate("[data-i18n=\"continue\"]", true));
+        Assert.assertEquals("[.//h3[@data-i18n=\"step3\"]]",
+                CodegenScorer.anchorToXPathPredicate("h3[data-i18n=\"step3\"]", true));
+        Assert.assertEquals("[.//*[@id=\"panel\"]]",
+                CodegenScorer.anchorToXPathPredicate("#panel", true));
+        Assert.assertEquals("[@data-testid=\"continue\"]",
+                CodegenScorer.anchorToXPathPredicate("[data-testid=\"continue\"]", false));
+        // 空值锚点（`[style=""]` = 属性存在且为空）同样要能转成合法 XPath 谓词。
+        Assert.assertEquals("[.//*[@style=\"\"]]",
+                CodegenScorer.anchorToXPathPredicate("[style=\"\"]", true));
+        Assert.assertEquals("[@style=\"\"]",
+                CodegenScorer.anchorToXPathPredicate("[style=\"\"]", false));
+
+        Assert.assertNull("值含引号⇒放弃（不生成非法 XPath）",
+                CodegenScorer.anchorToXPathPredicate("[data-x=\"a\\\"]\"]", true));
+        Assert.assertNull(CodegenScorer.anchorToXPathPredicate("", true));
+        Assert.assertNull(CodegenScorer.anchorToXPathPredicate(null, true));
+    }
+
+    /** XPath 1.0 字面量：无 {@code "} 用双引号，无 {@code '} 用单引号，两者都有则放弃（不做 concat 拼接）。 */
+    @Test
+    public void xpathLiteral_picksQuoteAndGivesUpWhenBothPresent() {
+        Assert.assertEquals("\"plain\"", CodegenScorer.xpathLiteral("plain"));
+        Assert.assertEquals("'a\"b'", CodegenScorer.xpathLiteral("a\"b"));
+        Assert.assertNull(CodegenScorer.xpathLiteral("a\"b'c"));
+        Assert.assertNull(CodegenScorer.xpathLiteral(null));
+    }
+
+    // ------------------------------------------------------------------
+    // 作用域头分档 / 额度分配（2026-11-17）
+    // ------------------------------------------------------------------
+
+    /** 带稳定 class 的分区容器（`div.page` 这类作用域头，2026-11-17 新增档位）。 */
+    private static CodegenFacts.Fact scopedPanel(String tag, String className, String css,
+                                                 List<String> anchors) {
+        return new CodegenFacts.Fact("generic", "", tag, "", "", "", "", "", "", "",
+                "", "", -1, css, List.of(), className, "", "", java.util.Map.of(), "", false, anchors);
+    }
+
+    /**
+     * 用户 2026-11-17 现场（Reset Password triage 页）：`[style='']` 那种写法能定位但绑死在行内样式上，
+     * 正解是 `div.page:has([data-i18n="title_triage"]) button:has([data-i18n="continue"])`。
+     *
+     * <p>本用例锁两件事：① 稳定 class 能当作用域头（裸 tag 头 `div:has(标题)` 会命中 html/body
+     * 等所有祖先层，必然多命中）；② <b>CSS 先于 XPath</b>——CSS 命中即返回，且分数仍是
+     * {@link CodegenScorer#CSS_DESC_ANCHOR}，不会被锚定 XPath 抢走。
+     */
+    @Test
+    public void classScopeHeadWinsWithCssBeforeAnchoredXpath() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(2)",
+                List.of("[data-i18n=\"continue\"]"));
+        CodegenFacts.Fact panel = scopedPanel("div", "button-panel clearfix fix-bottom",
+                "div:nth-of-type(5) > div:nth-of-type(3)", List.of("[data-i18n=\"back\"]"));
+        CodegenFacts.Fact page = scopedPanel("div", "page usename-page reset-triage-page",
+                "div:nth-of-type(5)", List.of("[data-i18n=\"title_triage\"]"));
+        String expected =
+                "div.page:has([data-i18n=\"title_triage\"]) button:has([data-i18n=\"continue\"])";
+        LocatorCounter counter = css -> css.equals(expected) ? 1 : 4;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(
+                new CodegenFacts(self, List.of(panel, page), List.of()), counter);
+
+        Assert.assertEquals("必须先给出 CSS，而不是锚定 XPath", expected, s.uniqueCss);
+        Assert.assertEquals(CodegenScorer.CSS_DESC_ANCHOR, s.score);
+        Assert.assertEquals(LocatorStrategy.CSS, s.strategy);
+    }
+
+    /**
+     * 用户 2026-11-17 现场：`.page:has([style='']) button.float-right [data-i18n="continue"]` 能定位激活页的
+     * Continue。框架现在也会产出这一档（`div.page:has([style=""]) …`），但只作<b>最后的作用域手段</b>：
+     * 语义/标题锚点全都不唯一时才登场，且仍是 CSS 档（先于锚定 XPath）。
+     */
+    @Test
+    public void stateScopeAnchorIsLastResortForVisibilityProxy() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(2)",
+                List.of("[data-i18n=\"continue\"]"));
+        CodegenFacts.Fact page = scopedPanel("div", "page usename-page reset-triage-page",
+                "div:nth-of-type(5)", List.of("[data-i18n=\"title_triage\"]", "[style=\"\"]"));
+        String expected = "div.page:has([style=\"\"]) button:has([data-i18n=\"continue\"])";
+        LocatorCounter counter = css -> css.equals(expected) ? 1 : 4;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(
+                new CodegenFacts(self, List.of(page), List.of()), counter);
+
+        Assert.assertEquals("标题锚点不唯一时必须退到状态型作用域", expected, s.uniqueCss);
+        Assert.assertEquals("仍是 CSS 档（先于锚定 XPath）", CodegenScorer.CSS_DESC_ANCHOR, s.score);
+        Assert.assertEquals(LocatorStrategy.CSS, s.strategy);
+    }
+
+    /** 两者都唯一时必须选标题锚点：状态型锚点只在语义锚点失效后登场（顺序即优先级）。 */
+    @Test
+    public void headingScopeAnchorBeatsStateScopeAnchor() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(2)",
+                List.of("[data-i18n=\"continue\"]"));
+        CodegenFacts.Fact page = scopedPanel("div", "page usename-page reset-triage-page",
+                "div:nth-of-type(5)", List.of("[data-i18n=\"title_triage\"]", "[style=\"\"]"));
+        String headingCss =
+                "div.page:has([data-i18n=\"title_triage\"]) button:has([data-i18n=\"continue\"])";
+        String stateCss = "div.page:has([style=\"\"]) button:has([data-i18n=\"continue\"])";
+        LocatorCounter counter = css -> css.equals(headingCss) || css.equals(stateCss) ? 1 : 4;
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(
+                new CodegenFacts(self, List.of(page), List.of()), counter);
+
+        Assert.assertEquals(headingCss, s.uniqueCss);
+    }
+
+    /**
+     * 锚定 XPath 的两个额度契约（2026-11-17 实测修正）：
+     * ① 近祖先（`.button-panel`）的锚点不得把 <b>12 条额度</b>吃光——外层分区标题
+     * （`.page` 的 `h1[data-i18n="title_triage"]`）必须能进入候选；此前实测 12 条里一条 title 都没有。
+     * ② 父级谓词不得与目标侧谓词相同：那是目标自身子树里的锚点（按钮内部的 `span[data-i18n="continue"]`），
+     * 对"按钮属于哪个分区"零区分度。
+     */
+    @Test
+    public void anchoredXPaths_keepsOuterHeadingAnchorAndSkipsSelfReferentialPredicate() {
+        CodegenFacts.Fact self = selfWithAnchors("button", "button:nth-of-type(2)",
+                List.of("[data-i18n=\"continue\"]", "#please-wait-loading", "[aria-label=\"x\"]"));
+        CodegenFacts.Fact panel = anchorPanel("div:nth-of-type(3)",
+                List.of("[data-i18n=\"back\"]", "[data-i18n=\"continue\"]", "#please-wait-loading"));
+        CodegenFacts.Fact page = anchorPanel("div:nth-of-type(5)",
+                List.of("[data-i18n=\"title_triage\"]", "[data-i18n=\"back\"]", "[data-i18n=\"continue\"]"));
+
+        List<String> out = CodegenScorer.anchoredXPaths(
+                new CodegenFacts(self, List.of(panel, page), List.of()));
+
+        Assert.assertTrue("外层分区标题锚点必须进入候选（近祖先不得吃光额度）：" + out,
+                out.stream().anyMatch(s -> s.contains("title_triage")));
+        Assert.assertFalse("父级谓词不得取自目标子树（自指零区分度）：" + out,
+                out.stream().anyMatch(s -> s.startsWith("//div[.//*[@data-i18n=\"continue\"]]")));
+        Assert.assertTrue("候选总量必须受上限保护：" + out.size(), out.size() <= 12);
     }
 }

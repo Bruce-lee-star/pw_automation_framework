@@ -149,4 +149,65 @@ public class NlsReverseLookupTest {
         Assert.assertNull(lookup.lookup(sb.toString()));   // 护栏生效：含子串也不误命中
         Assert.assertEquals("bank_logo", lookup.lookup(value)); // 短名仍正常
     }
+
+    /**
+     * 后代节点上的 key（{@code <button><span data-i18n="continue">Continue</span></button>}）必须能消歧：
+     * 真实 reset.json 里 8 个 key 的值都是 "Continue"，纯文案反查只能拿到文件里第一个
+     * （{@code reset_password_5}），语义不对；传入后代 key 必须拿到 {@code continue}。
+     */
+    @Test
+    public void descendantKeyDisambiguatesSameVisibleText() throws Exception {
+        Path f = writeBundle("{\"en\":{\"reset_password_5\":\"Continue\","
+                + "\"reset_password_11\":\"Continue\",\"continue\":\"Continue\"}}");
+        NLSUtils.setLanguage("en");
+        NlsReverseLookup lookup = new NlsReverseLookup(new String[]{f.toString()});
+
+        Assert.assertEquals("纯文案反查只能先到先得", "reset_password_5", lookup.lookup("Continue"));
+        Assert.assertEquals("continue", lookup.lookupByDescendantKey("Continue", "continue"));
+        Assert.assertEquals("reset_password_11",
+                lookup.lookupByDescendantKey("Continue", "reset_password_11"));
+    }
+
+    /** 加载中播报会把可访问名变成超集（{@code "Loading, please wait. Continue"}）⇒ 仍应采纳后代 key。 */
+    @Test
+    public void descendantKeyAcceptsNameSuperset() throws Exception {
+        Path f = writeBundle("{\"en\":{\"reset_password_5\":\"Continue\",\"continue\":\"Continue\"}}");
+        NLSUtils.setLanguage("en");
+        NlsReverseLookup lookup = new NlsReverseLookup(new String[]{f.toString()});
+
+        Assert.assertEquals("continue",
+                lookup.lookupByDescendantKey("Loading, please wait. Continue", "continue"));
+    }
+
+    /**
+     * 后代 key 的<b>值</b>与本元素可访问名对不上（装饰性子节点的 key）⇒ 不采纳，退回文案反查。
+     * 宁可拿到语义粗糙的 key，也不能产出一个运行期解析不到文案的 key。
+     */
+    @Test
+    public void descendantKeyRejectedWhenValueDoesNotMatchName() throws Exception {
+        Path f = writeBundle("{\"en\":{\"icon.tooltip\":\"Info\",\"continue\":\"Continue\"}}");
+        NLSUtils.setLanguage("en");
+        NlsReverseLookup lookup = new NlsReverseLookup(new String[]{f.toString()});
+
+        Assert.assertEquals("continue", lookup.lookupByDescendantKey("Continue", "icon.tooltip"));
+    }
+
+    /** 后代 key 缺失 / 为空 / 在当前语言包里不存在 ⇒ 与「没给」等价，回落文案反查（绝不返回坏 key）。 */
+    @Test
+    public void unknownOrBlankDescendantKeyFallsBackToText() throws Exception {
+        Path f = writeBundle("{\"en\":{\"continue\":\"Continue\"}}");
+        NLSUtils.setLanguage("en");
+        NlsReverseLookup lookup = new NlsReverseLookup(new String[]{f.toString()});
+
+        Assert.assertEquals("continue", lookup.lookupByDescendantKey("Continue", "no.such.key"));
+        Assert.assertEquals("continue", lookup.lookupByDescendantKey("Continue", "  "));
+        Assert.assertEquals("continue", lookup.lookupByDescendantKey("Continue", null));
+    }
+
+    /** 无 nls 文件（单语言环境）时 descendants 路径直接返回 null，不触碰语言状态。 */
+    @Test
+    public void noNlsFilesDescendantLookupReturnsNull() {
+        NlsReverseLookup lookup = new NlsReverseLookup(new String[]{});
+        Assert.assertNull(lookup.lookupByDescendantKey("Continue", "continue"));
+    }
 }

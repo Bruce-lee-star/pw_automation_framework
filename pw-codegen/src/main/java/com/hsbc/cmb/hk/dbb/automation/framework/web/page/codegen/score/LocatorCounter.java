@@ -1,5 +1,7 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.score;
 
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
+
 import java.util.Collection;
 import java.util.List;
 
@@ -52,6 +54,23 @@ public interface LocatorCounter {
      */
     default int countByRole(String role, String name) {
         return -1;
+    }
+
+    /**
+     * 该定位器当前是否指向一个<b>可见</b>元素（三态：{@link TriState#TRUE} / {@link TriState#FALSE} /
+     * {@link TriState#UNKNOWN} 不可判定）。
+     *
+     * <p>用途：判断「拾取时的页面状态是否还在」。多步向导（HSBC 重置密码）里用户点 Continue 后
+     * 同一个 document 切到下一步，先前可见的按钮被 {@code display:none} 隐藏；此时再拿
+     * {@code getByRole(role, name)} 复核，命中 0 并不代表定位器不可用，而是<b>页面已经不在那一步</b>。
+     * 调用方据此区分「名字口径不符 ⇒ 回退 CSS」与「页面已切换 ⇒ 保留 role 并标记待复核」。
+     *
+     * <p>默认 {@link TriState#UNKNOWN}（不可判定）：纯 CSS 桩实现无需改动，调用方不得把 UNKNOWN 当成 FALSE。
+     * 用枚举而非 {@code Boolean} 是为了让「不知道」成为编译期必须处理的分支，也避免 SpotBugs
+     * {@code NP_BOOLEAN_RETURN_NULL}（刻意的三态不该靠抑制注解过关）。
+     */
+    default TriState isVisible(String cssSelector) {
+        return TriState.UNKNOWN;
     }
 
     /**

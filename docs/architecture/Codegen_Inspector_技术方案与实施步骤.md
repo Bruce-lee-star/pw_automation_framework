@@ -418,13 +418,15 @@ pw-codegen-v3/                                          ← 全新模块，与 v
 | 拾取 | CDP `Overlay.setInspectMode(searchForNode)` + `DOM.resolveNode` + `Runtime.callFunctionOn` | 与 page.pause 同源 |
 | NLS 反查 | `NlsReverseLookup`，命中即 `Nls.t(key)` | — |
 | 类名由 URL 派生 | 调用方**不传 `pageClassName`**：`CodegenTarget` 由被测页当前 URL 派生页面类名（`…/portalserver/logon ⇒ LogonPage`），并同源派生 `LogonSteps`（`<页面包>.steps`）与 `LogonAssertions`（`<页面包>.assertions`）。Stop 时**重新读一次 URL**，拾取过程中发生导航也能对应"实际被拾取的页面" | 避免各人随手命名导致等价重复类；三 Tab 名字天然一致 |
+| **页面类归集粒度** | **一个 URL path 一个 Page 类**。分组键 = 拾取 URL 去掉 query / hash / 尾斜杠（与 `pageClassNameFromUrl` 只看 path 的口径一致），且**忽略标签页身份**。故 SPA 换 hash（`/reset-password#/triage → #/password`）、换跟踪参数、同一 URL 落在多个标签页（或 Page 对象被框架重建），都归入同一个类，不再派生 `XPage_2/_3`；`_2` 只保留给「不同 path 恰好派生出同名类」（`/logon` 与 `/Logon`）。跨标签页切页判定改用 **Page 对象身份**，同 URL 的新标签页仍会生成 `waitForNewPage` 触发器 | 用户 2026-11-16 反馈：同一个重置密码页被拆成 `ResetPasswordPage` / `ResetPasswordPage_2`，字段与 Step/Assert 跟着分裂 |
 | 三类产物共用模板 | Page / Step / Assert 全部走 FreeMarker（`codegen/templates/page-class.ftl`、`step-class.ftl`、`assert-class.ftl`，与框架报告侧 pw-reports 共用引擎 `2.3.34`），统一入口 `CodegenTemplates.render`（UTF-8 + 行尾归一化 LF，跨 OS 字节一致保障 CI 漂移校验） | 改产物格式只改模板，不碰 Java |
 | 三 Tab 共用一份字段规划 | `CodegenFieldPlanner` 是**唯一命名与定位来源**：去重 → List 分组 → 命名 → 定位注解 → 动作/断言表达式，产出 `Plan`（含 `CodegenFieldSpec` 的 `fieldName/verb/action/assertion`）供三个生成器消费 ⇒ Tab1 的 `public PageElement signIn;` 与 Tab2 的 `loginPage.signIn.click()` 一定对得上 | 消除"各 Tab 各自命名导致产物拼不成可运行代码" |
 | Page 类生成 | `PageClassGenerator`：类骨架 + 字段循环 + import 条件全在 `page-class.ftl`；**输出契约与 V2 严格对齐**（`@RoleElement` + `PageElement`/`PageElementList` 字段 + `extends AbstractManagedPage` + 类级 `@RoleFile`）+ `<generated:fields>` 标记块（预留增量合并 F-15） | — |
-| Step 类生成 | `StepClassGenerator`：包名 `<页面包>.steps`，持有 `PageObjectFactory.getPage(…)` 页面字段，每字段一个 `@Step public void <verb><Field>()`（textbox/combobox→`fill("")`、checkbox/radio→`check()`、其余→`click()`；一组元素取 `get(0)`；占位 `fill("")` 自带 TODO） | 与 v2 `RoleElementStepGenerator` 形态对齐 |
+| Step 类生成 | `StepClassGenerator`：包名 `<页面包>.steps`，持有 `PageObjectFactory.getPage(…)` 页面字段，每字段一个 `@Step public void <verb><Field>()`（textbox/combobox→`fill("")`、checkbox/radio→`check()`、其余→`click()`；一组元素取 `get(0)`，**集合项自动成组取 `get(index)`**，见下行；占位 `fill("")` 自带 TODO） | 与 v2 `RoleElementStepGenerator` 形态对齐 |
 | Assert 类生成 | `AssertClassGenerator`：包名 `<页面包>.assertions`，每字段一个 `@Step public void assert<Field><Text\|Checked\|Visible>()`；**hamcrest 风格 `assertThat(actual, is(expected))`**，断言失败时由 JUnit 打印 expected/actual 两段文本、一眼定位字符差异。派生规则：有可读 name 的元素断言其 `getText()`（输入框/下拉取 `getValue()`）等于拾取时记录的名字；checkbox/radio 断言 `isChecked()`；无 name 的容器退化断言 `isVisible()` | 与 v2 `RoleElementAssertionGenerator` 的 `assertThat(..., equalTo(...))` 同风格 |
 | 定位器选择策略 | ① **无 NLS 或反查不到 key ⇒ 一律 `name=` 定位**（不产 `key=`，保证产物无需 NLS 表即可运行）；② **role 可定位**（role 非 generic 且有可读 name）⇒ `@RoleElement(role=…, name=/key=)`；③ **role 定位不了**（generic / 无 name）⇒ 回退 `@Element("<cssSelector>")`（CSS 与 XPath 统一走 `@Element.value`）| — |
 | List（一组元素） | 注入脚本返回元素"同级序号 `index`"，`sigKey` 挂 `#index`，生成器按 **base-sig（剔除 `#N`）分组**：组内序号互异且 ≥2 条 ⇒ 合成**一个** `PageElementList`（运行期 `x.get(i)` 取单项）；同元素重复点选（序号相同）不成组。**自动识别覆盖不到的场景**（不同容器里同 role+name ⇒ sigKey 相同、序号互不异）由面板「标记为一组」显式合成，见下行 | — |
+| **集合项自动成组（`autoList`）** | 注入脚本 `listHintOf`：目标 role 是集合项（option/listitem/row/cell/tab/treeitem/radio/menuitem…）+ 最近的集合容器（listbox/list/grid/table/tablist/tree/menu/radiogroup/ul/ol/table/tbody/select）可唯一分段 + 容器的元素子节点**全是同标签** ⇒ 回传 `{selector, count, index}`（整组定位器 / 成员数 / **拾取项**序号）。`CodegenEntry.autoList=true` 时：① 强制 CSS 策略（`getByRole(role,name)` 命中的是单个选项，与整组语义冲突）；② `cssSelector` = 整组定位器、`index` = 拾取项序号、`matchCount` = 成员数；③ Step/Assert 用 **`get(index)`** 指回用户实际点的那一项（手动组仍 `get(0)`），统一走 `CodegenFieldSpec#listTarget()`；④ 不参与 base-sig 合并（两个不同下拉里同名的 "Yes" 不会被并成一个字段、共用第一个下拉的定位器），同一集合点两次则各出一个字段——宁可同定位器也不丢动作 | 解决「密保问题下拉 10 个 `li[role=option]` 可访问名各不相同 ⇒ 旧 `role|name` 判据永远成不了组、只能生成点中第 5 项的单元素」 |
 | 面板「标记为一组」 | 每次拾取分配唯一 `pickId`（不能用 sigKey：不同容器的同 role+name 元素 sigKey 完全相同，会互相覆盖）；列表行带复选框，勾选 ≥2 项点「标记为一组」⇒ 回传 `group <ids…>` ⇒ Java 把这些条目重写为「同一 base-sig + 互异序号」⇒ 生成器合成**一个** `PageElementList`；面板回执给行加 `[组]` 标记；成员 role/name 不一致时 WARN 提示"列表定位器取自首个成员，请确认能匹配全部项" | — |
 | NLS（语言前置） | NLS 文件是 **两级结构** `{ "zh": { key: value }, "en": {...} }`，必须**先用 `NLSUtils.setLanguage("zh")` 告知框架当前语言**才能反查。`NlsReverseLookup` 经 `NLSUtils.rawTables()` 取语言表、用 `NLSUtils.visibleText()` 归一化（剥离 `<b>/<img>` 标签与 `&nbsp;` 实体，匹配浏览器可见文本）。传了 nls 但没设语言 ⇒ `inspect` **直接拒绝启动**并提示；反查未命中回落 `name=` | 面板语言下拉（切换后 `reload`） |
 | Monaco 代码区 | CDN 加载，**离线自动降级**为 `<pre>` | — |
@@ -523,7 +525,7 @@ CodegenLauncher.inspect(inspectedPage, "nls/login.nls.json", "nls/common.nls.jso
 
 | # | 根因 | 处置 | 效果 |
 | --- | --- | --- | --- |
-| R1 | **选择器反查路径整体失效**：`DOM.enable` 只订阅事件、不推文档树，`DOM.requestNode` 恒返回 `nodeId=0` ⇒ 每次拾取白跑一遍注定失败的探测，再退回坐标 hit-test；坐标法看不见跨源 iframe 内部 ⇒ **跨 frame 拾取实际不可达** | `CdpFrameLocator` 改用 `DOM.describeNode(objectId)` 直取 `backendNodeId`（少一次往返、不依赖节点表），并在失败时 `DOM.getDocument` 自愈一次（`ensureDocument()`，幂等）；`enablePickChannel` 预热一次 | 选择器路径恢复（回归单测 `nodeResolutionSelfHealsByPrimingDocument` / `documentIsPrimedOnlyOnce`），拾取少 5ms（首帧 27ms）的无效开销 |
+| R1 | **选择器反查路径整体失效**：`DOM.enable` 只订阅事件、不推文档树，`DOM.requestNode` 恒返回 `nodeId=0` ⇒ 每次拾取白跑一遍注定失败的探测，再退回坐标 hit-test；坐标法看不见跨源 iframe 内部 ⇒ **跨 frame 拾取实际不可达** | `CdpFrameLocator` 改用 `DOM.describeNode(objectId)` 直取 `backendNodeId`（少一次往返、不依赖节点表），并在失败时 `DOM.getDocument` 自愈一次（`ensureDocument()`，幂等）；`enablePickChannel` 预热一次。**坐标 hit-test 兜底已彻底删除（2026-11-15）**：注入脚本不再上报 `x/y/coordSkipped`，Java 侧 `pickAt` 也不再接受坐标——定位只用「点击事件目标的选择器 / XPath / frame 路径」，失配即判本次拾取失败并告警 | 选择器路径恢复（回归单测 `nodeResolutionSelfHealsByPrimingDocument` / `documentIsPrimedOnlyOnce`），拾取少 5ms（首帧 27ms）的无效开销 |
 | R2 | **页级 role 复核对子 frame 元素恒 0 命中**：`page.getByRole` 只在主 frame 搜索 | `ElementRef` 增加 `FrameScope`（MAIN/SUB/UNKNOWN，由定位阶段随引用带出）；抽取时子 frame 元素**跳过**复核，直接产出 CSS（与"复核后必然回退"结果一致） | iframe 拾取 21.9 → 11.9 ms（−46%），大页面按 role 计数成本等比例下降（数十毫秒） |
 | R3 | **同一个选择器被 count 2~3 次**：`uniqueCss` 已计数一次，调用方 `isUnique` 再数一次；兜底 CSS 还在 role 判定前 eager 计算 | `CodegenScorer.uniqueCss` 返回 `Unique(css,count)`，调用方直接复用最后计数；首选候选结果缓存给循环与兜底分支复用；`isUnique` 删除 | 每个候选恒定少 1~2 次往返：CSS 链元素 3 次 → **1 次**，17.6 → 10.7 ms（−39%，2k） |
 | R4 | 主 frame 元素每次拾取重复读 `Page.getFrameTree`（定位阶段 + 抽取阶段各一次） | `FrameScope=MAIN` 时抽取阶段不再读树；`SUB` 时读一次并复用给穿透路径 | 每次拾取少一条 CDP 往返 |
@@ -800,3 +802,71 @@ String nlsKey = nls.lookup(name, dataI18n);
 `import static org.hamcrest.Matchers.containsString;` / `equalTo;`，并生成 `NLS` 字段与私有 `visibleText(String key)` 方法
 （其余仍只用 `is`）。
 
+
+## 十六、第五批交付（2026-11-15）：交互控件归一 + 字段命名规范
+
+### 16.1 根因：可点区域是容器，文案/图标是叶子
+
+HSBC 真实页面（reset-password）把按钮/链接文案包在  + "<span data-i18n>" +  里，radio/checkbox 的可点区域是  + "<label>" +  包裹的整块（svg + h2 + 文本 div + 说明）。旧规则「点哪个 DOM 对象就拾取哪个」因此产生两类坏产物：
+
+| 现象 | 旧行为 | 后果 |
+|---|---|---|
+| 点 Continue 按钮文案 | 拾取到  + "<span data-i18n>" + （role=generic） | AriaRole 无对应常量 ⇒ 退化成  + "div:nth-of-type(3) > button[class*=\"float-right\"]" +  这类长结构链 |
+| 点 radio 的 label 文本 | 记录「label 内文本」+ 浏览器补发的「控件 click」 | 一次点击产出**两条**元素定位 |
+
+### 16.2 规则：交互控件优先归一（ + "interactiveAncestor" + ）
+
+ + "pickTarget" +  第一步先上溯（≤6 层）找**可交互控件**，命中即返回：
+
+-  + "<button>" +  /  + "<a href>" +  /  + "<input 非 hidden>" +  /  + "<select>" +  /  + "<textarea>" +  ⇒ 该元素本身；
+- 自定义控件  + "
+ole=\"button|link|checkbox|radio|switch|tab|menuitem*|option|combobox|listbox|textbox|searchbox|spinbutton\"" +  ⇒ 该元素本身；
+- 包裹式  + "<label>" + （控件是其后代）⇒ **被包裹的控件**； + "label[for]" +  指向 label **之外**控件 ⇒ 仍保留 label（2026-11-11 规则①不放宽）；
+-  + "<input type=hidden>" +  ⇒ 不是交互目标（命中即停）。
+
+未命中才走既有逻辑（身份锚点保留 / 装饰性图标上溯到带名容器）。
+
+**合成 click 抑制**（ + "orwardedControl" + ）：点包裹式 label（或其内部任意文本/svg）且归一到的控件是 radio/checkbox 时，登记该控件；浏览器随后补发的那一次 click 在 120ms 内被吞掉 ⇒ **一次点击一条记录**。直接点控件本身不登记（避免误吞随后的真实点击）。
+
+### 16.3 NLS key 消歧：采纳目标**后代**的 data-i18n
+
+归一到 button 后控件自身没有  + "data-i18n" + ，只能按可见文案反查；而 reset.json 里 **8 个 key 的值都是 "Continue"**（ + "
+eset_password_5/11/23/28/49" + 、 + "
+eset_token_5/13" + 、 + "continue" + ），反查只能\"文件顺序先到先得\"，拿到语义不对的 key。
+
+处置： + "CodegenCdpNodeExtractor.descendantI18nKey(self.childAnchors)" +  从目标自身的后代锚点取第一个  + "[data-i18n=\"...\"]" + ，再经  + "NlsReverseLookup.lookupByDescendantKey" +  校验「该 key 的可见文本与元素可访问名互相包含」后才采纳；不匹配/不存在则回落文案反查——**绝不产出运行期解析不到文案的 key**。
+
+### 16.4 字段命名规范（用户定稿）
+
+判定**角色优先、标签兜底**（同一  + "<input>" +  可能是按钮/单选/复选/文本框，只有 AX 角色能区分）：
+
+| 种类 | 后缀 | 说明 |
+|---|---|---|
+| button（含  + "input[type=submit|button]" + ） |  + "xxxBtn" +  | |
+| link（ + "[href]" + ） |  + "xxxLink" +  | |
+| textbox / searchbox / spinbutton / textarea |  + "xxxInput" +  | |
+| radio |  + "xxxRadio" +  | |
+| checkbox / switch |  + "xxxCheckbox" +  | |
+| combobox / listbox / select |  + "xxxSelect" +  | |
+| label |  + "xxxLabel" +  | |
+| heading：h1/h2 |  + "xxxTitle" +  | 标题文案本身即语义名 |
+| heading：h3~h6 |  + "xxxSubtitle" +  | |
+| 其余（div/span/img/容器） | 无后缀 | 名字来自业务文案，加 Div/Span 只是噪声 |
+
+不叠加边界：名字本身就是角色词（ + "utton/
+adio/label" +  …）、名字已带该后缀（ + "privacyLink" + ）、兜底名  + "lement" + 。去重序号落在后缀之后（ + "continueBtn2" + ）。
+
+### 16.5 覆盖面与已知边界
+
+**已覆盖**：按钮/链接内的 span·svg·img；包裹式 label 内任意子节点（radio/checkbox/text/select）；自定义 ARIA 控件内的子节点； + "input[type=hidden]" +  排除。
+
+**已知边界**（非缺陷，或需另行决策）：原生  + "<select>" +  的  + "<option>" +  点击发生在系统弹层、DOM 无 click 事件；跨源 iframe 内部元素按 frame 穿透路径处理、不做交互归一；纯 div + JS 且**没有** ARIA role 的自定义控件无法识别； + "label[for]" +  与控件分离时仍按规则①拾取 label 自身（若要改需推翻该规则）。
+
+### 16.6 验证
+
+- 新增  + "CodegenPickTargetBrowserTest" +  3 例（真实 Chromium）：点按钮文案 ⇒ button；点链接文案 ⇒ link；点包裹式 label 内文本 ⇒ 被包裹的 input。
+- 新增  + "CodegenRecorderLabelClickTest" +  2 例（真实注入脚本 + 真实点击）：radio label 一次点击**恰好一条**记录且记录的是 input；按钮一次点击一条记录且是 button。
+- 新增  + "CodegenFieldNamingTest" +  6 例：后缀映射、标题层级、不叠加边界、去重序号位置。
+-  + "NlsReverseLookupTest" +  +5 例：后代 key 消歧 / 名字超集 / 值不匹配拒绝 / 未知或空 key 回落 / 无 nls 文件。
+-  + "CodegenHasScopeContractTest" +  +1 例：后代锚点提取 data-i18n key。
+- pw-codegen 全量 304 例 0 失败（含 Checkstyle/SpotBugs 门禁通过）。

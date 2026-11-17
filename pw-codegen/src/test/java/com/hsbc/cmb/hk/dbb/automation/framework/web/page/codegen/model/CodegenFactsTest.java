@@ -38,7 +38,7 @@ public class CodegenFactsTest {
 
     /**
      * 数组元素类型不符时不得抛异常、也不得"丢掉一层"：shadow 链丢层会错指向别的 shadow root。
-     * 按契约记为空串失效层，由定位侧判不可用并回退坐标。
+     * 按契约记为空串失效层，由定位侧判不可用（不做坐标兜底）。
      */
     @Test
     public void nonPrimitiveListItemsBecomeInvalidLayersWithoutThrowing() {

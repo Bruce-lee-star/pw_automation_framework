@@ -75,4 +75,22 @@ public class CodegenEntryTest {
         assertThrows(IllegalArgumentException.class,
                 () -> entry(LocatorStrategy.ROLE, 1, Integer.MIN_VALUE));
     }
+
+    /**
+     * 所有 copy 都必须携带 {@code autoList}：复核链上任何一次 {@code withXxx} 丢了它，
+     * 自动成组的 {@code get(index)} 就会静默退化成 {@code get(0)}（回放点错选项）。
+     */
+    @Test
+    public void immutableCopiesPreserveAutoList() {
+        CodegenEntry e = new CodegenEntry("option|Country#4", "option", "Country", LocatorStrategy.CSS,
+                500, "ul > li[role=\"option\"]", "ul > li[role=\"option\"]", null, 4,
+                List.of(), List.of(), 10, "li", false, CodegenEntry.ROLE_HITS_NOT_APPLICABLE, true);
+
+        assertTrue(e.withMatchCount(9).autoList);
+        assertTrue(e.withRoleHits(1).autoList);
+        assertTrue(e.withLocator(LocatorStrategy.CSS, "css", "css").autoList);
+        assertTrue(e.withChecked(true).autoList);
+        assertEquals("面板载荷需带出该标记", true, e.toMap().get("autoList"));
+        assertFalse("历史构造默认不是自动成组", entry(LocatorStrategy.CSS, 1, 0).autoList);
+    }
 }

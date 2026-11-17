@@ -7,6 +7,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.AriaRol
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.locator.LocatorStrategy;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenFacts;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.TriState;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp.ElementRef.Frames;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.nls.NlsReverseLookup;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.score.CodegenScorer;
@@ -21,6 +22,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 从 inspect 事件里的 {@code backendNodeId} 反查元素信息，组装 {@link CodegenEntry}。
@@ -58,932 +61,26 @@ public final class CodegenCdpNodeExtractor {
      * 在元素所属的 frame 执行上下文里完成求值。逻辑与 {@code codegen-inject.js} 的 {@code factsOf/ancestorChain}
      * 保持同源（改一处须同步另一处）。
      */
-    private static final String SELF_CONTAINED_GET_INFO_FN =
-            """
-            function () {
-                var el = this;
-                function roleOf(e) {
-                    var r = e.getAttribute && e.getAttribute('role');
-                    if (r) return r.toLowerCase();
-                    var t = e.tagName ? e.tagName.toLowerCase() : '';
-                    if (t === 'button') return 'button';
-                    if (t === 'a' && e.getAttribute('href')) return 'link';
-                    if (t === 'input') {
-                        var ty = (e.getAttribute('type') || '').toLowerCase();
-                        if (ty === 'checkbox') return 'checkbox';
-                        if (ty === 'radio') return 'radio';
-                        if (ty === 'submit' || ty === 'button' || ty === 'reset') return 'button';
-                        return 'textbox';
-                    }
-                    if (t === 'textarea') return 'textbox';
-                    if (t === 'select') return e.getAttribute('multiple') != null ? 'listbox' : 'combobox';
-                    if (/^h[1-6]$/.test(t)) return 'heading';
-                    if (t === 'img') return 'img';
-                    if (t === 'nav') return 'navigation';
-                    if (t === 'main') return 'main';
-                    if (t === 'table') return 'table';
-                    if (t === 'li') return 'listitem';
-                    if (t === 'label') return 'label';
-                    return 'generic';
-                }
-                function accessibleName(e) {
-                    var a = e.getAttribute && e.getAttribute('aria-label');
-                    if (a && a.trim()) return a.trim();
-                    if (e.id) {
-                        var byId = document.getElementById(e.id);
-                        if (byId && byId !== e) { var bid = byId.getAttribute('aria-label'); if (bid && bid.trim()) return bid.trim(); }
-                        var l = document.querySelector('label[for="' + (window.CSS ? CSS.escape(e.id) : e.id) + '"]');
-                        if (l && l.textContent.trim()) return l.textContent.trim();
-                    }
-                    if (e.tagName && e.tagName.toLowerCase() === 'img') {
-                        var alt = e.getAttribute('alt');
-                        if (alt && alt.trim()) return alt.trim();
-                    }
-                    var t = (e.textContent || '').replace(/\\s+/g, ' ').trim();
-                    if (t) return t;
-                    var title = e.getAttribute && e.getAttribute('title');
-                    if (title && title.trim()) return title.trim();
-                    return '';
-                }
-                function normalizedText(e) {
-                    var t = (e.textContent || '').replace(/\\s+/g, ' ').trim();
-                    return t.length > 240 ? t.substring(0, 240) : t;
-                }
-                function labelTextOf(e) {
-                    if (e.id) {
-                        var l = document.querySelector('label[for="' + (window.CSS ? CSS.escape(e.id) : e.id) + '"]');
-                        if (l && l.textContent.trim()) return l.textContent.trim();
-                    }
-                    var p = e.parentElement;
-                    if (p && p.tagName && p.tagName.toLowerCase() === 'label' && p.textContent.trim()) return p.textContent.trim();
-                    return '';
-                }
-                // 动态/随机 id 识别（Radix、Headless UI、react-select、MUI、antd 等每次渲染随机），
-                // 命中即视为无稳定 id，降级 tag:nth-of-type 结构链或 role/name。保守前缀黑名单，不误伤稳定 id。
-                function isDynamicId(id) {
-                    if (!id || !id.length) return false;
-                    if (/^_R_/.test(id) || /_R_[A-Za-z0-9]{4,}_/.test(id)) return true;
-                    if (/:r\\d+:/.test(id)) return true;
-                    if (/^headlessui-/.test(id)) return true;
-                    if (/^react-select-/.test(id)) return true;
-                    if (/^mui-\\d+$/.test(id)) return true;
-                    if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
-                    if (/\\d{4,}-id$/.test(id)) return true;
-                    if (/^[a-z]+(-[a-z]+)*\\d{4,}$/.test(id)) return true; // 通用: 段前缀 + ≥4 位尾随数字（无连字符）
-                    if (/[0-9a-f]{8,}/i.test(id)) return true;            // 十六进制/哈希 token
-                    if (/[A-Za-z0-9]{8,}/.test(id)) {                      // 高熵 base62 token：≥8 位无分隔符，且（含大小写+≥2 数字）或（≥3 数字），且数字非纯尾随
-                        var d = (id.match(/[0-9]/g) || []).length;
-                        if (/[0-9][A-Za-z]/.test(id) && ((/[A-Z]/.test(id) && /[a-z]/.test(id) && d >= 2) || d >= 3)) return true;
-                    }
-                    return false;
-                }
-                /** 结构链上溯层数上限（深层页面 6 层常覆盖不到带 id 的容器）。 */
-                var MAX_PATH_DEPTH = 8;
-                /** 结构链允许的「裸 tag:nth-of-type(n)」补位层数上限（超过才整条作废）。 */
-                var MAX_FILLER_LAYERS = 2;
-                /** 单层兜底段：tag:nth-of-type(k)（无父级时退化为裸 tag，如 html）。 */
-                function fallbackSeg(n) {
-                    if (!n || !n.tagName) return '';
-                    var tag = n.tagName.toLowerCase();
-                    return groupIndexSel(tag, n) || tag;
-                }
-                /**
-                 * 稳定 CSS 选择器：稳定 id 优先；动态 id 先试稳定前缀/包含选择器（唯一才用）；
-                 * 否则结构链逐层上溯——每层优先接受稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引），
-                 * 无锚点层用 :nth-of-type 补位（上限 MAX_FILLER_LAYERS 层）；补位超限才返回空串，
-                 * 交给 Java 侧 XPath 兜底（属性优先：稳定属性精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体）。
-                 */
-                function cssSel(e) {
-                    if (!e || e.nodeType !== 1) return '';
-                    if (e.id && !isDynamicId(e.id)) {
-                        var idSel = '#' + (window.CSS ? CSS.escape(e.id) : e.id);
-                        if (validCssSel(idSel)) return idSel;
-                    }
-                    if (e.id) {
-                        var fb = dynamicIdFallbackSel(e.id);
-                        if (fb && validCssSel(fb)) return fb;
-                    }
-                    // 自身层（Tier 1）：只接受不挂祖先即全局唯一的自身选择器（属性 / 组合，均经严格唯一校验）。
-                    var selfNoScope = attrFallbackSel(e, false);
-                    if (selfNoScope && validCssSel(selfNoScope)) return selfNoScope;
-                    // 子代锚点层（Tier 2）：元素自身无稳定属性时，借后代的 data-i18n/data-testid/aria-label 等经 :has() 唯一定位。
-                    var da = descendantAnchorSel(e);
-                    if (da && validCssSel(da)) return da;
-                    // 父/祖先作用域层（Tier 3）：把自身选择器挂到最近的、组合后全量唯一的祖先上（隐藏副本短路补丁）。
-                    var ab = attrFallbackSel(e, true);
-                    if (ab && validCssSel(ab)) return ab;
-                    var parts = [];
-                    var n = e;
-                    var anchored = false;
-                    var filler = 0;
-                    while (n && n.nodeType === 1 && parts.length < MAX_PATH_DEPTH) {
-                        if (n.id && !isDynamicId(n.id)) { parts.unshift('#' + (window.CSS ? CSS.escape(n.id) : n.id)); anchored = true; break; }
-                        if (n.id) {
-                            var pf = dynamicIdFallbackSel(n.id);
-                            if (pf) { parts.unshift(pf); anchored = true; break; }
-                        }
-                        var seg = attrFallbackSel(n);
-                        // 祖先的稳定 class/属性段（如 modal 的 forgot-username-modal）作为作用域锚点并停止上溯。
-                        if (seg) { parts.unshift(seg); anchored = true; break; }
-                        // 该层无稳定锚点也无可用属性段：用 :nth-of-type 补位，超过上限才整条作废。
-                        if (filler >= MAX_FILLER_LAYERS) return '';
-                        var fs = fallbackSeg(n);
-                        if (!fs) return '';
-                        // 加固：若该层有稳定 class token，给位置段加 class 收窄（更抗 DOM 重排）。
-                        var fcls = (typeof n.className === 'string') ? n.className : '';
-                        var ftoks = stableClassTokens(fcls);
-                        if (ftoks.length) {
-                            var ftag = n.tagName.toLowerCase();
-                            fs = fs.replace(ftag, ftag + '[class*="' + attrEsc(ftoks[0]) + '"]');
-                        }
-                        parts.unshift(fs);
-                        filler++;
-                        n = n.parentElement;
-                    }
-                    if (!anchored) return '';
-                    var pathSel = parts.join(' > ');
-                    // 终极护栏（双重）：① 语法非法（回归式畸形拼接）⇒ 作废；② 当前零命中 ⇒ 同样作废。
-                    // ② 防的是"层级错位死链"（如 … > div:nth-of-type(3) button 而父级子元素实为 button）：
-                    // 语法合法但一个都匹配不到，回放必然等不到元素，交给带唯一性校验的 XPath / role 兜底更好。
-                    if (!validCssSel(pathSel) || totalCount(pathSel) <= 0) return '';
-                    return pathSel;
-                }
-                // 动态 id 稳定前缀/包含选择器兜底（唯一才用）；无前缀/不唯一返回空串交给结构链
-                function stableIdPrefix(id) {
-                    var m = id.match(/^(.*?)(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|-\\d{4,}|\\d{4,}$|[0-9a-f]{8,})/i);
-                    return m ? m[1] : '';
-                }
-                // 动态 id 的稳定后缀：截掉开头随机段（Radix 夹心/`:rN:`/数字段+连字符）后，剩余尾部在组件语义上稳定。
-                function stableIdSuffix(id) {
-                    var m = id.match(/^(?:_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|[0-9a-f]{8,})(.*)$/i);
-                    return m ? m[1] : '';
-                }
-                function attrEsc(v) {
-                    return String(v).replace(/["\\\\]/g, function (c) { return '\\\\' + c; });
-                }
-                /** 可见性判定：hidden、aria-hidden="true"、display:none / visibility:hidden（含祖先，经计算样式）、
-                 * visibility:collapse、opacity:0（含祖先链，不继承需逐级查）、clip 裁零 / clip-path 裁零、
-                 * 零尺寸或整体移出视口（响应式/移动端隐藏副本常见）均视为隐藏。
-                 *
-                 * <p>祖先链必须逐级查 display / visibility：getComputedStyle(child).display 返回元素自身计算值，
-                 * 父级 display:none 不会传递下来——只看自身会把「藏在 style="display: none;" 面板里的副本」判成可见。
-                 * 祖先上限 10 层。
-                 *
-                 * <p>本函数只回答「渲染是否可见」，不等于「应从候选排除」：class="accessibleHidden" / .sr-only
-                 * 这类元素渲染不可见但仍在可访问性树里（getByRole 能命中，往往是唯一可访问名来源）。
-                 * 只有「渲染树剔除 ⇒ 同时从 AX 树剔除」的形态（display:none / visibility:hidden / hidden 属性 /
-                 * aria-hidden="true"）才可以作为排除依据。 */
-                function isVisible(e) {
-                    if (!e || e.nodeType !== 1) return false;
-                    if (e.hidden) return false;
-                    if (e.getAttribute && e.getAttribute('aria-hidden') === 'true') return false;
-                    if (e.style && (e.style.display === 'none' || e.style.visibility === 'hidden')) return false;
-                    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
-                        try {
-                            var cs = window.getComputedStyle(e);
-                            if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
-                            if (cs.opacity === '0' || cs.opacity === '0.0' || cs.opacity === '0.00') return false;
-                            if (cs.clip && (cs.clip === 'rect(0px, 0px, 0px, 0px)' || cs.clip.indexOf('rect(0') === 0)) return false;
-                            if (cs.clipPath && (/inset\\(0%\\)/.test(cs.clipPath) || /inset\\(50%\\)/.test(cs.clipPath) || /circle\\(0/.test(cs.clipPath))) return false;
-                            var p = e.parentElement, d = 0;
-                            while (p && p.nodeType === 1 && d < 10) {
-                                var pcs = window.getComputedStyle(p);
-                                if (pcs.display === 'none' || pcs.visibility === 'hidden' || pcs.visibility === 'collapse') return false;
-                                if (pcs.opacity === '0' || pcs.opacity === '0.0' || pcs.opacity === '0.00') return false;
-                                p = p.parentElement; d++;
-                            }
-                        } catch (err) { }
-                    }
-                    if (typeof e.getBoundingClientRect === 'function') {
-                        try {
-                            var r = e.getBoundingClientRect();
-                            if (!r || (r.width === 0 && r.height === 0)) return false;
-                            var vw = (typeof window !== 'undefined' && window.innerWidth) || 0;
-                            var vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
-                            if (vw > 0 && vh > 0 && (r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh)) return false;
-                        } catch (err) { }
-                    }
-                    return true;
-                }
+    private static final String SELF_CONTAINED_GET_INFO_FN = loadScript("cdp-extract-fn.js");
 
-
-                /**
-                 * 匹配总数（<b>含隐藏元素</b>）。
-                 *
-                 * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
-                 * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
-                 * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配。
-                 * 这是"重复面板里 Continue 按钮定位不准"的根因（2026-11-11 用户反馈）。
-                 */
-                /**
-                 * 匹配总数（<b>含隐藏元素</b>）。
-                 *
-                 * <p>Playwright 的 {@code locator(sel)} 不做可见性过滤，strict mode 下多匹配直接抛错，
-                 * 故唯一性必须按 DOM 全量计数。只数可见会漏掉隐藏的重复副本——典型如隐藏面板里那个
-                 * 同名 "Continue" 按钮：拾取时被判唯一，运行期面板一显示立刻变成多匹配。
-                 * 这是"重复面板里 Continue 按钮定位不准"的根因（2026-11-11 用户反馈）。
-                 */
-                function totalCount(sel) {
-                    try {
-                        if (!sel) return 0;
-                        return document.querySelectorAll(sel).length;
-                    } catch (e) { return 0; }
-                }
-
-                /**
-                 * 唯一性校验：DOM 全量匹配恰好 1 个（隐藏元素同样参与计数，对齐 Playwright strict mode）。
-                 * 绝不使用 Playwright 专有可见性伪类（原生 {@code document} 不识别，会抛 SyntaxError）。
-                 */
-                function uniqueSel(sel) {
-                    return totalCount(sel) === 1;
-                }
-
-                function dynamicIdFallbackSel(id) {
-                    var prefix = stableIdPrefix(id);
-                    if (prefix) {
-                        var byPrefix = '[id^="' + attrEsc(prefix) + '"]';
-                        if (uniqueSel(byPrefix)) return byPrefix;
-                    }
-                    var suffix = stableIdSuffix(id);
-                    if (suffix) {
-                        var bySuffix = '[id$="' + attrEsc(suffix) + '"]';
-                        if (uniqueSel(bySuffix)) return bySuffix;
-                    }
-                    var core = (prefix || suffix).replace(/^[-_]+|[-_]+$/g, '');
-                    if (core) {
-                        var byCore = '[id*="' + attrEsc(core) + '"]';
-                        if (uniqueSel(byCore)) return byCore;
-                    }
-                    return '';
-                }
-                // 取 src 尾部文件名（URL 末段，去 query/hash）；data URI / 空值返回空串。
-                function srcTail(s) {
-                    if (!s) return '';
-                    s = String(s).trim();
-                    if (s.indexOf('data:') === 0) return '';
-                    var q = s.indexOf('?'); if (q >= 0) s = s.substring(0, q);
-                    var h = s.indexOf('#'); if (h >= 0) s = s.substring(0, h);
-                    var sl = s.lastIndexOf('/'); if (sl >= 0) s = s.substring(sl + 1);
-                    return s.length >= 3 ? s : '';
-                }
-                // 语言无关的 src 文件名前缀：xxx_EN.png / xxx_zh-HK.png / xxx.en_US.png 切语言后整条换名，
-                // 必须锚定「语言段之前」的前缀（img[src*="xxx"]）；只吃最后一个语言段，前缀 < 4 字符不归一化。
-                var SRC_TRAILING_LOCALE = /^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw)(?:[._-](?:us|gb|hk|cn|tw|hans|hant))?$/i;
-                function srcLocaleNeutralPrefix(tail) {
-                    if (!tail) return '';
-                    var stem = String(tail).replace(/[.][A-Za-z0-9]{1,5}$/, '');
-                    var m = SRC_TRAILING_LOCALE.exec(stem);
-                    if (!m) return '';
-                    var prefix = m[1].replace(/[._-]+$/, '');
-                    return prefix.length >= 4 ? prefix : '';
-                }
-                // class 里的稳定类名（空格切分，滤掉框架随机 token 与过短碎片）。
-                function stableClassTokens(cls) {
-                    var out = [], seen = {};
-                    if (!cls) return out;
-                    var raw = String(cls).trim().split(/\\s+/);
-                    for (var i = 0; i < raw.length; i++) {
-                        var t = raw[i];
-                        if (t.length < 3) continue;
-                        if (/^(css|sc)-[a-z0-9]{5,}$/i.test(t)) continue;      // Emotion css-xxx
-                        if (/^[a-z0-9]{8,}$/i.test(t)) continue;                // 长 hash
-                        if (/_R_[A-Za-z0-9]{4,}_/.test(t)) continue;            // Radix 夹心
-                        if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(t)) continue;     // 数字后缀
-                        if (seen[t]) continue;
-                        seen[t] = true;
-                        out.push(t);
-                    }
-                    return out;
-                }
-                /** 属性值稳定段：值无随机段 → 精确(=)；含随机段（Radix 夹心 / :rN: / 数字段）→ 稳定前缀 ^=、核心 *=、稳定后缀 $=（段自身无随机段、长度 2~40，避免随机值；^= → *= → $= 顺序）。 */
-                function attrValueSegments(v) {
-                    if (!v) return [];
-                    v = String(v).trim();
-                    if (!v || v.length > 40) return [];
-                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}|\\d{6,}|[0-9a-fA-F]{10,}|(?=[A-Za-z0-9]*[0-9][A-Za-z])(?:(?=(?:[^0-9]*[0-9]){3})|(?=[^A-Z]*[A-Z])(?=[^a-z]*[a-z])(?=(?:[^0-9]*[0-9]){2}))[A-Za-z0-9]{8,}/;
-                    if (!rand.test(v)) return [{ op: '=', seg: v }];
-                    var parts = v.split(rand);
-                    var head = (parts[0] || '').replace(/^[-_ :]+|[-_ :]+$/g, '');
-                    var tail = (parts[parts.length - 1] || '').replace(/^[-_ :]+|[-_ :]+$/g, '');
-                    var core = parts.join(' ').replace(/\\s+/g, ' ').trim();
-                    var out = [];
-                    if (head.length >= 2 && !rand.test(head)) out.push({ op: '^=', seg: head });
-                    if (core.length >= 2 && core !== head && !rand.test(core)) out.push({ op: '*=', seg: core });
-                    if (tail.length >= 2 && tail !== head && tail !== core && !rand.test(tail)) out.push({ op: '$=', seg: tail });
-                    return out;
-                }
-
-                /** 稳定属性候选（id/class/style/src 各走专档）：值非空且 ≤40 字符、非纯数字长串；含随机段的属性不再丢弃，标 rand=1（值用 ^=/*=$= 变体）；稳定（rand=0）排前、按文档顺序，上限 6。 */
-                function stableAttrs(e) {
-                    var out = [], seen = {};
-                    var attrs = e.attributes;
-                    if (!attrs) return out;
-                    var rand = /_R_[A-Za-z0-9]{4,}_|:r\\d+:|\\d{4,}-|-\\d{4,}|\\d{6,}|[0-9a-fA-F]{10,}|(?=[A-Za-z0-9]*[0-9][A-Za-z])(?:(?=(?:[^0-9]*[0-9]){3})|(?=[^A-Z]*[A-Z])(?=[^a-z]*[a-z])(?=(?:[^0-9]*[0-9]){2}))[A-Za-z0-9]{8,}/;
-                    for (var i = 0; i < attrs.length; i++) {
-                        var a = attrs[i];
-                        var n = a.name;
-                        if (n === 'id' || n === 'class' || n === 'style' || n === 'src') continue;
-                        var v = a.value;
-                        if (!v) continue;
-                        v = String(v).trim();
-                        if (!v || v.length > 40) continue;
-                        if (/^[\\d.,-]+$/.test(v) && v.length > 6) continue;
-                        if (seen[n]) continue;
-                        seen[n] = true;
-                        out.push({ name: n, value: v, rand: rand.test(v) ? 1 : 0 });
-                    }
-                    out.sort(function (a, b) { return a.rand - b.rand; });
-                    if (out.length > 6) out.length = 6;
-                    return out;
-                }
-
-                /** 可见匹配计数（唯一性之外，用于识别"一组元素"场景）。 */
-                function visibleCount(sel) {
-                    try {
-                        if (!sel) return 0;
-                        var nodes = document.querySelectorAll(sel), n = 0;
-                        for (var i = 0; i < nodes.length; i++) if (isVisible(nodes[i])) n++;
-                        return n;
-                    } catch (e) { return 0; }
-                }
-
-                /** 组内索引：候选在父下同 tag 兄弟中的第 k 个（1 起），产出 {@code sel:nth-of-type(k)}；无父/无 tag 返回空串。 */
-                function groupIndexSel(sel, el) {
-                    var parent = el && el.parentElement;
-                    if (!parent || !el.tagName) return '';
-                    var tag = el.tagName.toLowerCase();
-                    var k = 0, sibs = parent.children || [];
-                    for (var i = 0; i < sibs.length; i++) {
-                        var c = sibs[i];
-                        if (c && c.nodeType === 1 && c.tagName && c.tagName.toLowerCase() === tag) {
-                            k++;
-                            if (c === el) return sel + ':nth-of-type(' + k + ')';
-                        }
-                    }
-                    return '';
-                }
-
-                /**
-                 * CSS 选择器语法合法性护栏：拦截一切非法选择器（如把两个属性塞进同一方括号），杜绝畸形串写进 cssSelector。
-                 * 全部为原生合法 CSS —— 绝不使用 Playwright 专有可见性伪类（原生 document 不识别，会抛 SyntaxError）。
-                 */
-                function validCssSel(sel) {
-                    if (typeof sel !== 'string' || !sel) return false;
-                    // 结构性畸形：同一方括号内出现两个以空白分隔的 name=value 段（把两个属性塞进同一方括号），杜绝畸形串写进 cssSelector。
-                    var depth = 0, seg = '';
-                    for (var i = 0; i < sel.length; i++) {
-                        var ch = sel.charAt(i);
-                        if (ch === '[') { depth++; seg = ''; }
-                        else if (ch === ']') { depth--; seg = ''; }
-                        else if (depth > 0) {
-                            seg += ch;
-                            if (ch === ' ' || ch === '\\t' || ch === '\\n' || ch === '\\r') {
-                                var f = seg.indexOf('=');
-                                if (f >= 0 && seg.indexOf('=', f + 1) >= 0) return false;
-                            }
-                        }
-                    }
-                    try {
-                        document.querySelectorAll(sel);
-                        return true;
-                    } catch (e) {
-                        return false;
-                    }
-                }
-
-                /** 隐藏副本判别符（按优先级）：d-none / aria-hidden / hidden / 行内 display:none。
-                 *  全部为原生合法 CSS —— 绝不使用 Playwright 专有可见性伪类（原生 document 不识别，会抛 SyntaxError）。 */
-                var HIDDEN_EXCLUDES = [':not(.d-none)', ':not([aria-hidden="true"])', ':not([hidden])',
-                    ':not([style*="display: none"])', ':not([style*="display:none"])'];
-                function scopeSegExcludingHidden(seg) {
-                    if (!seg) return '';
-                    for (var i = 0; i < HIDDEN_EXCLUDES.length; i++) {
-                        var ex = HIDDEN_EXCLUDES[i];
-                        var s2 = seg + ex;
-                        // 仅在「判别符确实剔除了隐藏副本（总匹配下降且仍 >0）」时采纳，避免误把可见副本也排除。
-                        var c2 = totalCount(s2);
-                        if (c2 > 0 && c2 < totalCount(seg)) return s2;
-                    }
-                    return '';
-                }
-
-                /** 祖先作用域收窄（隐藏副本短路补丁）：把 sel 挂到最近的、组合后全量唯一的祖先作用域上；
-                 *  候选集叠加“后代锚点”候选（按钮内子元素往往更精确）。只接受组合后全量唯一 / 可见唯一的结果。 */
-                function scopeUnderUniqueAncestor(sel, e) {
-                    if (!sel || !e) return '';
-                    var cands = [sel];
-                    if (sel.indexOf(':has') === -1) {
-                        var dacs = descendantAnchorCandidates(e);
-                        for (var d = 0; d < dacs.length; d++) cands.push(dacs[d]);
-                    }
-                    var n = e.parentElement;
-                    var guard = 0;
-                    while (n && n.nodeType === 1 && guard++ < 12) {
-                        var t = n.tagName ? n.tagName.toLowerCase() : '';
-                        if (!t || t === 'html') break;
-                        var seg = '';
-                        if (n.id && !isDynamicId(n.id)) {
-                            seg = '#' + (window.CSS ? CSS.escape(n.id) : n.id);
-                        } else if (n.id) {
-                            var pf = dynamicIdFallbackSel(n.id);
-                            if (pf) seg = pf;
-                        }
-                        if (!seg && t) {
-                            var cls = (typeof n.className === 'string') ? n.className : '';
-                            var toks = stableClassTokens(cls);
-                            for (var i = 0; i < toks.length && !seg; i++) {
-                                var ts = t + '[class*="' + attrEsc(toks[i]) + '"]';
-                                if (uniqueSel(ts)) seg = ts;
-                            }
-                        }
-                        if (!seg && t) {
-                            var nas = stableAttrs(n);
-                            for (var a = 0; a < nas.length && !nas[a].rand && !seg; a++) {
-                                var as = t + '[' + nas[a].name + '="' + attrEsc(nas[a].value) + '"]';
-                                if (uniqueSel(as)) seg = as;
-                            }
-                        }
-                        if (!seg) {
-                            var f = fallbackSeg(n);
-                            if (f) seg = f;
-                        }
-                        if (seg) {
-                            var isDirectParent = (n === e.parentElement);
-                            for (var c = 0; c < cands.length; c++) {
-                                var combined = seg + ' ' + cands[c];
-                                if (uniqueSel(combined)) return combined;
-                                if (isDirectParent) {
-                                    // 直接父级 + 子代轴（>）：隐藏副本常是目标的兄弟，用父级差异（如 body vs div[display:none]）
-                                    // 即可把「该父级下唯一」的目标单独摘出——这是「父级标签+属性」兜底档。
-                                    var childCombined = seg + ' > ' + cands[c];
-                                    if (uniqueSel(childCombined)) return childCombined;
-                                    var parentRefined = scopeSegExcludingHidden(seg);
-                                    if (parentRefined) {
-                                        var prc = parentRefined + ' > ' + cands[c];
-                                        if (uniqueSel(prc)) return prc;
-                                    }
-                                }
-                                if (visibleCount(combined) === 1) {
-                                    // 隐藏副本短路补丁（生成侧）：给祖先段附加原生排除判别符，收窄到可见副本。
-                                    var refined = scopeSegExcludingHidden(seg);
-                                    if (refined) {
-                                        var rc = refined + ' ' + cands[c];
-                                        if (uniqueSel(rc)) return rc;
-                                    }
-                                }
-                            }
-                        }
-                        n = n.parentElement;
-                    }
-                    return '';
-                }
-
-                /** 子代锚点候选：用目标后代（深度≤3、稳定属性元素）构造 t:has(后代[稳定属性="值"]) 形式的选择器，
-                 *  并追加“自身稳定信号 × 后代锚点”的 AND 复合加固。 */
-                function descendantAnchorCandidates(e) {
-                    var t = e.tagName ? e.tagName.toLowerCase() : '';
-                    var out = [];
-                    if (!t || t === 'html' || t === 'body') return out;
-                    var selfAttrs = [];
-                    var sa = stableAttrs(e);
-                    for (var z = 0; z < sa.length && selfAttrs.length < 2; z++) {
-                        if (!sa[z].rand) selfAttrs.push(sa[z]);
-                    }
-                    var selfCls = [];
-                    var cls = (typeof e.className === 'string') ? e.className : '';
-                    var ctoks = stableClassTokens(cls);
-                    for (var c0 = 0; c0 < ctoks.length && selfCls.length < 2; c0++) {
-                        selfCls.push(ctoks[c0]);
-                    }
-                    var plainDescs = [];
-                    var queue = [], visited = 0, seen = new Set();
-                    for (var i = 0; i < e.children.length; i++) queue.push({ n: e.children[i], d: 1 });
-                    while (queue.length && visited < 120) {
-                        var cur = queue.shift();
-                        var n = cur.n;
-                        if (!n || n.nodeType !== 1) continue;
-                        visited++;
-                        var attrs = stableAttrs(n);
-                        for (var j = 0; j < attrs.length; j++) {
-                            if (attrs[j].rand) continue;
-                            if (seen.has(attrs[j].name)) continue;
-                            seen.add(attrs[j].name);
-                            var ds = t + ':has(' + n.tagName.toLowerCase() + '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"])';
-                            plainDescs.push(ds);
-                            out.push(ds);
-                        }
-                        if (cur.d < 3) {
-                            for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
-                        }
-                    }
-                    for (var p = 0; p < plainDescs.length; p++) {
-                        var idx = plainDescs[p].indexOf(':has(');
-                        if (idx < 0) continue;
-                        var hasPart = plainDescs[p].slice(idx);
-                        for (var a = 0; a < selfAttrs.length; a++) {
-                            var ownA = '[' + selfAttrs[a].name + '="' + attrEsc(selfAttrs[a].value) + '"]';
-                            out.push(t + ownA + hasPart);
-                            for (var b = a + 1; b < selfAttrs.length; b++) {
-                                var ownB = '[' + selfAttrs[b].name + '="' + attrEsc(selfAttrs[b].value) + '"]';
-                                out.push(t + ownA + ownB + hasPart);
-                            }
-                        }
-                        for (var x = 0; x < selfCls.length; x++) {
-                            var ownC = '[class*="' + attrEsc(selfCls[x]) + '"]';
-                            out.push(t + ownC + hasPart);
-                            for (var y = x + 1; y < selfCls.length; y++) {
-                                var ownD = '[class*="' + attrEsc(selfCls[y]) + '"]';
-                                out.push(t + ownC + ownD + hasPart);
-                            }
-                        }
-                        for (var a2 = 0; a2 < selfAttrs.length; a2++) {
-                            var oa = '[' + selfAttrs[a2].name + '="' + attrEsc(selfAttrs[a2].value) + '"]';
-                            for (var x2 = 0; x2 < selfCls.length; x2++) {
-                                var oc = '[class*="' + attrEsc(selfCls[x2]) + '"]';
-                                out.push(t + oa + oc + hasPart);
-                            }
-                        }
-                    }
-                    return out;
-                }
-
-                function descendantAnchorSel(e) {
-                    var cands = descendantAnchorCandidates(e);
-                    for (var i = 0; i < cands.length; i++) {
-                        if (uniqueSel(cands[i])) return cands[i];
-                        var vc = visibleCount(cands[i]);
-                        if (vc > 0 && vc <= 10) {
-                            var sc = scopeUnderUniqueAncestor(cands[i], e);
-                            if (sc) return sc;
-                        }
-                    }
-                    return '';
-                }
-
-                /**
-                 * 唯一或组内索引（allowScope 控制是否允许祖先作用域收窄）。
-                 *
-                 * <p>① 全量唯一（含隐藏）直接用；② 否则只要存在“有限个可见匹配”就尝试 :nth-of-type(k) 收窄；
-                 * ③ 隐藏副本导致的非唯一：尝试祖先作用域收窄（scopeUnderUniqueAncestor）；
-                 * ④ 祖先作用域也失效时（隐藏副本与可见副本祖先结构相同）：本层自身即“可见命中恰 1”，
-                 * 直接用排除隐藏副本的原生判别符收窄本层自身段（如 :not(.d-none)），恢复 strict mode 唯一性。
-                 */
-                function uniqueOrGroup(sel, e, allowScope) {
-                    if (allowScope === undefined) allowScope = true;
-                    if (!sel || !e) return '';
-                    if (uniqueSel(sel)) return sel;
-                    if (!allowScope) return '';
-                    var cnt = visibleCount(sel);
-                    if (cnt > 0 && cnt <= 10) {
-                        var g = groupIndexSel(sel, e);
-                        if (g && uniqueSel(g)) return g;
-                        var sc = scopeUnderUniqueAncestor(sel, e);
-                        if (sc) return sc;
-                        if (cnt === 1) {
-                            var refined = scopeSegExcludingHidden(sel);
-                            if (refined) return refined;
-                        }
-                    }
-                    return '';
-                }
-                /**
-                 * 目标元素属性兜底（在结构链之前）：无 id / 动态 id 无法唯一时，先试
-                 * {@code img[src$="文件名"]}、稳定 class token / class 双 token AND，然后按「最稳定优先」用属性：
-                 * ① 稳定属性（值无随机段）精确 {@code [name="value"]}；② 稳定属性双→三精确 AND；③ 含随机值属性
-                 * 用开头 {@code ^=}、包含 {@code *=}、结尾 {@code $=} 变体（段自身无随机值）；④ 组合层：单属性仍
-                 * 不唯一时多个属性共同定位——稳定属性精确 AND 随机变体（最稳定优先）、随机变体 × 随机变体 AND。
-                 * 每个候选先做<b>全量</b>唯一性校验（含隐藏元素，对齐 Playwright strict mode）——唯一即采用；
-                 * 否则尝试组内索引再复核；全部失败返回空串交给结构链/XPath。
-                 */
-                function attrFallbackSel(e, allowScope) {
-                    if (allowScope === undefined) allowScope = true;
-                    if (!e || e.nodeType !== 1) return '';
-                    var t = e.tagName.toLowerCase();
-                    if (t === 'img') {
-                        var tail = srcTail(e.getAttribute && e.getAttribute('src'));
-                        if (tail) {
-                            // 语言变体文件名改锚定语言段之前的前缀，否则切语言后 src 换名即失效
-                            var neutral = srcLocaleNeutralPrefix(tail);
-                            var byTail = neutral
-                                ? 'img[src*="' + attrEsc(neutral) + '"]'
-                                : 'img[src$="' + attrEsc(tail) + '"]';
-                            var s0 = uniqueOrGroup(byTail, e, allowScope);
-                            if (s0) return s0;
-                        }
-                    }
-                    var cls = (typeof e.className === 'string') ? e.className : '';
-                    var toks = stableClassTokens(cls);
-                    for (var i = 0; i < toks.length; i++) {
-                        var byCls = t + '[class*="' + attrEsc(toks[i]) + '"]';
-                        var s1 = uniqueOrGroup(byCls, e, allowScope);
-                        if (s1) return s1;
-                    }
-                    // class 双 token AND：单 token 不唯一时，两个稳定 token 组合常能收敛。
-                    for (var i = 0; i < toks.length && i < 4; i++) {
-                        for (var j = i + 1; j < toks.length && j < 4; j++) {
-                            var byCls2 = t + '[class*="' + attrEsc(toks[i]) + '"][class*="' + attrEsc(toks[j]) + '"]';
-                            var s2 = uniqueOrGroup(byCls2, e, allowScope);
-                            if (s2) return s2;
-                        }
-                    }
-                    // 跨属性：按「最稳定优先」用属性——稳定属性（值无随机段）单精确 → 双/三精确 AND → 含随机值属性 ^=/*=$= 变体。
-                    var names = stableAttrs(e);
-                    for (var i = 0; i < names.length && !names[i].rand; i++) {
-                        var by1 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"]';
-                        var s3 = uniqueOrGroup(by1, e, allowScope);
-                        if (s3) return s3;
-                    }
-                    for (var i = 0; i < names.length && !names[i].rand; i++) {
-                        for (var j = i + 1; j < names.length && !names[j].rand; j++) {
-                            var by2 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"][' + names[j].name + '="' + attrEsc(names[j].value) + '"]';
-                            var s4 = uniqueOrGroup(by2, e, allowScope);
-                            if (s4) return s4;
-                        }
-                    }
-                    for (var i = 0; i < names.length && !names[i].rand; i++) {
-                        for (var j = i + 1; j < names.length && !names[j].rand; j++) {
-                            for (var k = j + 1; k < names.length && !names[k].rand; k++) {
-                                var by3 = t + '[' + names[i].name + '="' + attrEsc(names[i].value) + '"][' + names[j].name + '="' + attrEsc(names[j].value) + '"][' + names[k].name + '="' + attrEsc(names[k].value) + '"]';
-                                var s6 = uniqueOrGroup(by3, e, allowScope);
-                                if (s6) return s6;
-                            }
-                        }
-                    }
-                    for (var i = 0; i < names.length; i++) {
-                        if (!names[i].rand) continue;
-                        var segs = attrValueSegments(names[i].value);
-                        for (var m = 0; m < segs.length; m++) {
-                            var byV = t + '[' + names[i].name + segs[m].op + '"' + attrEsc(segs[m].seg) + '"]';
-                            var s5 = uniqueOrGroup(byV, e, allowScope);
-                            if (s5) return s5;
-                        }
-                    }
-                    // 组合层：单属性仍不唯一时多个属性共同定位——稳定属性精确 AND 随机属性变体 / 随机变体 × 随机变体 AND。
-                    var randNames = [], stabNames = [];
-                    for (var i = 0; i < names.length; i++) if (names[i].rand) randNames.push(names[i]);
-                    for (var i = 0; i < names.length && !names[i].rand && i < 2; i++) stabNames.push(names[i]);
-                    for (var a = 0; a < stabNames.length; a++) {
-                        for (var b = 0; b < randNames.length && b < 2; b++) {
-                            var rbSegs = attrValueSegments(randNames[b].value);
-                            for (var m = 0; m < rbSegs.length; m++) {
-                                var byMix = t + '[' + stabNames[a].name + '="' + attrEsc(stabNames[a].value) + '"][' + randNames[b].name + rbSegs[m].op + '"' + attrEsc(rbSegs[m].seg) + '"]';
-                                var s7 = uniqueOrGroup(byMix, e, allowScope);
-                                if (s7) return s7;
-                            }
-                        }
-                    }
-                    for (var b = 0; b < randNames.length && b < 2; b++) {
-                        for (var c = b + 1; c < randNames.length && c < 2; c++) {
-                            var rb2Segs = attrValueSegments(randNames[b].value);
-                            var rcSegs = attrValueSegments(randNames[c].value);
-                            for (var m = 0; m < rb2Segs.length; m++) {
-                                for (var m2 = 0; m2 < rcSegs.length; m2++) {
-                                    var byRand = t + '[' + randNames[b].name + rb2Segs[m].op + '"' + attrEsc(rb2Segs[m].seg) + '"][' + randNames[c].name + rcSegs[m2].op + '"' + attrEsc(rcSegs[m2].seg) + '"]';
-                                    var s8 = uniqueOrGroup(byRand, e, allowScope);
-                                    if (s8) return s8;
-                                }
-                            }
-                        }
-                    }
-                    return '';
-                }
-
-                function siblingIndex(e) { var i = 0, s = e.previousElementSibling; while (s) { i++; s = s.previousElementSibling; } return i; }
-                // 绝对 XPath（结构 CSS 无法唯一时的兜底定位器）。shadow root 内返回空串：XPath 表达不了
-                // "穿透 shadow 边界"的路径，那种情况由 shadowHosts + CSS 负责。
-                function absXPath(e) {
-                    if (!e || e.nodeType !== 1) return '';
-                    var root = e.getRootNode ? e.getRootNode() : null;
-                    if (root && root.nodeType === 11) return '';
-                    var parts = [], n = e, guard = 0;
-                    while (n && n.nodeType === 1 && guard++ < 64) {
-                        var t = n.tagName.toLowerCase();
-                        if (t === 'html') { parts.unshift('/html'); break; }
-                        var same = 0, idx = 0, sib = n.parentElement ? n.parentElement.firstElementChild : null;
-                        while (sib) {
-                            if (sib.tagName === n.tagName) { same++; if (sib === n) idx = same; }
-                            sib = sib.nextElementSibling;
-                        }
-                        parts.unshift('/' + t + (same > 1 ? '[' + idx + ']' : ''));
-                        n = n.parentElement;
-                    }
-                    return parts.join('');
-                }
-                // 拾取目标归一化（2026-11-11 定稿规则：拾取对象必须 = 用户实际点击的 DOM 对象）。
-                //
-                // 保留的归一：点击装饰性节点（<img alt="" aria-hidden="true"> 信息图标、空 <span>）或文本节点容器时，
-                // 若自身无可访问名（eHasName 为假），上溯到最近的「带稳定 #id 的语义容器」——使产物落到语义容器
-                // （如提示区 div#newPasswordHint），带回完整文本：既能反查 NLS key，也能回退到稳定 #id。
-                // 注意：上溯只认「稳定 #id」，无 id 的纯布局容器（content-wrapper / section / 大段文本 div）一律不接收，
-                // 否则会落到这种大文本容器，定位过广且不稳健（2026-11-12 收紧）。
-                //
-                // 已移除的归一：<label> 绝不再转发到 label.control / 内部控件。关联控件是「另一个 DOM 对象」，
-                // 转发会让产物定位到用户没点的元素（点"用户名"标签 → 生成 input 定位器），违背"拾取对象 = 点击对象"。
-                // label 自身有可访问名，命中 NLS 时可走文本语义策略生成 @RoleElement(key=...)。
-                //
-                // eHasName 守卫保证「自身已有名的元素」（文本 div、按钮、带 data-i18n 的 span 等）行为不变，避免无谓上溯。
-                function hasIdentityAttr(e) {
-                    if (!e || e.nodeType !== 1) return false;
-                    if (e.id && !isDynamicId(e.id)) return true;
-                    var attrs = stableAttrs(e);
-                    for (var i = 0; i < attrs.length; i++) {
-                        if (attrs[i].rand) continue;
-                        var n = attrs[i].name.toLowerCase();
-                        if (/^data-/.test(n) || n === 'aria-label' || n === 'name' || n === 'type') return true;
-                    }
-                    return false;
-                }
-
-                function pickTarget(e) {
-                    if (e && e.nodeType === 1 && hasIdentityAttr(e)) return e;
-                    var eHasName = (accessibleName(e) || '').trim();
-                    var n = e, depth = 0;
-                    while (n && n.nodeType === 1 && depth < 5) {
-                        var t = n.tagName ? n.tagName.toLowerCase() : '';
-                        if (t === 'input' || t === 'select' || t === 'textarea' || t === 'button') return n;
-                        //  2026-11-11：点 <label> 就保留 <label> 本身，绝不转发到 label.control。
-                        //  关联控件是另一个 DOM 对象，转发会导致「点'用户名'标签、产物却定位到 input」——
-                        //  拾取对象与用户实际点击对象不一致（用户明确否定的行为）。
-                        //  label 自身带可访问名（其文本），命中 NLS 时可走文本语义策略定位。
-                        if (t === 'label') return n;
-                        if (t === 'a' && n.getAttribute && n.getAttribute('href')) return n;
-                        // 2026-11-13：容器/地标类 role（document/dialog/group/region/...）不是可交互目标，
-                        // 不应把「用户点的标题/正文」上溯到它们——Bootstrap .modal-dialog=role=document、.modal=role=dialog
-                        // 会把 modal 内点击提升为对话框容器，再被 isContainerRoot 当背景误杀，导致 modal 内拾取静默无结果。
-                        // 仅对交互/语义控件角色（button/tab/checkbox/...）保留上溯提升。
-                        var __role = n.getAttribute && n.getAttribute('role');
-                        if (__role) {
-                            var __rl = String(__role).toLowerCase();
-                            var __containerRole = /^(document|dialog|alertdialog|application|group|region|banner|main|navigation|contentinfo|complementary|form|section|generic|none|presentation|article|aside|header|footer|search|tooltip|status|log|list|listitem)$/.test(__rl);
-                            if (!__containerRole) return n;
-                        }
-                        // 2026-11-12：上溯只接受「带稳定 #id 的语义容器」（如提示区 div#newPasswordHint），
-                        // 拒绝无 id 的纯布局容器（content-wrapper / section / 文本 div / span）——它们只是把大段文本
-                        // 包起来，落到这类容器会让产物定位过广且不稳健。找不到稳定 id 容器则保留点击对象本身
-                        // （precise = 用户实际点击的 DOM 对象），即便它只得 class 兜底选择器，也比大容器窄得多。
-                        if (depth > 0 && !eHasName && (accessibleName(n) || '').trim() && n.id && !isDynamicId(n.id)) return n;
-                        n = n.parentElement; depth++;
-                    }
-                    return e;
-                }
-                function shadowHostsOf(e) {
-                    var hosts = [];
-                    try {
-                        var node = e;
-                        while (node) {
-                            var root = node.getRootNode ? node.getRootNode() : null;
-                            if (!root || !root.host) break;
-                            hosts.unshift(cssSel(root.host));
-                            node = root.host;
-                        }
-                    } catch (ignore) { return []; }
-                    return hosts;
-                }
-                // 可定位的语义属性（data-* + 整族 aria-*）：业务自写/无障碍属性，值稳定时通常一个就能唯一定位。
-                // data-testid 已由 testid 字段单独消费，这里跳过；id/class/style 由其它字段处理，也不收集；
-                // 值随机与否交给 Java 侧判定（状态类属性只进组合，详见 CodegenScorer）。
-                function semanticAttrsOf(e, limit) {
-                    var out = {}, used = 0;
-                    if (!e || !e.attributes) return out;
-                    for (var i = 0; i < e.attributes.length && used < limit; i++) {
-                        var a = e.attributes[i];
-                        if (!a || !a.name) continue;
-                        var name = a.name.toLowerCase();
-                        if (name.indexOf('data-') !== 0 && name.indexOf('aria-') !== 0) continue;
-                        if (name === 'data-testid') continue;
-                        var v = (a.value || '').replace(/\\s+/g, ' ').trim();
-                        if (!v || v.length > 120) continue;
-                        out[name] = v;
-                        used++;
-                    }
-                    return out;
-                }
-                // 与 codegen-inject.js 的 checkedStateOf 保持同源（评审 N-02）：
-                // 原生控件读 .checked，自定义 role=checkbox 的 div 回退 aria-checked。
-                function checkedStateOf(el) {
-                    if (!el) return false;
-                    if (typeof el.checked === 'boolean') return el.checked;
-                    var aria = el.getAttribute && el.getAttribute('aria-checked');
-                    return aria === 'true';
-                }
-                function factsOf(x) {
-                    if (!x || x.nodeType !== 1) return null;
-                    var tag = x.tagName ? x.tagName.toLowerCase() : '';
-                    return {
-                        role: roleOf(x), name: accessibleName(x), tag: tag, id: x.id || '',
-                        testid: (x.getAttribute && x.getAttribute('data-testid')) || '',
-                        type: ((x.getAttribute && x.getAttribute('type')) || '').toLowerCase(),
-                        placeholder: (x.getAttribute && x.getAttribute('placeholder')) || '',
-                        alt: (x.getAttribute && x.getAttribute('alt')) || '',
-                        title: (x.getAttribute && x.getAttribute('title')) || '',
-                        value: (typeof x.value === 'string') ? x.value : '',
-                        checked: checkedStateOf(x),
-                        text: normalizedText(x), label: labelTextOf(x), nth: siblingIndex(x), cssSelector: cssSel(x),
-                        shadowHosts: shadowHostsOf(x),
-                        className: (typeof x.className === 'string') ? x.className : '',
-                        xpath: absXPath(x),
-                        nameAttr: (x.getAttribute && x.getAttribute('name')) || '',
-                        src: (x.getAttribute && x.getAttribute('src')) || '',
-                        attrs: semanticAttrsOf(x, 10),
-                        // 目标自身的后代锚点：供 Java 侧生成 `tag:has([data-i18n="x"])` 短形式。
-                        // 深度 3 / 最多 6 个，与注入脚本 factsOf 同口径（两端必须同步）。
-                        childAnchors: descendantAnchorsOf(x, 3, 6)
-                    };
-                }
-                // 单层选择器段：稳定 id 优先，动态 id 试稳定前缀（唯一才用），否则稳定属性段（含组内索引）；
-                // 一律不产出裸 tag:nth-of-type(n) 段——纯 tag 段既无锚点也无属性，不作 CSS 候选（交 Java 侧 XPath/role 兜底）。
-                function segOf(n) {
-                    if (n.id && !isDynamicId(n.id)) return '#' + (window.CSS ? CSS.escape(n.id) : n.id);
-                    if (n.id) {
-                        var fb = dynamicIdFallbackSel(n.id);
-                        if (fb) return fb;
-                    }
-                    return attrFallbackSel(n);
-                }
-                // 父级嵌套降级候选：每项是「从该祖先到目标的完整路径」（段链 > 连接、层级严格连续）。
-                // 必须整条替换 base，绝不能当 base 的前缀拼接——cssSel 是"上溯最多 6 层"的窗口，
-                // 两个窗口相拼会重叠，产出 div:nth-of-type(7) > body:nth-of-type(1) 这类不可能的层级，
-                // 生成的 CSS 永远匹配不到元素。
-                // v2.12 收紧：每一层都必须有稳定 id / 动态 id 前缀 / 稳定属性段（含组内索引）——
-                // 目标层或任一中间层是裸 tag:nth-of-type(n) 段时整条链作废（返回空数组），不再作为 CSS 候选，
-                // 交给 Java 侧 XPath / role 兜底；「锚点 + 中间裸 tag 段」的链同样不产出。
-                // 后代锚点（与 codegen-inject.js 的 descendantAnchorsOf 同源）：
-                // 深度 4 / 最多 4 个 / 最多访问 200 节点，供 :has() 作用域使用。
-                function descendantAnchorsOf(root, maxDepth, maxCount) {
-                    var out = [];
-                    if (!root || !root.children) return out;
-                    var queue = [], visited = 0;
-                    for (var i = 0; i < root.children.length; i++) queue.push({ n: root.children[i], d: 1 });
-                    while (queue.length && out.length < maxCount && visited < 200) {
-                        var cur = queue.shift();
-                        var n = cur.n;
-                        if (!n || n.nodeType !== 1) continue;
-                        visited++;
-                        var seg = '';
-                        if (n.id && !isDynamicId(n.id)) {
-                            seg = '#' + (window.CSS ? CSS.escape(n.id) : n.id);
-                        } else {
-                            var attrs = stableAttrs(n);
-                            for (var j = 0; j < attrs.length; j++) {
-                                if (attrs[j].rand) continue;
-                                seg = '[' + attrs[j].name + '="' + attrEsc(attrs[j].value) + '"]';
-                                break;
-                            }
-                        }
-                        if (seg) out.push(seg);
-                        if (cur.d < maxDepth) {
-                            for (var k = 0; k < n.children.length; k++) queue.push({ n: n.children[k], d: cur.d + 1 });
-                        }
-                    }
-                    return out;
-                }
-                function ancestorFacts(n, path) {
-                    return {
-                        cssSelector: path,
-                        id: n.id || '',
-                        tag: n.tagName ? n.tagName.toLowerCase() : '',
-                        testid: (n.getAttribute && n.getAttribute('data-testid')) || '',
-                        attrs: semanticAttrsOf(n, 6),
-                        // 深度 6 / 最多 6 个：4 层时行级锚点（卡片 > 列表 > 行 > 单元格 > 标题）采不到，
-                        // 而 :has() 作用域恰恰依赖深层锚点。节点访问上限 200 不变。
-                        childAnchors: descendantAnchorsOf(n, 6, 6)
-                    };
-                }
-                // 祖先链：从近到远的「从该祖先到目标的完整路径」。
-                // 无锚点层改为 :nth-of-type 补位（上限 MAX_FILLER_LAYERS），超过才停止上溯——
-                // 历史上任一层失败即返回空数组，复杂页面（中间是纯布局 div）一条祖先候选都产不出。
-                // 注意「截断而非清空」：已收集的近端路径仍然有效。
-                function ancestorChain(el, maxDepth) {
-                    var first = segOf(el) || fallbackSeg(el);
-                    if (!first) return [];
-                    var chain = [first], out = [], last = '';
-                    var filler = segOf(el) ? 0 : 1;
-                    var p = el.parentElement, d = 0;
-                    while (p && p.nodeType === 1) {
-                        var seg = segOf(p);
-                        if (!seg) {
-                            if (filler >= MAX_FILLER_LAYERS) break;   // 补位超限：截断，保留已有近端路径
-                            seg = fallbackSeg(p);
-                            if (!seg) break;
-                            filler++;
-                        }
-                        chain.unshift(seg);
-                        last = chain.join(' > ');
-                        if (d < maxDepth) out.push(ancestorFacts(p, last));
-                        p = p.parentElement;
-                        d++;
-                    }
-                    if (d > maxDepth && out.length && last !== out[out.length - 1].cssSelector) {
-                        out.push({ cssSelector: last, id: '' });
-                    }
-                    return out;
-                }
-                if (!el || el.nodeType !== 1) return null;
-                var target = pickTarget(el);
-                if (!target || target.nodeType !== 1) target = el;
-                return { self: factsOf(target), ancestors: ancestorChain(target, 8) };
+    /**
+     * 从 classpath 读取注入脚本。
+     *
+     * <p>为什么放资源文件而不是 text block：脚本已超 60KB，JVM 常量池单字符串上限 65535 字节，
+     * 任何注释增补都会触发 {@code is too long for the constant pool} 编译失败；资源化同时让
+     * {@code node --check} 与两处（DOM 注入 / CDP 提取）共享同一份实现成为可能。
+     */
+    private static String loadScript(String name) {
+        String path = "/codegen/" + name;
+        try (java.io.InputStream in = CodegenCdpNodeExtractor.class.getResourceAsStream(path)) {
+            if (in == null) {
+                throw new IllegalStateException("Missing codegen script resource: " + path);
             }
-            """;
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed to load codegen script resource: " + path, e);
+        }
+    }
 
     /**
      * 跨 frame 穿透：给定 `<iframe>` 宿主元素（在父 frame 文档内），返回其"优先、可读<b>且唯一</b>"的 CSS 选择器。
@@ -1126,7 +223,7 @@ public final class CodegenCdpNodeExtractor {
 
     /** 从 backendNodeId 反查 role/name/cssSelector，装配成 CodegenEntry；任一环节失败返回 null。 */
     public CodegenEntry extract(long backendNodeId) {
-        return extract(backendNodeId, null, ElementRef.FrameScope.UNKNOWN, null, null);
+        return extract(backendNodeId, null, ElementRef.FrameScope.UNKNOWN, null, null, null);
     }
 
     /**
@@ -1139,7 +236,7 @@ public final class CodegenCdpNodeExtractor {
      * @param frameIdHint 元素所属 frameId；{@code null} 表示未知（回退 {@code node.frameId}，仅 frame owner 可靠）
      */
     public CodegenEntry extract(long backendNodeId, String frameIdHint) {
-        return extract(backendNodeId, frameIdHint, ElementRef.FrameScope.UNKNOWN, null, null);
+        return extract(backendNodeId, frameIdHint, ElementRef.FrameScope.UNKNOWN, null, null, null);
     }
 
     /**
@@ -1150,7 +247,7 @@ public final class CodegenCdpNodeExtractor {
      * @param scopeHint     归属结论（定位阶段给出）；{@link ElementRef.FrameScope#UNKNOWN} 表示未知
      */
     public CodegenEntry extract(long backendNodeId, String frameIdHint, ElementRef.FrameScope scopeHint) {
-        return extract(backendNodeId, frameIdHint, scopeHint, null, null);
+        return extract(backendNodeId, frameIdHint, scopeHint, null, null, null);
     }
 
     /**
@@ -1165,8 +262,26 @@ public final class CodegenCdpNodeExtractor {
      * </ul>
      */
     public CodegenEntry extract(ElementRef ref) {
+        return extract(ref, null);
+    }
+
+    /**
+     * 生产入口（拾取路径）：附带<b>点击捕获阶段</b>的元素快照。
+     *
+     * <p>抽取是异步的（拾取引擎线程），等它执行时页面自身的 click 处理器早已跑完。提交类按钮
+     * 「点一下就变 loading」，抽到的会是 loading 文案，产物因此变成
+     * {@code @RoleElement(name = "Loading, please wait.")} + 字段名 {@code loadingPleaseWaitBtn}，
+     * 回放时那一步的按钮其实叫 {@code "Continue"} ⇒ 定位器打空。
+     *
+     * <p>捕获阶段（window capture，先于页面处理器）同步采集的 {@code name} / {@code text} 才是
+     * 「这一步要操作的那个元素」的样子；是否采信由 {@link PickNamePolicy} 判定（有证据才动）。
+     *
+     * @param ref 定位阶段给出的元素引用
+     * @param preClick 捕获阶段快照；{@code null} 表示无证据（行为与 {@link #extract(ElementRef)} 完全一致）
+     */
+    public CodegenEntry extract(ElementRef ref, PreClickSnapshot preClick) {
         if (ref == null) return null;
-        return extract(ref.backendNodeId(), ref.frameId(), ref.scope(), ref.objectId(), ref.frames());
+        return extract(ref.backendNodeId(), ref.frameId(), ref.scope(), ref.objectId(), ref.frames(), preClick);
     }
 
     /**
@@ -1181,10 +296,11 @@ public final class CodegenCdpNodeExtractor {
      *                      语义与不传完全一致（多一次往返，绝不失败）
      * @param framesHint    定位阶段顺带产出的 frame 树快照（主 frame id + parent 映射）；非 {@code null}
      *                      时抽取阶段直接复用，避免为生成穿透路径二次读取 {@code Page.getFrameTree}
+     * @param preClick      点击捕获阶段的元素快照（见 {@link PreClickSnapshot}）；{@code null} 表示无证据
      * @return 抽取结果；任一环节失败返回 {@code null}（调用方按"未拾取"处理，绝不产出半成品）
      */
     public CodegenEntry extract(long backendNodeId, String frameIdHint, ElementRef.FrameScope scopeHint,
-                                String objectIdHint, Frames framesHint) {
+                                String objectIdHint, Frames framesHint, PreClickSnapshot preClick) {
         long startedNanos = System.nanoTime();
         try {
             String objectId = objectIdHint;
@@ -1217,8 +333,19 @@ public final class CodegenCdpNodeExtractor {
             // AX 权威语义：与 Playwright getByRole 同源。页面侧 roleOf 只是标签推断（label/div/span 会落到
             // AriaRole 里不存在或无语义的角色，最终只能生成又长又脆的结构 CSS）；AX 给出的才是浏览器实际
             // 暴露给辅助技术的 role（radio/link/textbox/...）与可访问名。
-            CodegenFacts scoredFacts = new CodegenFacts(
-                    withAxSemantics(facts.self, axSemantics(objectId)), facts.ancestors, facts.robustXpaths);
+            CodegenFacts.Fact axSelf = withAxSemantics(facts.self, axSemantics(objectId));
+            // 名字收窄（有证据才动，规则见 PickNamePolicy）：
+            //   ① 状态播报区（aria-live）文本混进 AX 名 ⇒ 取稳定标签（"Loading, please wait. Continue" → "Continue"）；
+            //   ② 点击改写了元素自身文案（按钮变 loading）⇒ 用捕获阶段的名字还原（否则产物与字段名都变成 loading）。
+            // 必须早于打分/NLS 反查/字段命名：它们全部消费 name。
+            CodegenFacts.Fact namedSelf = resolvePickedName(axSelf, facts.self, preClick);
+            if (!Objects.equals(namedSelf.name, axSelf.name)) {
+                log.info("[codegen][cdp] picked name normalized for role={}: '{}' -> '{}' "
+                                + "(statusText='{}', preClickName='{}')",
+                        namedSelf.role, axSelf.name, namedSelf.name, facts.self.statusText,
+                        preClick == null ? null : preClick.name());
+            }
+            CodegenFacts scoredFacts = new CodegenFacts(namedSelf, facts.ancestors, facts.robustXpaths, facts.list);
             long afterAx = System.nanoTime();
 
             // frame 归属：主 frame 元素不必读 frame 树（定位阶段已告知），子 frame 元素才需要为穿透路径读一次。
@@ -1241,7 +368,7 @@ public final class CodegenCdpNodeExtractor {
 
             String role = self.role;
             String name = self.name;
-            // 容器根（document / RootWebArea / <html> / <body>）不是真实交互目标：坐标拾取命中它们，实际是点了
+            // 容器根（document / RootWebArea / <html> / <body>）不是真实交互目标：命中它们，实际是点了
             // 页面背景或弹窗遮罩，生成出来的条目既无意义又会污染 Elements 面板，且其聚合出的整页文案还会触发
             // 巨名 / 伪 NLS 键（见 NlsReverseLookup.MAX_REVERSE_NAME 与 CodegenFieldPlanner.MAX_NAME_IDENTIFIER）。
             // 直接判为无效拾取：调用方据此跳过条目、动作（若此前未被拾取）一并忽略，背景点击不污染产物。
@@ -1254,9 +381,30 @@ public final class CodegenCdpNodeExtractor {
             // 优先用元素自身 data-i18n（字面即 key，最精确、消歧多 key 同值）；否则按可见文案反查。
             String dataI18n = (self.attrs != null) ? self.attrs.get("data-i18n") : null;
             String nlsKey = nls.lookup(name, dataI18n);
-            String css = scored.uniqueCss == null || scored.uniqueCss.isEmpty() ? "html" : scored.uniqueCss;
-            int index = self.nth;
+            if (nlsKey == null || nlsKey.isEmpty()) {
+                // 交互控件本身通常不带 data-i18n：HSBC 把 i18n 标在按钮文案的 <span> 上
+                // （{@code <button><span data-i18n="continue">Continue</span></button>}）。
+                // 拾取归一后按钮才是拾取对象，自身属性里没有 key；此时若只按可见文案反查，
+                // 同一文案对应多个 key（reset.json 里 8 个 key 都是 "Continue"）时会"文件顺序先到先得"，
+                // 拿到语义不对的 key。故借目标自身采集的后代锚点（childAnchors）取回那个显式 key。
+                nlsKey = nls.lookupByDescendantKey(name, descendantI18nKey(self.childAnchors));
+            }
+            // 集合项自动成组：目标本身是 ARIA 集合里的一项（如密保问题下拉的 li[role=option]）时，
+            // 旧的「多次拾取同一 role|name」成组判据永远不成立（每一项的名字都不同），产物只能退化成
+            // 「点中第 5 个选项」的单元素。注入脚本已把「整组定位器 + 组内序号」一并带出，
+            // 这里落成 autoList：Page 侧生成 PageElementList，Step 侧用 get(index) 指回用户实际点的那一项。
+            CodegenFacts.ListHint listHint = facts.list != null && facts.list.usable() ? facts.list : null;
+            // 自动成组时 css 是「命中整组」的定位器（来自注入脚本，相对元素自身文档 / shadow root）。
+            String css = listHint != null
+                    ? listHint.selector()
+                    : (scored.uniqueCss == null || scored.uniqueCss.isEmpty() ? "html" : scored.uniqueCss);
+            // 序号语义随成组来源而不同：自动成组 = 用户实际点的那一项在组内的序号；否则沿用同级兄弟位置。
+            int index = listHint != null ? listHint.index() : self.nth;
             String sigKey = role + "|" + (name == null ? "" : name) + "#" + index;
+            if (listHint != null) {
+                log.info("[codegen][cdp] auto list detected: role={} index={} count={} selector='{}'",
+                        role, index, listHint.count(), css);
+            }
 
             if (scored.roleLocatable && inSubFrame) {
                 log.debug("[codegen][cdp] role verification skipped (element lives in sub frame {}): "
@@ -1268,8 +416,10 @@ public final class CodegenCdpNodeExtractor {
             // 一次页级计数在按钮密集的大页面上要 10~90ms，压在点击响应里明显发涩；故改由调用方在任何产物
             // 输出前用 countRoleMatches 复核（1 命中才保留 role，否则 RoleRevision.toCss 回退 CSS）。
             // 子 frame 元素连候选都不给：页级 getByRole 对它们恒 0 命中，role 策略无从校验，直接走穿透 CSS。
-            boolean roleLocatable = scored.roleLocatable && !inSubFrame;
-            if (scored.roleLocatable && !inSubFrame) {
+            // 自动成组的条目同样不给 role 候选：getByRole(role, name) 命中的是「某一个选项」，
+            // 而 PageElementList 需要「命中整组」的定位器，两者语义冲突，只能走整组 CSS。
+            boolean roleLocatable = scored.roleLocatable && !inSubFrame && listHint == null;
+            if (scored.roleLocatable && !inSubFrame && listHint == null) {
                 log.debug("[codegen][cdp] role verification deferred to generation for role={} name='{}'",
                         role, name);
             }
@@ -1278,15 +428,20 @@ public final class CodegenCdpNodeExtractor {
             String strategy = roleLocatable
                     ? ((nlsKey != null && !nlsKey.isEmpty()) ? LocatorStrategy.ROLE_WITH_NAME : LocatorStrategy.ROLE)
                     : LocatorStrategy.CSS;
-            String selector = buildSelector(role, name, nlsKey);
+            // 自动成组时产物用的是整组 CSS，展示用的 selector 也必须跟着改，否则面板/日志会显示
+            // 一条「role=option[name=第 5 项]」的误导信息。
+            String selector = listHint != null ? css : buildSelector(role, name, nlsKey);
+            // 自动成组的命中数取「整组成员数」（listHint 已在 usable() 里保证 >= 2）：
+            // 它既让生成侧走 PageElementList，也让产物注释能说明整组有多大。
+            int matchCount = listHint != null ? listHint.count() : scored.matchCount;
 
             // 可观测性：CSS 候选链最终 0 命中（或计数不可判定）时，运行期会一直等不到元素。
             // 不改变产物（拾取瞬间元素可能只是尚未渲染），但必须留下可检索的告警，
             // 而不是像以前那样把 0 命中当作「唯一」静默采用。
-            if (!roleLocatable && scored.matchCount <= 0) {
+            if (!roleLocatable && matchCount <= 0) {
                 log.warn("[codegen][cdp] locator '{}' matched {} element(s) at pick time{} - "
                                 + "the generated locator may time out at replay",
-                        css, scored.matchCount, inSubFrame ? " (sub frame)" : "");
+                        css, matchCount, inSubFrame ? " (sub frame)" : "");
             }
 
             // 两个引擎的计数各归各的字段（评审 P0-1）：
@@ -1302,8 +457,8 @@ public final class CodegenCdpNodeExtractor {
             List<String> framePath = inSubFrame ? resolveFramePath(frames, frameId) : List.of();
             // shadow 宿主链随事实一并带出：CDP 侧按选择器反查时 document.querySelector 不穿透 shadow 边界
             CodegenEntry entry = new CodegenEntry(sigKey, role, name, strategy, scored.score, selector, css,
-                    nlsKey, index, framePath, self.shadowHosts, scored.matchCount, self.tag, self.checked,
-                    roleHits);
+                    nlsKey, index, framePath, self.shadowHosts, matchCount, self.tag, self.checked,
+                    roleHits, listHint != null);
             logProfile(startedNanos, afterResolve, afterFacts, afterAx, afterScore, afterRole, counting, entry);
             return entry;
         } catch (Exception e) {
@@ -1317,7 +472,7 @@ public final class CodegenCdpNodeExtractor {
     }
 
     /**
-     * 页面级容器根不是真实交互目标：坐标拾取命中它们实为点了页面背景 / 弹窗遮罩，不该生成条目。
+     * 页面级容器根不是真实交互目标：命中它们实为点了页面背景 / 弹窗遮罩，不该生成条目。
      *
      * <p>覆盖两类等价情况：AX 树根角色（{@code document} / {@code RootWebArea} / {@code WebArea}）与
      * DOM 根标签（{@code <html>} / {@code <body>}）。二者都不会是用户真正想操作的元素。
@@ -1328,6 +483,35 @@ public final class CodegenCdpNodeExtractor {
         if (role.equals("document") || role.equals("rootwebarea") || role.equals("webarea")) return true;
         String tag = self.tag == null ? "" : self.tag.toLowerCase(Locale.ROOT);
         return tag.equals("html") || tag.equals("body");
+    }
+
+    /** {@code childAnchors} 里 {@code [data-i18n="xxx"]} 段的匹配式，捕获 key。 */
+    private static final Pattern DESCENDANT_I18N_ANCHOR =
+            Pattern.compile("\\[data-i18n=\"([^\"]+)\"]");
+
+    /**
+     * 从目标自身的后代锚点里取第一个显式 NLS key（{@code data-i18n}）。
+     *
+     * <p><b>为什么需要</b>：交互控件自身通常不带 {@code data-i18n} —— HSBC 把 i18n 标在按钮文案的
+     * {@code <span>} 上（{@code <button><span data-i18n="continue">Continue</span></button>}）。
+     * 拾取归一后拾取对象成了 button，自身属性里没有 key，只能按可见文案反查；而同一文案往往对应多个 key
+     * （reset.json 里 8 个 key 的值都是 "Continue"），反查只能"文件顺序先到先得"，拿到的 key 语义不对
+     * （例如拿到 {@code reset_password_5} 而不是 {@code continue}）。借后代锚点就能取回开发者显式绑定的那个 key。
+     *
+     * <p>后代锚点按 BFS 采集（浅层优先），故"最近的那个 data-i18n"胜出；最终是否采纳由
+     * {@code NlsReverseLookup.lookupByDescendantKey} 用「值必须与该元素可访问名互相包含」再校验一次，
+     * 防止把装饰性子节点的 key（图标 title 之类）误当成本元素的 key。
+     *
+     * @return 第一个后代 {@code data-i18n} 的值；没有则 {@code null}
+     */
+    static String descendantI18nKey(List<String> childAnchors) {
+        if (childAnchors == null || childAnchors.isEmpty()) return null;
+        for (String anchor : childAnchors) {
+            if (anchor == null) continue;
+            Matcher m = DESCENDANT_I18N_ANCHOR.matcher(anchor);
+            if (m.find()) return m.group(1);
+        }
+        return null;
     }
 
     /**
@@ -1381,9 +565,39 @@ public final class CodegenCdpNodeExtractor {
         String role = AriaRoles.isLocatable(ax.role()) ? ax.role() : js.role;
         String name = (ax.name() != null && !ax.name().isBlank()) ? ax.name() : js.name;
         if (Objects.equals(role, js.role) && Objects.equals(name, js.name)) return js;
+        // 拷贝必须带 childAnchors / statusText：前者供 NLS 反查「后代 data-i18n 显式 key」
+        // （HSBC 把 i18n 标在按钮文案的 <span> 上），后者供名字收窄校验。历史实现漏了它们，
+        // 导致 AX 存在时（常规路径）后代 key 与播报文本双双丢失。
         return new CodegenFacts.Fact(role, name, js.tag, js.id, js.testid, js.type, js.placeholder,
                 js.alt, js.title, js.value, js.text, js.label, js.nth, js.cssSelector, js.shadowHosts,
-                js.className, js.xpath, js.nameAttr, js.attrs, js.src, js.checked);
+                js.className, js.xpath, js.nameAttr, js.attrs, js.src, js.checked,
+                js.childAnchors, js.statusText);
+    }
+
+    /**
+     * 把「AX 权威名 + 页面侧事实 + 点击捕获快照」收敛成最终名字。
+     *
+     * <p>规则全部委托 {@link PickNamePolicy}（纯函数、有证据才动）：
+     * <ol>
+     *   <li>状态播报区文本混进 AX 名 ⇒ 取稳定标签；</li>
+     *   <li>点击改写了元素自身文案 ⇒ 用捕获阶段的名字还原。</li>
+     * </ol>
+     *
+     * <p>无证据时返回<b>同一对象</b>{@code ax}（不拷贝、零行为变更）。
+     *
+     * @param ax  AX 语义合并后的事实（可含播报文本 / 点击后的 loading 文案）
+     * @param js  页面侧事实（含 {@code statusText} 与点击后自身文本 {@code text}）
+     * @param pre 捕获阶段快照；{@code null} 表示无证据
+     */
+    static CodegenFacts.Fact resolvePickedName(CodegenFacts.Fact ax, CodegenFacts.Fact js, PreClickSnapshot pre) {
+        if (ax == null) return null;
+        String stable = PickNamePolicy.stableName(ax.name,
+                js == null ? null : js.name, js == null ? null : js.statusText);
+        String name = PickNamePolicy.restorePreClickName(stable, js == null ? null : js.text, pre);
+        if (Objects.equals(name, ax.name)) return ax;
+        return new CodegenFacts.Fact(ax.role, name, ax.tag, ax.id, ax.testid, ax.type, ax.placeholder,
+                ax.alt, ax.title, ax.value, ax.text, ax.label, ax.nth, ax.cssSelector, ax.shadowHosts,
+                ax.className, ax.xpath, ax.nameAttr, ax.attrs, ax.src, ax.checked, ax.childAnchors, ax.statusText);
     }
 
     /**
@@ -1472,6 +686,29 @@ public final class CodegenCdpNodeExtractor {
             log.debug("[codegen][cdp] css count failed for '{}': {}", cssSelector, e.toString());
             return -1;
         }
+    }
+
+    /**
+     * 「拾取时的那个元素，此刻还在、还看得见吗」——用于判定 role 复核的 0 命中是否可信。
+     *
+     * <p><b>为什么必须有这一步</b>：role 复核被后置到生成前（省掉点击热路径上每次 10~90ms 的引擎计数），
+     * 但生成往往发生在用户又点了几步之后。HSBC 重置密码是<b>同一 document 内</b>的多步向导：点 Continue 后
+     * 同一个页面里的上一步被 {@code display:none} 隐藏，于是 {@code getByRole(BUTTON, "Continue")} 命中 0。
+     * 若据此把定位器改写成 {@code div:nth-of-type(5) ... > button[class*='float-right']}，
+     * 用户手里的 Continue 就永远拿不到 role 定位器——即使它在使用的那个步骤里确实唯一。
+     *
+     * <p>判据：拾取时的 CSS 当前仍命中元素（{@code count>0}）<b>且</b>该元素当前可见 ⇒ 状态未变，
+     * 0 命中是真实的名字口径问题，可以回退 CSS；否则说明页面已推进，本次计数无意义。
+     *
+     * @return {@link TriState#TRUE}=状态未变；{@link TriState#FALSE}=元素已不在/不可见；
+     *         {@link TriState#UNKNOWN}=不可判定（调用方须按保守方向处理：保留 role、标未校验）
+     */
+    public TriState isPickStateIntact(CodegenEntry entry) {
+        if (entry == null || entry.cssSelector == null || entry.cssSelector.isBlank()) return TriState.UNKNOWN;
+        int now = countCssMatches(entry.cssSelector);
+        if (now < 0) return TriState.UNKNOWN;        // 计数不可判定：既不确认也不否认
+        if (now == 0) return TriState.FALSE;
+        return counter.isVisible(entry.cssSelector);
     }
 
     /**

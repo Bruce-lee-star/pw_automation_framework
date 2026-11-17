@@ -26,9 +26,9 @@ import java.util.Map;
  * 语义与不传时完全一致（多一次往返，绝不失败）。{@code frames} 同理：抽取阶段若拿到也只当提示，为空时
  * 仍自行读一次 frame 树（行为与无快照完全一致）。
  *
- * @param backendNodeId 元素的 backendNodeId（坐标反查 / 兜底路径的唯一凭据）
+ * @param backendNodeId 元素的 backendNodeId（按选择器定位后 {@code DOM.requestNode} 的唯一凭据）
  * @param frameId       元素所属 frame 的 id；主 frame 时即主 frame 的 id
- * @param scope         元素相对 frame 树的归属；未知（如仅经坐标反查）时为 {@link FrameScope#UNKNOWN}
+ * @param scope         元素相对 frame 树的归属；未知（调用方未提供归属快照）时为 {@link FrameScope#UNKNOWN}
  * @param objectId      定位阶段顺带得到的元素 {@code RemoteObject} id；{@code null} 表示不可用/未知
  * @param frames        frame 树快照（主 frame id + parent 映射）；{@code null} 表示未带，抽取阶段按需自读
  */

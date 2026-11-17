@@ -35,7 +35,8 @@ public class PageClassGeneratorTest {
         String out = PageClassGenerator.generate(TARGET, es, new String[]{});
         Assert.assertTrue(out.contains("public class LoginPage extends AbstractManagedPage"));
         Assert.assertTrue(out.contains("@RoleElement(role = AriaRole.BUTTON, name = \"Sign in\")"));
-        Assert.assertTrue(out.contains("public PageElement signIn;"));
+        // 命名规范（2026-11-15）：按钮字段带 Btn 后缀
+        Assert.assertTrue(out.contains("public PageElement signInBtn;"));
         Assert.assertFalse("无 NLS 不应有 @RoleFile", out.contains("@RoleFile"));
         Assert.assertFalse("无 NLS 不应有 key=", out.contains("key = "));
     }
@@ -177,13 +178,13 @@ public class PageClassGeneratorTest {
         Assert.assertTrue(out.contains("name = \"保存\""));
     }
 
-    /** 中文名 + 有 NLS key ⇒ 字段名取自 key（{@code login.username → loginUsername}）。 */
+    /** 中文名 + 有 NLS key ⇒ 字段名取自 key（{@code login.username → loginUsernameInput}）。 */
     @Test
     public void cjkNameWithNlsKey_usesKeyForFieldName() {
         List<CodegenEntry> es = List.of(role("textbox", "用户名", "#u", "login.username", 0));
         String out = PageClassGenerator.generate(TARGET, es, new String[]{"nls/login.json"});
 
-        Assert.assertTrue(out.contains("public PageElement loginUsername;"));
+        Assert.assertTrue(out.contains("public PageElement loginUsernameInput;"));
         Assert.assertTrue(out.contains("key = \"login.username\""));
         Assert.assertFalse(hasCjkDeclaration(out));
     }
@@ -198,13 +199,13 @@ public class PageClassGeneratorTest {
         Assert.assertFalse(hasCjkDeclaration(out));
     }
 
-    /** 中英混合名保留英文片段（{@code "Login 登录 -> login"}），不整段丢弃。 */
+    /** 中英混合名保留英文片段（{@code "Login 登录 -> loginBtn"}），不整段丢弃。 */
     @Test
     public void mixedCjkAndAscii_keepsAsciiPart() {
         List<CodegenEntry> es = List.of(role("button", "Login 登录", "#login", null, 0));
         String out = PageClassGenerator.generate(TARGET, es, new String[]{});
 
-        Assert.assertTrue(out.contains("public PageElement login;"));
+        Assert.assertTrue(out.contains("public PageElement loginBtn;"));
         Assert.assertFalse(hasCjkDeclaration(out));
     }
 

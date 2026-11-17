@@ -78,9 +78,9 @@ public class CodegenSequenceTest {
                 1, target, List.of(target), actions, List.of());
         String step = StepClassGenerator.generateSessions(target, List.of(session));
 
-        int pwdIdx = step.indexOf("loginPage.pwd.fill");
-        int userIdx = step.indexOf("loginPage.user.fill");
-        int submitIdx = step.indexOf("loginPage.submit.click");
+        int pwdIdx = step.indexOf("loginPage.pwdInput.fill");
+        int userIdx = step.indexOf("loginPage.userInput.fill");
+        int submitIdx = step.indexOf("loginPage.submitBtn.click");
         Assert.assertTrue("Pwd 操作应存在", pwdIdx >= 0);
         Assert.assertTrue("User 操作应存在", userIdx >= 0);
         Assert.assertTrue("Submit 操作应存在", submitIdx >= 0);

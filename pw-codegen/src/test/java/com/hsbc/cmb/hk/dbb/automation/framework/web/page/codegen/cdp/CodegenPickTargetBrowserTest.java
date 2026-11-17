@@ -47,7 +47,33 @@ public class CodegenPickTargetBrowserTest {
             + "<input id=\"userName\" name=\"userName\" type=\"text\">"
             //  隐藏的重复副本：唯一性计数必须包含它，否则产物在面板显示后变成多匹配
             + "<button class=\"panel-cta\">Continue</button>"
-            + "<div style=\"display:none\"><button class=\"panel-cta\">Continue</button></div>";
+            + "<div style=\"display:none\"><button class=\"panel-cta\">Continue</button></div>"
+            // 2026-11-15 用户反馈的真实 HSBC 形态：按钮/链接文案包在带 data-i18n 的 span 里，
+            // 点文案时事件目标是 span（旧逻辑会把 span 当拾取对象 ⇒ role=generic ⇒ 退化成结构 CSS）
+            + "<button id=\"cta\" type=\"button\">"
+            + "<span aria-live=\"polite\" aria-atomic=\"true\" class=\"accessibleHidden\"></span>"
+            + "<span data-i18n=\"continue\">Continue</span></button>"
+            + "<a id=\"privacy\" href=\"/privacy\"><span data-i18n=\"footer_privacy\">Privacy</span></a>"
+            // radio 选项：label 包裹 input，可点区域是 label 内整块（svg / h2 / 文本 div）
+            + "<fieldset><label class=\"option\" for=\"opt-security\">"
+            + "<div class=\"radio-title\"><h2 class=\"radio-frame\">"
+            + "<div class=\"radio-icon\"><svg width=\"18\" height=\"18\"></svg></div>"
+            + "<div data-i18n=\"security_radio_label\">Answer security questions</div></h2>"
+            + "<div><input type=\"radio\" id=\"opt-security\" name=\"select-option\" value=\"security\"></div>"
+            + "</div></label></fieldset>"
+            // 2026-11-15 用户反馈③：密保问题下拉 —— 每一项的可访问名都不同（旧的 role|name 成组判据永远不成立）
+            + "<ul id=\"sq1\" role=\"listbox\" aria-labelledby=\"label_sq1\">"
+            + "<li role=\"option\" id=\"sq1_a\">Name a memorable city or country</li>"
+            + "<li role=\"option\" id=\"sq1_b\">Name your favourite television character</li>"
+            + "<li role=\"option\" id=\"sq1_c\">What was the name of your first pet</li>"
+            + "<li role=\"option\" id=\"sq1_d\">What is your mother's maiden name</li>"
+            + "<li role=\"option\" id=\"sq1_e\">What was your first car</li>"
+            + "</ul>"
+            // 隐式 ARIA 角色：<li> 自身没有 role 属性（条目选择器若拼 [role="…"] 会命中 0 个）
+            + "<ul id=\"sq3\"><li>Alpha</li><li>Beta</li><li>Gamma</li></ul>"
+            // 混入非同类子节点：nth 与组内下标不再一致 ⇒ 必须放弃成组
+            + "<ul id=\"sq2\" role=\"listbox\"><li role=\"option\">A</li><li role=\"option\">B</li>"
+            + "<div>note</div></ul>";
 
     private Playwright pw;
     private Browser browser;
@@ -144,13 +170,101 @@ public class CodegenPickTargetBrowserTest {
         assertEquals("cssSelector 不得全量多匹配（隐藏副本也参与计数），实际: " + css, 1, ((Number) hits).intValue());
     }
 
+    /**
+     * 2026-11-15 用户反馈①：点按钮文案（{@code <button><span data-i18n>Continue</span></button>}）
+     * ⇒ 拾取对象必须是 button，否则 role 恒 generic，只能产出 {@code div:nth-of-type(3) > button[...]}
+     * 这类结构链（Continue 按钮的历史症状）。
+     */
+    @Test
+    public void clickOnButtonTextNormalizesToButton() {
+        JsonObject self = pick("button#cta > span[data-i18n=\"continue\"]");
+
+        assertEquals("点按钮内文案必须归一到 button", "button", self.get("tag").getAsString());
+        assertEquals("button", self.get("role").getAsString());
+        assertEquals("归一到 button 后 id 应可唯一定位", "cta", self.get("id").getAsString());
+        assertEquals("可访问名应为业务文案（空的 aria-live 播报不参与）",
+                "Continue", self.get("name").getAsString());
+    }
+
+    /** 点链接内文案 ⇒ 归一到 {@code a[href]}（链接卡片整块点击同理）。 */
+    @Test
+    public void clickOnLinkTextNormalizesToLink() {
+        JsonObject self = pick("a#privacy > span[data-i18n]");
+
+        assertEquals("点链接内文案必须归一到 a", "a", self.get("tag").getAsString());
+        assertEquals("link", self.get("role").getAsString());
+        assertEquals("privacy", self.get("id").getAsString());
+    }
+
+    /**
+     * 2026-11-15 用户反馈②：点 radio 的 label 内文本 ⇒ 归一到<b>被包裹的控件</b>。
+     *
+     * <p>旧行为会拾取 label 内的 {@code <div data-i18n>}，而浏览器随后又向 input 补发一次合成 click
+     * ⇒ 一次点击产出两个元素定位。归一到控件后只剩一条，且 role=radio 可生成
+     * {@code @RoleElement(role = AriaRole.RADIO, ...)} + {@code check()}。
+     */
+    @Test
+    public void clickInsideWrappingLabelNormalizesToNestedControl() {
+        JsonObject self = pick("label.option div[data-i18n=\"security_radio_label\"]");
+
+        assertEquals("包裹式 label 内的文本必须归一到被包裹的 input", "input", self.get("tag").getAsString());
+        assertEquals("radio", self.get("role").getAsString());
+        assertEquals("opt-security", self.get("id").getAsString());
+    }
+
+    /**
+     * 2026-11-15 用户反馈③：集合项（密保问题下拉的 {@code li[role=option]}）必须带出整组提示。
+     *
+     * <p>关键在于<b>三项都自洽</b>：选择器命中整组、成员数 = 实际命中数、序号 = 用户点的那一项。
+     * 任一项错位，生成的 {@code get(n)} 就会点错选项——比"没有组"更糟，所以这里用真实 DOM 校验。
+     */
+    @Test
+    public void collectionItemCarriesUsableListHint() {
+        JsonObject root = info("ul#sq1 > li#sq1_c");
+
+        JsonObject list = root.getAsJsonObject("list");
+        assertNotNull("集合项必须带出整组提示（否则只能生成单元素）", list);
+        String selector = list.get("selector").getAsString();
+        assertEquals("整组选择器 = 容器唯一段 + 条目标签", "#sq1 > li", selector);
+        assertEquals("成员数 = 容器里同类子节点数", 5, list.get("count").getAsInt());
+        assertEquals("序号 = 用户实际点的那一项（第 3 个 ⇒ 2）", 2, list.get("index").getAsInt());
+
+        Object hits = page.evaluate("(sel) => document.querySelectorAll(sel).length", selector);
+        assertEquals("整组选择器必须恰好命中 count 个元素，否则 get(n) 越界/点错项",
+                list.get("count").getAsInt(), ((Number) hits).intValue());
+    }
+
+    /** 隐式 ARIA 角色（{@code <li>} 无 role 属性）同样要能成组：条目选择器不能依赖 role 属性。 */
+    @Test
+    public void implicitRoleItemsStillFormAGroup() {
+        JsonObject list = info("ul#sq3 > li:nth-child(3)").getAsJsonObject("list");
+
+        assertNotNull("隐式 listitem 也应成组", list);
+        assertEquals("#sq3 > li", list.get("selector").getAsString());
+        assertEquals(3, list.get("count").getAsInt());
+        assertEquals(2, list.get("index").getAsInt());
+    }
+
+    /** 容器里混入非同类节点 ⇒ 下标与 nth 不再一致，宁可没有组也不能生成会点错项的 get(n)。 */
+    @Test
+    public void mixedChildrenSuppressListHint() {
+        JsonObject root = info("ul#sq2 > li:first-child");
+
+        assertTrue("混合子节点时不得给出成组提示",
+                !root.has("list") || root.get("list").isJsonNull());
+    }
+
     /** 在真实浏览器里用嵌入 JS 对被选元素求值 getInfo，返回 {self:...}。 */
     private JsonObject pick(String css) {
-        String expr = "JSON.stringify((" + fnSource + ").call(document.querySelector('" + css + "')))";
-        Object result = page.evaluate(expr);
-        JsonObject root = JsonParser.parseString(String.valueOf(result)).getAsJsonObject();
-        JsonObject self = root.getAsJsonObject("self");
+        JsonObject self = info(css).getAsJsonObject("self");
         assertNotNull("getInfo 应返回 self", self);
         return self;
+    }
+
+    /** getInfo 的完整载荷（{@code {self, ancestors, list}}）；需要 list 提示的用例走这里。 */
+    private JsonObject info(String css) {
+        String expr = "JSON.stringify((" + fnSource + ").call(document.querySelector('" + css + "')))";
+        Object result = page.evaluate(expr);
+        return JsonParser.parseString(String.valueOf(result)).getAsJsonObject();
     }
 }

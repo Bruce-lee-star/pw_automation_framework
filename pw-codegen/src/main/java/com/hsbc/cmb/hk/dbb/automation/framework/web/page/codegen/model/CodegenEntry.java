@@ -99,6 +99,15 @@ public final class CodegenEntry {
      * 不读该状态时，录制「取消勾选」会退化成 {@code check()}，产物与录制终态相反。
      */
     public final boolean checked;
+    /**
+     * 是否由「目标本身是 ARIA 集合里的一项」<b>自动</b>判成一组元素（{@code PageElementList}）。
+     *
+     * <p>与「多次拾取 / 面板标记为一组」的区别在于：那种组的 {@link #index} 是组内成员序号，
+     * 生成侧固定取 {@code get(0)}；而自动成组的 {@link #index} 是<b>用户实际点的那一项</b>的序号
+     * （如密保问题下拉里第 5 个 {@code li[role=option]}），生成侧必须取 {@code get(index)}——
+     * 否则回放会点错选项。
+     */
+    public final boolean autoList;
 
     public CodegenEntry(String sigKey, String role, String name, String strategy,
                         int score, String selector, String cssSelector, String nlsKey, int index) {
@@ -172,6 +181,21 @@ public final class CodegenEntry {
                         int score, String selector, String cssSelector, String nlsKey, int index,
                         java.util.List<String> framePath, java.util.List<String> shadowHosts,
                         int matchCount, String tag, boolean checked, int roleHits) {
+        this(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey, index,
+                framePath, shadowHosts, matchCount, tag, checked, roleHits, false);
+    }
+
+    /**
+     * 完整构造（含 role 复核结果与「集合项自动成组」标记）。
+     *
+     * @param autoList {@code true} 表示本条目不来自多次拾取，而是由「目标本身是 ARIA 集合里的一项」自动判成
+     *                 一组元素（{@link #cssSelector} 是命中整组的定位器，{@link #index} 是被拾取项在组内的
+     *                 0 基序号）。Step 生成据此用 {@code get(index)} 指向用户实际点的那一项，而不是 {@code get(0)}。
+     */
+    public CodegenEntry(String sigKey, String role, String name, String strategy,
+                        int score, String selector, String cssSelector, String nlsKey, int index,
+                        java.util.List<String> framePath, java.util.List<String> shadowHosts,
+                        int matchCount, String tag, boolean checked, int roleHits, boolean autoList) {
         this.sigKey = sigKey;
         this.role = role;
         this.name = name;
@@ -192,6 +216,7 @@ public final class CodegenEntry {
             throw new IllegalArgumentException("invalid roleHits: " + roleHits);
         }
         this.roleHits = roleHits;
+        this.autoList = autoList;
     }
 
     /** 是否为 role 策略（决定 {@link #effectiveMatchCount()} 该取哪个引擎的计数）。 */
@@ -221,16 +246,16 @@ public final class CodegenEntry {
         return roleUsed ? roleHits : matchCount;
     }
 
-    /** 复制并替换 CSS 命中数（其余字段含 {@code roleHits} 不变）。 */
+    /** 复制并替换 CSS 命中数（其余字段含 {@code roleHits} / {@code autoList} 不变）。 */
     public CodegenEntry withMatchCount(int count) {
         return new CodegenEntry(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey,
-                index, framePath, shadowHosts, count, tag, checked, roleHits);
+                index, framePath, shadowHosts, count, tag, checked, roleHits, autoList);
     }
 
     /** 复制并替换 role 复核命中数（其余字段逐字保留）。 */
     public CodegenEntry withRoleHits(int hits) {
         return new CodegenEntry(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey,
-                index, framePath, shadowHosts, matchCount, tag, checked, hits);
+                index, framePath, shadowHosts, matchCount, tag, checked, hits, autoList);
     }
 
     /**
@@ -244,13 +269,28 @@ public final class CodegenEntry {
      */
     public CodegenEntry withLocator(String strategy, String selector, String cssSelector) {
         return new CodegenEntry(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey,
-                index, framePath, shadowHosts, matchCount, tag, checked, roleHits);
+                index, framePath, shadowHosts, matchCount, tag, checked, roleHits, autoList);
     }
 
     /** 复制并只替换勾选态，供「同元素多次操作」按末次状态生成断言。 */
     public CodegenEntry withChecked(boolean checked) {
         return new CodegenEntry(sigKey, role, name, strategy, score, selector, cssSelector, nlsKey,
-                index, framePath, shadowHosts, matchCount, tag, checked, roleHits);
+                index, framePath, shadowHosts, matchCount, tag, checked, roleHits, autoList);
+    }
+
+    /**
+     * 复制并只替换 {@code sigKey}，其余字段（定位器 / 计数 / 组语义 …）<b>逐字保留</b>。
+     *
+     * <p>唯一用途是「孪生元素消歧」：两处 role+name+组内序号完全相同的<b>不同</b>元素会算出相同 sigKey，
+     * 而字段规划按 sigKey 去重 ⇒ 第二个元素会被当成重复条目丢弃。由
+     * {@code CodegenLauncher#disambiguateSigKey} 给后来者追加 {@code @n} 后缀，使两个元素各自成为独立字段。
+     *
+     * @param sigKey 新的签名（不得为空）
+     */
+    public CodegenEntry withSigKey(String sigKey) {
+        String next = (sigKey == null || sigKey.isEmpty()) ? this.sigKey : sigKey;
+        return new CodegenEntry(next, role, name, strategy, score, selector, cssSelector, nlsKey,
+                index, framePath, shadowHosts, matchCount, tag, checked, roleHits, autoList);
     }
 
     /** 转为面板 evaluate 可直接序列化的 Map（字段名即面板 JS 读取的键）。 */
@@ -271,6 +311,7 @@ public final class CodegenEntry {
         m.put("roleHits", roleHits);
         m.put("tag", tag == null ? "" : tag);
         m.put("checked", checked);
+        m.put("autoList", autoList);
         return m;
     }
 }

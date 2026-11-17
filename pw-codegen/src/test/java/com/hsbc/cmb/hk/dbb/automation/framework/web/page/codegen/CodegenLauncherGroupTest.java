@@ -30,7 +30,7 @@ public class CodegenLauncherGroupTest {
 
         // 标记前：sigKey 相同 ⇒ 去重后只剩一条，产物是一个普通 PageElement
         String before = PageClassGenerator.generate(TARGET, members, new String[]{});
-        Assert.assertTrue(before.contains("public PageElement submit;"));
+        Assert.assertTrue(before.contains("public PageElement submitBtn;"));
         Assert.assertFalse(before.contains("PageElementList"));
 
         // 标记后：共享 base-sig + 互异序号 ⇒ 合成一个 PageElementList
@@ -42,9 +42,9 @@ public class CodegenLauncherGroupTest {
         Assert.assertEquals(1, grouped.get(1).index);
 
         String after = PageClassGenerator.generate(TARGET, grouped, new String[]{});
-        Assert.assertTrue(after.contains("public PageElementList submit;"));
+        Assert.assertTrue(after.contains("public PageElementList submitBtn;"));
         Assert.assertEquals(1, count(after, "public PageElementList"));
-        Assert.assertFalse(after.contains("public PageElement submit;"));
+        Assert.assertFalse(after.contains("public PageElement submitBtn;"));
     }
 
     @Test

@@ -25,18 +25,35 @@ import java.util.regex.Pattern;
  *   <li><b>CSS/XPath 定位</b> {@code @Element("<css|xpath=...>")}（{@link LocatorStrategy#CSS}）。
  * </ul>
  *
+ * <h3>优先级总纲：先 CSS，后 XPath</h3>
+ * <p>凡能用<b>原生 CSS</b>（{@code :has()} / {@code :not()} 都是标准伪类，{@code querySelectorAll} 与
+ * Playwright 引擎都认）表达且唯一的方案一律优先；XPath 只做兜底。具体地：
+ * <ul>
+ *   <li>正常 CSS 候选（{@code <=530} 档，含 {@code :has()} 作用域收窄）→ 最先；</li>
+ *   <li>锚定 XPath（{@link #XPATH_ANCHORED}，父级锚点 × 子级锚点）→ CSS 全都不能唯一时；</li>
+ *   <li>位置型 CSS（{@link #CSS_STRUCT_POSITIONAL}）→ 语法是 CSS，但语义是「按序号猜元素」，故排在锚定 XPath 之后；</li>
+ *   <li>绝对 XPath（{@link #XPATH}）→ 最后。</li>
+ * </ul>
+ *
  * <h3>候选序列（逐个做唯一性校验，第一个唯一者胜出）</h3>
  * <ol>
  *   <li>{@code [data-testid="v"]} / 该属性值的部分匹配（{@code ^=}/{@code $=}/{@code *=}）；</li>
  *   <li>{@code #id} / {@code [id^=…]} 等；</li>
- *   <li>{@code tag:has([data-i18n="…"])}（<b>子代锚点短形式</b>：目标自身无属性、内部有唯一语义锚点）；</li>
+ *   <li>{@code tag:has([data-i18n="…"])}（<b>子代锚点短形式</b>：目标自身无属性、内部有唯一语义锚点）；
+ *       不唯一时在同一档内追加作用域前缀收窄：{@code #id …} / {@code [data-testid=…] …} /
+ *       {@code [data-x=…] …} / <b>{@code div.page …}（稳定 class 头，2026-11-17 新增）</b> /
+ *       裸 {@code tag …}，每档都是 {@code 前缀:has(祖先锚点) base}；</li>
  *   <li>{@code [name="v"]}（表单字段名，与语言无关，比可访问名稳定）/ 部分匹配；</li>
  *   <li>{@code [placeholder=…]}/{@code [alt=…]}/{@code [title=…]}——<b>仅单语言模式</b>：
  *       多语言环境下这些属性随语言变化，传 {@code textAttributesAllowed=false} 关闭；</li>
  *   <li>{@code [class*="稳定 token"]}（class 里混 hash 时只取语义 token）；</li>
  *   <li><b>属性组合</b> {@code tag[a="1"][b="2"]}：单属性命中多个时的首选，避免退化成长结构路径；</li>
- *   <li>结构 CSS（标签 + {@code :nth-of-type}）→ 逐级重建祖先路径（<b>最后手段</b>，越短越好）；</li>
- *   <li>绝对 XPath（{@code xpath=/html/body/…}）——结构 CSS 无法唯一时的最后兜底。</li>
+ *   <li>结构 CSS（标签 + {@code :nth-of-type}）——<b>仅当标签本身不含位置段</b>时按普通结构候选计分；</li>
+ *   <li><b>锚定 XPath</b> {@code //父[.//标题]//目标[.//子锚点]}——「父级锚点 + 子级锚点」，
+ *       专治语义完全相同的双胞胎（见 {@link #anchoredXPaths}）；</li>
+ *   <li>位置型结构链（含 {@code :nth-of-type} 的祖先路径）：<b>延后裁决</b>——
+ *       只要还有锚点/属性候选能唯一就绝不用它（见 {@link #CSS_STRUCT_POSITIONAL}）；</li>
+ *   <li>绝对 XPath（{@code xpath=/html/body/…}）——最后兜底。</li>
  * </ol>
  *
  * <h3>原生 CSS 伪类收敛（唯一性降级链）</h3>
@@ -44,6 +61,8 @@ import java.util.regex.Pattern;
  * id 祖先前缀 → 祖先语义属性前缀 → {@code :has(> 锚点)}（直接父级）→ {@code :has(锚点)}（任意后代）
  * → 完整祖先路径 → {@code :not(条件)} 减法。前四档是「加法」（缩小范围），
  * 末档是「减法」（排除整族干扰副本），且因可能误排目标而排在确定性最强的结构路径之后。
+ * <p><b>例外</b>：完整祖先路径若「新引入」了 {@code :nth-of-type} 序号，其唯一结果不就地胜出，
+ * 而是被 {@link #score} 降级为 {@link #CSS_STRUCT_POSITIONAL} 并延后到「一条锚点候选都没能唯一」时出场。
  * <p>伪类一律用原生 CSS：{@code :has()} / {@code :not()} 不被 {@code querySelectorAll} 拒绝；
  * Playwright 专有的 {@code :visible} / {@code :has-text()} <b>禁止</b>出现在产物里。
  *
@@ -162,9 +181,20 @@ public final class CodegenScorer {
      */
     public static final int CSS_ATTR_COMBO = 527;
     public static final int CSS_TAG = 530;
+    /**
+     * <b>位置型</b>结构链（选择器里含 {@code :nth-of-type}）：{@code div:nth-of-type(5) … > button[class*="float-right"]}。
+     *
+     * <p>这类选择器只在「拾取那一刻的 DOM 布局」成立：页面多插一个 {@code div}、向导推进一段、
+     * 弹层出现与消失，序号就整体漂移 ⇒ 回放时 0 命中（2026-11-16 「两个 Continue，第一个定位不出来」即此类）。
+     *
+     * <p>分数<b>刻意高于 {@link #XPATH_ANCHORED}</b>：只要还有「父级 / 子级稳定属性」能锚定，
+     * 就必须先用锚定方案，位置链只留到「一条锚点候选都没有」时才用。此前它按 {@link #CSS_TAG}（530）计分，
+     * 比锚定 XPath（1000）更优 ⇒ 锚点方案永远轮不到（用户反馈「还是没用父级/子级稳定属性」的根因）。
+     */
+    public static final int CSS_STRUCT_POSITIONAL = 1050;
     /** 绝对 XPath 兜底（结构 CSS 无法唯一时）。 */
     public static final int XPATH = 1100;
-    /** 稳健 XPath 兜底（借父级 / 子级属性锚定，优先于绝对路径）。 */
+    /** 稳健 XPath 兜底（借父级 / 子级属性锚定，优先于绝对路径与位置型结构链）。 */
     public static final int XPATH_ANCHORED = 1000;
     public static final int NTH = 10000;
     public static final int CSS_FALLBACK = 10000000;
@@ -193,8 +223,30 @@ public final class CodegenScorer {
      * 最多尝试几个「祖先 {@code :has(后代锚点)}」作用域锚点（每个祖先最多取 4 个锚点）。
      *
      * <p>额度按<b>锚点</b>计，同一锚点的「直接子级」与「任意后代」两种写法共享一次额度。
+     *
+     * <p>取值 6 而非 4：跨祖先轮转后，每层祖先都可能贡献 1~2 次尝试（近祖先 + 外层分区标题），
+     * 4 会在「三层祖先各带锚点」的常见页面上把最外层（真正有分区区分力的标题）挤掉。
+     * 代价是最多 6 个锚点 × 2 种写法 = 12 次计数往返，仍在一次拾取的可接受范围内。
      */
-    private static final int MAX_HAS_PREFIXES = 4;
+    private static final int MAX_HAS_PREFIXES = 6;
+
+    /** 单个祖先最多贡献几个 {@code :has()} 锚点（防止近祖先的多锚点把总额度吃光）。 */
+    private static final int MAX_HAS_ANCHORS_PER_ANCESTOR = 3;
+
+    /**
+     * 状态型作用域锚点：{@code style} 属性存在且为空串。
+     *
+     * <p>单页应用用它标记「当前激活 / 当前可见」的页面容器（隐藏页写成 {@code style="; display: none"}）。
+     * 它能唯一命中激活页，但绑定了组件当前的行内样式写法，属于<b>实现细节</b>，因此只在
+     * 「一条语义/标题锚点都不成立」时兜底，见 {@code uniqueCss} 的阶段 1d。
+     *
+     * <p>只接受空值这一固定形态；{@code display:block} / {@code display: none} 之类的具体值随组件
+     * 版本漂移，属于猜测，一律不生成。
+     */
+    private static final String STATE_SCOPE_ANCHOR = "[style=\"\"]";
+
+    /** 阶段 1d 的独立小额度：它是最后的作用域手段，不值得为它多付计数往返。 */
+    private static final int MAX_STATE_SCOPE_TRIES = 2;
 
     /**
      * 目标自身最多生成几个 {@code tag:has(后代锚点)} 短形式候选。
@@ -203,6 +255,34 @@ public final class CodegenScorer {
      * 取前 4 个已足够覆盖 {@code data-i18n} / {@code data-testid} 等首选项。
      */
     private static final int MAX_SELF_HAS_ANCHORS = 4;
+
+    /**
+     * 锚定 XPath 中「元素自身属性谓词」的上限（{@code [@id="…"]} / {@code [@data-i18n="…"]} …）。
+     *
+     * <p>谓词之间是 <b>OR</b> 关系（各自成一条候选），故不必贪多：一是候选数随谓词线性增长、
+     * 每条都要一次 {@code LocatorCounter} 往返；二是超过 3 个稳定属性通常说明该元素已是「属性堆」，
+     * 前几个语义属性就足以定位。
+     */
+    private static final int MAX_XPATH_SELF_ATTRS = 3;
+
+    /** 锚定 XPath 中每个元素最多取几个后代/祖国内部锚点（{@code [.//*[@data-i18n="…"]]}）。 */
+    private static final int MAX_XPATH_CHILD_ANCHORS = 3;
+
+    /**
+     * 锚定 XPath 最多上溯几层祖先做「父级锚点」。
+     *
+     * <p>分区标题锚点几乎都在目标的 1~3 层内（{@code section > div.panel > h3}）；再往上就是
+     * {@code body}/{@code #main} 这类全域容器，锚不住任何分区，只是白付往返。
+     */
+    private static final int MAX_XPATH_PARENTS = 3;
+
+    /**
+     * 锚定 XPath 候选总数上限（父级数 × 父级锚点数 × 目标侧谓词数 是三重乘积）。
+     *
+     * <p>所有候选会被一次 {@code prefetch} 批量下发，但每条仍各有一次计数；12 条已足够覆盖
+     * 「3 层祖先 × 各自锚点 × 目标侧组合」，再多只是拖慢拾取而不改变结果。
+     */
+    private static final int MAX_XPATH_CANDIDATES = 12;
 
     /**
      * 最多尝试几个单条 {@code :not()} 否定条件（只约束 CDP 往返次数，超出部分不尝试）。
@@ -227,9 +307,13 @@ public final class CodegenScorer {
     /**
      * 合法的 {@code :has()} 锚点段：{@code #id} 或 {@code [attr="value"]}（值内不得含引号/反斜杠）。
      * 锚点由注入脚本采集，但仍按白名单校验后才拼进选择器。
+     *
+     * <p><b>值允许为空串</b>（{@code {0,80}}）：用于 {@code [style=""]} 这类「属性存在且为空」的
+     * 确定形态（单页应用用它标记当前激活页）。空值仍是确定判据，不是随机值——真正随机的值在注入侧
+     * 已被 {@code stableAttrs} 过滤，不会走到这里。
      */
     private static final Pattern HAS_ANCHOR = Pattern.compile(
-            "^(#[A-Za-z0-9_-]{1,80}|\\[[A-Za-z_:][A-Za-z0-9_:.\\-]*=\"[^\"\\\\]{1,80}\"\\])$");
+            "^(#[A-Za-z0-9_-]{1,80}|\\[[A-Za-z_:][A-Za-z0-9_:.\\-]*=\"[^\"\\\\]{0,80}\"\\])$");
 
     /** 合法 HTML 标签名（用于 {@code tag:has(...)} 短形式的标签头，拒绝注入非法字符）。 */
     private static final Pattern SIMPLE_TAG = Pattern.compile("[a-z][a-z0-9-]{0,15}");
@@ -308,14 +392,10 @@ public final class CodegenScorer {
         CodegenFacts.Fact self = facts.self;
 
         List<Candidate> candidates = cssCandidates(self, textAttributesAllowed);
-        // 稳健 XPath（父级 / 子级属性锚定）：优先级低于所有 CSS 候选、高于绝对路径，
+        // 稳健 XPath（父级 / 子级属性锚定）：优先级低于所有 CSS 候选、高于位置型结构链与绝对路径，
         // 仅当 CSS（含 descendantAnchorSel / 祖先作用域前缀）全部失效时才被采用——比绝对路径更稳。
-        if (facts.robustXpaths != null) {
-            for (String rx : facts.robustXpaths) {
-                if (rx != null && !rx.isBlank()) {
-                    candidates.add(new Candidate(XPATH_ANCHORED, "xpath=" + rx));
-                }
-            }
+        for (String rx : anchoredXPathCandidates(facts)) {
+            candidates.add(new Candidate(XPATH_ANCHORED, "xpath=" + rx));
         }
         // 按分数排序（稳定排序：同分组内保持 前缀→后缀→包含 的顺序）
         candidates.sort(Comparator.comparingInt(Candidate::score));
@@ -348,11 +428,22 @@ public final class CodegenScorer {
         // 它绝不能胜出——否则会遮蔽后面真正唯一的候选，产出运行期永远等不到的死选择器。
         Unique fallback = first;
         int fallbackScoreOfChoice = fallbackScore;
+        // 「靠新引入的 :nth-of-type 序号凑出唯一」的结果（见 #introducesPosition）：<b>延后裁决</b>。
+        // 它不能就地返回，否则一条 512 分的语义候选靠加长祖先结构就能压过 1000 分的
+        // 「父级锚点 + 子级锚点」锚定 XPath（2026-11-16 实跑：两个 Continue 只能被锚定 XPath 区分，
+        // 产物却是 div:nth-of-type(5) … > button[class*='float-right']，回放必漂移）。
+        // 但也不能彻底丢弃：页面既无属性也无锚点时，它是唯一能收敛的手段，故留作最后手段——
+        // 分数降级为 CSS_STRUCT_POSITIONAL（1000 锚定 XPath 之后、1100 绝对 XPath 之前）。
+        Unique positionalOnly = null;
         for (int i = 0; i < candidates.size(); i++) {
             Candidate c = candidates.get(i);
             if (c.css() == null || c.css().isEmpty()) continue;
             Unique unique = (i == 0) ? first : uniqueCss(c.css(), facts, counter);
             if (unique.count() == 1) {
+                if (introducesPosition(c.css(), unique.css())) {
+                    if (positionalOnly == null) positionalOnly = unique;
+                    continue;   // 让后面的锚定候选先有机会胜出
+                }
                 return new ScoredLocator(false, unique.css(), c.score(), LocatorStrategy.CSS, unique.count());
             }
             // 兜底候选：优先选「当前确实有命中」的那一个，避免最终产物落在 0 命中的选择器上。
@@ -360,6 +451,11 @@ public final class CodegenScorer {
                 fallback = unique;
                 fallbackScoreOfChoice = c.score();
             }
+        }
+        if (positionalOnly != null) {
+            // 一条锚点/属性候选都没能唯一：位置链作为最后手段出场，并如实标注它的低分档位。
+            return new ScoredLocator(false, positionalOnly.css(), CSS_STRUCT_POSITIONAL,
+                    LocatorStrategy.CSS, positionalOnly.count());
         }
         return new ScoredLocator(false, fallback.css(), fallbackScoreOfChoice,
                 LocatorStrategy.CSS, fallback.count());
@@ -461,14 +557,22 @@ public final class CodegenScorer {
         // 两轮共享 MAX_HAS_PREFIXES 额度，弱头不会额外放大往返次数。
         int hasTried = 0;
         for (boolean strongHead : new boolean[]{true, false}) {
-            for (CodegenFacts.Fact a : facts.ancestors) {
-                if (hasTried >= MAX_HAS_PREFIXES) break;
-                if (hasIdentifyingScopeHead(a) != strongHead) continue;
-                String head = hasScopeHead(a);
-                if (head.isEmpty()) continue;
-                for (String anchor : a.childAnchors) {
+            // 跨祖先<b>轮转</b>：先让每个祖先的「第一优先锚点」都试一次，再试第二优先……
+            // 按祖先顺序逐个灌额度会让近祖先（分区内的按钮容器，锚点多）把额度吃光，
+            // 外层分区标题（`.page` 里的 `h1[data-i18n="title_triage"]`）根本没机会——
+            // 而恰恰是外层标题才是「这个按钮属于哪个分区」的唯一标识。
+            for (int round = 0; round < MAX_HAS_ANCHORS_PER_ANCESTOR; round++) {
+                for (CodegenFacts.Fact a : facts.ancestors) {
                     if (hasTried >= MAX_HAS_PREFIXES) break;
+                    if (hasIdentifyingScopeHead(a) != strongHead) continue;
+                    if (round >= a.childAnchors.size()) continue;
+                    String anchor = a.childAnchors.get(round);
                     if (anchor == null || !HAS_ANCHOR.matcher(anchor).matches()) continue;
+                    // 状态型锚点由阶段 1d 单独处理：它必须排在「所有」语义/标题锚点之后，
+                    // 不能占用轮转名额，否则可能凭祖先顺序抢在标题锚点前面。
+                    if (STATE_SCOPE_ANCHOR.equals(anchor)) continue;
+                    String head = hasScopeHead(a);
+                    if (head.isEmpty()) continue;
                     // 额度按锚点计：同一锚点的两种写法共享一次，不因新增 `>` 变体挤掉其它锚点。
                     hasTried++;
                     best = head + ":has(> " + anchor + ") " + baseCss;
@@ -482,7 +586,33 @@ public final class CodegenScorer {
             }
         }
 
+        // 阶段 1d：状态型作用域（`div.page:has([style=""])`）。
+        //
+        // 用户 2026-11-17 现场验证：`.page:has([style='']) button.float-right [data-i18n="continue"]`
+        // 能唯一定位激活页的 Continue。语义上它是「可见性代理」——比标题锚点脆（切页时行内样式会写成
+        // `display:block` / `"; display: none"`），但比位置链强得多：靠的是页面切换器写入的<b>状态标记</b>，
+        // 不是元素在 DOM 里的序号。故排在所有语义/标题锚点之后、位置链之前，且只用独立小额度。
+        int stateTried = 0;
+        for (boolean strongHead : new boolean[]{true, false}) {
+            for (CodegenFacts.Fact a : facts.ancestors) {
+                if (stateTried >= MAX_STATE_SCOPE_TRIES) break;
+                if (hasIdentifyingScopeHead(a) != strongHead) continue;
+                if (!a.childAnchors.contains(STATE_SCOPE_ANCHOR)) continue;
+                String head = hasScopeHead(a);
+                if (head.isEmpty()) continue;
+                stateTried++;
+                best = head + ":has(" + STATE_SCOPE_ANCHOR + ") " + baseCss;
+                count = counter.count(best);
+                if (count == 1) return new Unique(best, 1);
+            }
+        }
+
         // 阶段 2：完整祖先路径逐级加长（<b>确定性最强</b>的结构证据：逐级 :nth-of-type 必然指向目标）。
+        //
+        // 注意：这一档产出的唯一结果可能只是「按序号凑出来的唯一」（baseCss 本无 :nth-of-type，
+        // 加长后才引入）。这种结果不在这里丢弃——它仍是「既无属性也无锚点」页面上的唯一救场手段；
+        // 但它<b>不得压过锚定方案</b>，由 {@link #score} 依据 {@link #introducesPosition} 把它降级为
+        // {@link #CSS_STRUCT_POSITIONAL} 并延后裁决（详见 score 内注释）。
         int tried = 0;
         for (CodegenFacts.Fact a : facts.ancestors) {
             if (a.cssSelector == null || a.cssSelector.isEmpty() || isMalformedCssSelector(a.cssSelector)) continue;
@@ -630,8 +760,10 @@ public final class CodegenScorer {
         addCombos(out, self, textAttributesAllowed);
 
         // 6) 结构 CSS（标签 + nth-of-type，必要时逐级拼祖先）
+        //    位置型（含 :nth-of-type）降权到锚定 XPath 之后：锚点方案永远优先于"按序号猜元素"。
         if (self.cssSelector != null && !self.cssSelector.isEmpty() && !isMalformedCssSelector(self.cssSelector)) {
-            out.add(new Candidate(CSS_TAG, self.cssSelector));
+            out.add(new Candidate(isPositionalCss(self.cssSelector) ? CSS_STRUCT_POSITIONAL : CSS_TAG,
+                    self.cssSelector));
         }
 
         // 7) 绝对 XPath 兜底（结构 CSS 无法唯一时；shadow root 内为空，由采集侧保证）
@@ -828,6 +960,9 @@ public final class CodegenScorer {
     private static boolean hasIdentifyingScopeHead(CodegenFacts.Fact a) {
         if (a == null) return false;
         if (SelectorStability.isStable(a.id) || SelectorStability.isStable(a.testid)) return true;
+        // 稳定 class token（`div.page`）介于「语义属性」与「裸 tag」之间：它确实标识了容器种类，
+        // 但 `.page` 这类通用类名同一页里会出现多次，故仍需 `:has(锚点)` 收窄，不单独当唯一判据。
+        if (!firstStableClassToken(a.className).isEmpty()) return true;
         if (a.attrs == null) return false;
         for (Map.Entry<String, String> e : sortedAttrs(a.attrs)) {
             String key = e.getKey();
@@ -839,9 +974,10 @@ public final class CodegenScorer {
     }
 
     /**
-     * {@code :has()} 作用域头部：稳定 id → 稳定 data-testid → 稳定的祖先语义属性 → 裸标签名。
+     * {@code :has()} 作用域头部：稳定 id → 稳定 data-testid → 稳定的祖先语义属性 → 稳定 class token
+     * → 裸标签名。
      *
-     * <p>前三档是<b>强证据</b>（见 {@link #hasIdentifyingScopeHead}）；最后一档是弱证据兜底，
+     * <p>前四档是<b>强证据</b>（见 {@link #hasIdentifyingScopeHead}）；最后一档是弱证据兜底，
      * 由 {@link #uniqueCss} 分两轮调度，强头在前、裸 tag 在后。状态类 ARIA 与随机值一律排除。
      * 连标签名都没有时返回空串 ⇒ 跳过该祖先。
      */
@@ -858,7 +994,29 @@ public final class CodegenScorer {
             if (!SelectorStability.isStable(e.getValue())) continue;
             return attrSelector(key, "=", e.getValue());
         }
+        // 第三档（新增，2026-11-17）：分区容器的稳定 class token，拼成 `div.page`。
+        // 裸 tag 头（`div:has(标题)`）会命中 html/body/分区容器等所有含该标题的祖先层，
+        // 计数必然 > 1；带容器 class 才是真作用域。仍是强证据（强于裸 tag、弱于 id/testid/语义属性）。
+        String cls = firstStableClassToken(a.className);
+        if (!cls.isEmpty()) {
+            String tag = a.tag == null ? "" : a.tag.toLowerCase(Locale.ROOT);
+            return SIMPLE_TAG.matcher(tag).matches() ? tag + "." + cls : "." + cls;
+        }
         return a.tag == null ? "" : a.tag;
+    }
+
+    /**
+     * 祖先的第一个稳定 class token（{@code class} 以空格分隔；hash/过短/动态值由
+     * {@link SelectorStability#stableClassNames} 过滤），且必须能直接写进 CSS（{@link #SAFE_IDENTIFIER}）。
+     *
+     * <p>为什么只取一个：多 token 拼接（`div.page.a.b`）会把选择器绑死在样式的组合上——产品加一个
+     * 布局 class 就失配；单 token 配合 `:has(锚点)` 已足够把范围收到分区。
+     */
+    private static String firstStableClassToken(String className) {
+        for (String token : SelectorStability.stableClassNames(className)) {
+            if (SAFE_IDENTIFIER.matcher(token).matches()) return token;
+        }
+        return "";
     }
 
     /**
@@ -1032,5 +1190,245 @@ public final class CodegenScorer {
     static boolean isMalformedCssSelector(String sel) {
         if (sel == null || sel.isEmpty()) return false;
         return MALFORMED_CSS.matcher(sel).find();
+    }
+
+    /**
+     * 选择器是否含<b>位置</b>段（{@code :nth-of-type(...)}）。
+     *
+     * <p>位置段是可读但最脆的判据：它假设「目标在第 N 个同 tag 兄弟里」这一布局事实永恒不变。
+     * 页面插入一个 {@code div}、向导多渲染一段、弹层出现/消失，序号整体漂移即 0 命中。
+     * 故位置型选择器不得压过「父级 / 子级稳定属性」的锚定方案（见 {@link #CSS_STRUCT_POSITIONAL}）。
+     *
+     * @param sel CSS 选择器（可为 {@code null}）
+     * @return 含位置段返回 {@code true}
+     */
+    static boolean isPositionalCss(String sel) {
+        return sel != null && sel.contains(":nth-of-type(");
+    }
+
+    /**
+     * 唯一化「加长」是否<strong>新引入</strong>位置段：{@code baseCss} 本来没有 {@code :nth-of-type}，
+     * 加长后有了 ⇒ 这条收窄只是「用序号凑唯一」。
+     *
+     * <p>背景（2026-11-16 实跑）：{@code button:has(span[data-i18n='button_continue'])} 命中 2 个，
+     * 加长阶段拿祖先完整路径拼出
+     * {@code div:nth-of-type(5) div:has(span[data-i18n='back']) > div:nth-of-type(3) > button[class*='float-right']}：
+     * count==1 通过，但语义上仍是「按序号猜元素」，回放必然漂移。
+     *
+     * <p><b>判定为 {@code true} 后的处置是「延后裁决」而不是「就地丢弃」</b>（见 {@link #score}）：
+     * 这类结果被降级为 {@link #CSS_STRUCT_POSITIONAL} 并只在「一条属性/锚点候选都没能唯一」时出场。
+     * 就地丢弃会让页面在「既无稳定属性、也无可用锚点」时丧失唯一的收敛手段，反而退化到
+     * {@code :not()} 减法（弱证据，可能排除掉目标本身）或绝对 XPath。
+     *
+     * @param baseCss  加长前的候选
+     * @param composed 加长后的候选
+     * @return 加长步骤新引入了位置段返回 {@code true}
+     */
+    private static boolean introducesPosition(String baseCss, String composed) {
+        return !isPositionalCss(baseCss) && isPositionalCss(composed);
+    }
+
+    // ------------------------------------------------------------------
+    // 「父级锚点 + 子级锚点」锚定 XPath
+    // ------------------------------------------------------------------
+
+    /** 注入脚本回传的锚点段：{@code #id} / {@code [attr="v"]} / {@code tag[attr="v"]}（值内禁引号与反斜杠）。 */
+    private static final Pattern CSS_ANCHOR = Pattern.compile(
+            "^(?:([a-z][a-z0-9-]{0,15}))?\\[([A-Za-z_:][A-Za-z0-9_:.\\-]*)=\"([^\"\\\\]{0,80})\"\\]$");
+
+    /**
+     * 汇总全部锚定 XPath 候选（去重、保序）。
+     *
+     * <p>两个来源缺一不可：
+     * <ol>
+     *   <li>{@code facts.robustXpaths}——页面侧 {@code codegen-inject.js#robustXPaths} 生成、并已在文档内
+     *       自检「恰好命中 1 个」的候选。放在前面：它们已经过页面事实校验，最可能直接胜出；</li>
+     *   <li>{@link #anchoredXPaths}——本类由事实组合出的候选。页面侧只做「父级锚点 × <b>目标自身属性</b>」
+     *       与「目标 × 子级锚点」两档，<b>缺「父级锚点 × 子级锚点」</b>这一档；而目标自身无属性、
+     *       兄弟语义完全相同的双胞胎（两个 {@code Continue}）恰恰只能靠这一档区分。</li>
+     * </ol>
+     *
+     * <p>去重是必须的：两个来源会产出同形候选（{@code //button[.//*[@data-i18n="x"]]}），
+     * 重复候选会让同一条选择器被计数两次（违反「每个候选只查一次」的性能契约），
+     * 也让 {@code prefetch} 载荷出现重复项。
+     */
+    private static List<String> anchoredXPathCandidates(CodegenFacts facts) {
+        Set<String> out = new LinkedHashSet<>();
+        if (facts.robustXpaths != null) {
+            for (String rx : facts.robustXpaths) {
+                if (rx != null && !rx.isBlank()) out.add(rx.trim());
+            }
+        }
+        for (String rx : anchoredXPaths(facts)) {
+            if (rx != null && !rx.isBlank()) out.add(rx);
+        }
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * 由事实现算「父级锚点 + 子级锚点」的锚定 XPath 候选。
+     *
+     * <p><b>为什么必须有这一档</b>（用户 2026-11-16 需求）：页面里常有「所有语义维度都相同的双胞胎」——
+     * 两个 {@code Continue} 的 role/name/{@code data-i18n}/class 完全一致，单靠目标自身永远无法区分；
+     * 真正能区分它们的是<b>所在分区</b>（父级锚点：分区标题的 {@code data-i18n}）＋<b>目标内部语义</b>
+     * （子级锚点：按钮里那个 {@code span[data-i18n="button_continue"]}）。CSS 表达「父级 + 子级」只能写
+     * {@code div:has(标题) button:has(按钮锚点)}，而 {@code div} 会命中所有包含该标题的祖先层（html/body/…），
+     * 计数必 >1 被丢弃；XPath 的 {@code //父[.//标题]//目标[.//子锚点]} 结果集是<b>目标节点</b>，
+     * 只要按钮唯一就成立。
+     *
+     * <p>只产候选，唯一性由 {@link LocatorCounter}（Playwright 引擎）裁决——页面侧
+     * {@code document.querySelectorAll} 不穿透 shadow root、按 document 计数，不能作为最终裁判。
+     *
+     * @param facts 元素事实（self + ancestors）
+     * @return 形如 {@code //div[.//h3[@data-i18n="step3"]]//button[.//*[@data-i18n="continue"]]} 的候选（去重、有上限）
+     */
+    static List<String> anchoredXPaths(CodegenFacts facts) {
+        List<String> out = new ArrayList<>();
+        if (facts == null || facts.self == null) return out;
+        CodegenFacts.Fact self = facts.self;
+        String selfTag = self.tag == null ? "" : self.tag.toLowerCase(Locale.ROOT);
+        if (!SIMPLE_TAG.matcher(selfTag).matches() || "html".equals(selfTag) || "body".equals(selfTag)) return out;
+
+        List<String> selfPreds = selfPredicates(self);
+        List<String> childPreds = anchorPredicates(self.childAnchors, MAX_XPATH_CHILD_ANCHORS);
+        // 1) 目标侧单锚点：//button[@data-testid="x"] / //button[.//*[@data-i18n="x"]]
+        for (String p : selfPreds) addUnique(out, "//" + selfTag + p);
+        for (String p : childPreds) addUnique(out, "//" + selfTag + p);
+
+        // 2) 父级锚点 × 目标侧（父级标识分区，目标侧标识控件本身）
+        //
+        // 两条约束来自 2026-11-17 的实跑修正（Reset Password 页的两个 Continue）：
+        // ① 父级谓词不得与目标侧谓词相同——相同即说明该"锚点"取自目标自身子树
+        //    （`div:has(span[data-i18n="continue"])` 里的 span 就是按钮内部的文案），
+        //    它对"这个按钮属于哪个分区"零区分度，只会产出
+        //    `//div[.//*[@data-i18n="continue"]]//button[.//*[@data-i18n="continue"]]` 这种废候选并白占额度；
+        // ② 跨祖先<b>轮转</b>，而不是按祖先顺序逐个灌满：近祖先（`.button-panel`）的多个锚点会把
+        //    {@link #MAX_XPATH_CANDIDATES} 吃光，真正有分区区分力的<b>外层标题</b>
+        //    （`.page` 的 `h1[data-i18n="title_triage"]`）反而轮不上——实测 12 条候选里一条 title 都没有。
+        //    轮转后每个祖先的「第一优先锚点」（JS 侧已按标题优先排序）先全部试一遍，再试第二优先。
+        List<String> targetSide = new ArrayList<>(selfPreds);
+        targetSide.addAll(childPreds);
+        Set<String> targetPredicates = new LinkedHashSet<>(targetSide);
+
+        List<String> parentTags = new ArrayList<>();
+        List<List<String>> parentPredicates = new ArrayList<>();
+        for (CodegenFacts.Fact a : facts.ancestors) {
+            if (parentTags.size() >= MAX_XPATH_PARENTS) break;
+            String atag = a.tag == null ? "" : a.tag.toLowerCase(Locale.ROOT);
+            if (!SIMPLE_TAG.matcher(atag).matches() || "html".equals(atag) || "body".equals(atag)) continue;
+            List<String> preds = new ArrayList<>(selfPredicates(a));
+            preds.addAll(anchorPredicates(a.childAnchors, MAX_XPATH_CHILD_ANCHORS));
+            preds.removeAll(targetPredicates);   // ① 自指过滤
+            if (preds.isEmpty()) continue;
+            parentTags.add(atag);
+            parentPredicates.add(preds);
+        }
+        int maxRounds = MAX_XPATH_SELF_ATTRS + MAX_XPATH_CHILD_ANCHORS;
+        for (int round = 0; round < maxRounds; round++) {
+            for (int i = 0; i < parentTags.size(); i++) {
+                List<String> preds = parentPredicates.get(i);
+                if (round >= preds.size()) continue;
+                String prefix = "//" + parentTags.get(i) + preds.get(round) + "//" + selfTag;
+                for (String tp : targetSide) {
+                    addUnique(out, prefix + tp);
+                    if (out.size() >= MAX_XPATH_CANDIDATES) return out;
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 元素自身稳定属性谓词（identity 类：{@code id} / {@code data-testid} / {@code data-} 语义属性 /
+     * {@code name}，属性类最多 {@value #MAX_XPATH_SELF_ATTRS} 个）。
+     *
+     * <p>状态类 ARIA（{@code aria-hidden} 等）不进：它们是共享状态值，作 XPath 身份谓词只会命中整族。
+     */
+    private static List<String> selfPredicates(CodegenFacts.Fact f) {
+        List<String> out = new ArrayList<>();
+        if (f == null) return out;
+        if (f.id != null && !f.id.isEmpty() && SelectorStability.isStable(f.id)) {
+            String lit = xpathLiteral(f.id);
+            if (lit != null) out.add("[@id=" + lit + "]");
+        }
+        if (f.testid != null && !f.testid.isEmpty() && SelectorStability.isStable(f.testid)) {
+            String lit = xpathLiteral(f.testid);
+            if (lit != null) out.add("[@data-testid=" + lit + "]");
+        }
+        // 表单 name：与语言无关，是 input 类元素最稳定的身份依据之一（{@code attrs} 只含 data-*/aria-*，
+        // 故不能指望它从属性表里被遍历到，必须显式补）。
+        if (f.nameAttr != null && !f.nameAttr.isEmpty() && SelectorStability.isStable(f.nameAttr)) {
+            String lit = xpathLiteral(f.nameAttr);
+            if (lit != null) out.add("[@name=" + lit + "]");
+        }
+        int n = 0;
+        for (Map.Entry<String, String> e : sortedAttrs(f.attrs)) {
+            if (n >= MAX_XPATH_SELF_ATTRS) break;
+            String key = e.getKey() == null ? "" : e.getKey().toLowerCase(Locale.ROOT);
+            if (!ATTR_NAME.matcher(e.getKey() == null ? "" : e.getKey()).matches()) continue;
+            // 状态类 ARIA 不能当身份锚点（与 ARIA_STATE_ONLY / 页面侧 stableAttrs 同口径）
+            if (ARIA_STATE_ONLY.contains(key)) continue;
+            if (!SelectorStability.isStable(e.getValue())) continue;
+            String lit = xpathLiteral(e.getValue());
+            if (lit == null) continue;
+            out.add("[@" + e.getKey() + "=" + lit + "]");
+            n++;
+        }
+        return out;
+    }
+
+    /** 后代锚点 → XPath 谓词（{@code [.//*[@data-i18n="x"]]} / {@code [.//h3[@data-i18n="t"]]}）。 */
+    private static List<String> anchorPredicates(List<String> anchors, int max) {
+        List<String> out = new ArrayList<>();
+        if (anchors == null) return out;
+        for (String a : anchors) {
+            if (out.size() >= max) break;
+            String p = anchorToXPathPredicate(a, true);
+            if (p != null && !out.contains(p)) out.add(p);
+        }
+        return out;
+    }
+
+    /**
+     * CSS 锚点段 → XPath 谓词。
+     *
+     * @param anchor     {@code #id} / {@code [attr="v"]} / {@code tag[attr="v"]}
+     * @param descendant {@code true} = 目标<b>内部</b>的后代锚点（{@code [.//…]}）；{@code false} = 该节点自身属性
+     * @return 谓词；无法安全转换（含引号/反斜杠/非法名）时返回 {@code null}
+     */
+    static String anchorToXPathPredicate(String anchor, boolean descendant) {
+        if (anchor == null) return null;
+        String a = anchor.trim();
+        if (a.isEmpty()) return null;
+        if (a.charAt(0) == '#') {
+            String lit = xpathLiteral(a.substring(1));
+            if (lit == null) return null;
+            return descendant ? "[.//*[@id=" + lit + "]]" : "[@id=" + lit + "]";
+        }
+        Matcher m = CSS_ANCHOR.matcher(a);
+        if (!m.matches()) return null;
+        // 无标签头时必须落到通配符 `*`：`[.//[@data-i18n="x"]]` 是非法 XPath（谓词前缺少轴步），
+        // 引擎会直接抛 SyntaxError ⇒ 整条候选作废。页面侧 codegen-inject.js#cssAnchorToXpath 同样补 `*`。
+        String tag = m.group(1) == null ? "*" : m.group(1);
+        String attr = m.group(2);
+        String lit = xpathLiteral(m.group(3));
+        if (lit == null) return null;
+        if (!descendant) return "[@" + attr + "=" + lit + "]";
+        return "[.//" + tag + "[@" + attr + "=" + lit + "]]";
+    }
+
+    /**
+     * XPath 1.0 字符串字面量：值里没有 {@code "} 用双引号，没有 {@code '} 用单引号，
+     * 两者都有（极罕见）返回 {@code null} 表示放弃该候选（不做 {@code concat()} 拼接，保持可读）。
+     */
+    static String xpathLiteral(String value) {
+        if (value == null) return null;
+        if (value.indexOf('"') < 0) return "\"" + value + "\"";
+        if (value.indexOf('\'') < 0) return "'" + value + "'";
+        return null;
+    }
+
+    private static void addUnique(List<String> out, String xpath) {
+        if (xpath != null && !xpath.isEmpty() && !out.contains(xpath)) out.add(xpath);
     }
 }

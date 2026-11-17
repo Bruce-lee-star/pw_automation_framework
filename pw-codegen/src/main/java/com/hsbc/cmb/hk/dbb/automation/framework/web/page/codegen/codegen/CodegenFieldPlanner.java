@@ -131,12 +131,18 @@ public final class CodegenFieldPlanner {
             // （CSS 命中 5、role 命中 1 时会被误判成一组 ⇒ PageElementList + get(0)，组语义静默降级）。
             // role 未复核时返回负数 ⇒ 不判 List，下方还会产出 TODO，避免"没跑过校验却静默当成唯一"。
             int finalCount = e.effectiveMatchCount(roleLocatable);
-            boolean isList = listBases.contains(baseSig) || finalCount > 1;
+            // 自动成组（见 CodegenEntry#autoList）优先于计数判定：整组定位器在拾取瞬间可能因懒渲染数到
+            // 0/1 个，但「目标是 ARIA 集合里的一项」这个语义本身就该出 PageElementList。
+            boolean isList = e.autoList || listBases.contains(baseSig) || finalCount > 1;
             if (isList) {
                 hasList = true;
-                // 一组元素只合成【一个】PageElementList 字段（组内序号由运行期 x.get(i) 取单项）
-                if (!emittedListBases.add(baseSig)) continue;
+                // 一组元素只合成【一个】PageElementList 字段（组内序号由运行期 x.get(i) 取单项）。
+                // 自动成组是例外：它的「一组」由整组定位器决定，合并（按 base-sig 去重）会让同一集合里
+                // 第二次点击的动作整条消失——宁可多一个同定位器字段，也不能丢用户点过的那一步。
+                if (!e.autoList && !emittedListBases.add(baseSig)) continue;
             }
+            // 取单项的组内序号：自动成组 = 用户实际点的那一项；其余沿用首项。
+            int listIndex = listIndexOf(e, isList);
 
             String annotation;
             String comment = null;
@@ -190,8 +196,9 @@ public final class CodegenFieldPlanner {
             // 一组元素若拿不到 role 定位器（复核未通过 / 跨 frame），只能退化成组内首条的唯一 CSS：
             // 严格模式下不会报错，但这个 PageElementList 实际只命中 1 个元素（组语义丢失）。
             // 产物里显式标出来，避免评审时误以为它是"整组"。
-            //  仅对「多次拾取合成的组」提示可能只命中 1 个；finalCount>1 的组本来就命中多个，不适用
-            if (isList && !semantic && finalCount <= 1 && comment == null) {
+            //  仅对「多次拾取合成的组」提示可能只命中 1 个；finalCount>1 的组本来就命中多个，不适用。
+            //  自动成组的定位器本来就是整组 CSS，不存在「退化成组内首条」的问题，也不适用。
+            if (isList && !e.autoList && !semantic && finalCount <= 1 && comment == null) {
                 comment = "    // TODO(review): group could not use a role locator (verification failed or "
                         + "cross-frame); this @Element matches only one element of the group - review the selector";
             }
@@ -205,15 +212,19 @@ public final class CodegenFieldPlanner {
                 // 0 命中 / 计数不可判定：产物必须在显眼处提示人工核对，而不是静默给出死定位器。
                 comment = "    // TODO(review): locator matched " + finalCount
                         + " element(s) at pick time - verify the selector before replay";
-            } else if (comment == null && isList) {
+            } else if (comment == null && isList && !e.autoList) {
                 comment = "    // TODO(review): PageElementList - generated action targets get(0) only;"
                         + " add the remaining items manually";
+            } else if (comment == null && isList) {
+                // 自动成组：序号来自用户点的那一项，产物注释写清 get(n) 的来历，评审时不必回看录像。
+                comment = "    // PageElementList: the recorded action targets get(" + listIndex
+                        + ") - the item picked during recording";
             }
             fields.add(new CodegenFieldSpec(fieldName,
                     isList ? "PageElementList" : "PageElement",
                     annotation, comment,
-                    verb, actionFor(e, isList, fillValue), assertionFor(e, isList),
-                    isList, semantic, e, fillValue));
+                    verb, actionFor(e, isList, listIndex, fillValue), assertionFor(e, isList, listIndex),
+                    isList, semantic, e, fillValue, listIndex));
         }
 
         String classAnnotation = (hasRole && allowNlsKey) ? buildClassAnnotation(nlsFiles) : "";
@@ -281,13 +292,31 @@ public final class CodegenFieldPlanner {
     }
 
     /**
-     * Step 动作：按 role 派生（click/fill/check），一组元素取 {@code get(0)} 单项。
+     * 一组元素时 Step / Assert 指向的组内序号（0 基）；单元素恒 {@code 0}。
+     *
+     * <p>只有<b>自动成组</b>（{@link CodegenEntry#autoList}）才保留拾取时的序号——那是用户实际点的那一项
+     * （密保问题下拉第 5 项）；多次拾取 / 面板标记合成的组，其 {@code index} 只是成员序号，
+     * 产物沿用首项 {@code get(0)}。
+     */
+    static int listIndexOf(CodegenEntry e, boolean isList) {
+        if (!isList || e == null || !e.autoList) return 0;
+        return Math.max(0, e.index);
+    }
+
+    /** 取单项前缀：一组元素 {@code get(n).}，单元素空串。 */
+    static String listTarget(boolean isList, int listIndex) {
+        return isList ? "get(" + Math.max(0, listIndex) + ")." : "";
+    }
+
+    /**
+     * Step 动作：按 role 派生（click/fill/check），一组元素取 {@code get(n)} 单项
+     * （n 见 {@link #listIndexOf(CodegenEntry, boolean)}）。
      * 输入框优先回填录制时输入的最终值（令产物开箱即用）；未录制到值才退化为 {@code ""} 占位 + TODO。
      *
      * @param fillValue 该字段录制到的最终输入值（key=sigKey），可为 null
      */
-    static String actionFor(CodegenEntry e, boolean isList, String fillValue) {
-        String target = isList ? "get(0)." : "";
+    static String actionFor(CodegenEntry e, boolean isList, int listIndex, String fillValue) {
+        String target = listTarget(isList, listIndex);
         String verb = verbFor(e);
         if ("fill".equals(verb)) {
             String v = (fillValue != null) ? fillValue : "";
@@ -305,8 +334,8 @@ public final class CodegenFieldPlanner {
     }
 
     /** Assert 表达式：复选框/单选看勾选态，其余看可见性（{@code PageElement} 均提供）。 */
-    static String assertionFor(CodegenEntry e, boolean isList) {
-        String target = isList ? "get(0)." : "";
+    static String assertionFor(CodegenEntry e, boolean isList, int listIndex) {
+        String target = listTarget(isList, listIndex);
         String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
         return target + (("checkbox".equals(role) || "radio".equals(role)) ? "isChecked()" : "isVisible()");
     }
@@ -361,11 +390,16 @@ public final class CodegenFieldPlanner {
      * 一组元素的 base-sig 集合：同一 base-sig 下有 ≥2 个互异的有效序号。
      *
      * <p>{@code public} 供 Inspector 的生成前复核复用（见 {@link #baseSigOf(String)} 的说明）。
+     *
+     * <p><b>自动成组（{@link CodegenEntry#autoList}）不参与本判据</b>：它的「一组」来自整组定位器，
+     * 与 {@code role|name} 基座无关。若仍按 base-sig 合并，「两个不同下拉里名字都叫 Yes 的选项」
+     * 会被并成一个字段、共用第一个下拉的定位器，第二个动作直接消失——序号语义也不同
+     * （自动成组的是用户点的那一项，不是组成员号）。
      */
     public static Set<String> listGroupBaseSigs(Collection<CodegenEntry> entries) {
         Map<String, Set<Integer>> idxByBase = new LinkedHashMap<>();
         for (CodegenEntry e : entries) {
-            if (e == null) continue;
+            if (e == null || e.autoList) continue;
             idxByBase.computeIfAbsent(baseSigOf(e.sigKey), k -> new LinkedHashSet<>()).add(e.index);
         }
         Set<String> bases = new LinkedHashSet<>();
@@ -428,17 +462,121 @@ public final class CodegenFieldPlanner {
         // 经 toIdentifier 后仍可能长达上千字符，绝不能拿来当 Java 标识符。超过阈值即视为「不可用语义名」，
         // 顺延到 nlsKey / 角色 / 选择器标签，避免生成 logonPage.logOnToBusinessInternetBankingUsername… 这类巨名。
         String fromName = toIdentifier(e.name);
-        if (!fromName.isEmpty() && fromName.length() <= MAX_NAME_IDENTIFIER) return fromName;
+        if (!fromName.isEmpty() && fromName.length() <= MAX_NAME_IDENTIFIER) return withKindSuffix(fromName, e);
         String fromKey = toIdentifier(e.nlsKey);
-        if (!fromKey.isEmpty()) return fromKey;
+        if (!fromKey.isEmpty()) return withKindSuffix(fromKey, e);
         if (roleLocatable) {
             String fromRole = toIdentifier(e.role);
-            if (!fromRole.isEmpty()) return fromRole;
+            if (!fromRole.isEmpty()) return withKindSuffix(fromRole, e);
         }
         String fromSelector = toIdentifier(selectorLabel(e.cssSelector));
-        if (!fromSelector.isEmpty()) return fromSelector;
+        if (!fromSelector.isEmpty()) return withKindSuffix(fromSelector, e);
         return "element";
     }
+
+    /**
+     * 元素种类后缀（用户 2026-11-15 命名规范）：{@code xxxBtn} / {@code xxxInput} / {@code xxxLink} /
+     * {@code xxxLabel} / {@code xxxRadio} / {@code xxxCheckbox}，标题按层级 {@code xxxTitle} / {@code xxxSubtitle}。
+     *
+     * <h3>为什么按「角色优先、标签兜底」判定</h3>
+     * <p>同一个 {@code <input>} 可能是按钮（{@code type=submit}）、单选框、复选框或文本框，只看标签无法区分；
+     * 而 AX 角色（radio / checkbox / textbox / button …）正是运行期 {@code getByRole} 用的同一套语义，
+     * 按它命名能让字段名与产物里的定位方式一一对应。角色缺失（历史构造 / 非标准元素）时才退回标签判定。
+     *
+     * <h3>映射表</h3>
+     * <ul>
+     *   <li>{@code button}（含 {@code <button>} / {@code input[type=submit|button]}）⇒ {@code Btn}</li>
+     *   <li>{@code link}（{@code <a href>}）⇒ {@code Link}</li>
+     *   <li>{@code textbox} / {@code searchbox} / {@code spinbutton} / {@code <textarea>} ⇒ {@code Input}</li>
+     *   <li>{@code radio} ⇒ {@code Radio}；{@code checkbox} / {@code switch} ⇒ {@code Checkbox}</li>
+     *   <li>{@code combobox} / {@code listbox} / {@code <select>} ⇒ {@code Select}</li>
+     *   <li>{@code label} ⇒ {@code Label}</li>
+     *   <li>{@code heading} / {@code <h1>}~{@code <h6>} ⇒ {@code Title}（h1/h2）/{@code Subtitle}（h3~h6）</li>
+     * </ul>
+     *
+     * <p>其余元素（普通 div / span / img / 容器）不加后缀：它们的字段名本身就来自业务文案，
+     * 硬加 {@code Div}/{@code Span} 只会制造噪声。
+     */
+    static String kindSuffix(CodegenEntry e) {
+        if (e == null) return "";
+        String role = e.role == null ? "" : e.role.toLowerCase(Locale.ROOT);
+        String tag = e.tag == null ? "" : e.tag.toLowerCase(Locale.ROOT);
+        switch (role) {
+            case "button":
+                return "Btn";
+            case "link":
+                return "Link";
+            case "radio":
+                return "Radio";
+            case "checkbox":
+            case "switch":
+                return "Checkbox";
+            case "textbox":
+            case "searchbox":
+            case "spinbutton":
+                return "Input";
+            case "combobox":
+            case "listbox":
+                return "Select";
+            case "label":
+                return "Label";
+            case "heading":
+                return headingSuffix(tag);
+            default:
+                break;
+        }
+        switch (tag) {
+            case "button":
+                return "Btn";
+            case "a":
+                return "Link";
+            case "input":
+            case "textarea":
+                return "Input";
+            case "select":
+                return "Select";
+            case "label":
+                return "Label";
+            default:
+                break;
+        }
+        return tag.matches("h[1-6]") ? headingSuffix(tag) : "";
+    }
+
+    /** 标题后缀：h1/h2 是页面/区块标题（{@code Title}），h3~h6 是子标题（{@code Subtitle}）。 */
+    private static String headingSuffix(String tag) {
+        switch (tag) {
+            case "h3":
+            case "h4":
+            case "h5":
+            case "h6":
+                return "Subtitle";
+            default:
+                return "Title";
+        }
+    }
+
+    /**
+     * 把种类后缀拼到语义名后面，并挡住三类「重复/无意义」拼接：
+     * <ol>
+     *   <li>名字本身就是角色名（{@code button} / {@code radio} / {@code label} …，来自角色兜底档）⇒ 不再叠加；</li>
+     *   <li>名字已以该后缀结尾（{@code privacyLink}）⇒ 不再叠加；</li>
+     *   <li>兜底名 {@code element} ⇒ 保持中性。</li>
+     * </ol>
+     */
+    static String withKindSuffix(String base, CodegenEntry e) {
+        if (base == null || base.isEmpty()) return base;
+        String suffix = kindSuffix(e);
+        if (suffix.isEmpty() || GENERIC_BASE_NAMES.contains(base.toLowerCase(Locale.ROOT))) return base;
+        if (base.toLowerCase(Locale.ROOT).endsWith(suffix.toLowerCase(Locale.ROOT))) return base;
+        return base + suffix;
+    }
+
+    /** 「本身就是角色名」的兜底标识符：与后缀叠加会得到 {@code buttonBtn} / {@code textboxInput} 这类噪声。 */
+    private static final Set<String> GENERIC_BASE_NAMES = Collections.unmodifiableSet(Set.of(
+            "element", "button", "link", "radio", "checkbox", "switch", "textbox", "searchbox",
+            "spinbutton", "combobox", "listbox", "label", "heading", "title", "subtitle",
+            "input", "select", "textarea"));
 
     /**
      * 生成最终字段名（唯一化）。

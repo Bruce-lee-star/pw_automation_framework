@@ -274,6 +274,26 @@ public class CodegenLauncherModelTest {
 
     // ------------------------------------------------------------------
 
+    /** 右键 / 双击必须由「本次录制动作」决定，而不是字段模板里的 click。 */
+    @Test
+    public void rightClickAndDoubleClickComeFromRecordedAction() {
+        CodegenEntry button = new CodegenEntry("button|More#0", "button", "More", "ROLE", 100,
+                "role=button[name=\"More\"]", "#more", null, 0, List.of(), List.of(), 1, "button", false);
+        CodegenFieldSpec spec = new CodegenFieldSpec("moreBtn", "PageElement", "", null,
+                "click", "click()", "isVisible()", false, true, button, null);
+        assertEquals("rightClick()", CodegenLauncher.actionForPick(spec, pick(button, "contextmenu")));
+        assertEquals("doubleClick()", CodegenLauncher.actionForPick(spec, pick(button, "dblclick")));
+        assertEquals("click()", CodegenLauncher.actionForPick(spec, pick(button, "click")));
+    }
+
+    /** 右键两次是两次明确动作，不能被「纯连点去重」吞掉。 */
+    @Test
+    public void rightClickTwiceIsNotDeduplicated() {
+        assertFalse(CodegenLauncher.isRepeatedClick("click|rightClick()", "click|rightClick()",
+                "click", "contextmenu"));
+        assertTrue(CodegenLauncher.isRepeatedClick("click|click()", "click|click()", "click", "click"));
+    }
+
     private static CodegenEntry checkbox(boolean checked) {
         return new CodegenEntry("checkbox|Remember me#0", "checkbox", "Remember me", "ROLE", 100,
                 "role=checkbox[name=\"Remember me\"]", "#rm", null, 0,
