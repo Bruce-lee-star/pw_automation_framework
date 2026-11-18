@@ -329,8 +329,10 @@
                         try { resolved = pickTarget(target); } catch (ignore) { resolved = null; }
                         // 只上报「事件目标 + 其事实（选择器 / XPath / frame 路径）」：拾取按选择器逐 frame 求值，
                         // 绝不带坐标——坐标随滚动/重排漂移，且对跨源 iframe 必然打空。
+                        // hoverKey：与悬浮预览同一身份标识（轻量 nth 路径），Java 据此消费悬浮已裁决的定位器，
+                        // 保证 tooltip 显示的与点击落库的逐字一致（page.pause 语义）。
                         window.__codegenEvent({ type: 'click', tag: target && target.tagName,
-                            framePath: framePathOf(),
+                            framePath: framePathOf(), hoverKey: hoverSelectorOf(target),
                             info: infoOf(target) });
                         // 登记「即将到来的合成 click」：点包裹式 label（或其内部任意文本/svg）且归一到的控件是
                         // radio/checkbox 时，浏览器随后会向该控件补发一次 click，必须抑制掉（否则两条定位）。
@@ -470,6 +472,13 @@
             + 'font:11px/17px -apple-system,"Segoe UI",sans-serif;padding:0 6px;border-radius:3px;'
             + 'white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis;';
         d.appendChild(label);
+        // 第二行：Java 侧回显的「真实 locator」（对标 page.pause 悬浮 tooltip）。
+        var hint = document.createElement('span');
+        hint.id = '__codegen_locator_hint__';
+        hint.style.cssText = 'position:absolute;left:0;top:2px;background:rgba(17,24,39,.94);color:#a7f3d0;'
+            + 'font:11px/16px ui-monospace,Consolas,monospace;padding:2px 6px;border-radius:3px;'
+            + 'white-space:pre;max-width:520px;overflow:hidden;text-overflow:ellipsis;display:none;';
+        d.appendChild(hint);
         (document.body || document.documentElement).appendChild(d);
         return d;
     }
@@ -488,6 +497,31 @@
         return text;
     }
 
+    /**
+     * hover 预览用的轻量元素标识：从 document root 到目标的 `tag:nth-of-type(k) > …` 路径。
+     *
+     * <p>只遍历祖先链与同级前驱（O(深度×兄弟数)），不遍历后代、不算 cssSel/absXPath——
+     * 与 hlLabelOf 同一约束：mouseover 高频重入时不能把主线程打满。真正的 locator 由 Java 侧
+     * 唯一算法源（CodegenScorer）算出后经 __CODEGEN_SET_LOCATOR__ 回显，此处只负责「指认元素」。
+     */
+    function hoverSelectorOf(el) {
+        try {
+            var parts = [], n = el;
+            while (n && n.nodeType === 1) {
+                if (n.nodeName === 'HTML') { parts.unshift('html'); break; }
+                var parent = n.parentElement;
+                if (!parent) break;   // shadow root 边界：宿主链由 Java 侧按 framePath/shadowHosts 处理
+                var tag = (n.tagName || '').toLowerCase();
+                if (!tag) return '';
+                var idx = 1, s = n;
+                while (s.previousElementSibling) { idx++; s = s.previousElementSibling; }
+                parts.unshift(tag + ':nth-of-type(' + idx + ')');
+                n = parent;
+            }
+            return parts.join(' > ');
+        } catch (e) { return ''; }
+    }
+
     var hlCurrent = null;   // 当前已高亮的元素：同一元素重入 mouseover 直接跳过
     var hlPending = null;   // rAF 待刷新目标：合并同一帧内的多次 mouseover/scroll
     var hlRaf = 0;
@@ -500,6 +534,12 @@
         hlCurrent = el;
         hlLast = el;
         try { hlShow(el); } catch (e) { }
+        // hover 预览（对标 page.pause 的「悬浮即显示代码」）：只发轻量元素标识，
+        // 由 Java 侧唯一算法源算 locator 后回显。同元素守卫 + rAF 合并保证只在「换元素」时发一次。
+        try {
+            var sel = hoverSelectorOf(el);
+            if (sel) window.__codegenEvent({ type: 'hover', selector: sel, framePath: framePathOf() });
+        } catch (e) { }
     }
 
     function hlSchedule(el) {
@@ -524,6 +564,9 @@
         d.style.width = r.width + 'px';
         d.style.height = r.height + 'px';
         d.firstChild.textContent = hlLabelOf(el);
+        // 换元素：先清掉上一个元素的 locator 回显，避免显示错位代码（Java 会异步补上新的）。
+        var hint = d.querySelector('#__codegen_locator_hint__');
+        if (hint) { hint.style.display = 'none'; hint.textContent = ''; }
     }
 
     function hlOnOver(ev) {
@@ -571,6 +614,24 @@
         if (on === window.__CODEGEN_HL_ON__) return;
         window.__CODEGEN_HL_ON__ = on;
         try { on ? hlAttach() : hlDetach(); } catch (e) { }
+    };
+
+    /**
+     * Java 回显「当前悬浮元素最终会用的 locator」（对标 page.pause 的悬浮 tooltip）。
+     *
+     * <p>文本由 Java 侧唯一算法源（CodegenScorer + role 引擎复核）生成，因此这里显示的就是
+     * 点击会落库、回放会使用的同一条定位器，而不是 JS 侧另算一套近似值。
+     */
+    window.__CODEGEN_SET_LOCATOR__ = function (text, note) {
+        try {
+            var d = document.getElementById(HL_ID);
+            if (!d || d.style.display === 'none') return;   // 已移开/已暂停：丢弃过期回显
+            var hint = d.querySelector('#__codegen_locator_hint__');
+            if (!hint) return;
+            hint.textContent = (note ? note + '  ' : '') + (text || '');
+            hint.title = hint.textContent;
+            hint.style.display = text ? 'block' : 'none';
+        } catch (e) { }
     };
 
     // ---- 被测页控制条（对标 page.pause 的调试栏）：开始 / 继续 / 停止，且实时显示拾取态 ----

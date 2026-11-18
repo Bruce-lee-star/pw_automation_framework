@@ -1,5 +1,6 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.cdp;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -267,6 +268,85 @@ public final class CodegenCdpNodeExtractor {
     public CodegenEntry extract(ElementRef ref, PreClickSnapshot preClick) {
         if (ref == null) return null;
         return extract(ref.backendNodeId(), ref.frameId(), ref.scope(), ref.objectId(), ref.frames(), preClick);
+    }
+
+    /**
+     * 从「点击捕获阶段同步采集的 facts」直接构造条目——<b>点击即导航元素的兜底</b>。
+     *
+     * <p>某些按钮（如 HSBC 的 Cancel / reset_password_10）点击后<b>立即提交表单并跳页</b>。
+     * 拾取引擎异步回查时，点击时算好的 cssSelector / xpath 指向的旧 DOM 已被新文档替换，
+     * {@code elementBySelector} 全部落空（日志："page may have navigated"）。此时不能像常规元素那样
+     * 回查再 extract——元素已经不在了。
+     *
+     * <p>好在页面侧 {@code infoOf(target)} 是在 window 捕获阶段（先于页面 click 处理器、先于导航）
+     * <b>同步</b>算出的完整 facts（role/name/tag/cssSelector/xpath/attrs/childAnchors/text…），它就是
+     * 「这一步要操作的那个元素」的快照。本方法把它包成 {@link CodegenFacts}，走与常规路径同一套
+     * scorer + NLS 反查 + entry 构造，因此产出的定位器与常规拾取逐字一致，回放时（前面步骤重新走到
+     * 该页面、按钮重新出现）能正常命中。
+     *
+     * <p>与常规 extract 的唯一差异：拿不到 AX 权威语义与实时唯一性计数（旧文档已销毁）——故用 JS
+     * 侧 role/name，且 role 标记为待生成期复核（{@code roleHits=UNVERIFIED}）；这在导航场景是可接受的
+     * 降级，总比丢掉整个元素强。
+     *
+     * @param info      点击 payload 的 {@code info}（self facts 平铺 Map）
+     * @param preClick  捕获阶段 name/text 快照（修名用）
+     * @param framePath 点击时记录的 frame 路径（导航后仍能用于回放产物）
+     * @return 构造出的条目；info 无效返回 null
+     */
+    public CodegenEntry extractFromClickInfo(Map<String, Object> info, PreClickSnapshot preClick,
+                                             List<Integer> framePath) {
+        if (info == null || info.isEmpty()) return null;
+        try {
+            // info 是 self facts 的平铺 Map；CodegenFacts.fromJson 期望 {self:{...}, ancestors:[...]}。
+            JsonObject selfJson = new Gson().toJsonTree(info).getAsJsonObject();
+            JsonObject wrapped = new JsonObject();
+            wrapped.add("self", selfJson);
+            CodegenFacts facts = CodegenFacts.fromJson(wrapped);
+            if (facts == null || facts.self == null) return null;
+
+            // 名字归一：无 AX 语义可用，JS facts 兼作 ax/js 两侧；preClick 快照仍可还原点击前文案。
+            CodegenFacts.Fact namedSelf = resolvePickedName(facts.self, facts.self, preClick);
+            CodegenFacts scoredFacts = new CodegenFacts(namedSelf, facts.ancestors, facts.robustXpaths, facts.list);
+
+            // 导航后旧文档已销毁：计数必然 0，仅用于让 scorer 正常产出候选（matchCount 不代表当前命中）。
+            LocatorCounter noop = sel -> 0;
+            CodegenScorer.ScoredLocator scored = CodegenScorer.score(scoredFacts, noop, !nls.enabled());
+            CodegenFacts.Fact self = scoredFacts.self;
+
+            String role = self.role;
+            String name = self.name;
+            // NLS 反查（data-i18n / 后代 key）：与常规路径同一逻辑，导航不影响（读的是点击时快照的 attrs）。
+            String dataI18n = (self.attrs != null) ? self.attrs.get("data-i18n") : null;
+            String nlsKey = nls.lookup(name, dataI18n);
+            if (nlsKey == null || nlsKey.isEmpty()) {
+                nlsKey = nls.lookupByDescendantKey(name, descendantI18nKey(self.childAnchors));
+            }
+
+            String css = (scored.uniqueCss == null || scored.uniqueCss.isEmpty()) ? "html" : scored.uniqueCss;
+            String sigKey = role + "|" + (name == null ? "" : name) + "#" + self.nth;
+            boolean roleLocatable = scored.roleLocatable && (framePath == null || framePath.isEmpty());
+            String strategy = roleLocatable
+                    ? ((nlsKey != null && !nlsKey.isEmpty()) ? LocatorStrategy.ROLE_WITH_NAME : LocatorStrategy.ROLE)
+                    : LocatorStrategy.CSS;
+            String selector = buildSelector(role, name, nlsKey);
+            int matchCount = scored.matchCount;
+            int roleHits = roleLocatable
+                    ? CodegenEntry.ROLE_HITS_UNVERIFIED : CodegenEntry.ROLE_HITS_NOT_APPLICABLE;
+            List<String> shadowHosts = self.shadowHosts == null ? List.of() : self.shadowHosts;
+
+            // framePath 在条目里是 List<String>（iframe 宿主选择器链）；点击 payload 传来的 Integer 路径
+            // 导航后无法 resolve，且这类即时导航按钮在主 frame——直接用空链（与常规主 frame 拾取一致）。
+            CodegenEntry entry = new CodegenEntry(sigKey, role, name, strategy, scored.score, selector, css,
+                    nlsKey, self.nth, List.of(), shadowHosts,
+                    matchCount, self.tag, self.checked, roleHits, false);
+            log.info("[codegen][cdp] recovered nav element from pre-click facts: role={} name='{}' nlsKey={} "
+                            + "strategy={} selector='{}' (old DOM already navigated away)",
+                    role, name, nlsKey, strategy, selector);
+            return entry;
+        } catch (Exception e) {
+            log.warn("[codegen][cdp] extractFromClickInfo failed: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

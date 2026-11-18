@@ -338,4 +338,24 @@ public class CodegenHasScopeContractTest {
         assertTrue("CDP 可见性必须判祖先 display:none", cdp.contains("pcs.display === 'none'"));
     }
 
+    /**
+     * 悬浮即显示 locator（对标 {@code page.pause()}）的<b>页面侧契约</b>。
+     *
+     * <p>① mouseover 必须上报轻量元素标识（不传重量级 factsOf，否则高频重入卡死主线程）；
+     * ② Java 回显 API 必须存在且写到高亮框；③ 换元素时先清旧回显，避免显示错位代码。
+     */
+    @Test
+    public void hoverPreviewReportsLightweightSelectorAndAcceptsLocatorHint() throws Exception {
+        String inject = LocatorCoreScript.inject();
+        assertTrue("必须有轻量 hover 元素标识函数", inject.contains("function hoverSelectorOf("));
+        assertTrue("mouseover 必须上报 hover 事件", inject.contains("type: 'hover'"));
+        assertTrue("hover 上报不得携带重量级 factsOf", !inject.contains("factsOf(el), framePath: framePathOf()"));
+        assertTrue("必须有 locator 回显 API", inject.contains("__CODEGEN_SET_LOCATOR__"));
+        assertTrue("换元素时必须清理旧回显", inject.contains("hint.style.display = 'none'; hint.textContent = ''"));
+        // 悬浮裁决 → 点击消费同一条结论：hover 与 click 必须用同一身份函数算出 hoverKey。
+        assertTrue("click 事件必须携带 hoverKey", inject.contains("hoverKey: hoverSelectorOf(target)"));
+        assertTrue("悬浮上报的 selector 必须来自同一身份函数",
+                inject.contains("var sel = hoverSelectorOf(el)"));
+    }
+
 }

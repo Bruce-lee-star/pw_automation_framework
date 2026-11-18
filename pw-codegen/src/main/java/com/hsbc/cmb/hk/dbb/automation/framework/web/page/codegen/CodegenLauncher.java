@@ -367,6 +367,27 @@ public final class CodegenLauncher {
             // CodegenEngine（见 submitPick）；此处仅保留 per-page 的 CDP 会话 / 抽取器数据结构。
             /** CDP 拾取通道是否已开启（幂等标记）。 */
             volatile boolean pickChannelOn = false;
+            /**
+             * hover 预览序号：鼠标在元素间快速移动时，引擎队列会积压多个预览请求；
+             * 只有序号等于最新值的那一个才真正解析，其余直接丢弃（rAF 已合并同帧，这里再防跨帧积压）。
+             */
+            private final AtomicLong hoverSeq = new AtomicLong(0);
+            /**
+             * 悬浮已裁决的 entry（按页面侧 cssSelector 索引）。点击同一元素直接消费同一条结论，
+             * 保证「悬浮 tooltip 显示的」与「点击落库 / 回放使用的」逐字一致。
+             */
+            private final Map<String, CodegenEntry> hoverVerdicts = new java.util.concurrent.ConcurrentHashMap<>();
+
+            /**
+             * 消费悬浮裁决结果：命中则移除（一次性，避免过期结论被后续点击误用）。
+             *
+             * <p>鼠标移动过程中悬浮解析可能仍在跑，点击先于它完成属正常竞态——此时返回 null，
+             * 点击走自己的裁决路径，结论仍由同一个 {@link #adjudicateRole} 得出，不会表里不一。
+             */
+            CodegenEntry consumeHoverVerdict(String cssSelector) {
+                if (cssSelector == null || cssSelector.isEmpty()) return null;
+                return hoverVerdicts.remove(cssSelector);
+            }
 
             PageSession(Page page, String nlsLang, NlsReverseLookup nls) {
                 this.page = page;
@@ -473,6 +494,9 @@ public final class CodegenLauncher {
              * 同时把 NLS 语言带到引擎线程（抽取器依赖 ThreadLocal 语言）。
              */
             void submitPick(String fingerprint, Runnable task) {
+                // 点击优先于悬浮预览：递增序号使队列中尚未执行的 hover 预览全部失效，
+                // 避免用户点下去后先等一次预览抽取（实测单次要 20~360ms）才轮到本次拾取。
+                hoverSeq.incrementAndGet();
                 try {
                     if (!engine.submit(CodegenEngine.Kind.PICK, page, () -> {
                         // 语言已由 CodegenEngine.submit 在运行任务前统一 setLanguage(nlsLang)，此处无需重复。
@@ -503,6 +527,51 @@ public final class CodegenLauncher {
             }
 
             /**
+             * 悬浮预览（对标 {@code page.pause()} 的「悬浮即显示代码」）。
+             *
+             * <p>只把最新序号的请求交由共享拾取引擎解析（派发线程绝不发 CDP），产出的文本来自
+             * 唯一算法源：{@link CodegenScorer 打分器}选出的定位器 + role 引擎实时复核。因此悬浮
+             * 看到的就是点击会落库、回放会使用的同一条定位器，而不是 JS 侧另算的近似值。
+             */
+            void submitHoverPreview(Map<String, Object> payload) {
+                final long seq = hoverSeq.incrementAndGet();
+                String selector = payload.get("selector") instanceof String ? (String) payload.get("selector") : null;
+                if (selector == null || selector.isEmpty()) return;
+                @SuppressWarnings("unchecked")
+                List<Integer> framePath = framePathOf(payload);
+                try {
+                    engine.submit(CodegenEngine.Kind.PICK, page, () -> {
+                        if (seq != hoverSeq.get()) return;   // 只处理最新一次悬浮，丢弃队列中已过期的预览
+                        try {
+                            cdpSession();
+                            ElementRef ref = session.elementBySelector(selector, List.of(), framePath);
+                            if (ref == null) return;
+                            CodegenEntry raw = extractor.extract(ref, null);
+                            if (raw == null) return;
+                            // 悬浮即裁决：与点击共用同一判据，结论写入缓存供点击直接消费。
+                            CodegenEntry decided = adjudicateRole(raw, null, null, extractor, "hover preview");
+                            // key 必须与点击 payload 的 hoverKey 同源——都是 hoverSelectorOf(target) 的 nth 路径。
+                            hoverVerdicts.put(selector, decided);
+                            // tooltip 显示的必须是最终定位器本身（与点击落库 / 回放逐字一致）。
+                            final String text = decided.selector;
+                            if (text == null || text.isEmpty()) return;
+                            // extract() 已完成 Java 侧 NLS 反查（data-i18n / 后代 key → nlsKey），
+                            // 把结果显示成附注：悬浮即可看到最终代码会用的 i18n key，与产物注解逐字对齐。
+                            String note = (decided.nlsKey == null || decided.nlsKey.isEmpty())
+                                    ? "" : "NLS: " + decided.nlsKey;
+                            page.evaluate("a => { try { if (window.__CODEGEN_SET_LOCATOR__) "
+                                            + "window.__CODEGEN_SET_LOCATOR__(a.t, a.n); } catch (e) {} }",
+                                    Map.of("t", text, "n", note));
+                        } catch (Throwable t) {
+                            log.debug("[codegen][hover] preview failed on {}: {}", page.url(), t.getMessage());
+                        }
+                    });
+                } catch (Exception e) {
+                    log.debug("[codegen][hover] preview submit failed: {}", e.getMessage());
+                }
+            }
+
+            /**
              * 解析被点元素。
              *
              * <p><b>只用「点击事件目标」给出的定位事实，不做坐标反查</b>：坐标随滚动 / 重排 / 动画漂移，
@@ -521,7 +590,7 @@ public final class CodegenLauncher {
              */
             CodegenEntry pickAt(String type, Object cssSelector, String xpath,
                                 List<String> shadowHosts, List<Integer> framePath, List<String> robustXpaths,
-                                PreClickSnapshot preClick) {
+                                PreClickSnapshot preClick, String hoverKey, Map<String, Object> clickInfo) {
                 cdpSession();   // 防御性保证会话已建（正常由 submitPick 包装已建）
                 String selector = cssSelector instanceof String ? (String) cssSelector : null;
                 ElementRef ref = session.elementBySelector(selector, shadowHosts, framePath);
@@ -558,9 +627,21 @@ public final class CodegenLauncher {
                     }
                 }
                 if (ref == null) {
-                    // 必须可见：静默失败时用户只看到「点了没反应」，无从判断是选择器失配、页面已导航还是元素被移除。
+                    // 点击即导航元素（如 Cancel）：旧 DOM 已被新文档替换，selector/xpath 全部落空。
+                    // 兜底①：悬浮已裁决的条目（hoverKey 命中）——与 tooltip 显示逐字一致。
+                    CodegenEntry hovered = consumeHoverVerdict(hoverKey);
+                    if (hovered != null) {
+                        log.info("[codegen][cdp] recovered nav pick from hover verdict ({}) '{}' "
+                                        + "(old DOM navigated away)", type, hovered.selector);
+                        return hovered;
+                    }
+                    // 兜底②：用点击捕获阶段同步采集的完整 facts 直接构造条目（见 extractFromClickInfo）。
+                    // 这是「导航按钮不丢」的关键——info 是导航前算好的快照，不依赖当前 DOM。
+                    CodegenEntry fromFacts = extractor.extractFromClickInfo(clickInfo, preClick, framePath);
+                    if (fromFacts != null) return fromFacts;
+                    // 两条兜底都失败：必须可见，静默失败时用户只看到「点了没反应」。
                     log.warn("[codegen][cdp] pick failed ({}) on {} (selector='{}', xpath='{}', shadowHosts={}) - "
-                                    + "cssSel and ev.target xpath both unresolved: "
+                                    + "cssSel and ev.target xpath both unresolved, and no pre-click facts to recover: "
                                     + "page may have navigated / element removed / dynamic rewrite",
                             type, page.url(), selector, xpath, shadowHosts);
                     return null;
@@ -570,6 +651,12 @@ public final class CodegenLauncher {
                     // 并让子 frame 元素跳过必然失败的页级 role 复核（大页面上该复核 10~90ms）。
                     // preClick 是 window 捕获阶段同步采集的「点击前」事实：抽取跑在拾取引擎线程上，
                     // 此时页面自身 click 处理器已把提交类按钮变成 loading，名字不可再用（见 PreClickSnapshot）。
+                    // 悬浮已裁决的条目直接复用同一条结论——tooltip 显示的与落库/回放的逐字一致（page.pause 语义）。
+                    CodegenEntry hovered = consumeHoverVerdict(hoverKey);
+                    if (hovered != null) {
+                        log.debug("[codegen][cdp] reused hover-adjudicated locator ({}) '{}'", type, hovered.selector);
+                        return hovered;
+                    }
                     return extractor.extract(ref, preClick);
                 } catch (Exception e) {
                     log.warn("[codegen][cdp] extract failed ({}) for backendNodeId={}: {}",
@@ -914,20 +1001,26 @@ public final class CodegenLauncher {
             // 孪生元素（同 role+name、同组内序号）会算出相同 sigKey：字段规划按 sigKey 去重，
             // 不去消歧的话第二个元素在产物里会被当「同元素重复点选」直接丢弃（用户看到「生成了但只有一个字段」）。
             CodegenEntry effective = disambiguateSigKey(entry, docId, eid, picked);
+            // 悬浮已裁决的条目（roleHits 不再是 UNVERIFIED）不再欠复核——tooltip 显示的就是这条结论。
+            boolean roleAlreadyAdjudicated = effective.roleHits != CodegenEntry.ROLE_HITS_UNVERIFIED;
             Pick pk = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(), currentSession(sessionSeq),
                     effective, pg, safeUrl(pg), ps.extractor(),
-                    ps.extractor().requiresDeferredRoleVerification(effective));
+                    !roleAlreadyAdjudicated && ps.extractor().requiresDeferredRoleVerification(effective));
             pk.identify(docId, eid);
             picked.add(pk);
             if (panelRef[0] == null) {
                 log.warn("[codegen][cdp] picked #{} but panelRef not ready (panel null)", pk.id);
+                verifyRoleAtPickTime(null, pk);
                 return pk;
             }
             panelRef[0].onPicked(pk.id, effective);
+            // 点击当场完成 role 唯一性裁决：命中恰好 1 才保留 role，否则就地回退 CSS。
+            // 与 page.pause 语义一致——显示 / 落库 / 回放三者同源，不再拖到生成期才发现多命中。
+            verifyRoleAtPickTime(panelRef[0], pk);
             // 实时增量生成：每次拾取后立即刷新 Page/Step/Assert，无需等到按 Stop 才看到代码。
             requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
             log.debug("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
-                    pk.id, effective.name, effective.role, effective.selector);
+                    pk.id, pk.entry.name, pk.entry.role, pk.entry.selector);
             return pk;
         };
 
@@ -1135,6 +1228,12 @@ public final class CodegenLauncher {
             if (ps != null && src != null) {
                 sessions.setActive(src);   // 用户在哪页操作，活动页就跟随到哪页（弹窗/新标签页/嵌套弹窗）
             }
+            // 悬浮预览：与 page.pause 一致，鼠标停在元素上就显示最终会用的 locator。
+            // 只登记请求，CDP 解析交给共享引擎（见 submitHoverPreview），绝不阻塞消息派发线程。
+            if ("hover".equals(String.valueOf(payload.get("type")))) {
+                if (sessions.pickOn.get() && ps != null) ps.submitHoverPreview(payload);
+                return null;
+            }
             Object infoObj = payload.get("info");
             @SuppressWarnings("unchecked")
             Map<String, Object> info = infoObj instanceof Map ? (Map<String, Object>) infoObj : null;
@@ -1243,7 +1342,8 @@ public final class CodegenLauncher {
                             info != null ? info.get("cssSelector") : null,
                             info != null ? (String) info.get("xpath") : null,
                             shadowHostsOf(info), framePathOf(payload), robustXpathsOf(info),
-                            preClickSnapshot(info));
+                            preClickSnapshot(info), payload.get("hoverKey") instanceof String
+                                    ? (String) payload.get("hoverKey") : null, info);
                     // addPick 内部按 (docId, eid) 落库元素身份 + 消歧孪生元素的 sigKey：
                     // 后续对同一元素的重复操作（再点一次 / 继续输入）靠身份命中本条，
                     // 而不是靠 role+name 反查（那样会把页面里同 role+name 的孪生元素并成一条）。
@@ -2914,6 +3014,84 @@ public final class CodegenLauncher {
             if (state.isUnknown()) undeterminable = true;
         }
         return undeterminable ? TriState.UNKNOWN : TriState.TRUE;
+    }
+
+    /**
+     * 点击当场完成 role 唯一性裁决（对标 page.pause 的「悬浮即校验、点击即所用」）。
+     *
+     * <p>历史实现把复核推迟到生成前，导致「拾取时 modal 未开 → role 唯一；生成时 modal 已开 →
+     * hits=2 回退到一条已漂移的位置链」。现在点击落库前就用 Playwright 引擎复核一次：
+     * <ul>
+     *   <li>{@code hits == 1} ⇒ 保留 role 并回填真实命中数；</li>
+     *   <li>{@code hits < 0} ⇒ 不可判定，保留 role 但标注未校验（生成侧补 TODO）；</li>
+     *   <li>其余（0 / >1）⇒ 先看是不是"页面已翻页"（可回归用旧值判断），否则当场回退 CSS。</li>
+     * </ul>
+     * 复核失败即清掉 {@code rolePending}，生成期的 {@code verifyPendingRoles} 不会再重复复核。
+     */
+    private static void verifyRoleAtPickTime(CodegenPanelHandle panel, Pick pk) {
+        if (pk == null || !pk.rolePending || pk.extractor == null) return;
+        pk.rolePending = false;   // 先消欠账：无论结论如何，这次点击已完成复核
+        CodegenEntry entry = pk.entry;
+        int hits = pk.extractor.countRoleMatches(entry);
+        if (hits < 0) {
+            pk.entry = entry.withRoleHits(CodegenEntry.ROLE_HITS_UNDETERMINABLE);
+            log.warn("[codegen][cdp] role verification undeterminable at pick time for #{} (role={}, name='{}')"
+                    + " - keeping ROLE but flagging it as unverified", pk.id, entry.role, entry.name);
+            return;
+        }
+        if (RoleVerificationPolicy.keepRole(hits, 1)) {
+            pk.entry = entry.withRoleHits(hits);
+            log.debug("[codegen][cdp] role verified at pick time for #{} (role={}, name='{}', hits=1)",
+                    pk.id, entry.role, entry.name);
+            return;
+        }
+        // 0 命中且拾取元素此刻已不可见 ⇒ 多半是"页面翻页了"，保留 role 并标 TODO，
+        // 不当成定位器失效（与生成期兜底同一启发式）。>1 命中必回退 CSS。
+        if (keepRoleBecausePageMovedOn(pk, entry, hits)) return;
+        reviseToCss(panel, pk, hits, "expected exactly 1 hit (pick-time verification)");
+    }
+
+    /**
+     * role 唯一性裁决的<b>共用判据</b>：悬浮预览与点击落库必须走这同一条路径，结论才不会表里不一。
+     *
+     * <p>返回裁决后的 entry：
+     * <ul>
+     *   <li>role 唯一 ⇒ 原 entry 回填 {@code roleHits=命中数}；</li>
+     *   <li>引擎不可判定 ⇒ 原 entry 标 {@code UNDETERMINABLE}（保留 role）；</li>
+     *   <li>不唯一 ⇒ 回退 CSS，标 {@code NOT_APPLICABLE} 并用 CSS 引擎重新计数。</li>
+     * </ul>
+     * 悬浮 tooltip 显示的就是本方法返回的 {@code selector}，点击直接缓存消费同一条。
+     *
+     * @param entry     待裁决的条目（悬浮解析结果 / 点击拾取结果）
+     * @param panel     仅回退时需要推面板就地修订；悬浮预览传 null
+     * @param pk        仅回退时需要（拿到 id 做面板通知）；悬浮预览传 null
+     * @param extractor role / CSS 计数用的 CDP 抽取器（两个调用点都非 null）
+     * @param context   日志上下文（"hover preview" / "pick-time verification"）
+     */
+    private static CodegenEntry adjudicateRole(CodegenEntry entry, CodegenPanelHandle panel, Pick pk,
+                                               CodegenCdpNodeExtractor extractor, String context) {
+        if (entry == null || extractor == null) return entry;
+        // 非 role 策略（纯 CSS / 锚定 XPath）无需裁决。
+        if (!LocatorStrategy.ROLE.equals(entry.strategy)
+                && !LocatorStrategy.ROLE_WITH_NAME.equals(entry.strategy)) return entry;
+        int hits = extractor.countRoleMatches(entry);
+        if (hits < 0) {
+            log.debug("[codegen][{}] role verification undeterminable (role={}, name='{}') - keeping ROLE",
+                    context, entry.role, entry.name);
+            return entry.withRoleHits(CodegenEntry.ROLE_HITS_UNDETERMINABLE);
+        }
+        if (RoleVerificationPolicy.keepRole(hits, 1)) {
+            return entry.withRoleHits(hits);
+        }
+        // 回退 CSS：与 reviseToCss 同一构造（重新计数 + 标不适用），悬浮/点击逐字一致。
+        int cssHits = extractor.countCssMatches(entry.cssSelector);
+        CodegenEntry revised = RoleRevision.toCss(entry)
+                .withMatchCount(cssHits)
+                .withRoleHits(CodegenEntry.ROLE_HITS_NOT_APPLICABLE);
+        log.info("[codegen][{}] role rejected (hits={}, role={}, name='{}') - revised to CSS '{}' (engineHits={})",
+                context, hits, entry.role, entry.name, revised.selector, cssHits);
+        if (panel != null && pk != null) panel.onPickedRevised(pk.id, revised, "hits=" + hits + ", " + context);
+        return revised;
     }
 
     /** 回退 CSS 并推面板就地修订该行（不新增行）。 */
