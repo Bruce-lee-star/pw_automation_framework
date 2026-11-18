@@ -574,9 +574,15 @@ public final class CodegenLauncher {
                         try {
                             cdpSession();
                             ElementRef ref = session.elementBySelector(selector, List.of(), framePath);
-                            if (ref == null) return;
+                            if (ref == null) {
+                                log.debug("[codegen][hover] selector unresolved '{}' - no tooltip", selector);
+                                return;
+                            }
                             CodegenEntry raw = extractor.extract(ref, null);
-                            if (raw == null) return;
+                            if (raw == null) {
+                                log.debug("[codegen][hover] extract null for '{}' - no tooltip", selector);
+                                return;
+                            }
                             // 悬浮即裁决：与点击共用同一判据，结论写入缓存供点击直接消费。
                             CodegenEntry decided = adjudicateRole(raw, null, null, extractor, "hover preview");
                             // key 必须与点击 payload 的 hoverKey 同源——都是 hoverSelectorOf(target) 的 nth 路径。
@@ -591,6 +597,7 @@ public final class CodegenLauncher {
                             page.evaluate("a => { try { if (window.__CODEGEN_SET_LOCATOR__) "
                                             + "window.__CODEGEN_SET_LOCATOR__(a.t, a.n); } catch (e) {} }",
                                     Map.of("t", text, "n", note));
+                            log.debug("[codegen][hover] tooltip sent: '{}' note='{}'", text, note);
                         } catch (Throwable t) {
                             log.debug("[codegen][hover] preview failed on {}: {}", page.url(), t.getMessage());
                         }

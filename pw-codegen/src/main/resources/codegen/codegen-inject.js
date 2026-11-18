@@ -548,6 +548,14 @@
         if (!el || el.nodeType !== 1) return;
         hlCurrent = el;
         hlLast = el;
+        // 换元素：清掉上一个元素的 locator 缓存，避免新元素短暂显示旧代码（Java 会异步补新的）。
+        try {
+            var box = document.getElementById(HL_ID);
+            if (box) {
+                var oldHint = box.querySelector('#__codegen_locator_hint__');
+                if (oldHint) { oldHint.removeAttribute('data-locator'); oldHint.textContent = ''; oldHint.style.display = 'none'; }
+            }
+        } catch (e) { }
         try { hlShow(el); } catch (e) { }
         // hover 预览（对标 page.pause 的「悬浮即显示代码」）：只发轻量元素标识，
         // 由 Java 侧唯一算法源算 locator 后回显。同元素守卫 + rAF 合并保证只在「换元素」时发一次。
@@ -579,9 +587,14 @@
         d.style.width = r.width + 'px';
         d.style.height = r.height + 'px';
         d.firstChild.textContent = hlLabelOf(el);
-        // 换元素：先清掉上一个元素的 locator 回显，避免显示错位代码（Java 会异步补上新的）。
+        // 恢复缓存的 locator 回显：Java 回显可能先于 hlShow 到达（异步竞态），
+        // 此时 hint 已写入 data-locator 但 display 未变；这里按缓存恢复，避免 tooltip 丢失。
         var hint = d.querySelector('#__codegen_locator_hint__');
-        if (hint) { hint.style.display = 'none'; hint.textContent = ''; }
+        if (hint) {
+            var cached = hint.getAttribute('data-locator') || '';
+            if (cached) { hint.textContent = cached; hint.title = cached; hint.style.display = 'block'; }
+            else { hint.style.display = 'none'; hint.textContent = ''; }
+        }
     }
 
     function hlOnOver(ev) {
@@ -639,12 +652,15 @@
      */
     window.__CODEGEN_SET_LOCATOR__ = function (text, note) {
         try {
-            var d = document.getElementById(HL_ID);
-            if (!d || d.style.display === 'none') return;   // 已移开/已暂停：丢弃过期回显
+            var d = hlBox();   // 确保高亮框已创建（回显可能先于第一次 hlShow 到达）
             var hint = d.querySelector('#__codegen_locator_hint__');
             if (!hint) return;
-            hint.textContent = (note ? note + '  ' : '') + (text || '');
-            hint.title = hint.textContent;
+            var value = (note ? note + '  ' : '') + (text || '');
+            // 缓存到 hint 上：回显到达时高亮框可能暂未显示（异步竞态），
+            // 由 hlShow 在下次显示时恢复，避免"Java 算了但 tooltip 没出现"。
+            hint.setAttribute('data-locator', value);
+            hint.textContent = value;
+            hint.title = value;
             hint.style.display = text ? 'block' : 'none';
         } catch (e) { }
     };
