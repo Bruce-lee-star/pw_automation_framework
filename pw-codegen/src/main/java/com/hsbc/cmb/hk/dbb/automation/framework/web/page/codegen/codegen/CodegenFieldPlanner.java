@@ -90,19 +90,20 @@ public final class CodegenFieldPlanner {
             if (e != null && !bySig.containsKey(e.sigKey)) bySig.put(e.sigKey, e);
         }
 
-        // 2) List 分组：base-sig 相同且序号互异（≥2 条）⇒ 一组元素
-        Set<String> listBases = listGroupBaseSigs(bySig.values());
+        // 2) List 分组：base-sig + 定位器签名相同、且序号互异（≥2 条）⇒ 一组元素。
+        //    仅靠 base-sig 会把「不同容器里同 role+name 的按钮」误判成一组，导致后一个字段被跳过。
+        Set<String> listGroups = listGroupKeys(bySig.values());
 
         List<CodegenFieldSpec> fields = new ArrayList<>();
         Set<String> usedNames = new HashSet<>();
-        Set<String> emittedListBases = new HashSet<>();
+        Set<String> emittedListGroups = new HashSet<>();
         boolean hasAriaRole = false;
         boolean hasRole = false;
         boolean hasElement = false;
         boolean hasList = false;
 
         for (CodegenEntry e : bySig.values()) {
-            String baseSig = baseSigOf(e.sigKey);
+            String groupKey = listGroupKey(e);
 
             // 角色可定位 = ①拾取阶段判定为角色策略 ②role 能映射到确切的 AriaRole 常量
             // （非 generic/none/presentation）③有可读 name。任一条不满足就回退 @Element(css)：
@@ -133,13 +134,13 @@ public final class CodegenFieldPlanner {
             int finalCount = e.effectiveMatchCount(roleLocatable);
             // 自动成组（见 CodegenEntry#autoList）优先于计数判定：整组定位器在拾取瞬间可能因懒渲染数到
             // 0/1 个，但「目标是 ARIA 集合里的一项」这个语义本身就该出 PageElementList。
-            boolean isList = e.autoList || listBases.contains(baseSig) || finalCount > 1;
+            boolean isList = e.autoList || listGroups.contains(groupKey) || finalCount > 1;
             if (isList) {
                 hasList = true;
                 // 一组元素只合成【一个】PageElementList 字段（组内序号由运行期 x.get(i) 取单项）。
-                // 自动成组是例外：它的「一组」由整组定位器决定，合并（按 base-sig 去重）会让同一集合里
+                // 自动成组是例外：它的「一组」由整组定位器决定，合并（按分组键去重）会让同一集合里
                 // 第二次点击的动作整条消失——宁可多一个同定位器字段，也不能丢用户点过的那一步。
-                if (!e.autoList && !emittedListBases.add(baseSig)) continue;
+                if (!e.autoList && !emittedListGroups.add(groupKey)) continue;
             }
             // 取单项的组内序号：自动成组 = 用户实际点的那一项；其余沿用首项。
             int listIndex = listIndexOf(e, isList);
@@ -403,22 +404,50 @@ public final class CodegenFieldPlanner {
      * （自动成组的是用户点的那一项，不是组成员号）。
      */
     public static Set<String> listGroupBaseSigs(Collection<CodegenEntry> entries) {
-        Map<String, Set<Integer>> idxByBase = new LinkedHashMap<>();
+        Set<String> keys = listGroupKeys(entries);
+        Set<String> bases = new LinkedHashSet<>();
         for (CodegenEntry e : entries) {
             if (e == null || e.autoList) continue;
-            idxByBase.computeIfAbsent(baseSigOf(e.sigKey), k -> new LinkedHashSet<>()).add(e.index);
+            if (keys.contains(listGroupKey(e))) bases.add(baseSigOf(e.sigKey));
         }
-        Set<String> bases = new LinkedHashSet<>();
-        for (Map.Entry<String, Set<Integer>> en : idxByBase.entrySet()) {
+        return bases;
+    }
+
+    /**
+     * 成组的分组键集合（见 {@link #listGroupKey(CodegenEntry)}）：同一分组键下有 ≥2 个互异的有效序号。
+     *
+     * <p>供 {@link #plan} 精确判定「当前条目属于哪一组」。只按 base-sig 判定会把「不同容器里同
+     * role+name 的按钮」误并成一组，后一个字段因此在 {@code emittedListGroups} 处被跳过。
+     */
+    public static Set<String> listGroupKeys(Collection<CodegenEntry> entries) {
+        Map<String, Set<Integer>> idxByGroup = new LinkedHashMap<>();
+        for (CodegenEntry e : entries) {
+            if (e == null || e.autoList) continue;
+            idxByGroup.computeIfAbsent(listGroupKey(e), k -> new LinkedHashSet<>()).add(e.index);
+        }
+        Set<String> keys = new LinkedHashSet<>();
+        for (Map.Entry<String, Set<Integer>> en : idxByGroup.entrySet()) {
             Set<Integer> idxs = en.getValue();
             if (idxs.size() < 2) continue;                 // 同一元素被重复点选 ⇒ 不成组
             boolean usable = true;
             for (Integer i : idxs) {
                 if (i == null || i < 0) { usable = false; break; }
             }
-            if (usable) bases.add(en.getKey());
+            if (usable) keys.add(en.getKey());
         }
-        return bases;
+        return keys;
+    }
+
+    /**
+     * List 分组键 = base-sig + 定位器签名（定位引擎 + 选择器）。
+     *
+     * <p>真·同一组的成员共用同一「定位引擎 + 选择器」，仅 {@code index} 互异。不同容器里同 role+name、
+     * 但一个回退 CSS、一个保留 role 的按钮定位器不同，分组键也不同，不会被误并成一个 List。
+     */
+    public static String listGroupKey(CodegenEntry e) {
+        String strategy = e.strategy == null ? "" : e.strategy;
+        String selector = e.selector == null ? "" : e.selector;
+        return baseSigOf(e.sigKey) + "|@|" + strategy + '|' + selector;
     }
 
     // ------------------------------------------------------------------

@@ -83,6 +83,41 @@ public class CodegenFieldPlannerAutoListTest {
         Assert.assertTrue(plan.fields.get(1).annotation.contains("#q2"));
     }
 
+    /**
+     * 两个不同容器里的同名按钮：一个 role 命中多回退成 CSS、一个保留 role（导航兜底恢复）。
+     * 定位器不同 ⇒ 不得被 base-sig 误并成一个 PageElementList，否则后一个字段被 emittedListGroups
+     * 跳过——用户看到的就是「两个 Continue 只生成一个」。
+     */
+    @Test
+    public void sameNameDifferentLocatorsKeepBothFields() {
+        CodegenEntry cssFallback = new CodegenEntry("button|Continue#0", "button", "Continue",
+                LocatorStrategy.CSS, 500,
+                ".page:has([data-i18n=\"title_triage\"]) button.float-right",
+                ".page:has([data-i18n=\"title_triage\"]) button.float-right",
+                "button_continue", 0, List.of(), List.of(), 1, "button", false);
+        CodegenEntry roleKept = new CodegenEntry("button|Continue#1", "button", "Continue",
+                LocatorStrategy.ROLE, 105,
+                "role=button[name=Nls.t(\"button_continue\")]", "button.float-right",
+                "button_continue", 1, List.of(), List.of(), 1, "button", false, 1);
+
+        CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(
+                List.of(cssFallback, roleKept), new String[]{}, Map.of());
+
+        Assert.assertEquals("两个独立元素 ⇒ 两个字段", 2, plan.fields.size());
+        Assert.assertEquals("PageElement", plan.fields.get(0).fieldType);
+        Assert.assertEquals("PageElement", plan.fields.get(1).fieldType);
+    }
+
+    /** 真·同组的成员（同定位器、index 互异）仍须合成一个 PageElementList，防止修复误伤正常成组。 */
+    @Test
+    public void sameNameSameLocatorStillGroupsIntoOneField() {
+        CodegenFieldPlanner.Plan plan = CodegenFieldPlanner.plan(
+                List.of(member(0), member(1)), new String[]{}, Map.of());
+
+        Assert.assertEquals("同定位器的两个成员 ⇒ 一个 List 字段", 1, plan.fields.size());
+        Assert.assertEquals("PageElementList", plan.fields.get(0).fieldType);
+    }
+
     /** 同一集合里点了两次：两个动作都必须保留（各自带自己的序号），绝不能因合并丢步。 */
     @Test
     public void twoPicksInOneCollectionKeepBothActions() {
