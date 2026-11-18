@@ -41,7 +41,7 @@ import java.util.regex.Pattern;
  *   <li>{@code #id} / {@code [id^=…]} 等；</li>
  *   <li>{@code tag:has([data-i18n="…"])}（<b>子代锚点短形式</b>：目标自身无属性、内部有唯一语义锚点）；
  *       不唯一时在同一档内追加作用域前缀收窄：{@code #id …} / {@code [data-testid=…] …} /
- *       {@code [data-x=…] …} / <b>{@code div.page …}（稳定 class 头，2026-11-17 新增）</b> /
+ *       {@code [data-x=…] …} / <b>{@code .page …}（稳定 class 头）</b> /
  *       裸 {@code tag …}，每档都是 {@code 前缀:has(祖先锚点) base}；</li>
  *   <li>{@code [name="v"]}（表单字段名，与语言无关，比可访问名稳定）/ 部分匹配；</li>
  *   <li>{@code [placeholder=…]}/{@code [alt=…]}/{@code [title=…]}——<b>仅单语言模式</b>：
@@ -417,23 +417,39 @@ public final class CodegenScorer {
         // 避免"靠一大块正文定位"这种过宽又过脆的产物。
         boolean roleLocatable = self.roleLocatable() && !isBroadRoleName(self.name);
         int roleScore = roleLocatable ? ROLE_NAME : ROLE_NO_NAME;
-        if (roleLocatable && roleScore <= fallbackScore) {
-            // 带出的 matchCount 是「兜底 CSS 候选」的计数，role 引擎一次都没跑过。
-            // 必须如实标注这一事实，否则下游会把 CSS 命中数当成 role 命中数（详见 matchCount 字段说明）。
-            return new ScoredLocator(true, first.css(), roleScore, LocatorStrategy.ROLE_WITH_NAME, first.count());
-        }
+        // 2026-11-18：role 胜出时不能再把「第一个候选的位置型唯一化结果」直接当附带 CSS。
+        // 生成期 role 复核一旦失败（同名按钮 hits>1），回退用的就是这条附带 CSS（见 RoleRevision）——
+        // 它若是靠 :nth-of-type 凑出来的长链，页面一推进即 0 命中（日志 #20 现场）。
+        // 故 role / CSS 两条路径共用同一套「非位置型优先」裁决，role 条目携带的也是最好的非位置型 CSS。
+        // 快路径：首个候选本身已唯一且不含位置段时无需再查（绝大多数拾取走这里，零额外往返）。
+        boolean roleWins = roleLocatable && roleScore <= fallbackScore;
+        CssChoice css = (first.count() == 1 && !isPositionalCss(first.css()))
+                ? new CssChoice(first.css(), first.count(), fallbackScore)
+                : selectCss(candidates, facts, counter, first, fallbackScore);
 
-        // 逐候选校验唯一性：<b>只有 count == 1 才算唯一</b>。
-        // count == 0 表示该选择器当前一个都匹配不到（元素未渲染 / hydration 未完成 / 选择器写错），
-        // 它绝不能胜出——否则会遮蔽后面真正唯一的候选，产出运行期永远等不到的死选择器。
+        if (roleWins) {
+            return new ScoredLocator(true, css.css(), roleScore, LocatorStrategy.ROLE_WITH_NAME, css.count());
+        }
+        return new ScoredLocator(false, css.css(), css.score(), LocatorStrategy.CSS, css.count());
+    }
+
+    /** CSS 裁决结果：最终产物 + 该产物在 DOM 的命中数 + 分数档位。 */
+    private record CssChoice(String css, int count, int score) {
+    }
+
+    /**
+     * 逐候选校验唯一性，并做「非位置型优先」裁决。
+     *
+     * <p>原来的实现在 {@code score} 内联，只有非 role 路径会走；role 提前返回时会把
+     * {@code first}（第一个候选的uniqueCss 结果）直接当附带 CSS。对「按钮内部锚点被同页 modal 副本
+     * 命中多次、只有祖先作用域 + 按钮 class 能唯一」的页面，first 的唯一化结果是一条
+     * {@code div:nth-of-type(5) … > button[class*="float-right"]} 长链，而排序靠后的 class 候选
+     * 本可产出 {@code .page:has([style=""]) button.float-right}——却根本没机会参与比较。
+     */
+    private static CssChoice selectCss(List<Candidate> candidates, CodegenFacts facts,
+                                       LocatorCounter counter, Unique first, int firstScore) {
         Unique fallback = first;
-        int fallbackScoreOfChoice = fallbackScore;
-        // 「靠新引入的 :nth-of-type 序号凑出唯一」的结果（见 #introducesPosition）：<b>延后裁决</b>。
-        // 它不能就地返回，否则一条 512 分的语义候选靠加长祖先结构就能压过 1000 分的
-        // 「父级锚点 + 子级锚点」锚定 XPath（2026-11-16 实跑：两个 Continue 只能被锚定 XPath 区分，
-        // 产物却是 div:nth-of-type(5) … > button[class*='float-right']，回放必漂移）。
-        // 但也不能彻底丢弃：页面既无属性也无锚点时，它是唯一能收敛的手段，故留作最后手段——
-        // 分数降级为 CSS_STRUCT_POSITIONAL（1000 锚定 XPath 之后、1100 绝对 XPath 之前）。
+        int fallbackScoreOfChoice = firstScore;
         Unique positionalOnly = null;
         for (int i = 0; i < candidates.size(); i++) {
             Candidate c = candidates.get(i);
@@ -442,9 +458,9 @@ public final class CodegenScorer {
             if (unique.count() == 1) {
                 if (introducesPosition(c.css(), unique.css())) {
                     if (positionalOnly == null) positionalOnly = unique;
-                    continue;   // 让后面的锚定候选先有机会胜出
+                    continue;   // 让后面的锚点/属性候选先有机会胜出
                 }
-                return new ScoredLocator(false, unique.css(), c.score(), LocatorStrategy.CSS, unique.count());
+                return new CssChoice(unique.css(), unique.count(), c.score());
             }
             // 兜底候选：优先选「当前确实有命中」的那一个，避免最终产物落在 0 命中的选择器上。
             if (fallback.count() <= 0 && unique.count() > 0) {
@@ -453,12 +469,9 @@ public final class CodegenScorer {
             }
         }
         if (positionalOnly != null) {
-            // 一条锚点/属性候选都没能唯一：位置链作为最后手段出场，并如实标注它的低分档位。
-            return new ScoredLocator(false, positionalOnly.css(), CSS_STRUCT_POSITIONAL,
-                    LocatorStrategy.CSS, positionalOnly.count());
+            return new CssChoice(positionalOnly.css(), positionalOnly.count(), CSS_STRUCT_POSITIONAL);
         }
-        return new ScoredLocator(false, fallback.css(), fallbackScoreOfChoice,
-                LocatorStrategy.CSS, fallback.count());
+        return new CssChoice(fallback.css(), fallback.count(), fallbackScoreOfChoice);
     }
 
     /**
@@ -586,7 +599,7 @@ public final class CodegenScorer {
             }
         }
 
-        // 阶段 1d：状态型作用域（`div.page:has([style=""])`）。
+        // 阶段 1d：状态型作用域（`.page:has([style=""])`）。
         //
         // 用户 2026-11-17 现场验证：`.page:has([style='']) button.float-right [data-i18n="continue"]`
         // 能唯一定位激活页的 Continue。语义上它是「可见性代理」——比标题锚点脆（切页时行内样式会写成
@@ -752,6 +765,12 @@ public final class CodegenScorer {
 
         // 5) class 里的稳定类名（class 以空格分隔类名，类名内部可含 '-'，故按空格切分而非按分隔符切）
         for (String cls : SelectorStability.stableClassNames(self.className)) {
+            // `tag.class` 是 `[class*="cls"]` 的精确形态：同样稳定，却额外把 tag 纳入判据
+            // （`button.float-right` 不会命中 `div.float-right`，HSBC triage 页头部恰有一个同名 div），
+            // 且不必做子串匹配。同分、先构造 ⇒ 稳定排序后优先被尝试；`[class*=…]` 仍保留兜底
+            // （class 含 CSS 非法标识符时只能用子串形态）。
+            String tagClass = tagClassSelector(selfTag, cls);
+            if (!tagClass.isEmpty()) out.add(new Candidate(CSS_CLASS, tagClass));
             out.add(new Candidate(CSS_CLASS, attrSelector("class", "*=", cls)));
         }
 
@@ -861,6 +880,17 @@ public final class CodegenScorer {
         }
     }
 
+    /**
+     * 精确类选择器 {@code tag.class}：tag 与类名都必须是可直接写进 CSS 的标识符，
+     * 否则返回空串（调用方退回 {@code [class*="…"]}，避免注入非法选择器）。
+     */
+    private static String tagClassSelector(String tag, String cls) {
+        if (SIMPLE_TAG.matcher(tag).matches() && SAFE_IDENTIFIER.matcher(cls).matches()) {
+            return tag + "." + cls;
+        }
+        return "";
+    }
+
     /** 组装组合属性选择器：{@code tag[a="1"][b="2"]}（tag 为空时退化为纯属性组合）。 */
     private static String comboSelector(CodegenFacts.Fact self, String... conditions) {
         StringBuilder sb = new StringBuilder();
@@ -960,7 +990,7 @@ public final class CodegenScorer {
     private static boolean hasIdentifyingScopeHead(CodegenFacts.Fact a) {
         if (a == null) return false;
         if (SelectorStability.isStable(a.id) || SelectorStability.isStable(a.testid)) return true;
-        // 稳定 class token（`div.page`）介于「语义属性」与「裸 tag」之间：它确实标识了容器种类，
+        // 稳定 class token（`.page`）介于「语义属性」与「裸 tag」之间：它确实标识了容器种类，
         // 但 `.page` 这类通用类名同一页里会出现多次，故仍需 `:has(锚点)` 收窄，不单独当唯一判据。
         if (!firstStableClassToken(a.className).isEmpty()) return true;
         if (a.attrs == null) return false;
@@ -994,14 +1024,13 @@ public final class CodegenScorer {
             if (!SelectorStability.isStable(e.getValue())) continue;
             return attrSelector(key, "=", e.getValue());
         }
-        // 第三档（新增，2026-11-17）：分区容器的稳定 class token，拼成 `div.page`。
-        // 裸 tag 头（`div:has(标题)`）会命中 html/body/分区容器等所有含该标题的祖先层，
-        // 计数必然 > 1；带容器 class 才是真作用域。仍是强证据（强于裸 tag、弱于 id/testid/语义属性）。
+        // 第三档（2026-11-18 收敛）：分区容器的稳定 class token，输出 `.page`。
+        // 裸 tag 头（`div:has(标题)`）会命中 html/body/分区容器等所有含该标题的祖先层，计数必然 > 1；
+        // 带容器 class 才是真作用域。不再强制拼 tag：`.page:has([style=""]) button.float-right`
+        // 与 `div.page:has(...) button.float-right` 语义等价但更短，且页面里 `<form class="page">`
+        // 与 `<div class="page">` 混用时只认 class 反而不会漏。唯一性仍由调用方逐条计数把关。
         String cls = firstStableClassToken(a.className);
-        if (!cls.isEmpty()) {
-            String tag = a.tag == null ? "" : a.tag.toLowerCase(Locale.ROOT);
-            return SIMPLE_TAG.matcher(tag).matches() ? tag + "." + cls : "." + cls;
-        }
+        if (!cls.isEmpty()) return "." + cls;
         return a.tag == null ? "" : a.tag;
     }
 
@@ -1009,7 +1038,7 @@ public final class CodegenScorer {
      * 祖先的第一个稳定 class token（{@code class} 以空格分隔；hash/过短/动态值由
      * {@link SelectorStability#stableClassNames} 过滤），且必须能直接写进 CSS（{@link #SAFE_IDENTIFIER}）。
      *
-     * <p>为什么只取一个：多 token 拼接（`div.page.a.b`）会把选择器绑死在样式的组合上——产品加一个
+     * <p>为什么只取一个：多 token 拼接（`.page.a.b`）会把选择器绑死在样式的组合上——产品加一个
      * 布局 class 就失配；单 token 配合 `:has(锚点)` 已足够把范围收到分区。
      */
     private static String firstStableClassToken(String className) {

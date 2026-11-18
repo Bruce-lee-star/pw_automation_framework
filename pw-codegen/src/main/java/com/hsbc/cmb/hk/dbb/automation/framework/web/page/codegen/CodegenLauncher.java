@@ -2304,6 +2304,9 @@ public final class CodegenLauncher {
                                                             Map<String, String> fillValues) {
         List<Pick> timeline = new ArrayList<>(sessionPicks);
         timeline.sort(Comparator.comparingLong(p -> p.seq));
+        // 双击合并：注入侧已跳过 detail>1 的 click，时间线上仍是 [click, dblclick]，不合并会生成
+        // click(); doubleClick();（比录制多一次单击）。必须在动作生成前收口。
+        timeline = mergeDoubleClicks(timeline);
 
         // 本会话涉及的页面类（按首次出现顺序）——方法体内按此顺序实例化页面对象。
         // 注意：同一标签页导航（A→B）会产生两个不同的目标，故此处是「目标」列表而非「标签页」列表。
@@ -2598,6 +2601,37 @@ public final class CodegenLauncher {
     /** 归一化会话号：历史数据与边界情况一律归入第 1 个会话。 */
     private static int currentSession(int session) {
         return Math.max(1, session);
+    }
+
+    /**
+     * 双击合并：把「紧邻的 click + dblclick（同元素）」压成一次 {@code doubleClick()}。
+     *
+     * <p>浏览器双击序列是 click(detail=1) → click(detail=2) → dblclick。注入侧已按 {@code detail > 1}
+     * 跳过第二下 click，但第一下会正常拾取；不合并的话产物是 {@code click(); doubleClick();}，
+     * 回放比录制多一次单击。这里在动作生成前丢弃紧邻的那次 click，保留 dblclick 条目
+     * （它与 click 携带同一元素事实，且 {@link #actionForPick} 会为 dblclick 生成双击动作）。
+     *
+     * <p>纯函数、不依赖浏览器：便于回归测试。
+     */
+    static List<Pick> mergeDoubleClicks(List<Pick> picks) {
+        if (picks == null || picks.size() < 2) return picks;
+        List<Pick> out = new ArrayList<>(picks.size());
+        for (int i = 0; i < picks.size(); i++) {
+            Pick p = picks.get(i);
+            Pick next = i + 1 < picks.size() ? picks.get(i + 1) : null;
+            if (isDoubleClickLead(p, next)) continue;
+            out.add(p);
+        }
+        return out;
+    }
+
+    /** 是否为「双击的第一下 click」：紧随其后是同一页面、同一元素的 dblclick。 */
+    private static boolean isDoubleClickLead(Pick p, Pick next) {
+        if (p == null || next == null) return false;
+        if (!"click".equals(p.actionType) || !"dblclick".equals(next.actionType)) return false;
+        if (p.entry == null || next.entry == null || p.entry.sigKey == null) return false;
+        if (!p.entry.sigKey.equals(next.entry.sigKey)) return false;
+        return Objects.equals(p.page, next.page) && Objects.equals(p.url, next.url);
     }
 
     /**

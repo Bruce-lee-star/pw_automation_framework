@@ -42,7 +42,7 @@ public class CodegenHasScopeContractTest {
      * 2026-11-17 作用域收窄三项的<b>双端契约</b>：注入脚本与 CDP 自包含函数各维护一份 JS，
      * 只改一端等于没改（实际拾取走 CDP 端，只改注入脚本时产物完全不变）。
      *
-     * <p>① 祖先事实必须带 {@code className}——Java 侧据此生成 {@code div.page:has(标题)} 作用域头；
+     * <p>① 祖先事实必须带 {@code className}——Java 侧据此生成 {@code .page:has(标题)} 作用域头；
      * 无此项时只剩裸 tag 头（{@code div:has(标题)} 命中 html/body 等所有祖先层，必然多命中）。
      * <p>② 父级锚点必须<b>排除目标子树</b>——否则父谓词与子谓词同指目标内部（零区分度、白占额度）。
      * <p>③ 状态型锚点 {@code [style=""]}（属性存在且为空）必须两端同口径采集，否则「激活页」兜底缺失。
@@ -271,6 +271,15 @@ public class CodegenHasScopeContractTest {
         String inject = LocatorCoreScript.inject();
         assertTrue("注入脚本必须监听右键", inject.contains("addEventListener('contextmenu'"));
         assertTrue("右键必须上报 contextmenu 动作类型", inject.contains("type: 'contextmenu'"));
+    }
+
+    /** 双击录制链路：必须监听 dblclick，且跳过 detail&gt;1 的第二下 click（否则双击变三个动作）。 */
+    @Test
+    public void doubleClickIsRecordedByInjectScript() throws Exception {
+        String inject = LocatorCoreScript.inject();
+        assertTrue("注入脚本必须监听双击", inject.contains("addEventListener('dblclick'"));
+        assertTrue("双击必须上报 dblclick 动作类型", inject.contains("type: 'dblclick'"));
+        assertTrue("双击的第二下 click（detail>1）必须跳过", inject.contains("if (ev.detail > 1) return;"));
     }
 
     private static int occurrences(String haystack, String needle) {

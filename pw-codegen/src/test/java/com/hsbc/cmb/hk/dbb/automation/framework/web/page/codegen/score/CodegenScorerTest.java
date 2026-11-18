@@ -696,7 +696,7 @@ public class CodegenScorerTest {
         LocatorCounter c = css -> css.contains("login-form") ? 1 : 5;
         CodegenScorer.ScoredLocator s = CodegenScorer.score(facts(self), c);
 
-        Assert.assertEquals("[class*=\"login-form\"]", s.uniqueCss);
+        Assert.assertEquals("div.login-form", s.uniqueCss);
         Assert.assertEquals(CodegenScorer.CSS_CLASS, s.score);
     }
 
@@ -1259,7 +1259,7 @@ public class CodegenScorerTest {
     // 作用域头分档 / 额度分配（2026-11-17）
     // ------------------------------------------------------------------
 
-    /** 带稳定 class 的分区容器（`div.page` 这类作用域头，2026-11-17 新增档位）。 */
+    /** 带稳定 class 的分区容器（`.page` 这类作用域头）。 */
     private static CodegenFacts.Fact scopedPanel(String tag, String className, String css,
                                                  List<String> anchors) {
         return new CodegenFacts.Fact("generic", "", tag, "", "", "", "", "", "", "",
@@ -1268,7 +1268,7 @@ public class CodegenScorerTest {
 
     /**
      * 用户 2026-11-17 现场（Reset Password triage 页）：`[style='']` 那种写法能定位但绑死在行内样式上，
-     * 正解是 `div.page:has([data-i18n="title_triage"]) button:has([data-i18n="continue"])`。
+     * 正解是 `.page:has([data-i18n="title_triage"]) button:has([data-i18n="continue"])`。
      *
      * <p>本用例锁两件事：① 稳定 class 能当作用域头（裸 tag 头 `div:has(标题)` 会命中 html/body
      * 等所有祖先层，必然多命中）；② <b>CSS 先于 XPath</b>——CSS 命中即返回，且分数仍是
@@ -1283,7 +1283,7 @@ public class CodegenScorerTest {
         CodegenFacts.Fact page = scopedPanel("div", "page usename-page reset-triage-page",
                 "div:nth-of-type(5)", List.of("[data-i18n=\"title_triage\"]"));
         String expected =
-                "div.page:has([data-i18n=\"title_triage\"]) button:has([data-i18n=\"continue\"])";
+                ".page:has([data-i18n=\"title_triage\"]) button:has([data-i18n=\"continue\"])";
         LocatorCounter counter = css -> css.equals(expected) ? 1 : 4;
 
         CodegenScorer.ScoredLocator s = CodegenScorer.score(
@@ -1296,7 +1296,7 @@ public class CodegenScorerTest {
 
     /**
      * 用户 2026-11-17 现场：`.page:has([style='']) button.float-right [data-i18n="continue"]` 能定位激活页的
-     * Continue。框架现在也会产出这一档（`div.page:has([style=""]) …`），但只作<b>最后的作用域手段</b>：
+     * Continue。框架现在也会产出这一档（`.page:has([style=""]) …`），但只作<b>最后的作用域手段</b>：
      * 语义/标题锚点全都不唯一时才登场，且仍是 CSS 档（先于锚定 XPath）。
      */
     @Test
@@ -1305,7 +1305,7 @@ public class CodegenScorerTest {
                 List.of("[data-i18n=\"continue\"]"));
         CodegenFacts.Fact page = scopedPanel("div", "page usename-page reset-triage-page",
                 "div:nth-of-type(5)", List.of("[data-i18n=\"title_triage\"]", "[style=\"\"]"));
-        String expected = "div.page:has([style=\"\"]) button:has([data-i18n=\"continue\"])";
+        String expected = ".page:has([style=\"\"]) button:has([data-i18n=\"continue\"])";
         LocatorCounter counter = css -> css.equals(expected) ? 1 : 4;
 
         CodegenScorer.ScoredLocator s = CodegenScorer.score(
@@ -1324,14 +1324,52 @@ public class CodegenScorerTest {
         CodegenFacts.Fact page = scopedPanel("div", "page usename-page reset-triage-page",
                 "div:nth-of-type(5)", List.of("[data-i18n=\"title_triage\"]", "[style=\"\"]"));
         String headingCss =
-                "div.page:has([data-i18n=\"title_triage\"]) button:has([data-i18n=\"continue\"])";
-        String stateCss = "div.page:has([style=\"\"]) button:has([data-i18n=\"continue\"])";
+                ".page:has([data-i18n=\"title_triage\"]) button:has([data-i18n=\"continue\"])";
+        String stateCss = ".page:has([style=\"\"]) button:has([data-i18n=\"continue\"])";
         LocatorCounter counter = css -> css.equals(headingCss) || css.equals(stateCss) ? 1 : 4;
 
         CodegenScorer.ScoredLocator s = CodegenScorer.score(
                 new CodegenFacts(self, List.of(page), List.of()), counter);
 
         Assert.assertEquals(headingCss, s.uniqueCss);
+    }
+
+    /**
+     * 2026-11-18 现场回归：role 拾取的「附带 CSS」不能是位置链。
+     *
+     * <p>HSBC Reset Password triage 页的 Continue：拾取时 role 可定位，但同一 {@code .page} 内
+     * modal footer 里还有一份同名 Continue ⇒ 生成期 role 复核 hits=2 回退 CSS。旧算法在 role 胜出时
+     * 直接返回首个候选（按钮内部锚点）的唯一化结果——那条结果靠 {@code :nth-of-type} 祖先链凑唯一，
+     * 页面一推进就 0 命中（日志 #20: engineHits=0）。真正稳定的解是「祖先状态作用域 + 按钮自身 class」：
+     * {@code .page:has([style=""]) button.float-right}。
+     */
+    @Test
+    public void roleFallbackCss_prefersStateScopeOverPositionalChain() {
+        String positional = "div:nth-of-type(5) div:has(span[data-i18n=\"back\"]) > "
+                + "div:nth-of-type(3) > button[class*=\"float-right\"]";
+        String expected = ".page:has([style=\"\"]) button.float-right";
+        CodegenFacts.Fact self = new CodegenFacts.Fact("button", "Continue", "button", "", "", "",
+                "", "", "", "", "", "", -1, positional, List.of(),
+                "btn btn-primary btn-prepend-icon m-l-4 float-right", "", "",
+                java.util.Map.of(), "", false, List.of("[data-i18n=\"continue\"]"));
+        CodegenFacts.Fact page = new CodegenFacts.Fact("generic", "", "div", "", "", "",
+                "", "", "", "", "", "", -1, "div:nth-of-type(5)", List.of(),
+                "page usename-page reset-triage-page", "", "",
+                java.util.Map.of(), "", false,
+                List.of("[data-i18n=\"title_triage\"]", "[style=\"\"]"));
+
+        LocatorCounter counter = css -> {
+            if (expected.equals(css)) return 1;              // 目标解：状态作用域 + 精确 class
+            if (css.contains(":nth-of-type(")) return 1;     // 位置链仅在拾取瞬间唯一
+            return 2;                                        // 内部锚点/标题锚点被 modal 副本淹没
+        };
+
+        CodegenScorer.ScoredLocator s = CodegenScorer.score(
+                new CodegenFacts(self, List.of(page), List.of()), counter);
+
+        Assert.assertTrue("拾取阶段仍走 role 策略", s.roleLocatable);
+        Assert.assertEquals("role 复核失败后回退的 CSS 必须是非位置型作用域解", expected, s.uniqueCss);
+        Assert.assertEquals(1, s.matchCount);
     }
 
     /**

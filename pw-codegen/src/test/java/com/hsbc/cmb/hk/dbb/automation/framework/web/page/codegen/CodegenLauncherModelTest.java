@@ -294,6 +294,43 @@ public class CodegenLauncherModelTest {
         assertTrue(CodegenLauncher.isRepeatedClick("click|click()", "click|click()", "click", "click"));
     }
 
+    /** 双击两次同理：dblclick 不走连点去重（否则第二次双击被静默吞掉）。 */
+    @Test
+    public void doubleClickTwiceIsNotDeduplicated() {
+        assertFalse(CodegenLauncher.isRepeatedClick("click|doubleClick()", "click|doubleClick()",
+                "click", "dblclick"));
+    }
+
+    /**
+     * 双击的第一下 click 必须并入 doubleClick：浏览器双击序列是 click(detail=1) → click(detail=2) → dblclick，
+     * 注入侧只跳过 detail&gt;1 的那次，剩下的 [click, dblclick] 不合并就会生成 click(); doubleClick();
+     */
+    @Test
+    public void doubleClickMergesItsLeadingClick() {
+        CodegenEntry button = new CodegenEntry("button|Open#0", "button", "Open", "ROLE", 100,
+                "role=button[name=\"Open\"]", "#open", null, 0, List.of(), List.of(), 1, "button", false);
+
+        List<CodegenLauncher.Pick> merged = CodegenLauncher.mergeDoubleClicks(List.of(
+                pickAt(button, "click", 1L), pickAt(button, "dblclick", 2L)));
+
+        assertEquals("第一下 click 应被 doubleClick 吸收", 1, merged.size());
+        assertEquals("dblclick", merged.get(0).actionType);
+    }
+
+    /** 合并只针对「同元素」：双击别的元素不能把上一次单击吞掉。 */
+    @Test
+    public void doubleClickDoesNotSwallowAnotherElementsClick() {
+        CodegenEntry open = new CodegenEntry("button|Open#0", "button", "Open", "ROLE", 100,
+                "role=button[name=\"Open\"]", "#open", null, 0, List.of(), List.of(), 1, "button", false);
+        CodegenEntry close = new CodegenEntry("button|Close#0", "button", "Close", "ROLE", 100,
+                "role=button[name=\"Close\"]", "#close", null, 0, List.of(), List.of(), 1, "button", false);
+
+        List<CodegenLauncher.Pick> merged = CodegenLauncher.mergeDoubleClicks(List.of(
+                pickAt(open, "click", 1L), pickAt(close, "dblclick", 2L)));
+
+        assertEquals("不同元素的两条动作都要保留", 2, merged.size());
+    }
+
     private static CodegenEntry checkbox(boolean checked) {
         return new CodegenEntry("checkbox|Remember me#0", "checkbox", "Remember me", "ROLE", 100,
                 "role=checkbox[name=\"Remember me\"]", "#rm", null, 0,
@@ -307,6 +344,11 @@ public class CodegenLauncherModelTest {
 
     private static CodegenLauncher.Pick pick(CodegenEntry entry, String actionType) {
         return new CodegenLauncher.Pick(1L, 1L, 1, entry, null, "https://example.test/",
+                null, false, true, actionType);
+    }
+
+    private static CodegenLauncher.Pick pickAt(CodegenEntry entry, String actionType, long seq) {
+        return new CodegenLauncher.Pick(seq, seq, 1, entry, null, "https://example.test/",
                 null, false, true, actionType);
     }
 }

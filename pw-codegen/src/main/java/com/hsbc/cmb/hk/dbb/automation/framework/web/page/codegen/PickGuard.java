@@ -48,6 +48,10 @@ final class PickGuard {
      */
     boolean begin(String fingerprint, String type) {
         if (fingerprint == null) return true;
+        // 双击是离散的独立动作：双击序列里第一下 click 的 CDP 拾取还在途中（100~200ms），
+        // dblclick 紧随其后到达。若按「同元素在途」拒绝，dblclick 永远排不上拾取，
+        // 双击就退化成单击。故 dblclick 无视在途占位——多一次 CDP 往返，换动作不丢。
+        if ("dblclick".equals(type)) return true;
         if (!isClickIntent(type) && coolingDown(fingerprint)) return false;
         return inFlight.add(fingerprint);
     }

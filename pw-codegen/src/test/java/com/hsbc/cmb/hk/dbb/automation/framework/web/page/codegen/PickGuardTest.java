@@ -42,6 +42,25 @@ public class PickGuardTest {
         assertTrue("click 是用户明确意图，必须允许重试", guard.begin(FP, "click"));
     }
 
+    /** 双击不能被同元素在途的单击吞掉：dblclick 紧随第一下 click 到达，此时它的 CDP 拾取还在途中。 */
+    @Test
+    public void doubleClickIsNotBlockedByInFlightClick() {
+        PickGuard guard = new PickGuard(60_000L);
+
+        assertTrue(guard.begin(FP, "click"));
+        assertTrue("dblclick 必须放行，否则双击退化成单击", guard.begin(FP, "dblclick"));
+    }
+
+    /** 双击同样不受失败冷却压制（与 click / contextmenu 同属明确意图）。 */
+    @Test
+    public void doubleClickBypassesFailureCooldown() {
+        PickGuard guard = new PickGuard(60_000L);
+        guard.begin(FP, "fill");
+        guard.finish(FP, false);
+
+        assertTrue(guard.begin(FP, "dblclick"));
+    }
+
     @Test
     public void cooldownExpires() throws InterruptedException {
         PickGuard guard = new PickGuard(30L);

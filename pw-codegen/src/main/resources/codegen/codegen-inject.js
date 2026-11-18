@@ -302,6 +302,9 @@
                         // 的 onclick 执行，若照常上报，「点暂停」会把暂停按钮自己拾取进面板
                         // （此刻 Java 侧 pickOn 尚未被 pause 命令置 false）。
                         if (isCodegenUi(target)) return;
+                        // 双击序列的第二下 click（detail=2）不上报：浏览器随后必然派发 dblclick，
+                        // 若照常上报，产物会变成 click() + doubleClick()（双击被拆成两个动作）。
+                        if (ev.detail > 1) return;
                         // 2026-11-13 / 2026-11-15：<label> 被点击时，浏览器会向关联控件
                         // （radio/checkbox）再派发一次「合成 click」（label 默认行为）。该合成 click
                         // 与真实点击几乎同时、目标即控件；若照常上报会生成「label + 控件」两条记录
@@ -311,8 +314,11 @@
                         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
                                 || target.tagName === 'SELECT')) {
                             var now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+                            // 窗口 500ms：label 的真实 click 与浏览器补发的合成 click 之间会夹一次拾取往返
+                            // （infoOf 归一 + 选择器计算）与布局抖动，冷启动实测可超过 120ms；500ms 仍远小于
+                            // 用户对同一控件两次真实点击的间隔，不足以误吞真实点击。
                             if (__codegenLastLabel && __codegenLastLabel.ctrl === target
-                                    && (now - __codegenLastLabel.t) < 120) {
+                                    && (now - __codegenLastLabel.t) < 500) {
                                 __codegenLastLabel = null;
                                 return;
                             }
@@ -341,6 +347,19 @@
                         if (isCodegenUi(target)) return;
                         window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
                         window.__codegenEvent({ type: 'contextmenu', tag: target && target.tagName,
+                            framePath: framePathOf(),
+                            info: infoOf(target) });
+                    } catch (e) {}
+                }, true);
+                // 双击（dblclick）：生成侧映射为 doubleClick()。双击序列的第一下 click 由 Java 端
+                // 与紧随的 dblclick 合并为单个动作（CodegenLauncher#mergeDoubleClicks），第二下 click
+                // 已在 click 处理器里按 detail>1 跳过。绝不 preventDefault —— 双击的页面默认行为照常发生。
+                window.addEventListener('dblclick', function (ev) {
+                    try {
+                        var target = ev.target;
+                        if (isCodegenUi(target)) return;
+                        window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
+                        window.__codegenEvent({ type: 'dblclick', tag: target && target.tagName,
                             framePath: framePathOf(),
                             info: infoOf(target) });
                     } catch (e) {}
