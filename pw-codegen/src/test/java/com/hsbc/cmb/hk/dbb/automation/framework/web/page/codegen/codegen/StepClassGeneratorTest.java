@@ -65,8 +65,10 @@ public class StepClassGeneratorTest {
         Assert.assertTrue(out.contains(
                 "import com.hsbc.cmb.hk.dbb.automation.framework.web.page.factory.PageObjectFactory;"));
         Assert.assertTrue(out.contains("public class LoginSteps {"));
-        Assert.assertTrue("step 方法内应实例化页面类（局部变量）",
-                out.contains("LoginPage loginPage = PageObjectFactory.getPage(LoginPage.class);"));
+        Assert.assertTrue("页面类应声明为类字段（框架约定），不在方法内实例化",
+                out.contains("    private final LoginPage loginPage = PageObjectFactory.getPage(LoginPage.class);"));
+        Assert.assertFalse("方法体内不应再重复实例化页面类",
+                out.contains("        LoginPage loginPage = PageObjectFactory.getPage(LoginPage.class);"));
         Assert.assertTrue(out.trim().endsWith("}"));
         Assert.assertFalse(out.contains("\r"));
     }

@@ -17,7 +17,7 @@ import static org.junit.Assert.assertTrue;
  * <p>锁定的产品契约：
  * <ul>
  *   <li><b>一次 Start→Pause = 一个 step</b>：{@code step1} / {@code step2}，Assert 同构 {@code assert1} / {@code assert2}；</li>
- *   <li>同一步跨了多个页面 ⇒ 该方法体内<b>实例化多个页面类</b>，元素字段仍各归各的 Page 类；</li>
+ *   <li>涉及的页面类<b>声明为类字段</b>（一次声明、所有 step 复用），元素字段仍各归各的 Page 类；</li>
  *   <li>切页内联 {@code waitForNewPage(() -> from.trigger.action)}，不再有独立流程类；</li>
  *   <li>frame 切换 / dialog 落在真实发生位置（同一个 step 内）。</li>
  * </ul>
@@ -95,12 +95,13 @@ public class MultiPageCodegenTest {
         assertFalse("切页已内联进 step 方法，不应再有流程类",
                 result.stepCode.contains("ScenarioFlowSteps"));
 
+        // 页面对象声明为类字段（框架约定），方法体内不再重复实例化
+        assertTrue("类字段应声明 LogonPage",
+                result.stepCode.contains("private final LogonPage logonPage = PageObjectFactory.getPage(LogonPage.class);"));
+        assertTrue("类字段应声明 PopupPage",
+                result.stepCode.contains("private final PopupPage popupPage = PageObjectFactory.getPage(PopupPage.class);"));
         String step1 = methodBody(result.stepCode, "step1");
-        // 同一步跨两页 ⇒ 该 step 内实例化两个页面类
-        assertTrue("step1 应实例化 LogonPage",
-                step1.contains("LogonPage logonPage = PageObjectFactory.getPage(LogonPage.class);"));
-        assertTrue("step1 应实例化 PopupPage",
-                step1.contains("PopupPage popupPage = PageObjectFactory.getPage(PopupPage.class);"));
+        assertFalse("step1 方法体内不应再实例化页面类", step1.contains("PageObjectFactory.getPage"));
         // 切页用 waitForNewPage 包住触发器（触发器不重复点击），并接住返回的新页 Page
         assertTrue("step1 应以 waitForNewPage 编排切页并接收返回值",
                 step1.contains("Page newPage1 = logonPage.waitForNewPage(() -> logonPage."
@@ -112,9 +113,7 @@ public class MultiPageCodegenTest {
                 step1.contains("popupPage." + next.fieldName + "." + next.action + ";"));
 
         String step2 = methodBody(result.stepCode, "step2");
-        assertTrue("step2 只用到 A 页，应实例化 LogonPage",
-                step2.contains("getPage(LogonPage.class)"));
-        assertFalse("step2 未操作 B 页，不应实例化 PopupPage", step2.contains("PopupPage"));
+        assertFalse("step2 方法体内不应实例化任何页面类", step2.contains("PageObjectFactory.getPage"));
 
         // Assert：与 Step 严格同构
         assertTrue("Assert 产物应为单个 LogonAssertions 类",
@@ -132,7 +131,7 @@ public class MultiPageCodegenTest {
     @Test
     public void sameTabNavigationInsertsCommentInsteadOfWaitForNewPage() {
         // 同一标签页内导航：A 页点链接后 URL 跳到 B 页（而非弹新窗）。
-        // 此时不应生成 waitForNewPage（那是跨标签页语义），只插入「已导航」注释，两个页类都在方法顶部实例化。
+        // 此时不应生成 waitForNewPage（那是跨标签页语义），只插入「已导航」注释，两个页类都声明为类字段。
         CodegenEntry aClick = entry("link#go", "link", "goToB", "#go");
         CodegenEntry bSubmit = entry("button#s", "button", "submit", "#s");
         List<CodegenEntry> pageA = List.of(aClick);
@@ -166,12 +165,13 @@ public class MultiPageCodegenTest {
                 result.pageCode.contains("class PrivacyAndSecurityPage")
                         && result.pageCode.contains("class BusinessIntegratedAccountPage"));
 
+        // 两个页类都声明为类字段，方法体内不再实例化
+        assertTrue("类字段应声明 PrivacyAndSecurityPage",
+                result.stepCode.contains("private final PrivacyAndSecurityPage privacyAndSecurityPage = PageObjectFactory.getPage(PrivacyAndSecurityPage.class);"));
+        assertTrue("类字段应声明 BusinessIntegratedAccountPage",
+                result.stepCode.contains("private final BusinessIntegratedAccountPage businessIntegratedAccountPage = PageObjectFactory.getPage(BusinessIntegratedAccountPage.class);"));
         String step1 = methodBody(result.stepCode, "step1");
-        // 两个页类都在方法顶部实例化
-        assertTrue("step1 应实例化 PrivacyAndSecurityPage",
-                step1.contains("PrivacyAndSecurityPage privacyAndSecurityPage = PageObjectFactory.getPage(PrivacyAndSecurityPage.class);"));
-        assertTrue("step1 应实例化 BusinessIntegratedAccountPage",
-                step1.contains("BusinessIntegratedAccountPage businessIntegratedAccountPage = PageObjectFactory.getPage(BusinessIntegratedAccountPage.class);"));
+        assertFalse("step1 方法体内不应再实例化页面类", step1.contains("PageObjectFactory.getPage"));
         // 同标签页导航：不生成 waitForNewPage，而是「已导航」注释
         assertFalse("同标签页导航不应生成 waitForNewPage", step1.contains("waitForNewPage"));
         assertTrue("同标签页导航应插入「已导航」注释",

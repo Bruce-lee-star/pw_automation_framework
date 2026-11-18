@@ -26,7 +26,7 @@ import java.util.Set;
  *   <li>checkbox / radio ⇒ {@code assertThat(page.field.isChecked(), is(true|false))}，
  *       期望值取拾取时刻的真实勾选态；</li>
  *   <li>无 name 的元素 ⇒ 退化为可见性 {@code assertThat(..., isVisible(), is(true))}；</li>
- *   <li>命中 NLS key ⇒ 走 {@code NLS.visibleText(key)}，语言无关。</li>
+ *   <li>命中 NLS key ⇒ 走 {@code NLS.getTextByKey(key)}，语言无关。</li>
  * </ul>
  * 一组元素（{@code PageElementList}）取与 Step 相同的 {@code get(n)} 单项断言（见
  * {@link CodegenFieldSpec#listTarget()}）；自动成组时 n 是用户实际点的那一项，Step 与 Assert 必须指向同一项。
@@ -52,6 +52,9 @@ public final class AssertClassGenerator {
         }
         List<String> imports = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        // 与 Step 一致：Page 对象声明为类字段，不在每个断言方法内重复实例化。
+        List<String> fields = new ArrayList<>();
+        Set<String> fieldClasses = new LinkedHashSet<>();
         List<Map<String, Object>> methods = new ArrayList<>(sessions.size());
         boolean hasNlsAssert = false;
 
@@ -60,16 +63,13 @@ public final class AssertClassGenerator {
                 if (seen.add(page.pageClassName)) {
                     imports.add(page.packageName + "." + page.pageClassName);
                 }
+                if (fieldClasses.add(page.pageClassName)) {
+                    fields.add("    private final " + page.pageClassName + " " + page.pageVar
+                            + " = PageObjectFactory.getPage(" + page.pageClassName + ".class);");
+                }
             }
 
             List<String> body = new ArrayList<>();
-            for (CodegenTarget page : s.pages) {
-                body.add("        " + page.pageClassName + " " + page.pageVar
-                        + " = PageObjectFactory.getPage(" + page.pageClassName + ".class);");
-            }
-            if (!s.pages.isEmpty() && !s.asserts.isEmpty()) {
-                body.add("");
-            }
             for (MultiPageCodegen.PageEntries pe : s.asserts) {
                 for (CodegenEntry entry : pe.entries) {
                     CodegenFieldSpec spec = specOf(pe.plan, entry);
@@ -91,6 +91,7 @@ public final class AssertClassGenerator {
         model.put("assertPackageName", header.assertPackageName);
         model.put("assertClassName", header.assertClassName);
         model.put("imports", imports);
+        model.put("fields", fields);
         model.put("methods", methods);
         model.put("hasNlsAssert", hasNlsAssert);
         model.put("nlsBindExpr", nlsBindExpr(nlsFiles));
@@ -162,9 +163,9 @@ public final class AssertClassGenerator {
                 || r.equals("combobox") || r.equals("listbox");
     }
 
-    /** 运行期取 key 对应可见文本的调用：直接用已 bind 的 {@code NLS} 字段。 */
+    /** 运行期按 key 取可见文本的调用：直接用已 bind 的 {@code NLS} 字段。 */
     private static String nlsValueExpr(String nlsKey) {
-        return "NLS.visibleText(\"" + CodegenFieldPlanner.escapeJava(nlsKey) + "\")";
+        return "NLS.getTextByKey(\"" + CodegenFieldPlanner.escapeJava(nlsKey) + "\")";
     }
 
     /** 生成 {@code NLSUtils.bind("f1", "f2")} 表达式：bind 一次性抽为生成类的 NLS 字段。 */
@@ -182,7 +183,7 @@ public final class AssertClassGenerator {
     /** 生成期解析 key 对应的可见文本，用于决定 {@code equalTo}/{@code containsString}。 */
     private static String safeVisibleText(String nlsKey, String[] nlsFiles) {
         try {
-            return NLSUtils.bind(nlsFiles).visibleText(nlsKey);
+            return NLSUtils.bind(nlsFiles).getTextByKey(nlsKey);
         } catch (Exception e) {
             return null;
         }

@@ -19,7 +19,8 @@ public class ${assertClassName} {
     /** 本次录制用到的 NLS bundle：bind 一次，避免每个断言重复 bind。 */
     private static final NLSUtils.NlsBundle NLS = ${nlsBindExpr};
 </#if>
-<#list methods as m>
+<#list fields as f>${f}
+</#list><#list methods as m>
 
     @Step
     public void ${m.name}() {

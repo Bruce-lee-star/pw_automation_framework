@@ -7,7 +7,8 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.factory.PageObjectFacto
 <#list imports as imp>import ${imp};
 </#list>
 public class ${stepClassName} {
-<#list methods as m>
+<#list fields as f>${f}
+</#list><#list methods as m>
 
     @Step
     public void ${m.name}() {

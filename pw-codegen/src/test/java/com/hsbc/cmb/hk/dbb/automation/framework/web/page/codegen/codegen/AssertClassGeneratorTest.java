@@ -93,8 +93,11 @@ public class AssertClassGeneratorTest {
         Assert.assertTrue(out.contains("import static org.hamcrest.MatcherAssert.assertThat;"));
         Assert.assertTrue(out.contains("import static org.hamcrest.Matchers.is;"));
         Assert.assertTrue(out.contains("public class LoginAssertions {"));
-        // 会话模型：页面对象在该方法内实例化（局部变量），而非字段
-        Assert.assertTrue(out.contains("LoginPage loginPage = PageObjectFactory.getPage(LoginPage.class);"));
+        // 页面对象声明为类字段（与 Step 一致），不在断言方法内实例化
+        Assert.assertTrue("页面类应声明为类字段",
+                out.contains("    private final LoginPage loginPage = PageObjectFactory.getPage(LoginPage.class);"));
+        Assert.assertFalse("方法体内不应再重复实例化页面类",
+                out.contains("        LoginPage loginPage = PageObjectFactory.getPage(LoginPage.class);"));
         Assert.assertTrue(out.trim().endsWith("}"));
         Assert.assertFalse(out.contains("\r"));
     }
@@ -231,8 +234,8 @@ public class AssertClassGeneratorTest {
         Assert.assertTrue(out.contains("private static final NLSUtils.NlsBundle NLS = NLSUtils.bind("));
         // 不再生成冗余的 getKey(key) 私有透传方法
         Assert.assertFalse(out.contains("private static String getKey("));
-        // 断言处直接走 NLS.visibleText，无重复的 NLSUtils.bind(...)
-        Assert.assertTrue(out.contains("loginPage.signInBtn.getText(), equalTo(NLS.visibleText(\"signin\")));"));
+        // 断言处直接走 NLS.getTextByKey，无重复的 NLSUtils.bind(...)
+        Assert.assertTrue(out.contains("loginPage.signInBtn.getText(), equalTo(NLS.getTextByKey(\"signin\")));"));
         Assert.assertFalse("bind 不应出现在断言行", out.contains("equalTo(NLSUtils.bind("));
     }
 
@@ -246,7 +249,7 @@ public class AssertClassGeneratorTest {
         Assert.assertTrue(out.contains("import static org.hamcrest.Matchers.containsString;"));
         Assert.assertTrue(out.contains("private static final NLSUtils.NlsBundle NLS = NLSUtils.bind("));
         Assert.assertFalse(out.contains("private static String getKey("));
-        Assert.assertTrue(out.contains("assertThat(NLS.visibleText(\"greet\"), containsString(loginPage.worldTitle.getText()));"));
+        Assert.assertTrue(out.contains("assertThat(NLS.getTextByKey(\"greet\"), containsString(loginPage.worldTitle.getText()));"));
         Assert.assertFalse("bind 不应出现在断言行", out.contains("containsString(NLSUtils.bind("));
     }
 

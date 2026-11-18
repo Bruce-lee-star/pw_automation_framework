@@ -14,19 +14,17 @@ import java.util.Set;
  * <pre>
  * public class LogonSteps {
  *
+ *     private final LogonPage logonPage = PageObjectFactory.getPage(LogonPage.class);
+ *     private final PopupPage popupPage = PageObjectFactory.getPage(PopupPage.class);
+ *
  *     &#64;Step
  *     public void step1() {
- *         LogonPage logonPage = PageObjectFactory.getPage(LogonPage.class);
- *
  *         logonPage.userName.fill("dbb_1");
  *         logonPage.signIn.click();
  *     }
  *
  *     &#64;Step
  *     public void step2() {
- *         LogonPage logonPage = PageObjectFactory.getPage(LogonPage.class);
- *         PopupPage popupPage = PageObjectFactory.getPage(PopupPage.class);
- *
  *         Page newPage1 = logonPage.waitForNewPage(() -> logonPage.openProfile.click());
  *         popupPage.switchToPage(newPage1);
  *         popupPage.ok.click();
@@ -37,8 +35,9 @@ import java.util.Set;
  * <p>要点：
  * <ul>
  *   <li>方法名 {@code step1..N}，与 Assert 的 {@code assert1..N} 一一对应（同一会话）；</li>
- *   <li>方法体内<b>按需实例化本会话涉及的所有页面类</b>——同一步操作了多个页面时，
- *       这一步就实例化多个页面对象（而不是把不同页面塞进同一个 Page 类）；</li>
+ *   <li>页面对象<b>声明为 private final 类字段</b>（{@code private final XxxPage xxxPage = PageObjectFactory.getPage(...)}，
+ *       符合 {@code PageObjectFactory} 约定），一次声明供所有 step 复用，不在方法内重复实例化；
+ *       同一次录制涉及的多个页面各自一个字段（而不是把不同页面塞进同一个 Page 类）；</li>
  *   <li>字段名/动作表达式由 {@link CodegenFieldPlanner} 统一规划，与 Page 类严格同源；</li>
  *   <li>页面切换处生成 {@code Page newPageN = from.waitForNewPage(() -> from.trigger.click())} 并接住返回值，
  *       随后 {@code to.switchToPage(newPageN)} 把新页显式绑定到目标页对象 —— 不使用任何
@@ -64,12 +63,20 @@ public final class StepClassGenerator {
         }
         List<String> imports = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        // Page 对象按框架约定声明为类字段（见 PageObjectFactory Javadoc）：所有 step 复用同一实例，
+        // 不在每个方法内重复 getPage。多个会话涉及同一页类时只声明一次。
+        List<String> fields = new ArrayList<>();
+        Set<String> fieldClasses = new LinkedHashSet<>();
         List<Map<String, Object>> methods = new ArrayList<>(sessions.size());
 
         for (MultiPageCodegen.SessionUnit s : sessions) {
             for (CodegenTarget page : s.pages) {
                 if (seen.add(page.pageClassName)) {
                     imports.add(page.packageName + "." + page.pageClassName);
+                }
+                if (fieldClasses.add(page.pageClassName)) {
+                    fields.add("    private final " + page.pageClassName + " " + page.pageVar
+                            + " = PageObjectFactory.getPage(" + page.pageClassName + ".class);");
                 }
             }
             if (usesPageSwitch(s)) {
@@ -79,13 +86,6 @@ public final class StepClassGenerator {
             }
 
             List<String> body = new ArrayList<>();
-            for (CodegenTarget page : s.pages) {
-                body.add("        " + page.pageClassName + " " + page.pageVar
-                        + " = PageObjectFactory.getPage(" + page.pageClassName + ".class);");
-            }
-            if (!s.pages.isEmpty() && !s.actions.isEmpty()) {
-                body.add("");
-            }
             int newPageSeq = 0;
             for (MultiPageCodegen.SessionAction action : s.actions) {
                 if (action.kind == MultiPageCodegen.ActionKind.PAGE_SWITCH) {
@@ -105,6 +105,7 @@ public final class StepClassGenerator {
         model.put("stepPackageName", header.stepPackageName);
         model.put("stepClassName", header.stepClassName);
         model.put("imports", imports);
+        model.put("fields", fields);
         model.put("methods", methods);
         return CodegenTemplates.render(TEMPLATE, model);
     }
@@ -161,7 +162,7 @@ public final class StepClassGenerator {
                 }
                 break;
             case NAVIGATION:
-                // 同标签页内 URL 跳转：不切页、不等待，仅提示（该页对象已在方法顶部实例化）。
+                // 同标签页内 URL 跳转：不切页、不等待，仅提示（该页对象已声明为类字段）。
                 out.add("        // " + (a.note == null ? "same-tab navigation" : a.note));
                 break;
             default:
