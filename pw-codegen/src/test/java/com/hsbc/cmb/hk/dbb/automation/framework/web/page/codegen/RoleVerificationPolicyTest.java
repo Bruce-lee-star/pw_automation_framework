@@ -75,4 +75,15 @@ public class RoleVerificationPolicyTest {
         assertFalse(RoleVerificationPolicy.fallBackToCssAfterMismatch(-1, TriState.UNKNOWN));
         assertFalse(RoleVerificationPolicy.fallBackToCssAfterMismatch(-1, TriState.FALSE));
     }
+
+    /** P0-1：多命中可能是合法组，拾取阶段不得判死，须推迟到生成期按组期望值复核。 */
+    @Test
+    public void multiHitIsDeferredToGenerationForGroupDecision() {
+        assertFalse("单命中已确定唯一，无需推迟", RoleVerificationPolicy.deferMultiHitToGeneration(1));
+        assertTrue("多命中可能是合法组，必须保留 role 交给生成期按组复核",
+                RoleVerificationPolicy.deferMultiHitToGeneration(2));
+        assertTrue(RoleVerificationPolicy.deferMultiHitToGeneration(3));
+        assertFalse("0 命中走页面翻页启发式，不走多命中推迟分支",
+                RoleVerificationPolicy.deferMultiHitToGeneration(0));
+    }
 }

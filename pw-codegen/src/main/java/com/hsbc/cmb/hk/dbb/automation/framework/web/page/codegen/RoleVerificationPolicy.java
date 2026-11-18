@@ -68,4 +68,19 @@ final class RoleVerificationPolicy {
         if (hits > 0) return true;             // 真的多命中：歧义成立
         return pickStateIntact.isTrue();       // 0 命中：只有确认"状态未变"才回退
     }
+
+    /**
+     * 拾取 / 悬浮阶段遇到 role 多命中时，是否保留 role、把期望值判定推迟到生成期。
+     *
+     * <p>一组的定位器<b>本就命中多个</b>（列表项、表格重复按钮、{@code li[role=option]}）。
+     * 拾取当场若按「单元素恰好 1 命中」判死并当场回退 CSS，合法组会被误退化为结构 CSS，
+     * 生成期的 {@code verifyGroup}（expected=组内拾取数）永远收不到条目（评审 P0-1）。
+     *
+     * <p>拾取阶段无法知道同组最终拾取了几个，故多命中只记录真实 {@code roleHits}、保留 role 策略
+     * 与 {@code rolePending}；等生成期拿到全部拾取后按 base-sig 分组：组大小与命中数相符才保留 role，
+     * 确属单元素多命中再由 {@link #fallBackToCssAfterMismatch} 回退 CSS。
+     */
+    static boolean deferMultiHitToGeneration(int hits) {
+        return hits > 1;
+    }
 }
