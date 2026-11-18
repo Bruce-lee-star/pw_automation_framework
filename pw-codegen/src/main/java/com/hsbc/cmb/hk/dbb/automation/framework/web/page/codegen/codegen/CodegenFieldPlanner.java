@@ -170,6 +170,12 @@ public final class CodegenFieldPlanner {
                 if (!allowNlsKey && containsCjk(e.name)) {
                     comment = "    // TODO(review): CJK element name has no English source "
                             + "(role-based placeholder used) - provide an English NLS key or rename for clarity";
+                } else if (!allowNlsKey && containsDynamicDigit(e.name)) {
+                    // M2：单语言/无 NLS 环境下 name 会被写死进注解；含数字的文案（"3 items"、
+                    // "Balance: 1,234.56"）数字一变定位即失效。不擅自改写 name（会破坏语义匹配），
+                    // 但必须显式标注，让人工复核时优先绑 NLS key 或改用 CSS。
+                    comment = "    // TODO(review): element name contains digits - value may change at runtime; "
+                            + "prefer an NLS key or a CSS locator";
                 }
             } else if (textSemanticLocatable) {
                 // role 缺省 = 框架的文本语义策略：运行期按 key 解析当前语言文案后 getByText 定位。
@@ -750,6 +756,15 @@ public final class CodegenFieldPlanner {
         if (s == null) return false;
         for (int i = 0; i < s.length(); i++) {
             if (s.charAt(i) >= 0x4E00 && s.charAt(i) <= 0x9FFF) return true;
+        }
+        return false;
+    }
+
+    /** name 是否含数字（≥1 位，含千分位/小数）——用于 M2 的动态文案 TODO 标注。 */
+    static boolean containsDynamicDigit(String s) {
+        if (s == null) return false;
+        for (int i = 0; i < s.length(); i++) {
+            if (Character.isDigit(s.charAt(i))) return true;
         }
         return false;
     }

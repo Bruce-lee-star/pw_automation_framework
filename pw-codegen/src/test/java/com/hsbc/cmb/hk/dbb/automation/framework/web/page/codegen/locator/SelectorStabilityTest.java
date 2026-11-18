@@ -153,4 +153,20 @@ public class SelectorStabilityTest {
         assertTrue("语义 id 仍稳定", SelectorStability.isStable("step2"));
         assertTrue("语义类名仍稳定", SelectorStability.isStable("tokenless-ack-active-msk"));
     }
+
+    /** M1：长纯字母 hash class（无数字）必须与 JS stableClassTokens 一致地剔除。 */
+    @Test
+    public void longPureLetterClassTokensAreDropped() {
+        assertTrue("长纯字母 hash 不得进 class 候选",
+                !SelectorStability.stableClassNames("btn abcdefghijklmnop").contains("abcdefghijklmnop"));
+        assertTrue("短语义 class 保留",
+                SelectorStability.stableClassNames("btn tokenless-ack-active-msk").contains("tokenless-ack-active-msk"));
+        assertTrue("含数字的长 hash 仍由 isHighEntropy 处理",
+                !SelectorStability.stableClassNames("btn a1b2c3d4e5f6g7").contains("a1b2c3d4e5f6g7"));
+        // css-/sc- 阈值 5→4：4 位后缀也判为 Emotion hash，两侧与 JS stableClassTokens 同源。
+        assertTrue("css-abcd（4 位）判随机",
+                !SelectorStability.stableClassNames("btn css-abcd sc-1234").contains("css-abcd"));
+        assertTrue("sc-1234（4 位）判随机",
+                !SelectorStability.stableClassNames("btn css-abcd sc-1234").contains("sc-1234"));
+    }
 }

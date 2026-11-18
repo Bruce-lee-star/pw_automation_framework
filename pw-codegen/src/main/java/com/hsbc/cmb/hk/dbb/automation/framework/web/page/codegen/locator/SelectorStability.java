@@ -106,7 +106,7 @@ public final class SelectorStability {
             Pattern.compile("^downshift-\\d+.*", Pattern.CASE_INSENSITIVE),
             Pattern.compile("^ng-tns-.*", Pattern.CASE_INSENSITIVE),
             Pattern.compile("^_ngcontent-.*", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("^(css|sc)-[a-z0-9]{5,}$", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("^(css|sc)-[a-z0-9]{4,}$", Pattern.CASE_INSENSITIVE),
             Pattern.compile("^\\d+-\\d+$"));
 
     /** 部分匹配片段的最小长度（太短会命中一大片，最终也会被唯一性校验否掉，干脆不生成）。 */
@@ -233,6 +233,9 @@ public final class SelectorStability {
         for (String raw : className.trim().split("\\s+")) {
             if (raw.length() < MIN_FRAGMENT_LENGTH) continue;
             if (isVolatile(raw)) continue;
+            // M1：与 JS stableClassTokens 对齐——≥16 位纯字母是无数字的 hash（RAND_RE/isHighEntropy
+            // 都要求含数字，漏判），如 emotion/styled-components 生成的长随机 class。
+            if (raw.length() >= 16 && raw.chars().allMatch(c -> c >= 'a' && c <= 'z')) continue;
             out.add(raw);
         }
         return new ArrayList<>(out);

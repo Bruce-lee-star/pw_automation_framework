@@ -472,7 +472,7 @@ function srcLocaleNeutralPrefix(tail) {
             // 同一字符串「作 id 判随机、作 class 判稳定」（如 aZ3kM9xQ），且会把 container 这类
             // 长语义类名当 hash 删掉（/^[a-z0-9]{8,}$/ 的误伤）。
             if (RAND_RE.test(t)) continue;                          // Radix 夹心 / 数字段 / 长 hash / 高熵 base62
-            if (/^(css|sc)-[a-z0-9]{5,}$/i.test(t)) continue;      // Emotion css-xxx
+            if (/^(css|sc)-[a-z0-9]{4,}$/i.test(t)) continue;      // Emotion css-xxx
             if (/^[a-z]{16,}$/.test(t)) continue;                   // 无数字的长纯字母 hash（RAND_RE 无法判定）
             if (seen[t]) continue;
             seen[t] = true;

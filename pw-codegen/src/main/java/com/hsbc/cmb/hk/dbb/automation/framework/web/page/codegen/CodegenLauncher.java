@@ -55,6 +55,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
 /**
  * V3 Inspector 入口与会话编排。
@@ -2676,7 +2677,31 @@ public final class CodegenLauncher {
         int h = s.indexOf('#');
         if (h >= 0) cut = Math.min(cut, h);
         while (cut > 0 && s.charAt(cut - 1) == '/') cut--;   // 尾斜杠不是不同的页面
-        return s.substring(0, cut);
+        String normalized = s.substring(0, cut);
+        // M3：path 里的语言段（/en_US/logon vs /zh_HK/logon）同属一个逻辑页面，必须剥掉，
+        // 否则切语言会分裂成两个 Page 类 / 两组 Step。
+        return stripPathLocale(normalized);
+    }
+
+    /** path 里的语言/地区段（/en_US/、/zh-HK/、/tc/…）；只在两段 '/' 之间匹配，避免误伤业务名。 */
+    private static final Pattern PATH_LOCALE_SEGMENT = Pattern.compile(
+            "/(?:en|zh|tc|sc|hk|cn|tw|ja|jp|ko|kr|fr|de|es|pt|it|nl|ru|ar|th|vi|id|ms|hi|tr|pl|sv|da|fi|no|cs|el|he|hu|ro|sk|uk)"
+                    + "(?:[-_](?:us|gb|uk|hk|cn|tw|sg|au|ca|in|jp|kr|de|fr|es|pt|br|mx|it|nl|ru|ae|sa|th|vn|id|my|tr|pl|hans|hant))?(?=/|$)",
+            Pattern.CASE_INSENSITIVE);
+
+    /** 剥掉 URL path 中的语言段（保留 host 与其余业务 path）。 */
+    static String stripPathLocale(String url) {
+        if (url == null || url.isEmpty()) return url;
+        // 只处理 path 部分（scheme://host 之后的 '/…'），避免把域名里的 en/zh 子域误剥。
+        int scheme = url.indexOf("://");
+        int pathStart = scheme >= 0 ? url.indexOf('/', scheme + 3) : url.indexOf('/');
+        if (pathStart < 0) return url;
+        String prefix = url.substring(0, pathStart);
+        String path = url.substring(pathStart);
+        java.util.regex.Matcher m = PATH_LOCALE_SEGMENT.matcher(path);
+        String stripped = m.replaceAll("");
+        // 重复剥（如 /en_US/zh-HK/logon 这种叠的语言段，虽罕见但保守处理一次即可）。
+        return prefix + stripped;
     }
 
     /** 安全取页面 URL：页面已关闭 / 取不到时返回 null（走兜底类名），不抛异常。 */

@@ -121,6 +121,23 @@ public class CodegenPageGroupingTest {
                 CodegenLauncher.urlKey("https://h/logon"), CodegenLauncher.urlKey("https://h/Logon"));
     }
 
+    /** M3：path 里的语言段不构成新页面——切语言不得分裂成两个 Page 类。 */
+    @Test
+    public void pathLocaleSegmentIsNotANewPage() {
+        assertEquals("下划线语言段",
+                CodegenLauncher.urlKey("https://h/en_US/logon"),
+                CodegenLauncher.urlKey("https://h/logon"));
+        assertEquals("连字符语言段",
+                CodegenLauncher.urlKey("https://h/zh-HK/reset-password"),
+                CodegenLauncher.urlKey("https://h/reset-password"));
+        assertEquals("两字母语言段",
+                CodegenLauncher.urlKey("https://h/fr/portalserver/logon"),
+                CodegenLauncher.urlKey("https://h/portalserver/logon"));
+        assertEquals("业务 path 中的语言样词不得误剥（如 /zhongwen/ 不是语言码）",
+                CodegenLauncher.urlKey("https://h/zhongwen/logon"),
+                "https://h/zhongwen/logon");
+    }
+
     // ------------------------------------------------------------------
 
     private static CodegenLauncher.PageUrl key(Page page, String url) {
