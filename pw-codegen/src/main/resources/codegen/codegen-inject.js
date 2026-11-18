@@ -288,6 +288,18 @@
                         return path;
                     } catch (e) { return null; }
                 }
+                /**
+                 * 事件归属 URL：优先取顶层文档的 location.href（元素归属按主页面 path 分组，
+                 * 与框架 PageUrl 口径一致）；跨域 iframe 无法访问 window.top.location 时回退到自身 href。
+                 */
+                function eventUrlOf() {
+                    try {
+                        if (window.top && window.top.location && window.top.location.href) {
+                            return window.top.location.href;
+                        }
+                    } catch (e) { /* 跨域 iframe：fall through */ }
+                    try { return location.href; } catch (e) { return ''; }
+                }
                 // 注意：这里绝不 preventDefault / stopPropagation —— 拾取必须与页面交互共存
                 // （早先版本用 CDP Overlay.setInspectMode 拦截鼠标，导致「一进拾取页面就点不动」）。
                 // 注册在 window 捕获层而非 document：跨域官网弹窗（如 business.hsbc.com.hk 的
@@ -331,8 +343,11 @@
                         // 绝不带坐标——坐标随滚动/重排漂移，且对跨源 iframe 必然打空。
                         // hoverKey：与悬浮预览同一身份标识（轻量 nth 路径），Java 据此消费悬浮已裁决的定位器，
                         // 保证 tooltip 显示的与点击落库的逐字一致（page.pause 语义）。
+                        // url：点击捕获阶段的 location.href——导航型元素（如 Cancel/Back）点击后立即跳页，
+                        // 异步拾取时 page.url() 已是新页面；必须用这份「点击那一刻」的 URL 归属元素到正确的 Page。
                         window.__codegenEvent({ type: 'click', tag: target && target.tagName,
                             framePath: framePathOf(), hoverKey: hoverSelectorOf(target),
+                            url: eventUrlOf(),
                             info: infoOf(target) });
                         // 登记「即将到来的合成 click」：点包裹式 label（或其内部任意文本/svg）且归一到的控件是
                         // radio/checkbox 时，浏览器随后会向该控件补发一次 click，必须抑制掉（否则两条定位）。
@@ -349,7 +364,7 @@
                         if (isCodegenUi(target)) return;
                         window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
                         window.__codegenEvent({ type: 'contextmenu', tag: target && target.tagName,
-                            framePath: framePathOf(),
+                            framePath: framePathOf(), url: eventUrlOf(),
                             info: infoOf(target) });
                     } catch (e) {}
                 }, true);
@@ -362,7 +377,7 @@
                         if (isCodegenUi(target)) return;
                         window.__CODEGEN_CLICK_COUNT__ = (window.__CODEGEN_CLICK_COUNT__ || 0) + 1;
                         window.__codegenEvent({ type: 'dblclick', tag: target && target.tagName,
-                            framePath: framePathOf(),
+                            framePath: framePathOf(), url: eventUrlOf(),
                             info: infoOf(target) });
                     } catch (e) {}
                 }, true);
@@ -370,7 +385,7 @@
                     try {
                         if (isCodegenUi(ev.target)) return;   // 框架自绘 UI 不录制
                         window.__codegenEvent({ type: 'fill', tag: ev.target && ev.target.tagName,
-                            framePath: framePathOf(),
+                            framePath: framePathOf(), url: eventUrlOf(),
                             value: ev.target.value, info: infoOf(ev.target) });
                     } catch (e) {}
                 }, true);
@@ -399,7 +414,7 @@
                             : (values && values.length ? values[0]
                                 : ((typeof el.value === 'string') ? el.value : ''));
                         window.__codegenEvent({ type: 'fill', semantic: semantic, tag: el && el.tagName,
-                            framePath: framePathOf(),
+                            framePath: framePathOf(), url: eventUrlOf(),
                             value: single, valueCount: values ? values.length : 1,
                             info: infoOf(el) });
                     } catch (e) {}
@@ -419,7 +434,7 @@
                         var combo = mods.concat([key]).join('+');
                         var el2 = ev.target;
                         window.__codegenEvent({ type: 'press', value: combo, tag: el2 && el2.tagName,
-                            framePath: framePathOf(), info: infoOf(el2) });
+                            framePath: framePathOf(), url: eventUrlOf(), info: infoOf(el2) });
                     } catch (e) {}
                 }, true);
             }

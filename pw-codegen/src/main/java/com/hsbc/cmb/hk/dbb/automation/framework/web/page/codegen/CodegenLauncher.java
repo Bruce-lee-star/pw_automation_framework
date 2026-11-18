@@ -249,13 +249,14 @@ public final class CodegenLauncher {
     @FunctionalInterface
     private interface PickSink {
         /**
-         * @param page  元素所属被测页
-         * @param entry 解析结果
-         * @param docId 页面侧文档标识（可为空 = 无身份信息）
-         * @param eid   页面侧元素标识（可为空）
+         * @param page    元素所属被测页
+         * @param entry   解析结果
+         * @param docId   页面侧文档标识（可为空 = 无身份信息）
+         * @param eid     页面侧元素标识（可为空）
+         * @param pickUrl 点击捕获阶段记录的 {@code location.href}（导航前 URL）；为空时回退到 {@code page.url()}
          * @return 新建的 Pick（{@code entry == null} 时返回 {@code null}）
          */
-        Pick add(Page page, CodegenEntry entry, String docId, String eid);
+        Pick add(Page page, CodegenEntry entry, String docId, String eid, String pickUrl);
     }
 
     /** 一次原生对话框事件（已自动关闭）：记录所属页 / 类型 / accept，供步骤里生成 {@code acceptAlert/dismissAlert}。 */
@@ -376,17 +377,44 @@ public final class CodegenLauncher {
              * 悬浮已裁决的 entry（按页面侧 cssSelector 索引）。点击同一元素直接消费同一条结论，
              * 保证「悬浮 tooltip 显示的」与「点击落库 / 回放使用的」逐字一致。
              */
-            private final Map<String, CodegenEntry> hoverVerdicts = new java.util.concurrent.ConcurrentHashMap<>();
+            /** 悬浮裁决结论 + 写入时刻（用于 TTL 过期：导航后旧文档的同名 nth 路径不能误命中新页面元素）。 */
+            private static final class HoverVerdict {
+                final CodegenEntry entry;
+                final long atNanos;
+
+                HoverVerdict(CodegenEntry entry) {
+                    this.entry = entry;
+                    this.atNanos = System.nanoTime();
+                }
+            }
+
+            private final Map<String, HoverVerdict> hoverVerdicts = new java.util.concurrent.ConcurrentHashMap<>();
+            /** 悬浮裁决有效期 10s：超过即视为过期（用户早该移开鼠标 / 页面已导航）。 */
+            private static final long HOVER_VERDICT_TTL_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+
+            /** 写入悬浮裁决结论（TTL 计时开始）。 */
+            void putHoverVerdict(String key, CodegenEntry entry) {
+                if (key == null || key.isEmpty() || entry == null) return;
+                hoverVerdicts.put(key, new HoverVerdict(entry));
+            }
 
             /**
-             * 消费悬浮裁决结果：命中则移除（一次性，避免过期结论被后续点击误用）。
+             * 消费悬浮裁决结果：命中且未过期则移除（一次性）。
              *
              * <p>鼠标移动过程中悬浮解析可能仍在跑，点击先于它完成属正常竞态——此时返回 null，
              * 点击走自己的裁决路径，结论仍由同一个 {@link #adjudicateRole} 得出，不会表里不一。
+             * TTL 防止导航后旧文档的同名 nth 路径选择器误命中新页面元素（悬浮结论属于旧 DOM）。
              */
             CodegenEntry consumeHoverVerdict(String cssSelector) {
                 if (cssSelector == null || cssSelector.isEmpty()) return null;
-                return hoverVerdicts.remove(cssSelector);
+                HoverVerdict v = hoverVerdicts.remove(cssSelector);
+                if (v == null) return null;
+                if (System.nanoTime() - v.atNanos > HOVER_VERDICT_TTL_NANOS) {
+                    log.debug("[codegen][hover] verdict expired (TTL) for '{}' - discarding stale DOM conclusion",
+                            cssSelector);
+                    return null;
+                }
+                return v.entry;
             }
 
             PageSession(Page page, String nlsLang, NlsReverseLookup nls) {
@@ -551,7 +579,7 @@ public final class CodegenLauncher {
                             // 悬浮即裁决：与点击共用同一判据，结论写入缓存供点击直接消费。
                             CodegenEntry decided = adjudicateRole(raw, null, null, extractor, "hover preview");
                             // key 必须与点击 payload 的 hoverKey 同源——都是 hoverSelectorOf(target) 的 nth 路径。
-                            hoverVerdicts.put(selector, decided);
+                            putHoverVerdict(selector, decided);
                             // tooltip 显示的必须是最终定位器本身（与点击落库 / 回放逐字一致）。
                             final String text = decided.selector;
                             if (text == null || text.isEmpty()) return;
@@ -995,7 +1023,7 @@ public final class CodegenLauncher {
 
         // 拾取到元素 → Elements 表 + 增量生成（仅在共享引擎线程调用）。
         // 入参带页面侧元素身份：① 落库到 Pick（后续「同一元素」判定用）；② sigKey 冲突消歧（孪生元素）。
-        final PickSink addPick = (pg, entry, docId, eid) -> {
+        final PickSink addPick = (pg, entry, docId, eid, pickUrl) -> {
             if (entry == null) return null;
             PageSession ps = sessions.of(pg);
             // 孪生元素（同 role+name、同组内序号）会算出相同 sigKey：字段规划按 sigKey 去重，
@@ -1003,8 +1031,12 @@ public final class CodegenLauncher {
             CodegenEntry effective = disambiguateSigKey(entry, docId, eid, picked);
             // 悬浮已裁决的条目（roleHits 不再是 UNVERIFIED）不再欠复核——tooltip 显示的就是这条结论。
             boolean roleAlreadyAdjudicated = effective.roleHits != CodegenEntry.ROLE_HITS_UNVERIFIED;
+            // URL 归属：优先用点击捕获阶段记录的 location.href（导航型元素点击后立即跳页，异步落库时
+            // page.url() 已是新页面——Back/Cancel 会被错误归到 logon 页、Step 代码出现在错误的 Page）。
+            String pickUrlSafe = (pickUrl != null && !pickUrl.isEmpty())
+                    ? pickUrl : safeUrl(pg);
             Pick pk = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(), currentSession(sessionSeq),
-                    effective, pg, safeUrl(pg), ps.extractor(),
+                    effective, pg, pickUrlSafe, ps.extractor(),
                     !roleAlreadyAdjudicated && ps.extractor().requiresDeferredRoleVerification(effective));
             pk.identify(docId, eid);
             picked.add(pk);
@@ -1285,8 +1317,11 @@ public final class CodegenLauncher {
                             lastFill.actionValue = currentValue;
                         } else {
                             CodegenEntry repeatEntry = resolveCheckedState(existing.entry, info, repeatType);
+                            // URL 归属与首次拾取一致：用点击捕获阶段的 url，导航型元素重复操作时才不会归到新页面。
+                            String repeatUrl = payload.get("url") instanceof String
+                                    ? (String) payload.get("url") : safeUrl(src);
                             Pick np = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(),
-                                    currentSession(sessionSeq), repeatEntry, src, safeUrl(src),
+                                    currentSession(sessionSeq), repeatEntry, src, repeatUrl,
                                     existing.extractor, false, true, actionTag);
                             np.actionValue = fillEvent ? currentValue : null;
                             np.valueCount = Math.max(1, valueCount);
@@ -1348,7 +1383,8 @@ public final class CodegenLauncher {
                     // 后续对同一元素的重复操作（再点一次 / 继续输入）靠身份命中本条，
                     // 而不是靠 role+name 反查（那样会把页面里同 role+name 的孪生元素并成一条）。
                     if (e != null) {
-                        addPick.add(eventPage, resolveCheckedState(e, info, actionType), docIdOf(info), eidOf(info));
+                        addPick.add(eventPage, resolveCheckedState(e, info, actionType), docIdOf(info), eidOf(info),
+                                payload.get("url") instanceof String ? (String) payload.get("url") : null);
                     }
                     recordAction.accept(payload, e);
                 } finally {

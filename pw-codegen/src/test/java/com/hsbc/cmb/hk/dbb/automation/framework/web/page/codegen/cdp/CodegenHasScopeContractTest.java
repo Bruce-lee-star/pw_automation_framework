@@ -356,6 +356,14 @@ public class CodegenHasScopeContractTest {
         assertTrue("click 事件必须携带 hoverKey", inject.contains("hoverKey: hoverSelectorOf(target)"));
         assertTrue("悬浮上报的 selector 必须来自同一身份函数",
                 inject.contains("var sel = hoverSelectorOf(el)"));
+        // 导航型元素（Back/Cancel）点击后立即跳页：必须用捕获阶段的 location.href 归属 Page，
+        // 否则异步落库时 page.url() 已是新页面，代码生成到错误的 Page 里（用户看到"没产生代码"）。
+        assertTrue("click 事件必须携带点击那一刻的 url（顶层文档，iframe 内也按主页面归属）",
+                inject.contains("url: eventUrlOf()"));
+        assertTrue("eventUrlOf 必须优先取顶层文档 href", inject.contains("window.top.location.href"));
+        long eventUrlCount = inject.lines().filter(l -> l.contains("url: eventUrlOf()")).count();
+        assertTrue("所有交互事件（click/contextmenu/dblclick/fill/change/press）都必须带 url，实际=" + eventUrlCount,
+                eventUrlCount >= 6);
     }
 
 }
