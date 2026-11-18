@@ -47,17 +47,17 @@ public class NLSUtilsTest {
         assertFalse("模板占位符不应残留 {{name}}", src.contains("{{name}}"));
     }
 
-    /** {@code NlsBundle.visibleText(key)} 应等于手写 {@code NLSUtils.visibleText(bind(file).get(key))}，且剥离 HTML。 */
+    /** {@code NlsBundle.getTextByKey(key)} 应等于手写 {@code NLSUtils.visibleText(bind(file).get(key))}，且剥离 HTML。 */
     @Test
-    public void bundleVisibleText_stripsHtmlAndMatchesManualForm() throws Exception {
+    public void bundleGetTextByKey_stripsHtmlAndMatchesManualForm() throws Exception {
         Path dir = Files.createTempDirectory("nls-bundle");
         Path f = dir.resolve("b.nls.json");
         Files.writeString(f, "{\"en\":{\"greet\":\"Hello <b>World</b> &copy;\"}}");
         NLSUtils.setLanguage("en");
 
-        String viaBundle = NLSUtils.bind(f.toString()).visibleText("greet");
+        String viaBundle = NLSUtils.bind(f.toString()).getTextByKey("greet");
         String manual = NLSUtils.visibleText(NLSUtils.bind(f.toString()).get("greet"));
-        assertEquals("visibleText(key) 应等价于手写 visibleText(get(key))", manual, viaBundle);
+        assertEquals("getTextByKey(key) 应等价于手写 visibleText(get(key))", manual, viaBundle);
         assertFalse("应剥离 HTML 标签", viaBundle.contains("<"));
         assertTrue("应解码实体 &copy; -> (c)", viaBundle.contains("(c)"));
         assertTrue(viaBundle.contains("Hello"));

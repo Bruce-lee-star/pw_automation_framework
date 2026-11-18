@@ -152,17 +152,17 @@ public final class NLSUtils {
         }
 
         /**
-         * 取 key 对应的「可见文本」：内部先 {@link #get(String)} 取当前语言原始值，再经
+         * 按 key 取当前语言下的可见文本：先 {@link #get(String)} 取原始值，再经
          * {@link NLSUtils#visibleText(String)} 剥 HTML 标签 / 解码实体 / 归一化空白——正好对应
-         * 浏览器渲染后的可见文本。适合与页面 {@code getText()}/{@code getValue()} 做断言比对，
-         * 避免原始值里内嵌 {@code <a>/<strong>/&nbsp;} 等导致和可见文本比对不上。
+         * 浏览器渲染后的可见文本。适合与页面 {@code getText()}/{@code getValue()} 做断言比对。
          *
-         * <p>等价手写 {@code NLSUtils.visibleText(bind(files).get(key))}，但少一层嵌套、语义更直白。
+         * <p>方法名强调「按 key 取文本」（{@code getTextByKey}），区别于静态的
+         * {@link NLSUtils#visibleText(String)}（对已有文本做归一化）——后者参数是文本值而非 key。
          *
          * @param key 功能内 key
          * @return 当前语言下、已剥 HTML 的可见文本（缺失 key 时由 {@link #get(String)} 抛异常）
          */
-        public String visibleText(String key) {
+        public String getTextByKey(String key) {
             return NLSUtils.visibleText(get(key));
         }
 
