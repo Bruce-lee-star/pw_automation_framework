@@ -87,6 +87,9 @@ public final class StepClassGenerator {
                     imports.add("com.microsoft.playwright.Page");
                 }
             }
+            if (usesDownload(s) && seen.add("com.microsoft.playwright.Download")) {
+                imports.add("com.microsoft.playwright.Download");
+            }
 
             List<String> body = new ArrayList<>();
             int newPageSeq = 0;
@@ -131,6 +134,19 @@ public final class StepClassGenerator {
         return false;
     }
 
+    private static int parseOrDefault(String[] parts, int idx, int fallback) {
+        if (parts == null || idx >= parts.length) return fallback;
+        try { return Integer.parseInt(parts[idx].trim()); } catch (NumberFormatException e) { return fallback; }
+    }
+
+    /** 本会话是否存在文件下载动作（决定是否引入 Download import）。 */
+    private static boolean usesDownload(MultiPageCodegen.SessionUnit s) {
+        for (MultiPageCodegen.SessionAction a : s.actions) {
+            if (a.kind == MultiPageCodegen.ActionKind.DOWNLOAD) return true;
+        }
+        return false;
+    }
+
     /** 单条会话动作 → 方法体行（含必要的 TODO / 注释）。 */
     private static List<String> render(MultiPageCodegen.SessionAction a, int newPageSeq) {
         List<String> out = new ArrayList<>(2);
@@ -160,6 +176,41 @@ public final class StepClassGenerator {
                             + "the once-dialog handler must be armed BEFORE the real trigger, "
                             + "otherwise Playwright dismisses it by default");
                     out.add("        " + pageVar(a.target) + "." + dialogMethod + "();");
+                }
+                break;
+            case DOWNLOAD:
+                // C02：waitForDownload 必须先武装再触发；绑定触发动作时把 once 监听包在外面。
+                if (a.fieldName != null && !a.fieldName.isBlank()
+                        && a.action != null && !a.action.isBlank()) {
+                    out.add("        Download dl = " + pageVar(a.target) + ".waitForDownload(() -> "
+                            + pageVar(a.target) + "." + a.fieldName + "." + a.action + ");");
+                    out.add("        // downloaded: " + (a.note == null || a.note.isBlank() ? "(name unknown)" : a.note));
+                } else {
+                    out.add("        // TODO(review): download not bound to a recorded trigger - "
+                            + "arm waitForDownload BEFORE the real trigger, otherwise the event is missed");
+                    out.add("        Download dl = " + pageVar(a.target) + ".waitForDownload();");
+                }
+                break;
+            case SCROLL:
+                // C04：滚动后需显式等待异步加载完成（框架无法自动判断"加载完"）。
+                String[] xy = (a.action == null ? "0,0" : a.action).split(",", -1);
+                int dx = parseOrDefault(xy, 0, 0);
+                int dy = parseOrDefault(xy, 1, 0);
+                out.add("        " + pageVar(a.target) + ".scrollBy(" + dx + ", " + dy + ");");
+                out.add("        // TODO(review): wait for lazy-loaded content to settle before the next action");
+                break;
+            case RELOAD:
+                // C05：刷新 / beforeunload。
+                out.add("        " + pageVar(a.target) + ".refresh();");
+                break;
+            case DRAG:
+                // C03：把源元素拖到目标元素（PageElement.dragTo）。降级路径（端点未进入字段表）时
+                // action 为 null、note 带选择器摘要——只输出 TODO 注释，不生成非法源码。
+                if (a.fieldName == null || a.action == null) {
+                    out.add("        // TODO(review): " + (a.note == null ? "unresolved drag" : a.note));
+                } else {
+                    out.add("        " + pageVar(a.target) + "." + a.fieldName + ".dragTo("
+                            + pageVar(a.toTarget) + "." + a.action + ");");
                 }
                 break;
             case PAGE_SWITCH:

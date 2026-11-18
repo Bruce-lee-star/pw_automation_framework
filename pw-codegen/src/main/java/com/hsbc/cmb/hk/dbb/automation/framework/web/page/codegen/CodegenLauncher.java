@@ -286,6 +286,41 @@ public final class CodegenLauncher {
     }
 
     /**
+     * 页面级动作（C03/C04/C05）：scroll / reload / drag 共用容器。
+     * data 承载类型相关数据：scroll→dx,dy；drag→sourceInfo/targetInfo 的 JSON 字符串。
+     */
+    static final class PageActionOp {
+        final Page page;
+        final String type;
+        final Map<String, Object> data;
+        final long seq;
+        final int session;
+
+        PageActionOp(Page page, String type, Map<String, Object> data, long seq, int session) {
+            this.page = page;
+            this.type = type;
+            this.data = data;
+            this.seq = seq;
+            this.session = session;
+        }
+    }
+
+    /** 一次文件下载事件（C02）：记录所属页 / 建议文件名 / 会话，供步骤里生成 waitForDownload。 */
+    static final class DownloadOp {
+        final Page page;
+        final String suggestedFilename;
+        final long seq;
+        final int session;
+
+        DownloadOp(Page page, String suggestedFilename, long seq, int session) {
+            this.page = page;
+            this.suggestedFilename = suggestedFilename;
+            this.seq = seq;
+            this.session = session;
+        }
+    }
+
+    /**
      * 只传被测页：无 NLS ⇒ 一律以 <b>name</b> 定位（产物不含 {@code @RoleFile}、不含 {@code key=}）。
      * 页面/步骤/断言类名全部由当前页面 URL 派生（见 {@link CodegenTarget}），包名取
      * {@link CodegenTarget#DEFAULT_PACKAGE}（不接收包名实参）。
@@ -335,6 +370,10 @@ public final class CodegenLauncher {
         List<Pick> picked = new CopyOnWriteArrayList<>();
         // 原生对话框事件容器（与 picked 同生命周期；供生成步骤里的 acceptAlert/dismissAlert）
         List<DialogOp> dialogOps = new CopyOnWriteArrayList<>();
+        // 文件下载事件容器（C02；供生成步骤里的 waitForDownload）
+        List<DownloadOp> downloadOps = new CopyOnWriteArrayList<>();
+        // 页面级动作（C03/C04/C05：scroll / reload / drag）事件容器。
+        List<PageActionOp> pageActions = new CopyOnWriteArrayList<>();
         // 用数组持有者避免 lambda 捕获"正在被赋值的局部变量"导致的明确赋值错误
         final CodegenPanelHandle[] panelRef = { null };
         // 会话结束闩锁：用户关面板窗口（标题栏 ×）或点「停止」即释放，主线程从阻塞中返回。
@@ -752,6 +791,8 @@ public final class CodegenLauncher {
              * 自动关闭，污染用户后续使用（弹窗会被挂起而非自动关闭）。
              */
             final Map<Page, Consumer<Dialog>> dialogHandlers = new ConcurrentHashMap<>();
+            /** 已挂过下载监听器的页（C02，按页去重；会话结束 / 关页时 offDownload 注销）。 */
+            final Map<Page, Consumer<com.microsoft.playwright.Download>> downloadHandlers = new ConcurrentHashMap<>();
             /**
              * 录制期原生对话框的默认动作（整场生效）。handler 内<b>同步</b>执行、不等待面板，
              * 因此不会阻塞 Playwright 的派发线程；切换策略只影响之后弹出的对话框。
@@ -810,6 +851,28 @@ public final class CodegenLauncher {
                     }
                 }
             }
+
+            /** 安装下载监听（C02）：记录下载事件供步骤生成 waitForDownload。 */
+            void installDownloadListener(Page page) {
+                if (page == null || downloadHandlers.containsKey(page)) return;
+                Consumer<com.microsoft.playwright.Download> h = download -> {
+                    String name = null;
+                    try { name = download.suggestedFilename(); } catch (Throwable ignore) { }
+                    downloadOps.add(new DownloadOp(page, name, EVENT_SEQ.incrementAndGet(),
+                            currentSession(sessionSeq)));
+                };
+                page.onDownload(h);
+                downloadHandlers.put(page, h);
+            }
+
+            /** 注销下载监听（会话结束 / 页面关闭时调用）。 */
+            void removeDownloadListener(Page page) {
+                Consumer<com.microsoft.playwright.Download> h = downloadHandlers.remove(page);
+                if (h != null) {
+                    try { page.offDownload(h); } catch (Throwable ignore) { }
+                }
+            }
+
             void followNewPage(Page newPage) {
                 if (newPage == null || newPage == real) return;
                 // 注入已由 context.addInitScript 覆盖；此处<b>只登记页面 + 挂载关闭钩子</b>，
@@ -820,6 +883,7 @@ public final class CodegenLauncher {
                 of(newPage);
                 newPage.onClose(p -> {
                     removeDialogAutoDismiss(newPage);
+                    removeDownloadListener(newPage);
                     PageSession removed = map.remove(newPage);
                     // 释放本页 CDP 会话（拾取任务已统一在引擎线程）：页面关掉后若不 close，其 PageSession（含 CDPSession / 抽取器）
                     // 会悬空泄漏；放到 engine，避免在 onClose 派发线程上同步 shutdown/awaitTermination 阻塞派发。
@@ -852,6 +916,7 @@ public final class CodegenLauncher {
                 });
                 // 原生对话框自动关闭：覆盖本新页（P0 缺口修复，详见 installDialogAutoDismiss）。
                 installDialogAutoDismiss(newPage);
+                installDownloadListener(newPage);
                 final Page np = newPage;
                 // —— 补丁 A：opener 判定（对齐官方 popup vs openPage 语义）——
                 // opener 非 null 且未关闭 ⇒ 业务弹窗（window.open / target=_blank 等），应跟随并开启拾取；
@@ -987,6 +1052,10 @@ public final class CodegenLauncher {
                     removeDialogAutoDismiss(p);
                 }
                 dialogHandlers.clear();
+                for (Page p : downloadHandlers.keySet()) {
+                    removeDownloadListener(p);
+                }
+                downloadHandlers.clear();
                 for (PageSession ps : map.values()) {
                     ps.close();
                 }
@@ -1032,7 +1101,7 @@ public final class CodegenLauncher {
                         "value", "fill".equals(type) ? value : ""));
             }
             if (firstSeen) {
-                requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
+                requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, downloadOps, pageActions, nlsFiles, lang, sessions.stopped);
             }
         };
 
@@ -1069,7 +1138,7 @@ public final class CodegenLauncher {
             // 与 page.pause 语义一致——显示 / 落库 / 回放三者同源，不再拖到生成期才发现多命中。
             verifyRoleAtPickTime(panelRef[0], pk);
             // 实时增量生成：每次拾取后立即刷新 Page/Step/Assert，无需等到按 Stop 才看到代码。
-            requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
+            requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, downloadOps, pageActions, nlsFiles, lang, sessions.stopped);
             log.debug("[codegen][cdp] picked #{} name='{}' role='{}' selector='{}'",
                     pk.id, pk.entry.name, pk.entry.role, pk.entry.selector);
             return pk;
@@ -1172,7 +1241,7 @@ public final class CodegenLauncher {
                 }
                 case "group":
                     handleGroup(picked, cmd, panelRef[0]);
-                    requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, nlsFiles, lang, sessions.stopped);
+                    requestLiveRegeneration(regenExecutor, panelRef, picked, recorder, dialogOps, downloadOps, pageActions, nlsFiles, lang, sessions.stopped);
                     break;
                 case "stop": {
                     sessions.pickOn.set(false);
@@ -1192,7 +1261,7 @@ public final class CodegenLauncher {
                     broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
                     if (panelRef[0] != null) {
                         // 定稿必须准确：skipVerify=false ⇒ 内部先 verifyPendingRoles 再生成（此处不再重复复核）。
-                        generateMultiPage(panelRef[0], picked, recorder, dialogOps, nlsFiles, sessions.stopped, /*skipVerify=*/false);
+                        generateMultiPage(panelRef[0], picked, recorder, dialogOps, downloadOps, pageActions, nlsFiles, sessions.stopped, /*skipVerify=*/false);
                         panelRef[0].setStatus("stopped");
                     }
                     log.info("[codegen] generated multi-page artifacts ({} picked, {} recorded actions, {} pages)",
@@ -1209,7 +1278,7 @@ public final class CodegenLauncher {
                         sessions.stopped.set(true);
                         broadcastPickStatus(sessions.map, sessions.active.get(), sessions.pickOn.get(), sessions.started.get(), sessions.stopped.get());
                         if (panelRef[0] != null) {
-                            generateMultiPage(panelRef[0], picked, recorder, dialogOps, nlsFiles, sessions.stopped, /*skipVerify=*/false);
+                            generateMultiPage(panelRef[0], picked, recorder, dialogOps, downloadOps, pageActions, nlsFiles, sessions.stopped, /*skipVerify=*/false);
                             panelRef[0].setStatus("ended");
                         }
                         log.info("[codegen] finalized on endSession ({} picked, {} recorded actions)",
@@ -1283,6 +1352,16 @@ public final class CodegenLauncher {
             // 只登记请求，CDP 解析交给共享引擎（见 submitHoverPreview），绝不阻塞消息派发线程。
             if ("hover".equals(String.valueOf(payload.get("type")))) {
                 if (sessions.pickOn.get() && ps != null) ps.submitHoverPreview(payload);
+                return null;
+            }
+            // C03/C04/C05 页面级动作（scroll / reload / drag）：不进拾取路径，单独收集成 PageActionOp。
+            String pageActionType = String.valueOf(payload.get("type"));
+            if ("scroll".equals(pageActionType) || "reload".equals(pageActionType)
+                    || "drag".equals(pageActionType)) {
+                if (sessions.pickOn.get() && src != null) {
+                    pageActions.add(new PageActionOp(src, pageActionType, new LinkedHashMap<>(payload),
+                            EVENT_SEQ.incrementAndGet(), currentSession(sessionSeq)));
+                }
                 return null;
             }
             Object infoObj = payload.get("info");
@@ -1442,6 +1521,7 @@ public final class CodegenLauncher {
         // 不处理对话框信号（V2 二期再对齐 page.pause 生成 waitForDialog/accept 片段）—— V1 仅需「不冻结」即可。
         for (Page p : ctx.pages()) {
             sessions.installDialogAutoDismiss(p);
+            sessions.installDownloadListener(p);
         }
 
         // ---- 事件泵：驱动 Playwright 的消息派发（独立 daemon 线程，与引擎拾取/生成线程分离）----
@@ -1823,6 +1903,22 @@ public final class CodegenLauncher {
      * 从事件载荷取多选 select 的全部选中值（P1-13）；缺失 / 非数组 / 含非字符串项一律返回 null
      * （生成侧据此退回单值 + TODO，不猜值）。
      */
+    static String nestedString(Map<String, Object> m, String key, String nestedKey) {
+        if (m == null) return null;
+        Object v = m.get(key);
+        if (!(v instanceof Map<?, ?> inner)) return null;
+        Object s = inner.get(nestedKey);
+        return s instanceof String ? (String) s : null;
+    }
+
+    static int intOf(Object raw, int fallback) {
+        if (raw instanceof Number n) return n.intValue();
+        if (raw instanceof String s) {
+            try { return Integer.parseInt(s.trim()); } catch (NumberFormatException ignore) { }
+        }
+        return fallback;
+    }
+
     static List<String> stringListOf(Object raw) {
         if (!(raw instanceof List<?> items) || items.isEmpty()) return null;
         List<String> out = new ArrayList<>(items.size());
@@ -2172,8 +2268,9 @@ public final class CodegenLauncher {
 
     private static void requestLiveRegeneration(ExecutorService regenExecutor, CodegenPanelHandle[] panelRef,
                                                 List<Pick> picks, CodegenRecorder recorder,
-                                                List<DialogOp> dialogOps, String[] nlsFiles,
-                                                String nlsLang, AtomicBoolean stopped) {
+                                                List<DialogOp> dialogOps, List<DownloadOp> downloadOps,
+                                                List<PageActionOp> pageActions,
+                                                String[] nlsFiles, String nlsLang, AtomicBoolean stopped) {
         if (regenExecutor == null || stopped.get()) {
             return;
         }
@@ -2193,7 +2290,7 @@ public final class CodegenLauncher {
                     long started = renderedSeq;
                     // 首推：跳过全量复核（verify 是 CDP 往返、首推瓶颈），先把代码推上面板（快，目标 <500ms）。
                     long tFirst = System.nanoTime();
-                    generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
+                    generateMultiPage(panelRef[0], picks, recorder, dialogOps, downloadOps, pageActions, nlsFiles, stopped, /*skipVerify=*/true);
                     long firstMs = (System.nanoTime() - tFirst) / 1_000_000;
                     if (firstMs > 500) {
                         log.warn("[codegen][regen] first push (skipVerify) took {} ms (>500ms) - "
@@ -2204,7 +2301,7 @@ public final class CodegenLauncher {
                     // 生成期间若又有新拾取（序号变化），合并覆盖最新（仍走快首推）。
                     if (REGEN_SEQ.get() != started) {
                         long tMerge = System.nanoTime();
-                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/true);
+                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, downloadOps, pageActions, nlsFiles, stopped, /*skipVerify=*/true);
                         log.debug("[codegen][regen] merged re-push took {} ms", (System.nanoTime() - tMerge) / 1_000_000);
                     }
                     // 【必须在合并之后重新求 pending】首推之前算出的 anyPending 是过期快照：
@@ -2215,7 +2312,7 @@ public final class CodegenLauncher {
                     // 落在首推路径之外，用户先把代码看到、再被修订覆盖）。Stop 定稿走 skipVerify=false 已含复核。
                     if (anyPending && !stopped.get()) {
                         long tBack = System.nanoTime();
-                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, nlsFiles, stopped, /*skipVerify=*/false);
+                        generateMultiPage(panelRef[0], picks, recorder, dialogOps, downloadOps, pageActions, nlsFiles, stopped, /*skipVerify=*/false);
                         // 后台 verify+repush 并入明细桶：高频时不再逐条 INFO（汇总条里已含耗时），
                         // 慢轮在 generateMultiPage 内以 (slow) INFO 单独呈现。
                         regenLogBucket((int) ((System.nanoTime() - tBack) / 1_000_000));
@@ -2231,7 +2328,7 @@ public final class CodegenLauncher {
                     // 这里按序号差补投一轮；补投任务自身看不到新的序号变化 ⇒ 收敛，不会自旋。
                     if (!stopped.get() && regenerationStale(renderedSeq, REGEN_SEQ.get())) {
                         requestLiveRegeneration(regenExecutor, panelRef, picks, recorder,
-                                dialogOps, nlsFiles, nlsLang, stopped);
+                                dialogOps, downloadOps, pageActions, nlsFiles, nlsLang, stopped);
                     }
                 }
             });
@@ -2283,8 +2380,9 @@ public final class CodegenLauncher {
      *                   （{@code skipVerify=false}）复核并修订。{@code false} 用于 Stop 定稿（必须准确）。
      */
     private static void generateMultiPage(CodegenPanelHandle panel, List<Pick> picks, CodegenRecorder recorder,
-                                         List<DialogOp> dialogOps, String[] nlsFiles, AtomicBoolean stopped,
-                                         boolean skipVerify) {
+                                         List<DialogOp> dialogOps, List<DownloadOp> downloadOps,
+                                         List<PageActionOp> pageActions,
+                                         String[] nlsFiles, AtomicBoolean stopped, boolean skipVerify) {
         if (panel == null || stopped.get() || picks.isEmpty()) {
             return;
         }
@@ -2298,7 +2396,7 @@ public final class CodegenLauncher {
         MultiPageCodegen.MultiPageResult result;
         long tr = System.nanoTime();
         try {
-            result = assembleMultiPage(picks, recorder, dialogOps, nlsFiles);
+            result = assembleMultiPage(picks, recorder, dialogOps, downloadOps, pageActions, nlsFiles);
         } catch (Exception e) {
             log.warn("[codegen] live regeneration skipped (generation failed): {}", e.toString());
             return;
@@ -2333,8 +2431,23 @@ public final class CodegenLauncher {
      * {@code from.waitForNewPage(() -> from.trigger.action)} —— 触发元素不会在来源页被重复点击。
      */
     /** 装配会话产物。package-private 供端到端 golden 测试直接驱动（不改变行为）。 */
+    /** 4 参重载（测试/无下载/无页面动作场景）：downloadOps、pageActions 为空。 */
     static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
                                                               List<DialogOp> dialogOps, String[] nlsFiles) {
+        return assembleMultiPage(picks, recorder, dialogOps, List.of(), List.of(), nlsFiles);
+    }
+
+    /** 5 参重载（测试/无页面动作场景）：pageActions 为空。 */
+    static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
+                                                              List<DialogOp> dialogOps,
+                                                              List<DownloadOp> downloadOps, String[] nlsFiles) {
+        return assembleMultiPage(picks, recorder, dialogOps, downloadOps, List.of(), nlsFiles);
+    }
+
+    static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
+                                                              List<DialogOp> dialogOps,
+                                                              List<DownloadOp> downloadOps,
+                                                              List<PageActionOp> pageActions, String[] nlsFiles) {
         // 0) 视图分流：字段视图（每元素一次，供 Page 类 / plan / 断言字段名）与动作视图
         //    （含「对已拾取元素的后续操作」，供 Step 动作时间线）。二者不能混用，否则
         //    「勾 → 取消」「同字段两次不同值提交」会因 sigKey 相同而被吞掉（P0-3）。
@@ -2396,7 +2509,20 @@ public final class CodegenLauncher {
         for (DialogOp d : dialogOps) {
             dialogsBySession.computeIfAbsent(currentSession(d.session), k -> new ArrayList<>()).add(d);
         }
-        List<Integer> sessionKeys = new ArrayList<>(picksBySession.keySet());
+        Map<Integer, List<DownloadOp>> downloadsBySession = new LinkedHashMap<>();
+        for (DownloadOp d : downloadOps) {
+            downloadsBySession.computeIfAbsent(currentSession(d.session), k -> new ArrayList<>()).add(d);
+        }
+        Map<Integer, List<PageActionOp>> pageActionsBySession = new LinkedHashMap<>();
+        for (PageActionOp a : pageActions) {
+            pageActionsBySession.computeIfAbsent(currentSession(a.session), k -> new ArrayList<>()).add(a);
+        }
+        // 会话键并集：页面级动作（scroll/reload/drag）可能没有对应元素 pick，也要生成步骤。
+        java.util.TreeSet<Integer> allSessionKeys = new java.util.TreeSet<>(picksBySession.keySet());
+        allSessionKeys.addAll(dialogsBySession.keySet());
+        allSessionKeys.addAll(downloadsBySession.keySet());
+        allSessionKeys.addAll(pageActionsBySession.keySet());
+        List<Integer> sessionKeys = new ArrayList<>(allSessionKeys);
         sessionKeys.sort(Comparator.naturalOrder());
 
         // 5) 每个会话 → 一个 SessionUnit；方法序号从 1 连续编号（空会话自然不出方法）
@@ -2404,8 +2530,11 @@ public final class CodegenLauncher {
         int stepNo = 0;
         for (Integer key : sessionKeys) {
             stepNo++;
-            sessions.add(buildSession(stepNo, picksBySession.get(key),
-                    dialogsBySession.getOrDefault(key, List.of()), targets, plans, fillValues));
+            sessions.add(buildSession(stepNo, picksBySession.getOrDefault(key, List.of()),
+                    dialogsBySession.getOrDefault(key, List.of()),
+                    downloadsBySession.getOrDefault(key, List.of()),
+                    pageActionsBySession.getOrDefault(key, List.of()),
+                    targets, plans, fillValues));
         }
 
         return MultiPageCodegen.build(pageUnits, sessions, nlsFiles);
@@ -2488,6 +2617,8 @@ public final class CodegenLauncher {
      * @param dialogs      本会话 dialog
      */
     private static MultiPageCodegen.SessionUnit buildSession(int index, List<Pick> sessionPicks, List<DialogOp> dialogs,
+                                                            List<DownloadOp> downloads,
+                                                            List<PageActionOp> pageActions,
                                                             Map<PageUrl, CodegenTarget> targets,
                                                             Map<PageUrl, CodegenFieldPlanner.Plan> plans,
                                                             Map<String, String> fillValues) {
@@ -2543,6 +2674,8 @@ public final class CodegenLauncher {
         List<SessionItem> items = new ArrayList<>();
         for (Pick p : timeline) items.add(new SessionItem(p.seq, p, null));
         for (DialogOp d : dialogs) items.add(new SessionItem(d.seq, null, d));
+        for (DownloadOp d : downloads) items.add(new SessionItem(d.seq, null, null, d));
+        for (PageActionOp a : pageActions) items.add(new SessionItem(a.seq, null, null, null, a));
         items.sort(Comparator.comparingLong(i -> i.seq));
 
         List<MultiPageCodegen.SessionAction> actions = new ArrayList<>();
@@ -2566,7 +2699,63 @@ public final class CodegenLauncher {
         MultiPageCodegen.SessionAction lastElementAction = null;
         Pick lastElementPick = null;
         int lastElementActionIndex = -1;
+        // C01：hover 去重——mouseover 会在点击前先报一次 hoverAction，若紧接着点同一元素，
+        // hover() 是冗余的（click 隐含 hover）。记录最近的 hover 下标/sigKey，点击时覆盖它。
+        String lastHoverSig = null;
+        int lastHoverActionIndex = -1;
         for (SessionItem item : items) {
+            if (item.pageAction != null) {
+                PageActionOp a = item.pageAction;
+                CodegenTarget t = pageToTarget.get(a.page);
+                if (t == null && !targets.isEmpty()) t = targets.values().iterator().next();
+                if (t != null) {
+                    if ("scroll".equals(a.type)) {
+                        int dx = intOf(a.data.get("dx"), 0);
+                        int dy = intOf(a.data.get("dy"), 0);
+                        actions.add(MultiPageCodegen.SessionAction.scroll(t, dx, dy));
+                    } else if ("reload".equals(a.type)) {
+                        actions.add(MultiPageCodegen.SessionAction.reload(t));
+                    } else if ("drag".equals(a.type)) {
+                        // C03：拖拽降级——注入侧上报了源/目标的选择器摘要，但两个端点未进入字段注册表
+                        // （那需要两次独立 CDP 拾取）。这里显式产出 TODO + 选择器提示，绝不静默丢事件。
+                        String srcSel = nestedString(a.data, "sourceInfo", "cssSelector");
+                        String dstSel = nestedString(a.data, "info", "cssSelector");
+                        actions.add(MultiPageCodegen.SessionAction.dragUnresolved(t,
+                                "drag from [" + (srcSel == null ? "?" : srcSel)
+                                        + "] to [" + (dstSel == null ? "?" : dstSel)
+                                        + "] - pick both endpoints as PageElements then use source.dragTo(target)"));
+                    }
+                }
+                continue;
+            }
+            if (item.download != null) {
+                // C02：下载事件绑定到最近的元素动作（通常是 Download 按钮的 click），
+                // 生成 waitForDownload(() -> field.action())。找不到触发时独立 + TODO。
+                boolean triggerAvailable = lastElementAction != null && lastElementPick != null
+                        && lastElementActionIndex >= 0 && lastElementActionIndex < actions.size()
+                        && lastElementAction.kind == MultiPageCodegen.ActionKind.ELEMENT
+                        && lastElementPick.page == item.download.page
+                        && item.download.seq > lastElementPick.seq;
+                CodegenTarget t = triggerAvailable
+                        ? targets.get(new PageUrl(lastElementPick.page, lastElementPick.url))
+                        : pageToTarget.get(item.download.page);
+                if (t != null) {
+                    MultiPageCodegen.SessionAction bound = triggerAvailable
+                            ? MultiPageCodegen.SessionAction.downloadWithTrigger(t,
+                                    lastElementAction.fieldName, lastElementAction.action,
+                                    item.download.suggestedFilename)
+                            : MultiPageCodegen.SessionAction.download(t, item.download.suggestedFilename);
+                    // 若目标位置已是 DOWNLOAD（同一触发产生多个下载），追加新行；否则就地替换触发动作。
+                    if (triggerAvailable
+                            && actions.get(lastElementActionIndex).kind != MultiPageCodegen.ActionKind.DOWNLOAD) {
+                        actions.set(lastElementActionIndex, bound);
+                        // 触发位置现在是 DOWNLOAD；后续 download/dialog 通过 kind 检查知道此处已被消费。
+                    } else {
+                        actions.add(bound);
+                    }
+                }
+                continue;
+            }
             if (item.dialog != null) {
                 // P1-07/08/09：触发动作不再只认 click（press:Enter / fill(select) 同样触发 dialog）；
                 // lastElement* 处理完第一个 dialog 不再清空，链式 confirm→alert 的每一段都能绑定触发；
@@ -2655,10 +2844,28 @@ public final class CodegenLauncher {
             }
             MultiPageCodegen.SessionAction elementAction =
                     MultiPageCodegen.SessionAction.element(t, spec.fieldName, action, todo);
-            actions.add(elementAction);
+            // C01：hover 紧跟同元素 click ⇒ 用 click 覆盖 hover，避免产物多一行冗余 hover()。
+            boolean clickAfterHover = "click".equals(p.actionType)
+                    && lastHoverSig != null && lastHoverSig.equals(p.entry.sigKey)
+                    && lastHoverActionIndex >= 0 && lastHoverActionIndex == actions.size() - 1;
+            if (clickAfterHover) {
+                actions.set(lastHoverActionIndex, elementAction);
+                lastElementActionIndex = lastHoverActionIndex;
+            } else {
+                actions.add(elementAction);
+                lastElementActionIndex = actions.size() - 1;
+            }
+            // 记录 hover 状态；非 hover 动作若不是「被覆盖的 click」则清掉 hover 上下文
+            boolean isHover = "hoverAction".equals(p.actionType);
+            if (isHover) {
+                lastHoverSig = p.entry.sigKey;
+                lastHoverActionIndex = lastElementActionIndex;
+            } else if (!clickAfterHover) {
+                lastHoverSig = null;
+                lastHoverActionIndex = -1;
+            }
             lastElementAction = elementAction;
             lastElementPick = p;
-            lastElementActionIndex = actions.size() - 1;
         }
 
         // 断言（P0-2）：期望值取【本会话内】该字段的末态，而不是 plan.fields 里被全局末态覆盖过的 entry。
@@ -2700,11 +2907,23 @@ public final class CodegenLauncher {
         final long seq;
         final Pick pick;
         final DialogOp dialog;
+        final DownloadOp download;
+        final PageActionOp pageAction;
 
         SessionItem(long seq, Pick pick, DialogOp dialog) {
+            this(seq, pick, dialog, null, null);
+        }
+
+        SessionItem(long seq, Pick pick, DialogOp dialog, DownloadOp download) {
+            this(seq, pick, dialog, download, null);
+        }
+
+        SessionItem(long seq, Pick pick, DialogOp dialog, DownloadOp download, PageActionOp pageAction) {
             this.seq = seq;
             this.pick = pick;
             this.dialog = dialog;
+            this.download = download;
+            this.pageAction = pageAction;
         }
     }
 
@@ -2947,6 +3166,10 @@ public final class CodegenLauncher {
         }
         if ("dblclick".equals(p.actionType)) {
             return target + "doubleClick()";
+        }
+        // C01：hover 菜单——mouseover 换元素时录制的动作，生成 hover()（触发二级菜单展开）。
+        if ("hoverAction".equals(p.actionType)) {
+            return target + "hover()";
         }
         // 文件选择：fakepath 不可回放，产物给可编译的 uploadFile 占位 + TODO，由人工填资源路径。
         if ("file".equals(p.actionType)) {

@@ -501,6 +501,14 @@ public abstract class BasePage {
         return PageNavigation.getTitle(this);
     }
 
+    /**
+     * 滚动页面（C04 codegen 产物用）。直接走 Playwright mouse.wheel，不经 recorder——
+     * 回放产物里的滚动不应再被录制一遍。
+     */
+    public void scrollBy(int deltaX, int deltaY) {
+        page.mouse().wheel(deltaX, deltaY);
+    }
+
     public void refresh() {
         recorder.refresh(this);
     }

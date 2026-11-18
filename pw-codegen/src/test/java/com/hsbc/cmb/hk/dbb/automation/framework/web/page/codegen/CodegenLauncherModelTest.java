@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -121,6 +122,54 @@ public class CodegenLauncherModelTest {
 
         assertEquals("无录制值的 fill 只能是空串占位 + TODO，不得回填历史值",
                 "fill(\"\")", CodegenLauncher.actionForPick(spec, pick(user, "fill")));
+    }
+
+    /** C01：hover 菜单——mouseover 换元素录制的动作生成 hover()。 */
+    @Test
+    public void hoverActionGeneratesHover() {
+        CodegenEntry menu = new CodegenEntry("button|Menu#0", "button", "Menu", "ROLE", 100,
+                "role=button[name=\"Menu\"]", "#menu", null, 0, List.of(), List.of(), 1, "button", false);
+        CodegenFieldSpec spec = new CodegenFieldSpec("menuBtn", "PageElement", "", null,
+                "click", "click()", "isVisible()", false, true, menu, null);
+        assertEquals("hover()", CodegenLauncher.actionForPick(spec, pick(menu, "hoverAction")));
+    }
+
+    /**
+     * C01 生成期去重：hover 后点【同一元素】⇒ 只留 click()（click 隐含 hover，避免冗余行）；
+     * hover 后点【不同元素】⇒ 两条都保留（菜单项与触发按钮是不同元素）。
+     */
+    @Test
+    public void hoverFollowedByClickOnSameElementIsDeduplicated() {
+        String url = "https://example.test/portalserver/home";
+        CodegenEntry menu = new CodegenEntry("button|Menu#0", "button", "Menu", "ROLE", 100,
+                "role=button[name=\"Menu\"]", "#menu", null, 0, List.of(), List.of(), 1, "button", false);
+        CodegenEntry item = new CodegenEntry("button|Item#0", "button", "Item", "ROLE", 100,
+                "role=button[name=\"Item\"]", "#item", null, 1, List.of(), List.of(), 1, "button", false);
+        // hover Menu → click Menu（同元素，应去重为一条 click）
+        MultiPageCodegen.MultiPageResult same = CodegenLauncher.assembleMultiPage(
+                List.of(
+                        new CodegenLauncher.Pick(1L, 1L, 1, menu, null, url, null, false, false, "hoverAction"),
+                        new CodegenLauncher.Pick(2L, 2L, 1, menu, null, url, null, false, true, "click")),
+                new CodegenRecorder(), List.of(), null);
+        assertEquals("同元素 hover+click 只留一条 click:\n" + same.stepCode, 1,
+                countOccurrences(same.stepCode, "menuBtn.click()"));
+        assertEquals("hover() 应被去重:\n" + same.stepCode, 0, countOccurrences(same.stepCode, "menuBtn.hover()"));
+
+        // hover Menu → click Item（不同元素，两条都在）
+        MultiPageCodegen.MultiPageResult diff = CodegenLauncher.assembleMultiPage(
+                List.of(
+                        new CodegenLauncher.Pick(1L, 1L, 1, menu, null, url, null, false, false, "hoverAction"),
+                        new CodegenLauncher.Pick(2L, 2L, 1, item, null, url, null, false, false, "click")),
+                new CodegenRecorder(), List.of(), null);
+        assertTrue("不同元素 hover 应保留:\n" + diff.stepCode, diff.stepCode.contains("menuBtn.hover()"));
+        assertTrue("不同元素 click 应保留:\n" + diff.stepCode, diff.stepCode.contains("itemBtn.click()"));
+    }
+
+    private static int countOccurrences(String s, String sub) {
+        if (s == null || sub == null || sub.isEmpty()) return 0;
+        int count = 0, idx = 0;
+        while ((idx = s.indexOf(sub, idx)) >= 0) { count++; idx += sub.length(); }
+        return count;
     }
 
     /** P1-16：方向键 / 数字键 / 功能键 / 斜杠都是 Playwright 合法键名，白名单不得丢弃。 */
@@ -477,6 +526,101 @@ public class CodegenLauncherModelTest {
                 assert1Body.contains("isChecked(), is(true)"));
         assertTrue("会话2 取消 ⇒ assert2 期望 is(false):\n" + assert2Body,
                 assert2Body.contains("isChecked(), is(false)"));
+    }
+
+    // ------------------------------------------------------------------
+    // C02 文件下载：download 事件绑定到触发元素，生成 waitForDownload(() -> trigger)
+    // ------------------------------------------------------------------
+
+    @Test
+    public void downloadBindsToTriggerAndEmitsWaitForDownload() {
+        String url = "https://example.test/portalserver/report";
+        CodegenEntry btn = new CodegenEntry("button|Download#0", "button", "Download", "ROLE", 100,
+                "role=button[name=\"Download\"]", "#dl", null, 0,
+                List.of(), List.of(), 1, "button", false);
+        List<CodegenLauncher.Pick> picks = List.of(
+                new CodegenLauncher.Pick(1L, 1L, 1, btn, null, url, null, false, false, "click"));
+        List<CodegenLauncher.DownloadOp> downloads = List.of(
+                new CodegenLauncher.DownloadOp(null, "report.pdf", 2L, 1));
+
+        MultiPageCodegen.MultiPageResult result = CodegenLauncher.assembleMultiPage(
+                picks, new CodegenRecorder(), List.of(), downloads, null);
+        String step = result.stepCode;
+
+        assertTrue("应生成 waitForDownload 包裹触发点击:\n" + step,
+                step.contains("waitForDownload(() -> reportPage.downloadBtn.click())"));
+        assertTrue("应带建议文件名:\n" + step, step.contains("downloaded: report.pdf"));
+        assertTrue("应 import Download:\n" + step,
+                step.contains("import com.microsoft.playwright.Download;"));
+        assertFalse("不应残留裸 click（已被 waitForDownload 包裹）:\n" + step,
+                step.contains("        reportPage.downloadBtn.click();"));
+    }
+
+    // ------------------------------------------------------------------
+    // C03/C04/C05 页面级动作：scroll / reload / drag
+    // ------------------------------------------------------------------
+
+    @Test
+    public void scrollActionEmitsScrollByWithWaitTodo() {
+        String url = "https://example.test/portalserver/home";
+        CodegenEntry btn = new CodegenEntry("button|Go#0", "button", "Go", "ROLE", 100,
+                "role=button[name=\"Go\"]", "#go", null, 0,
+                List.of(), List.of(), 1, "button", false);
+        List<CodegenLauncher.Pick> picks = List.of(
+                new CodegenLauncher.Pick(1L, 1L, 1, btn, null, url, null, false, false, "click"));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("dx", 0);
+        data.put("dy", 640);
+        List<CodegenLauncher.PageActionOp> actions = List.of(
+                new CodegenLauncher.PageActionOp(null, "scroll", data, 2L, 1));
+
+        MultiPageCodegen.MultiPageResult result = CodegenLauncher.assembleMultiPage(
+                picks, new CodegenRecorder(), List.of(), List.of(), actions, null);
+        assertTrue("应生成 scrollBy(0, 640):\n" + result.stepCode,
+                result.stepCode.contains("homePage.scrollBy(0, 640);"));
+        assertTrue("滚动后应有等待提示:\n" + result.stepCode,
+                result.stepCode.contains("wait for lazy-loaded content to settle"));
+    }
+
+    @Test
+    public void reloadActionEmitsRefresh() {
+        String url = "https://example.test/portalserver/home";
+        CodegenEntry btn = new CodegenEntry("button|Go#0", "button", "Go", "ROLE", 100,
+                "role=button[name=\"Go\"]", "#go", null, 0,
+                List.of(), List.of(), 1, "button", false);
+        List<CodegenLauncher.Pick> picks = List.of(
+                new CodegenLauncher.Pick(1L, 1L, 1, btn, null, url, null, false, false, "click"));
+        List<CodegenLauncher.PageActionOp> actions = List.of(
+                new CodegenLauncher.PageActionOp(null, "reload", Map.of(), 2L, 1));
+
+        MultiPageCodegen.MultiPageResult result = CodegenLauncher.assembleMultiPage(
+                picks, new CodegenRecorder(), List.of(), List.of(), actions, null);
+        assertTrue("应生成 refresh():\n" + result.stepCode, result.stepCode.contains("homePage.refresh();"));
+    }
+
+    /** C03 降级：drag 端点未进字段表时输出 TODO 注释（带选择器摘要），不生成非法源码。 */
+    @Test
+    public void dragActionEmitsTodoWithSelectors() {
+        String url = "https://example.test/portalserver/home";
+        CodegenEntry btn = new CodegenEntry("button|Go#0", "button", "Go", "ROLE", 100,
+                "role=button[name=\"Go\"]", "#go", null, 0,
+                List.of(), List.of(), 1, "button", false);
+        List<CodegenLauncher.Pick> picks = List.of(
+                new CodegenLauncher.Pick(1L, 1L, 1, btn, null, url, null, false, false, "click"));
+        Map<String, Object> src = Map.of("cssSelector", "#draggable");
+        Map<String, Object> dst = Map.of("cssSelector", "#dropzone");
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sourceInfo", src);
+        data.put("info", dst);
+        List<CodegenLauncher.PageActionOp> actions = List.of(
+                new CodegenLauncher.PageActionOp(null, "drag", data, 2L, 1));
+
+        MultiPageCodegen.MultiPageResult result = CodegenLauncher.assembleMultiPage(
+                picks, new CodegenRecorder(), List.of(), List.of(), actions, null);
+        assertTrue("TODO 应带源/目标选择器:\n" + result.stepCode,
+                result.stepCode.contains("drag from [#draggable] to [#dropzone]"));
+        assertFalse("降级不得生成非法 dragTo 占位:\n" + result.stepCode,
+                result.stepCode.contains("dragSource.dragTo"));
     }
 
     // ------------------------------------------------------------------

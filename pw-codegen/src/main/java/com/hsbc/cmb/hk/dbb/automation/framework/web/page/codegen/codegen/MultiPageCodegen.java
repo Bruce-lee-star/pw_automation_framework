@@ -83,6 +83,14 @@ public final class MultiPageCodegen {
         FRAME_SWITCH,
         /** 处理浏览器 dialog（{@code page.acceptAlert()/dismissAlert()}）。 */
         DIALOG,
+        /** 文件下载（C02）：{@code page.waitForDownload(() -> page.field.action())}。 */
+        DOWNLOAD,
+        /** 页面滚动（C04）：{@code page.scrollBy(dx, dy)} + 等待提示。 */
+        SCROLL,
+        /** 页面刷新（C05）：{@code page.refresh()}。 */
+        RELOAD,
+        /** 拖拽（C03）：{@code source.dragTo(target)}。 */
+        DRAG,
         /** 跨页切换：{@code from.waitForNewPage(() -> from.trigger.action)}。 */
         PAGE_SWITCH,
         /** 同标签页导航提示：不切页、不等待，仅注释「已导航到 X 页」（如需要可加 waitForLoadState）。 */
@@ -148,6 +156,48 @@ public final class MultiPageCodegen {
                                                       String triggerField, String triggerAction) {
             return new SessionAction(ActionKind.DIALOG, target, triggerField, triggerAction,
                     null, null, null, accept, null, null);
+        }
+
+        /**
+         * 文件下载包裹其触发动作（C02）：{@code page.waitForDownload(() -> page.field.action())}。
+         * 与 dialog 同理——监听必须先武装再触发，否则下载事件在 handler 挂上前就溜走。
+         */
+        public static SessionAction downloadWithTrigger(CodegenTarget target,
+                                                        String triggerField, String triggerAction,
+                                                        String suggestedFilename) {
+            return new SessionAction(ActionKind.DOWNLOAD, target, triggerField, triggerAction,
+                    null, null, null, false, null, suggestedFilename);
+        }
+
+        /** 找不到触发动作的下载（定时器 / 异步）：独立 waitForDownload() + TODO。 */
+        public static SessionAction download(CodegenTarget target, String suggestedFilename) {
+            return new SessionAction(ActionKind.DOWNLOAD, target, null, null,
+                    null, null, null, false, null, suggestedFilename);
+        }
+
+        /** 页面滚动（C04）：action="dx,dy"，note=等待提示。 */
+        public static SessionAction scroll(CodegenTarget target, int dx, int dy) {
+            return new SessionAction(ActionKind.SCROLL, target, null, dx + "," + dy,
+                    null, null, null, false, null, null);
+        }
+
+        /** 页面刷新（C05）。 */
+        public static SessionAction reload(CodegenTarget target) {
+            return new SessionAction(ActionKind.RELOAD, target, null, null,
+                    null, null, null, false, null, null);
+        }
+
+        /** 拖拽（C03）：sourceField→targetField（可跨页：sourceTarget/targetTarget）。 */
+        public static SessionAction drag(CodegenTarget sourceTarget, String sourceField,
+                                         CodegenTarget targetTarget, String targetField) {
+            return new SessionAction(ActionKind.DRAG, sourceTarget, sourceField, targetField,
+                    null, null, null, false, targetTarget, null);
+        }
+
+        /** 拖拽降级（C03）：端点未进入字段表，note 带选择器摘要，产物只输出 TODO 注释。 */
+        public static SessionAction dragUnresolved(CodegenTarget target, String note) {
+            return new SessionAction(ActionKind.DRAG, target, null, null,
+                    null, null, null, false, null, note);
         }
 
         public static SessionAction pageSwitch(CodegenTarget from, String triggerField, String triggerAction,

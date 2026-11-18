@@ -468,6 +468,48 @@
                             framePath: framePathOf(), url: eventUrlOf(), info: infoOf(el2) });
                     } catch (e) {}
                 }, true);
+
+                // C04 滚动：累计位移，静默 200ms 后上报一次（滚动期间高频触发，不能每条都录）。
+                // 记录累计 dx/dy，产物用 mouse.wheel(dx,dy) 一次回放到位。
+                var __scrollAcc = { x: 0, y: 0, timer: null };
+                window.addEventListener('scroll', function () {
+                    try {
+                        if (isCodegenUi(document.activeElement)) return;
+                        __scrollAcc.x += (window.scrollX - (__scrollAcc.lastX || window.scrollX));
+                        __scrollAcc.y += (window.scrollY - (__scrollAcc.lastY || window.scrollY));
+                        __scrollAcc.lastX = window.scrollX;
+                        __scrollAcc.lastY = window.scrollY;
+                        if (__scrollAcc.timer) clearTimeout(__scrollAcc.timer);
+                        __scrollAcc.timer = setTimeout(function () {
+                            if (__scrollAcc.x !== 0 || __scrollAcc.y !== 0) {
+                                window.__codegenEvent({ type: 'scroll',
+                                    dx: __scrollAcc.x, dy: __scrollAcc.y, url: eventUrlOf() });
+                                __scrollAcc.x = 0; __scrollAcc.y = 0;
+                            }
+                        }, 200);
+                    } catch (e) {}
+                }, true);
+
+                // C05 刷新 / 关闭：pagehide 在刷新和关闭时都触发，用于产物生成 refresh()。
+                window.addEventListener('pagehide', function () {
+                    try {
+                        window.__codegenEvent({ type: 'reload', url: eventUrlOf() });
+                    } catch (e) {}
+                }, true);
+
+                // C03 拖拽：dragstart 记源元素，drop 上报源+目标（关联成一条）。
+                var __dragSource = null;
+                window.addEventListener('dragstart', function (ev) {
+                    try { if (!isCodegenUi(ev.target)) __dragSource = infoOf(ev.target); } catch (e) {}
+                }, true);
+                window.addEventListener('drop', function (ev) {
+                    try {
+                        if (isCodegenUi(ev.target) || !__dragSource) { __dragSource = null; return; }
+                        window.__codegenEvent({ type: 'drag', sourceInfo: __dragSource,
+                            info: infoOf(ev.target), url: eventUrlOf(), framePath: framePathOf() });
+                    } catch (e) {}
+                    __dragSource = null;
+                }, true);
             }
         }
     };
@@ -593,6 +635,14 @@
         try {
             var sel = hoverSelectorOf(el);
             if (sel) window.__codegenEvent({ type: 'hover', selector: sel, framePath: framePathOf() });
+        } catch (e) { }
+        // C01 hover 录制：换元素（真实 hover）时上报带定位事实的 hoverAction，供产物生成 hover()。
+        // 与上面的轻量预览（type=hover）分开，避免 Java 把预览当动作。生成期会做「hover 紧跟同元素 click 则丢弃」去重。
+        try {
+            if (!isCodegenUi(el)) {
+                window.__codegenEvent({ type: 'hoverAction', tag: el.tagName,
+                    framePath: framePathOf(), url: eventUrlOf(), info: infoOf(el) });
+            }
         } catch (e) { }
     }
 
