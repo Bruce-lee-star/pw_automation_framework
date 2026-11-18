@@ -225,6 +225,9 @@
         if (/^headlessui-/.test(id)) return true;    // Headless UI
         if (/^react-select-/.test(id)) return true;  // react-select
         if (/^mui-\d+$/.test(id)) return true;       // MUI: mui-12345
+        // H6：已知框架前缀的序号哪怕只有 1 位也是动态（mat-input-0 / ant-input-1 / el-input_2）。
+        // 与 Java FRAMEWORK_GENERATED 白名单同源；通用规则仍要求 ≥4 位，避免误伤 step2 这类语义 id。
+        if (/^(el|ant|mat|mui|rc|downshift|ng-tns)[-_][a-z0-9_-]*\d/i.test(id)) return true;
         if (/^[a-z]+(-[a-z]+)*-\d{4,}$/.test(id)) return true; // 通用: 任意段前缀 + ≥4 位数字（antd 类）
         if (/\d{4,}-id$/.test(id)) return true;                // 通用: 段内随机数字 + 字面量 -id 后缀（如 modal-forgot_username_title46223-id）
         if (/^[a-z]+(-[a-z]+)*\d{4,}$/.test(id)) return true;  // 通用: 段前缀 + ≥4 位尾随数字（无连字符，如 listitem1234）
@@ -556,6 +559,32 @@ function attrValueSegments(v) {
  * 由这里的档位决定尝试顺序，最终唯一性由 Playwright 引擎裁决。换一个属性（{@code title}、
  * {@code aria-labelledby}、{@code data-state}、任意自定义属性）都不需要再改代码。
  */
+    /** 是否 URL/path 类属性（值可能带 ?query/#hash，需做语言中性化）。 */
+    function isUrlAttr(name) {
+        return name === 'href' || name === 'action' || name === 'formaction'
+            || name === 'data-url' || name === 'data-href' || name === 'data-link'
+            || name === 'poster' || name === 'cite' || name === 'srcset'
+            || name === 'background' || name === 'xlink:href' || name === 'data';
+    }
+    /**
+     * URL 属性值的「语言中性前缀」：返回 query/hash 之前的稳定 path；
+     * 若 path 为空（值本身只有 query）则返回空串表示不可用。非 URL 属性原样返回。
+     *
+     * <p>例：{@code /portalserver/tokenReplacement?lang=en_US} → {@code /portalserver/tokenReplacement}，
+     * 切到 zh-HK 后锚点前缀不变。整段 query 都剥掉（而非按个删参数）：query 里的参数名/顺序本身也随
+     * 服务端版本漂移，path 才是稳定身份。
+     */
+    function urlStablePrefix(name, value) {
+        if (!isUrlAttr(name)) return value;
+        var cut = value.length;
+        var q = value.indexOf('?');
+        var h = value.indexOf('#');
+        if (q >= 0) cut = Math.min(cut, q);
+        if (h >= 0) cut = Math.min(cut, h);
+        var path = value.slice(0, cut);
+        return path || '';
+    }
+
 function attrAnchorPriority(name) {
         if (name === 'data-testid') return 0;
         if (name === 'data-i18n') return 1;
@@ -572,7 +601,8 @@ function attrAnchorPriority(name) {
     function segAttrName(seg) {
         if (!seg) return '';
         if (seg.charAt(0) === '#') return 'id';
-        var m = /\[\s*([A-Za-z_:][A-Za-z0-9_:.\-]*)\s*=/.exec(seg);
+        // 兼容 = / ^= / $= / *=：URL 属性剥 query 后用 ^= 前缀匹配，属性名仍要能识别（去重/优先级用）。
+        var m = /\[\s*([A-Za-z_:][A-Za-z0-9_:.\-]*)\s*(?:\^|\$|\*)?=/.exec(seg);
         return m ? m[1].toLowerCase() : '';
     }
 
@@ -595,10 +625,18 @@ function stableAttrs(e, withState) {
         for (var i = 0; i < attrs.length; i++) {
             var a = attrs[i];
             var n = a.name;
-            if (n === 'id' || n === 'class' || n === 'src') continue;
+            // H2：value（输入框当前值/余额）、title/placeholder/aria-label 等文案属性随语言与用户输入漂移，
+            // 绝不进锚点池（多语言下 [title="…"] 会胜出）。id/class/src 走各自专档，value 直接排除。
+            if (n === 'id' || n === 'class' || n === 'src' || n === 'value') continue;
             var state = isStateAttr(n);
             var v = (a.value == null) ? '' : String(a.value);
             v = v.trim();
+            // URL 类属性：整段 query/hash 随语言/会话/租户漂移，剥掉后只用稳定 path 做 ^= 前缀匹配。
+            // 例：href="/portalserver/tokenReplacement?lang=en_US" → path="/portalserver/tokenReplacement"，
+            // 切到 zh-HK 后前缀不变（属性候选仍是原始整值，供需要精确匹配的场景使用）。
+            var urlPrefix = isUrlAttr(n) ? urlStablePrefix(n, v) : '';
+            var usePrefix = !!(urlPrefix && urlPrefix !== v);
+            if (usePrefix) v = urlPrefix;   // 锚点池用中性 path，配 ^= 前缀匹配
             // 非空 style 不猜：`display:block` / `; display: none` 之类随组件版本漂移。
             // 空值（`style=""`）作为「存在性锚点」保留，见下。
             if (n === 'style' && v) continue;
@@ -618,7 +656,8 @@ function stableAttrs(e, withState) {
             out.push({
                 name: n, value: v, rand: rand.test(v) ? 1 : 0,
                 pri: withState ? attrAnchorPriority(n) : 0,
-                state: state ? 1 : 0
+                state: state ? 1 : 0,
+                prefix: usePrefix ? 1 : 0   // URL 属性已剥 query ⇒ 生成 ^= 前缀匹配
             });
         }
         out.sort(function (x, y) { return (x.pri - y.pri) || (x.rand - y.rand); });
@@ -640,7 +679,8 @@ function stableAttrs(e, withState) {
         var attrs = stableAttrs(n, !!withState);
         for (var i = 0; i < attrs.length; i++) {
             if (attrs[i].rand) continue;
-            var seg = '[' + attrs[i].name + '="' + attrEsc(attrs[i].value) + '"]';
+            var op = attrs[i].prefix ? '^=' : '=';
+            var seg = '[' + attrs[i].name + op + '"' + attrEsc(attrs[i].value) + '"]';
             if (isStateAnchorSeg(seg)) {
                 if (withState) states.push({ seg: seg, state: 1 });
                 continue;

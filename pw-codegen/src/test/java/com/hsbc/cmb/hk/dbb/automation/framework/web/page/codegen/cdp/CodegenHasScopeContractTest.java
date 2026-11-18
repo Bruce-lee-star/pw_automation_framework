@@ -366,4 +366,19 @@ public class CodegenHasScopeContractTest {
                 eventUrlCount >= 6);
     }
 
+    /**
+     * URL 类属性锚点必须<b>语言中性</b>：{@code href='/x?lang=en_US'} 不得把 en_US 硬编码进定位器，
+     * 否则切到 zh-HK 后定位器失效（与图片 src 的语言尾标归一化同类问题）。
+     */
+    @Test
+    public void urlAttributeAnchorsStripLanguageQuery() throws Exception {
+        String locator = LocatorCoreScript.inject();
+        assertTrue("必须识别 URL 类属性", locator.contains("function isUrlAttr("));
+        assertTrue("必须有 URL 稳定前缀函数", locator.contains("function urlStablePrefix("));
+        assertTrue("URL 锚点必须走前缀剥离", locator.contains("isUrlAttr(n) ? urlStablePrefix(n, v)"));
+        assertTrue("剥离后必须生成 ^= 前缀匹配（而非精确匹配整值）",
+                locator.contains("attrs[i].prefix ? '^=' : '='"));
+        assertTrue("属性名识别必须兼容 ^=/$/ *=", locator.contains("(?:\\^|\\$|\\*)?="));
+    }
+
 }

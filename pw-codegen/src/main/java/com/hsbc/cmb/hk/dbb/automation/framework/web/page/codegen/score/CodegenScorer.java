@@ -163,6 +163,20 @@ public final class CodegenScorer {
             "aria-busy", "aria-multiselectable", "aria-grabbed", "aria-dropeffect",
             "aria-orientation", "aria-haspopup", "aria-live", "aria-atomic", "aria-relevant",
             "aria-sort", "aria-valuemax", "aria-valuemin", "aria-valuenow");
+
+    /**
+     * H3：值随语言/用户输入漂移的文案型属性。多语言环境（{@code textAttributesAllowed=false}）下
+     * 必须从通用属性候选里剔除，否则 {@code aria-label="3 items"} / {@code data-i18n-values} 会生成
+     * 精确匹配、切语言即失效。
+     *
+     * <p><b>不含 {@code data-i18n}</b>：它的值是 i18n key（如 {@code reset_password_10}），跨语言不变，
+     * 恰恰是最可靠的语言无关锚点，必须保留。
+     */
+    public static final Set<String> TEXT_LIKE_ATTRS = Set.of(
+            "aria-label", "aria-labelledby", "aria-describedby", "aria-details",
+            "data-i18n-values", "data-i18n-attrs", "data-tooltip", "data-title",
+            "title", "alt", "placeholder", "value");
+
     public static final int ROLE_NO_NAME = 510;
     /** 表单 {@code name} 属性：与语言无关，稳定但可能重名 ⇒ 排在 id 之后、结构之前。 */
     public static final int CSS_NAME = 515;
@@ -325,8 +339,12 @@ public final class CodegenScorer {
      * {@code Search_HSBC_HK_Business_Express_EN} 只把尾部 {@code _EN} 视为语言码，
      * 中间的 {@code _HK} 是业务名的一部分，不能被剥掉。
      */
+    // 与 locator-core.js 的 SRC_TRAILING_LOCALE 同源：覆盖 30+ 语言码与完整地区码表。
+    // 旧版只认 en/zh 系，img_username_JA.png / banner_fr-FR.png 会退化成含语言码的精确尾部匹配，
+    // 切语言即失效（JS 侧已归一化，Java 侧却漏判——两侧漂移）。新增语言只改这两处。
     private static final Pattern SRC_TRAILING_LOCALE = Pattern.compile(
-            "(?i)^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw)(?:[._-](?:us|gb|hk|cn|tw|hans|hant))?$");
+            "(?i)^(.{4,}?)[._-](?:en|zh|tc|sc|hk|cn|tw|ja|jp|ko|kr|fr|de|es|pt|it|nl|ru|ar|th|vi|id|ms|hi|tr|pl|sv|da|fi|no|cs|el|he|hu|ro|sk|uk)"
+                    + "(?:[._-](?:us|gb|uk|hk|cn|tw|sg|au|ca|in|jp|kr|de|fr|es|pt|br|mx|it|nl|ru|ae|sa|th|vn|id|my|tr|pl|hans|hant))?$");
 
     /** 文件扩展名（{@code .png} / {@code .svg} / {@code .jpg} …）。 */
     private static final Pattern FILE_EXT = Pattern.compile("\\.[A-Za-z0-9]{1,5}$");
@@ -700,6 +718,9 @@ public final class CodegenScorer {
             if (!ATTR_NAME.matcher(attr).matches()) continue;
             // 状态类 ARIA（aria-hidden/aria-modal…）单独从不唯一，只进组合，不生成独立候选
             if (ARIA_STATE_ONLY.contains(attr.toLowerCase())) continue;
+            // H3：多语言环境下剔除文案型属性（aria-label/data-i18n-values/title…）——它们的值随语言
+            // /用户输入漂移。data-i18n（i18n key）不在集合内，跨语言稳定，仍作首选锚点。
+            if (!textAttributesAllowed && TEXT_LIKE_ATTRS.contains(attr.toLowerCase())) continue;
             dataAttrs++;
             addAttribute(out, attr, e.getValue(), CSS_DATA_ATTR, CSS_DATA_ATTR_PARTIAL);
         }
@@ -780,7 +801,10 @@ public final class CodegenScorer {
 
         // 6) 结构 CSS（标签 + nth-of-type，必要时逐级拼祖先）
         //    位置型（含 :nth-of-type）降权到锚定 XPath 之后：锚点方案永远优先于"按序号猜元素"。
-        if (self.cssSelector != null && !self.cssSelector.isEmpty() && !isMalformedCssSelector(self.cssSelector)) {
+        if (self.cssSelector != null && !self.cssSelector.isEmpty() && !isMalformedCssSelector(self.cssSelector)
+                && (textAttributesAllowed || !containsTextAttribute(self.cssSelector))) {
+            // H3：多语言下 JS cssSel 可能已把 aria-label/title/placeholder 拼进选择器；
+            // Java 侧无法回传语言开关给 JS，只能在这里对含文案属性的候选做二次过滤。
             out.add(new Candidate(isPositionalCss(self.cssSelector) ? CSS_STRUCT_POSITIONAL : CSS_TAG,
                     self.cssSelector));
         }
@@ -1219,6 +1243,20 @@ public final class CodegenScorer {
     static boolean isMalformedCssSelector(String sel) {
         if (sel == null || sel.isEmpty()) return false;
         return MALFORMED_CSS.matcher(sel).find();
+    }
+
+    /** 选择器属性段（捕获属性名），用于文案属性过滤。 */
+    private static final Pattern CSS_ATTR_SEG = Pattern.compile(
+            "\\[\\s*([A-Za-z_:][A-Za-z0-9_:.-]*)\\s*(?:[\\^$*]?=)", Pattern.CASE_INSENSITIVE);
+
+    /** 选择器是否含文案型属性的<b>精确/部分匹配</b>段（多语言下需剔除，见 H3）。 */
+    static boolean containsTextAttribute(String sel) {
+        if (sel == null || sel.isEmpty()) return false;
+        Matcher m = CSS_ATTR_SEG.matcher(sel);
+        while (m.find()) {
+            if (TEXT_LIKE_ATTRS.contains(m.group(1).toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
     }
 
     /**

@@ -93,6 +93,8 @@ public final class CodegenCdpNodeExtractor {
                     if (/^headlessui-/.test(id)) return true;
                     if (/^react-select-/.test(id)) return true;
                     if (/^mui-\\d+$/.test(id)) return true;
+                    // H6：已知框架前缀的 1 位序号也是动态（mat-input-0 等）；与 locator-core.js 同源。
+                    if (/^(el|ant|mat|mui|rc|downshift|ng-tns)[-_][a-z0-9_-]*\\d/i.test(id)) return true;
                     if (/^[a-z]+(-[a-z]+)*-\\d{4,}$/.test(id)) return true;
                     if (/\\d{4,}-id$/.test(id)) return true;
                     if (/^[a-z]+(-[a-z]+)*\\d{4,}$/.test(id)) return true; // 通用: 段前缀 + ≥4 位尾随数字（无连字符）

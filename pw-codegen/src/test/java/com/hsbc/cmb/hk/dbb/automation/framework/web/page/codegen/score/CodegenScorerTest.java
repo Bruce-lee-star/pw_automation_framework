@@ -1086,6 +1086,13 @@ public class CodegenScorerTest {
                 CodegenScorer.localeNeutralSrcPrefix("Search_HSBC_HK_Business_Express_EN.png"));
         Assert.assertEquals("logo",
                 CodegenScorer.localeNeutralSrcPrefix("logo.en_US.svg"));
+        // H5：Java 语言码表与 JS 对齐——ja/fr/de 等非 en/zh 系此前漏判，切语言即定位失效。
+        Assert.assertEquals("img_username",
+                CodegenScorer.localeNeutralSrcPrefix("img_username_JA.png"));
+        Assert.assertEquals("banner",
+                CodegenScorer.localeNeutralSrcPrefix("banner_fr-FR.png"));
+        Assert.assertEquals("icon",
+                CodegenScorer.localeNeutralSrcPrefix("icon_de.svg"));
 
         Assert.assertNull("无语言段：保持精确匹配",
                 CodegenScorer.localeNeutralSrcPrefix("hsbc_badge.png"));

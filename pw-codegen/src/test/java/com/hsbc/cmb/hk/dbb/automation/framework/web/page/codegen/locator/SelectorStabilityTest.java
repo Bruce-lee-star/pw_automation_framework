@@ -137,4 +137,20 @@ public class SelectorStabilityTest {
                 SelectorStability.stablePrefix("mat-input-3"));
         assertEquals("首段随机 ⇒ 无前缀", "", SelectorStability.stablePrefix("a3f9c1d2-userName"));
     }
+
+    /** H1：段级的纯数字/高熵特征必须进入整串判定，与 JS RAND_RE 对齐。 */
+    @Test
+    public void volatileDigitAndEntropySegmentsAreDetected() {
+        assertTrue("7 位纯数字段（JS RAND_RE 早判随机，Java 此前漏判）",
+                SelectorStability.isVolatile("btn-1234567"));
+        assertTrue("段内高熵 base62", SelectorStability.isVolatile("user-abc123xyzxyz"));
+        assertTrue("日期形态", SelectorStability.isVolatile("2026-11-18"));
+        assertTrue("带时间日期", SelectorStability.isVolatile("2026-11-18T09:30:00"));
+        assertTrue("版本号", SelectorStability.isVolatile("1.2.3"));
+        assertTrue("带 v 版本号", SelectorStability.isVolatile("v2.0.0-beta"));
+        // 不能误伤合法语义 id（含短序号碎片与类名）
+        assertTrue("合法用户名仍稳定", SelectorStability.isStable("WP7UAT2_2"));
+        assertTrue("语义 id 仍稳定", SelectorStability.isStable("step2"));
+        assertTrue("语义类名仍稳定", SelectorStability.isStable("tokenless-ack-active-msk"));
+    }
 }

@@ -83,6 +83,14 @@ public final class SelectorStability {
     /** 中间长数字段（≥8 位连续数字）——时间戳/hash 数字段。 */
     private static final Pattern LONG_DIGIT_RUN = Pattern.compile("\\d{8,}");
 
+    /** 日期形态（2026-11-18 / 2026_11_18 / 2026-11-18T09:30）——构建/展示日期会随时间漂移。 */
+    private static final Pattern DATE_LIKE = Pattern.compile(
+            "^\\d{4}[-_]\\d{1,2}[-_]\\d{1,2}(?:[T ]\\d{1,2}:\\d{2}(?::\\d{2})?)?$");
+
+    /** 版本号形态（v1.2.3 / 1.2.3 / 2.0.0-beta）——随构建升级漂移。 */
+    private static final Pattern VERSION_LIKE = Pattern.compile(
+            "^v?\\d+\\.\\d+\\.\\d+(?:[-+][A-Za-z0-9.]+)?$", Pattern.CASE_INSENSITIVE);
+
     /**
      * 已知 UI 框架/工具生成的「语义 + 自增序号」形态。
      *
@@ -122,6 +130,8 @@ public final class SelectorStability {
         if (PURE_DIGITS.matcher(v).matches()) return true;
         if (TRAILING_TIMESTAMP.matcher(v).find()) return true;
         if (LONG_DIGIT_RUN.matcher(v).find()) return true;
+        if (DATE_LIKE.matcher(v).matches()) return true;
+        if (VERSION_LIKE.matcher(v).matches()) return true;
         for (Pattern p : FRAMEWORK_GENERATED) {
             if (p.matcher(v).matches()) return true;
         }
@@ -134,9 +144,15 @@ public final class SelectorStability {
         // 组合值同样要判：「语义前缀 + hash 段」（userName-deadbeef / btn-c0ffee）整串不匹配任何
         // 整值模式，却是打包器最常见的命名形态。只按段判 hash 特征，不用「任一段随机」——
         // 后者会把 WP7UAT2_2 里的序号碎片当成随机，误杀合法语义 id。
+        // H1：段级判定要覆盖「纯数字段 / 高熵段」，与 JS RAND_RE 对齐。
+        // 不能直接用 Part.isVolatile()——它含「<3 位碎片即随机」规则，会把 WP7UAT2_2 的尾段 "2"
+        // 当成随机段、误杀合法用户名。这里只补 PURE_DIGITS（≥6 位）与 isHighEntropy（≥12 位）两条
+        // 强特征，避开短序号碎片。btn-1234567（7 位数字段）、user-abc123xyzxyz 得以拦截。
         for (Part p : parts(v)) {
             if (HEX_HASH.matcher(p.text).matches()) return true;
             if (LEET_HEX.matcher(p.text).matches() && hasDigit(p.text)) return true;
+            if (PURE_DIGITS.matcher(p.text).matches()) return true;
+            if (isHighEntropy(p.text)) return true;
         }
         return isHighEntropy(v);
     }
