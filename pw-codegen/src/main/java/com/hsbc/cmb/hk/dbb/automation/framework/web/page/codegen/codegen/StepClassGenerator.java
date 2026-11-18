@@ -135,8 +135,20 @@ public final class StepClassGenerator {
                         + CodegenFieldPlanner.escapeJava(a.frameSelector) + "\");");
                 break;
             case DIALOG:
-                out.add("        " + pageVar(a.target) + "."
-                        + (a.accept ? "acceptAlert()" : "dismissAlert()") + ";");
+                // 必须「先武装监听器再触发」：acceptAlert()/dismissAlert() 是一次性 onceDialog，
+                // 独立成行时弹窗早已被 Playwright 默认 dismiss，录的「确定」会跑成「取消」。
+                String dialogMethod = a.accept ? "acceptAlert" : "dismissAlert";
+                if (a.fieldName != null && !a.fieldName.isBlank()
+                        && a.action != null && !a.action.isBlank()) {
+                    out.add("        " + pageVar(a.target) + "." + dialogMethod + "(() -> "
+                            + pageVar(a.target) + "." + a.fieldName + "." + a.action + ");");
+                } else {
+                    // 找不到触发动作（定时器 / 异步请求触发的弹窗）：退化为独立语句并显式提示。
+                    out.add("        // TODO(review): dialog not bound to a recorded trigger - "
+                            + "the once-dialog handler must be armed BEFORE the real trigger, "
+                            + "otherwise Playwright dismisses it by default");
+                    out.add("        " + pageVar(a.target) + "." + dialogMethod + "();");
+                }
                 break;
             case PAGE_SWITCH:
                 // waitForNewPage 返回新页 Page；必须接住返回值并显式 switchToPage(newPage) 绑定到

@@ -82,9 +82,9 @@ public final class MultiPageCodegen {
         public final ActionKind kind;
         /** 动作所属页面（PAGE_SWITCH 时为<b>来源页</b>）。 */
         public final CodegenTarget target;
-        /** ELEMENT / PAGE_SWITCH 的元素字段名（与 Page 类同源）。 */
+        /** ELEMENT / PAGE_SWITCH 的元素字段名；DIALOG 包裹触发时为他触发元素字段名。 */
         public final String fieldName;
-        /** ELEMENT / PAGE_SWITCH 的动作表达式（{@code click()} / {@code fill("…")} …）。 */
+        /** ELEMENT / PAGE_SWITCH 的动作表达式；DIALOG 包裹触发时为他触发动作（{@code click()} …）。 */
         public final String action;
         /** 非空时在动作上方生成 {@code // TODO(review): …}。 */
         public final String todo;
@@ -124,6 +124,18 @@ public final class MultiPageCodegen {
 
         public static SessionAction dialog(CodegenTarget target, boolean accept) {
             return new SessionAction(ActionKind.DIALOG, target, null, null, null, null, null, accept, null, null);
+        }
+
+        /**
+         * dialog 包裹其触发动作：{@code page.acceptAlert(() -> page.field.action())}。
+         *
+         * <p>必须先武装 onceDialog 监听再执行点击，否则弹窗在 handler 挂上前就被 Playwright 默认 dismiss，
+         * 「确定」分支被跑成「取消」。找不到触发动作时才退化为独立 {@link #dialog} 并打 TODO。
+         */
+        public static SessionAction dialogWithTrigger(CodegenTarget target, boolean accept,
+                                                      String triggerField, String triggerAction) {
+            return new SessionAction(ActionKind.DIALOG, target, triggerField, triggerAction,
+                    null, null, null, accept, null, null);
         }
 
         public static SessionAction pageSwitch(CodegenTarget from, String triggerField, String triggerAction,

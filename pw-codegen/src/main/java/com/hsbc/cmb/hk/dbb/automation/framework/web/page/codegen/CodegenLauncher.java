@@ -1037,15 +1037,19 @@ public final class CodegenLauncher {
             // 孪生元素（同 role+name、同组内序号）会算出相同 sigKey：字段规划按 sigKey 去重，
             // 不去消歧的话第二个元素在产物里会被当「同元素重复点选」直接丢弃（用户看到「生成了但只有一个字段」）。
             CodegenEntry effective = disambiguateSigKey(entry, docId, eid, picked);
-            // 悬浮已裁决的条目（roleHits 不再是 UNVERIFIED）不再欠复核——tooltip 显示的就是这条结论。
-            boolean roleAlreadyAdjudicated = effective.roleHits != CodegenEntry.ROLE_HITS_UNVERIFIED;
+            // 悬浮已裁决的条目（roleHits 不再是 UNVERIFIED）一般不再欠复核——tooltip 显示的就是这条结论。
+            // 例外：悬浮因「多命中」保留了 role（roleHits>1），期望值（单/组）要等生成期拿到全部拾取
+            // 才能判定，故这种条目仍欠一次复核（评审 P0-1）。
+            boolean needsDeferredVerification = effective.roleHits == CodegenEntry.ROLE_HITS_UNVERIFIED
+                    || RoleVerificationPolicy.deferMultiHitToGeneration(effective.roleHits);
+            boolean roleNeedsVerification = needsDeferredVerification
+                    && ps.extractor().requiresDeferredRoleVerification(effective);
             // URL 归属：优先用点击捕获阶段记录的 location.href（导航型元素点击后立即跳页，异步落库时
             // page.url() 已是新页面——Back/Cancel 会被错误归到 logon 页、Step 代码出现在错误的 Page）。
             String pickUrlSafe = (pickUrl != null && !pickUrl.isEmpty())
                     ? pickUrl : safeUrl(pg);
             Pick pk = new Pick(PICK_SEQ.incrementAndGet(), EVENT_SEQ.incrementAndGet(), currentSession(sessionSeq),
-                    effective, pg, pickUrlSafe, ps.extractor(),
-                    !roleAlreadyAdjudicated && ps.extractor().requiresDeferredRoleVerification(effective));
+                    effective, pg, pickUrlSafe, ps.extractor(), roleNeedsVerification);
             pk.identify(docId, eid);
             picked.add(pk);
             if (panelRef[0] == null) {
@@ -2501,7 +2505,6 @@ public final class CodegenLauncher {
         items.sort(Comparator.comparingLong(i -> i.seq));
 
         List<MultiPageCodegen.SessionAction> actions = new ArrayList<>();
-        Map<CodegenTarget, List<String>> frameByTarget = new LinkedHashMap<>();
         // dialog 没有 URL 快照，按「所属标签页的首个目标」解析（dialog 落在某个标签页上，取该页第一个 URL 的目标）。
         Map<Page, CodegenTarget> pageToTarget = new LinkedHashMap<>();
         for (Pick p : timeline) {
@@ -2517,11 +2520,33 @@ public final class CodegenLauncher {
         // 勾↔取消、radio 改选、同字段两次不同值提交都是不同动作，必须全部保留（P0-3）。
         Map<String, String> lastActionBySig = new HashMap<>();
         Pick prevPick = null;
+        // 最近一条「元素动作」及其 pick / 在 actions 中的下标：dialog 由点击触发，
+        // 用它把 onceDialog 监听器包到触发点击外面（先武装、后触发），避免默认 dismiss 跑错分支。
+        MultiPageCodegen.SessionAction lastElementAction = null;
+        Pick lastElementPick = null;
+        int lastElementActionIndex = -1;
         for (SessionItem item : items) {
             if (item.dialog != null) {
                 CodegenTarget t = pageToTarget.get(item.dialog.page);
-                if (t != null) actions.add(MultiPageCodegen.SessionAction.dialog(t, item.dialog.accept));
+                if (t != null) {
+                    // 触发 dialog 的 click 在捕获阶段先被拾取，dialog 紧随其后（seq 更大）且同页。
+                    // 满足则把那条元素动作升级为 acceptAlert(() -> click())，否则独立成行 + TODO。
+                    boolean triggerAvailable = lastElementAction != null && lastElementPick != null
+                            && lastElementActionIndex >= 0 && lastElementActionIndex < actions.size()
+                            && lastElementPick.page == item.dialog.page
+                            && item.dialog.seq > lastElementPick.seq
+                            && "click".equals(lastElementPick.actionType);
+                    if (triggerAvailable) {
+                        actions.set(lastElementActionIndex, MultiPageCodegen.SessionAction.dialogWithTrigger(
+                                t, item.dialog.accept, lastElementAction.fieldName, lastElementAction.action));
+                    } else {
+                        actions.add(MultiPageCodegen.SessionAction.dialog(t, item.dialog.accept));
+                    }
+                }
                 prevPick = null;
+                lastElementAction = null;
+                lastElementPick = null;
+                lastElementActionIndex = -1;
                 continue;
             }
             Pick p = item.pick;
@@ -2538,16 +2563,11 @@ public final class CodegenLauncher {
             }
             prevPick = p;
 
-            // 每个页类独立跟踪当前 frame：进入 iframe 时生成 switchToFrame（回到主帧不生成，字段本身带 frame 前缀）
-            List<String> currentFrame = frameByTarget.getOrDefault(t, List.of());
-            if (!p.entry.framePath.equals(currentFrame)) {
-                if (!p.entry.framePath.isEmpty()) {
-                    String inner = p.entry.framePath.get(p.entry.framePath.size() - 1);
-                    actions.add(MultiPageCodegen.SessionAction.frameSwitch(
-                            t, inner, String.join(" :: ", p.entry.framePath)));
-                }
-                frameByTarget.put(t, p.entry.framePath);
-            }
+            // 跨 frame 字段一律自带 frame= 全链穿透前缀（见 CodegenFieldPlanner.framePiercing），
+            // 由 LocatorFactory.buildFramePiercingLocator 逐层定位；主帧字段无前缀、按 page 解析。
+            // 因此【不生成 switchToFrame】：① 它只切最内层，双层 iframe 会在根文档找不到而抛 Frame not found；
+            // ② 它改的是页对象持久状态 getCurrentFrame()，回主帧不恢复会把后续主帧字段带偏到 iframe。
+            // 帧内元素若内层 CSS 缺失（P1-5），spec 为 null 时下面照旧跳过，但无残留 frame 状态污染。
 
             CodegenFieldSpec spec = fieldSpecFor(planByTarget.get(t), p.entry);
             if (spec == null) continue;
@@ -2575,7 +2595,12 @@ public final class CodegenLauncher {
                 todo = "multiple select: only the first of " + p.valueCount
                         + " values is generated; add the rest manually";
             }
-            actions.add(MultiPageCodegen.SessionAction.element(t, spec.fieldName, action, todo));
+            MultiPageCodegen.SessionAction elementAction =
+                    MultiPageCodegen.SessionAction.element(t, spec.fieldName, action, todo);
+            actions.add(elementAction);
+            lastElementAction = elementAction;
+            lastElementPick = p;
+            lastElementActionIndex = actions.size() - 1;
         }
 
         // 断言：本会话每页类的元素（保持会话内操作顺序、按 sigKey 去重）。
@@ -3113,8 +3138,22 @@ public final class CodegenLauncher {
                     pk.id, entry.role, entry.name);
             return;
         }
+        // 多命中可能是合法组（列表项 / 表格重复按钮）：保留 role，但 roleHits 维持 UNVERIFIED，
+        // 并把欠账退回生成期 —— verifyPendingRoles 重新计数、按 base-sig 分组、以「组内拾取数」
+        // 为期望值复核。拾取当场按 hits==1 判死会让 verifyGroup 收不到条目（评审 P0-1）。
+        // 不写真实命中数 hits：首推(skipVerify=true)时 verifyPendingRoles 还没跑，FieldPlanner
+        // 若读到 roleHits=hits>1 会过早判成 PageElementList；维持 UNVERIFIED 让它本轮只出
+        // PageElement + TODO，等生成期复核后再定单元素/组，避免错误组语义闪现。
+        if (RoleVerificationPolicy.deferMultiHitToGeneration(hits)) {
+            pk.entry = entry.withRoleHits(CodegenEntry.ROLE_HITS_UNVERIFIED);
+            pk.rolePending = true;   // 欠账保持：交给生成期的组复核收尾
+            log.debug("[codegen][cdp] role matched {} elements at pick time for #{} (role={}, name='{}') - "
+                    + "keeping ROLE unverified and deferring group decision to generation",
+                    hits, pk.id, entry.role, entry.name);
+            return;
+        }
         // 0 命中且拾取元素此刻已不可见 ⇒ 多半是"页面翻页了"，保留 role 并标 TODO，
-        // 不当成定位器失效（与生成期兜底同一启发式）。>1 命中必回退 CSS。
+        // 不当成定位器失效（与生成期兜底同一启发式）。
         if (keepRoleBecausePageMovedOn(pk, entry, hits)) return;
         reviseToCss(panel, pk, hits, "expected exactly 1 hit (pick-time verification)");
     }
@@ -3150,6 +3189,16 @@ public final class CodegenLauncher {
         }
         if (RoleVerificationPolicy.keepRole(hits, 1)) {
             return entry.withRoleHits(hits);
+        }
+        // 多命中可能是合法组（列表项 / 表格重复按钮）：拾取阶段不知最终组大小，不能在悬浮预览
+        // 就判死成 CSS（否则 verifyGroup 永远收不到条目）。保留 role，但 roleHits 维持 UNVERIFIED
+        // 而非写 hits——命中数与期望值都交给生成期 verifyPendingRoles 重新计数 + 按组复核。
+        // 若这里写 hits>1，首推(skipVerify=true)的 FieldPlanner 会据 finalCount>1 过早判成
+        // PageElementList，单元素多命中会先闪一下错误的组语义（评审 P0-1 首推瑕疵）。
+        if (RoleVerificationPolicy.deferMultiHitToGeneration(hits)) {
+            log.debug("[codegen][{}] role matched {} elements - keeping ROLE unverified, deferring group "
+                    + "decision to generation (role={}, name='{}')", context, hits, entry.role, entry.name);
+            return entry.withRoleHits(CodegenEntry.ROLE_HITS_UNVERIFIED);
         }
         // 回退 CSS：与 reviseToCss 同一构造（重新计数 + 标不适用），悬浮/点击逐字一致。
         int cssHits = extractor.countCssMatches(entry.cssSelector);

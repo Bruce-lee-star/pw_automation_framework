@@ -71,6 +71,18 @@ public class AssertClassGeneratorTest {
         return AssertClassGenerator.generateSessions(TARGET, List.of(s), nlsFiles);
     }
 
+    /** P1-2：自动成组取用户点的那一项，Assert 必须与 Step 指向同一个 get(n)，不能恒 get(0)。 */
+    @Test
+    public void autoListAssertTargetsSameIndexAsStep() {
+        CodegenEntry picked = new CodegenEntry("option|Country#4", "option", "Country", "CSS", 100,
+                "ul > li[role=option]", "ul > li[role=option]", null, 4, List.of(), List.of(), 10,
+                "li", false, CodegenEntry.ROLE_HITS_NOT_APPLICABLE, true);
+        String out = assertClass(List.of(picked), new String[]{});
+        Assert.assertTrue("断言必须指向用户点的第 5 项 get(4)，而非 get(0): " + out,
+                out.contains("country.get(4)."));
+        Assert.assertFalse("不应出现 get(0) 断言", out.contains("country.get(0)"));
+    }
+
     @Test
     public void rendersAssertClassSkeleton() {
         List<CodegenEntry> es = List.of(role("button", "Sign in", "#btn", 0));

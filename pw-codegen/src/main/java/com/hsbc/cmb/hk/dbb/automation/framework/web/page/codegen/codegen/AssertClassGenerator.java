@@ -28,7 +28,8 @@ import java.util.Set;
  *   <li>无 name 的元素 ⇒ 退化为可见性 {@code assertThat(..., isVisible(), is(true))}；</li>
  *   <li>命中 NLS key ⇒ 走 {@code NLS.visibleText(key)}，语言无关。</li>
  * </ul>
- * 一组元素（{@code PageElementList}）取 {@code get(0)} 单项断言（与 Step 同源）。
+ * 一组元素（{@code PageElementList}）取与 Step 相同的 {@code get(n)} 单项断言（见
+ * {@link CodegenFieldSpec#listTarget()}）；自动成组时 n 是用户实际点的那一项，Step 与 Assert 必须指向同一项。
  *
  * <p>模板：{@code codegen/templates/assert-class-sessions.ftl}。
  */
@@ -109,7 +110,9 @@ public final class AssertClassGenerator {
     private static String assertLine(CodegenTarget target, CodegenFieldSpec f, CodegenEntry entry,
                                      String[] nlsFiles, boolean[] nls) {
         String pageVar = target == null ? "" : target.pageVar;
-        String targetExpr = pageVar + "." + f.fieldName + (f.isList ? ".get(0)." : ".");
+        // 与 Step 同源取组内序号：自动成组的 index 是用户实际点的那一项，
+        // 断言必须指向同一个 get(n)，否则 Step 点第 5 项、Assert 却断言第 1 项。
+        String targetExpr = pageVar + "." + f.fieldName + "." + f.listTarget();
 
         if (f.assertion.endsWith("isChecked()")) {
             // checkbox/radio：断言勾选态（无"字符"语义，布尔足够）。

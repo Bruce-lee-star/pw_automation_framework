@@ -101,6 +101,47 @@ public class StepClassGeneratorTest {
         Assert.assertEquals("一组元素只生成一个步骤方法", 1, countOccurrences(out, "@Step"));
     }
 
+    /** P0-2：dialog 必须包住触发点击（先武装 onceDialog 再点击），不能独立排在点击之后。 */
+    @Test
+    public void dialogWrapsItsTriggerClick() {
+        String accept = StepClassGenerator.generateSessions(TARGET, List.of(
+                new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET), List.of(
+                        MultiPageCodegen.SessionAction.dialogWithTrigger(TARGET, true, "confirmBtn", "click()")),
+                        List.of())));
+        Assert.assertTrue("accept 必须先武装监听再触发点击: " + accept,
+                accept.contains("loginPage.acceptAlert(() -> loginPage.confirmBtn.click());"));
+        Assert.assertFalse("不应残留独立的 acceptAlert() 语句", accept.contains("acceptAlert();"));
+
+        String dismiss = StepClassGenerator.generateSessions(TARGET, List.of(
+                new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET), List.of(
+                        MultiPageCodegen.SessionAction.dialogWithTrigger(TARGET, false, "cancelBtn", "click()")),
+                        List.of())));
+        Assert.assertTrue(dismiss.contains("loginPage.dismissAlert(() -> loginPage.cancelBtn.click());"));
+    }
+
+    /** P0-2 退化路径：找不到触发动作时独立成行，但必须打 TODO 提示人工补武装时机。 */
+    @Test
+    public void dialogWithoutTriggerEmitsTodo() {
+        String out = StepClassGenerator.generateSessions(TARGET, List.of(
+                new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET), List.of(
+                        MultiPageCodegen.SessionAction.dialog(TARGET, true)),
+                        List.of())));
+        Assert.assertTrue(out.contains("loginPage.acceptAlert();"));
+        Assert.assertTrue("无触发动作必须提示: " + out, out.contains("dialog not bound to a recorded trigger"));
+    }
+
+    /** P0-3：跨 frame 字段靠 frame= 全链穿透，不生成 switchToFrame（避免双层 iframe 抛错 / 回主帧污染）。 */
+    @Test
+    public void noFrameSwitchIsGenerated() {
+        CodegenEntry inFrame = new CodegenEntry("button|Ok#0", "button", "Ok", "CSS", 100,
+                "#ok", "#ok", null, 0,
+                List.of("iframe#outer", "iframe#inner"));
+        String step = stepClass(List.of(inFrame));
+        Assert.assertFalse("不应生成 switchToFrame", step.contains("switchToFrame"));
+        String page = PageClassGenerator.generate(TARGET, List.of(inFrame), new String[]{});
+        Assert.assertTrue("Page 字段应带 frame= 穿透前缀: " + page, page.contains("@Element(\"frame="));
+    }
+
     /** Step 引用的字段名必须与 Page 类生成的一致（同源规划的硬保证）。 */
     @Test
     public void fieldNamesMatchPageClass() {
