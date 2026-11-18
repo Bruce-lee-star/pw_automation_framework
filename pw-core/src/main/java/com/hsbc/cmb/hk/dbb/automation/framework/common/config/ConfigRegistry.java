@@ -62,15 +62,11 @@ public enum ConfigRegistry {
 
     /**
      * 密文解密失败是否失败快（默认 true）。
-     * <p>P2-1：统一到 {@code framework.} 前缀（框架自有开关一律加前缀，与
-     * {@link FrameworkFlags#PREFIX} 的约定一致）。旧键 {@link #LEGACY_SECURITY_SECRET_STRICT}
-     * 保留向后兼容（命中即告警），排障用法不变。</p>
+     * <p>统一到 {@code framework.} 前缀（框架自有开关一律加前缀，与
+     * {@link FrameworkFlags#PREFIX} 的约定一致）。</p>
      */
     SECURITY_SECRET_STRICT(
         "framework.security.secret.strict", "true", "密文解密失败是否失败快（false 仅排障降级）"),
-    /** 旧键名（无 {@code framework.} 前缀）—— 仅向后兼容；新配置请用 {@link #SECURITY_SECRET_STRICT}。 */
-    LEGACY_SECURITY_SECRET_STRICT(
-        "security.secret.strict", "true", "[deprecated] 旧键名，等价于 framework.security.secret.strict"),
 
 
     // ===================== Web（对应 WebFrameworkConfig）=====================
@@ -79,11 +75,6 @@ public enum ConfigRegistry {
         "project.report.name",
         "",
         "报告项目名称（所有报告统一使用；<b>未配置时报告显示 Test Report</b>）"
-    ),
-    LEGACY_FRAMEWORK_PROJECT_NAME(
-        "framework.project.name",
-        "",
-        "[deprecated] 旧报告项目名称，未配置 project.report.name 时兼容读取"
     ),
     REPORT_BROWSERS(
         "pw.report.browsers",
@@ -630,11 +621,6 @@ public enum ConfigRegistry {
         "framework.recording.enabled",
         "true",
         "是否将浏览器动作写入测试报告；与日志级别无关"
-    ),
-    WEB_FRAMEWORK_OUTPUT_DIRECTORY(
-        "framework.output.directory",
-        "target/reports",
-        "报告输出目录"
     ),
     WEB_FRAMEWORK_FEATURES_ROOT(
         "framework.features.root",

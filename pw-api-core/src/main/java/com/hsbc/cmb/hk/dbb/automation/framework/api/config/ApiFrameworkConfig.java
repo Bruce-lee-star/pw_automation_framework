@@ -35,7 +35,7 @@ public class ApiFrameworkConfig {
     /** HTTP socket 超时回退值（毫秒）。 */
     public static final ConfigKey HTTP_SOCKET_TIMEOUT_FALLBACK = ConfigRegistry.API_HTTP_SOCKET_TIMEOUT_FALLBACK.toConfigKey();
 
-    /** HTTP socket 超时（毫秒），主键（兼容历史键 http.socket.timeout.value / .fallback）。 */
+    /** HTTP socket 超时（毫秒），主键。 */
     public static final ConfigKey HTTP_SOCKET_TIMEOUT = ConfigRegistry.API_HTTP_SOCKET_TIMEOUT.toConfigKey();
 
     /** HTTP 连接池最大总连接数（P-3：连接池治理，RestAssured 默认每路由仅 2 连接）。 */
@@ -74,7 +74,7 @@ public class ApiFrameworkConfig {
     /** 文件日志格式。 */
     public static final ConfigKey LOGGING_FILE_PATTERN = ConfigRegistry.API_LOGGING_FILE_PATTERN.toConfigKey();
 
-    /** API 默认 base URI（主键，兼容历史键 api.base-uri.default）。 */
+    /** API 默认 base URI。 */
     public static final ConfigKey API_BASE_URI_DEFAULT = ConfigRegistry.API_API_BASE_URI_DEFAULT.toConfigKey();
 
     /** 测试重试次数。 */
@@ -132,17 +132,13 @@ public class ApiFrameworkConfig {
 
     /**
      * 获取 socket 超时（毫秒）。
-     * <p>优先读取 {@link ConfigKey} {@code http.socket.timeout}，
-     * 再回退到历史键 {@code http.socket.timeout.value} / {@code http.socket.timeout.fallback}，
-     * 三者皆无则回退默认值。
+     * <p>优先读取 {@link ConfigKey} {@code http.socket.timeout}，其次 {@code http.socket.timeout.fallback}，
+     * 皆无则回退默认值。
      * @return socket 超时（默认：30000ms）
      */
     public static int getSocketTimeout() {
         if (config().hasPath(HTTP_SOCKET_TIMEOUT.key())) {
             return config().getInt(HTTP_SOCKET_TIMEOUT.key());
-        }
-        if (config().hasPath("http.socket.timeout.value")) {
-            return config().getInt("http.socket.timeout.value");
         }
         if (config().hasPath(HTTP_SOCKET_TIMEOUT_FALLBACK.key())) {
             return config().getInt(HTTP_SOCKET_TIMEOUT_FALLBACK.key());
@@ -288,15 +284,11 @@ public class ApiFrameworkConfig {
 
     /**
      * 获取默认 base URI。
-     * <p>兼容历史键 {@code api.base-uri.default} 与标准键 {@code api.base.uri.default}。
      * @return 默认 base URI（默认：http://localhost）
      */
     public static String getDefaultBaseUri() {
         if (config().hasPath(API_BASE_URI_DEFAULT.key())) {
             return config().getString(API_BASE_URI_DEFAULT.key());
-        }
-        if (config().hasPath("api.base-uri.default")) {
-            return config().getString("api.base-uri.default");
         }
         return API_BASE_URI_DEFAULT.defaultValue();
     }

@@ -20,7 +20,7 @@ import org.slf4j.LoggerFactory;
  * <ul>
  *   <li><b>{@code ENC(...)} 显式标记 —— 失败快（默认）</b>：解密失败（主密钥缺失 / key 与密文不匹配 /
  *       密文被篡改）就抛 {@link IllegalStateException}，启动即失败，逼出配置错误（C-3，默认
- *       {@code -Dsecurity.secret.strict=true}）；</li>
+ *       {@code -Dframework.security.secret.strict=true}）；</li>
  *   <li><b>裸 {@code <base64>} —— 启发式，失败降级</b>：裸密文无标记，无法与"恰好合法 base64 的普通值"
  *       区分，故解密失败时<b>告警并保留原串</b>，绝不因此让框架启动崩溃（CORE-C5）；</li>
  *   <li><b>仅非密文形态回退</b>：值<b>明显不是密文</b>（非合法 base64，或长度不足以含 IV + GCM 标签）
@@ -28,7 +28,7 @@ import org.slf4j.LoggerFactory;
  * </ul>
  * 如需关闭裸密文启发式（仅 {@code ENC(...)} 才解密），显式设
  * {@code framework.secret.allow-bare-base64=false}；如需排障降级（解密失败仅告警保留原串，勿用于生产），
- * 设 {@code -Dsecurity.secret.strict=false}。
+ * 设 {@code -Dframework.security.secret.strict=false}。
  */
 public final class SecretValue {
 
@@ -59,7 +59,7 @@ public final class SecretValue {
      * </ul>
      *
      * <p>解密失败处理：{@code ENC(...)} 路径下，<b>主密钥缺失 / GCM 认证失败（key 不匹配或密文被篡改）</b>
-     * 视为配置错误，默认抛 {@link IllegalStateException}（失败快，C-3），仅 {@code -Dsecurity.secret.strict=false}
+     * 视为配置错误，默认抛 {@link IllegalStateException}（失败快，C-3），仅 {@code -Dframework.security.secret.strict=false}
      * 时降级为告警并保留原串；裸 base64 路径（启发式）下，解密失败一律降级为告警并保留原串（CORE-C5）。
      * <b>仅非密文形态</b>（base64 解码失败 / 长度过短）才原样返回。
      *
@@ -113,8 +113,8 @@ public final class SecretValue {
     }
 
     /**
-     * 解密失败的统一出口：默认<b>严格失败快</b>（C-3，默认 {@code -Dsecurity.secret.strict=true}），
-     * 抛 {@link IllegalStateException}；仅显式 {@code -Dsecurity.secret.strict=false} 时降级为告警并
+     * 解密失败的统一出口：默认<b>严格失败快</b>（C-3，默认 {@code -Dframework.security.secret.strict=true}），
+     * 抛 {@link IllegalStateException}；仅显式 {@code -Dframework.security.secret.strict=false} 时降级为告警并
      * 保留原串（排障用，勿用于生产）。
      */
     private static String onDecryptFailure(String raw, String message, Exception cause) {
@@ -126,23 +126,12 @@ public final class SecretValue {
     }
 
     /**
-     * 严格模式判定（P2-1：键统一到 {@code framework.} 前缀）。
-     *
-     * <p>解析顺序：新键 {@code framework.security.secret.strict} → 旧键 {@code security.secret.strict}
-     * （命中即告警，保留排障用法的向后兼容）→ 注册表默认值（{@code true}）。</p>
+     * 严格模式判定：读 {@code framework.security.secret.strict}，缺省用注册表默认值（{@code true}）。
      */
     private static boolean isStrictMode() {
         String current = FrameworkFlags.resolve(ConfigRegistry.SECURITY_SECRET_STRICT.key(), null);
-        if (current != null) {
-            return Boolean.parseBoolean(current);
-        }
-        String legacy = FrameworkFlags.resolve(ConfigRegistry.LEGACY_SECURITY_SECRET_STRICT.key(), null);
-        if (legacy != null) {
-            LOGGER.warn("config key '{}' is deprecated (missing {} prefix), use '{}' instead; old value still effective this time: {}",
-                    ConfigRegistry.LEGACY_SECURITY_SECRET_STRICT.key(), FrameworkFlags.PREFIX,
-                    ConfigRegistry.SECURITY_SECRET_STRICT.key(), legacy);
-            return Boolean.parseBoolean(legacy);
-        }
-        return Boolean.parseBoolean(ConfigRegistry.SECURITY_SECRET_STRICT.defaultValue().trim());
+        return current != null
+                ? Boolean.parseBoolean(current)
+                : Boolean.parseBoolean(ConfigRegistry.SECURITY_SECRET_STRICT.defaultValue().trim());
     }
 }

@@ -632,14 +632,6 @@ public enum WebFrameworkConfig {
     /** Whether browser actions are added to the test report. */
     FRAMEWORK_RECORDING_ENABLED(ConfigRegistry.FRAMEWORK_RECORDING_ENABLED),
 
-    // ==================== 报告配置 ====================
-
-    /**
-     * 报告输出目录
-     */
-    FRAMEWORK_OUTPUT_DIRECTORY(ConfigRegistry.WEB_FRAMEWORK_OUTPUT_DIRECTORY),
-
-
     // ==================== 测试执行配置 ====================
 
     /**

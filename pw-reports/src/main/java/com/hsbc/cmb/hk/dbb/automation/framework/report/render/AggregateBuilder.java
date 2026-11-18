@@ -235,8 +235,7 @@ public final class AggregateBuilder {
 
 
     /**
-     * 报告标题：读框架配置 {@code project.report.name}（历史键 {@code framework.project.name} 仍作兜底），
-     * 缺省回退 {@code Test Report}。index / 邮件报告共用。
+     * 报告标题：读框架配置 {@code project.report.name}，缺省回退 {@code Test Report}。index / 邮件报告共用。
      *
      * <p>统一走 {@link ConfigReader#resolve}：系统属性 → 环境变量 → SPI 配置源 → 默认值，
      * 与框架其它配置读取链路一致，保证「所有报告使用同一个 name」。</p>
@@ -244,10 +243,6 @@ public final class AggregateBuilder {
     static String projectName() {
         String name = ConfigReader.resolve(ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.key(),
                 ConfigRegistry.WEB_FRAMEWORK_PROJECT_NAME.defaultValue());
-        if (name == null || name.isBlank()) {
-            // 兼容旧桥接：早期实现直接把项目名塞进该系统属性
-            name = ConfigReader.getProperty(ConfigRegistry.LEGACY_FRAMEWORK_PROJECT_NAME.key());
-        }
         //  <b>未配置 → Test Report</b>：不再拿框架自带的默认值冒充"用户配的名字"
         //  （2026-10-22 用户要求：只显示配置的，没配置就显示 Test Report）。
         return name == null || name.isBlank() ? "Test Report" : name;
