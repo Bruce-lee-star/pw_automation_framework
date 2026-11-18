@@ -222,7 +222,7 @@ public class PageClassGeneratorTest {
         List<CodegenEntry> es = List.of(
                 frameCss("#submit", 0, List.of("iframe#outer", "iframe[name=\"inner\"]")));
         String out = PageClassGenerator.generate(TARGET, es, new String[]{});
-        // 选择器内的双引号被 toJavaStringLiteral 转为单引号，保证 Java 字面量合法
+        // 选择器内的双引号被 toJavaStringLiteral 转为单引号，保证 Java 字面量合法。
         Assert.assertTrue(out.contains(
                 "@Element(\"frame=iframe#outer :: iframe[name='inner'] :: #submit\")"));
     }
@@ -276,6 +276,26 @@ public class PageClassGeneratorTest {
         Assert.assertTrue(out.contains("public class LoginPage extends AbstractManagedPage {"));
         Assert.assertTrue(out.trim().endsWith("}"));
         Assert.assertFalse(out.contains("PageElement "));
+    }
+
+    /** P1-05：跨 frame 且内层无 CSS 时，产出带 TODO 的占位字段，而不是整条静默丢弃。 */
+    @Test
+    public void crossFrameWithoutInnerCss_emitsPlaceholderWithTodo() {
+        CodegenEntry e = frameCss("", 0, List.of("iframe#outer"));
+        String out = PageClassGenerator.generate(TARGET, List.of(e), new String[]{});
+        Assert.assertTrue("仍应产出字段声明:\n" + out, out.contains("public PageElement"));
+        Assert.assertTrue("必须显式标注内层 CSS 缺失:\n" + out, out.contains("no inner CSS at pick time"));
+        Assert.assertTrue("占位用 frame 穿透到 body:\n" + out, out.contains("frame=iframe#outer :: body"));
+    }
+
+    /** P1-06：shadow DOM 内的元素必须显式标注 shadow 链未进入产物，避免静默生成脆弱定位器。 */
+    @Test
+    public void shadowDomElement_emitsTodoWithShadowChain() {
+        CodegenEntry e = new CodegenEntry("button|OK#0", "button", "OK", "ROLE", 100,
+                "role=button", "#ok", null, 0, List.of(), List.of("my-widget", "#inner"), 1);
+        String out = PageClassGenerator.generate(TARGET, List.of(e), new String[]{});
+        Assert.assertTrue("必须标注 shadow DOM 及链:\n" + out,
+                out.contains("inside shadow DOM (my-widget :: #inner)"));
     }
 
     private static int countOccurrences(String s, String sub) {

@@ -132,6 +132,53 @@ public class StepClassGeneratorTest {
         Assert.assertTrue("无触发动作必须提示: " + out, out.contains("dialog not bound to a recorded trigger"));
     }
 
+    /** P0-3：新标签与旧标签同 Page 类（toTarget == target）也必须 switchToPage，否则 newPageN 悬空、后续打在旧页。 */
+    @Test
+    public void pageSwitchGeneratesBindingEvenForSameTarget() {
+        String out = StepClassGenerator.generateSessions(TARGET, List.of(
+                new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET), List.of(
+                        MultiPageCodegen.SessionAction.pageSwitch(TARGET, "openTab", "click()", TARGET)),
+                        List.of())));
+        Assert.assertTrue("必须接住新页: " + out, out.contains("Page newPage1 = loginPage.waitForNewPage(() -> loginPage.openTab.click());"));
+        Assert.assertTrue("同页类新标签必须仍生成 switchToPage(newPage1): " + out,
+                out.contains("loginPage.switchToPage(newPage1);"));
+        Assert.assertTrue("同页类新标签应提示单实例重绑定: " + out, out.contains("same page class in a new tab"));
+    }
+
+    /** P0-3：不同 Page 类的切页仍绑定到新页类（保持既有行为）。 */
+    @Test
+    public void pageSwitchBindsToDifferentTarget() {
+        CodegenTarget other = CodegenTarget.of("com.example.pages", "https://host/portalserver/profile");
+        String out = StepClassGenerator.generateSessions(TARGET, List.of(
+                new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET, other), List.of(
+                        MultiPageCodegen.SessionAction.pageSwitch(TARGET, "openTab", "click()", other)),
+                        List.of())));
+        Assert.assertTrue(out.contains("profilePage.switchToPage(newPage1);"));
+    }
+
+    /**
+     * T08 夹具④ / P0-1：两个会话各自「填不同值 → 提交切页」，第一段 waitForNewPage 内必须是本步值。
+     * Launcher 侧已由 actionForPick 保证传入本步值；这里钉住 Step 生成层忠实使用每条动作自带的 action，
+     * 而不是回退到字段模板的全局末值。
+     */
+    @Test
+    public void twoSessionsDifferentFillValuesKeepTheirOwnTriggerAction() {
+        String out = StepClassGenerator.generateSessions(TARGET, List.of(
+                new MultiPageCodegen.SessionUnit(1, TARGET, List.of(TARGET), List.of(
+                        MultiPageCodegen.SessionAction.pageSwitch(TARGET, "accountInput",
+                                "fill(\"alice\")", TARGET)), List.of()),
+                new MultiPageCodegen.SessionUnit(2, TARGET, List.of(TARGET), List.of(
+                        MultiPageCodegen.SessionAction.pageSwitch(TARGET, "accountInput",
+                                "fill(\"bob\")", TARGET)), List.of())));
+
+        Assert.assertTrue("step1 的 lambda 必须是本步值 alice:\n" + out,
+                out.contains("waitForNewPage(() -> loginPage.accountInput.fill(\"alice\"))"));
+        Assert.assertTrue("step2 的 lambda 必须是本步值 bob:\n" + out,
+                out.contains("waitForNewPage(() -> loginPage.accountInput.fill(\"bob\"))"));
+        Assert.assertFalse("step1 不得被末值 bob 污染:\n" + out,
+                out.contains("step1()") && out.indexOf("fill(\"bob\")") < out.indexOf("waitForNewPage"));
+    }
+
     /** P0-3：跨 frame 字段靠 frame= 全链穿透，不生成 switchToFrame（避免双层 iframe 抛错 / 回主帧污染）。 */
     @Test
     public void noFrameSwitchIsGenerated() {

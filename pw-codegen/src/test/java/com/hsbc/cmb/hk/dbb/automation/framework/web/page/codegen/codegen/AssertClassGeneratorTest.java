@@ -166,6 +166,32 @@ public class AssertClassGeneratorTest {
                 out.contains("getValue(), is(\"Username\")"));
     }
 
+    /**
+     * P1-03：div 自绘下拉（role=combobox 但无 value 语义）必须走 getText()，不能生成恒空的 getValue()。
+     */
+    @Test
+    public void customComboboxUsesGetTextNotGetValue() {
+        CodegenEntry custom = new CodegenEntry("combobox|Country#0", "combobox", "Country", "ROLE", 100,
+                "role=combobox[name=\"Country\"]", "#country", null, 0,
+                List.of(), List.of(), 1, "div");
+        String out = assertClass(List.of(custom), new String[]{}, Map.of("combobox|Country#0", "Hong Kong"));
+        Assert.assertTrue("自绘下拉没有 value，断言必须走 getText():\n" + out,
+                out.contains("assertThat(loginPage.countrySelect.getText(), is(\"Country\"));"));
+        Assert.assertFalse("不得对自绘下拉生成 getValue():\n" + out,
+                out.contains("countrySelect.getValue()"));
+    }
+
+    /** P1-03 正对照：原生 select（tag=select）有 value，仍走 getValue() + 录制值。 */
+    @Test
+    public void nativeSelectUsesGetValue() {
+        CodegenEntry nativeSelect = new CodegenEntry("combobox|Province#0", "combobox", "Province", "ROLE", 100,
+                "role=combobox[name=\"Province\"]", "#prov", null, 0,
+                List.of(), List.of(), 1, "select");
+        String out = assertClass(List.of(nativeSelect), new String[]{}, Map.of("combobox|Province#0", "HK"));
+        Assert.assertTrue("原生 select 走 getValue() + 录制值:\n" + out,
+                out.contains("assertThat(loginPage.provinceSelect.getValue(), is(\"HK\"));"));
+    }
+
     /** 没有录制到输入值时，不得编造期望值：退化为可见性断言并标 TODO。 */
     @Test
     public void valueRoleWithoutRecordedValueFallsBackToVisibility() {
@@ -239,7 +265,7 @@ public class AssertClassGeneratorTest {
         Assert.assertFalse("bind 不应出现在断言行", out.contains("equalTo(NLSUtils.bind("));
     }
 
-    /** NLS 值含 HTML（可见文本是元素可见名的超集）⇒ 用 containsString 断言 NLS 值包含元素文本。 */
+    /** NLS 值含 HTML（可见文本是元素可见名的超集）⇒ 用 containsString 断言页面文本包含词典文本（P1-02）。 */
     @Test
     public void nlsTextAssertionUsesContainsStringWhenHtmlWrapsValue() throws Exception {
         Path f = writeBundle("{\"en\":{\"greet\":\"Hello <b>World</b>\"}}");
@@ -249,7 +275,10 @@ public class AssertClassGeneratorTest {
         Assert.assertTrue(out.contains("import static org.hamcrest.Matchers.containsString;"));
         Assert.assertTrue(out.contains("private static final NLSUtils.NlsBundle NLS = NLSUtils.bind("));
         Assert.assertFalse(out.contains("private static String getKey("));
-        Assert.assertTrue(out.contains("assertThat(NLS.getTextByKey(\"greet\"), containsString(loginPage.worldTitle.getText()));"));
+        // P1-02：方向必须是「页面文本 contains 词典文本」——页面可带动态前后缀，词典文本才是稳定子串。
+        Assert.assertTrue(out.contains("assertThat(loginPage.worldTitle.getText(), containsString(NLS.getTextByKey(\"greet\")));"));
+        Assert.assertFalse("旧的反方向断言不得再出现",
+                out.contains("assertThat(NLS.getTextByKey(\"greet\"), containsString("));
         Assert.assertFalse("bind 不应出现在断言行", out.contains("containsString(NLSUtils.bind("));
     }
 

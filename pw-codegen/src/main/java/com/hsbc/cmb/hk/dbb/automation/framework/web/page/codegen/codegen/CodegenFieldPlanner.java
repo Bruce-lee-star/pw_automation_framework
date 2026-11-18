@@ -153,10 +153,16 @@ public final class CodegenFieldPlanner {
                 String inner = (e.cssSelector == null || e.cssSelector.isBlank() || "html".equals(e.cssSelector))
                         ? null : e.cssSelector;
                 if (inner == null) {
-                    continue; // 内层无 CSS 无法生成穿透定位器，跳过
+                    // P1-05：内层无 CSS 时不能整条 continue——那会让字段声明/动作/TODO 一起消失，
+                    // 面板上表现为「点了没反应」。改为用 frame 内 body 作可编译占位 + 显式 TODO。
+                    hasElement = true;
+                    annotation = "@Element(" + toJavaStringLiteral(framePiercing(e.framePath, "body")) + ")";
+                    comment = "    // TODO(review): cross-frame element had no inner CSS at pick time - "
+                            + "replace the 'body' placeholder with a real selector inside the iframe";
+                } else {
+                    hasElement = true;
+                    annotation = "@Element(" + toJavaStringLiteral(framePiercing(e.framePath, inner)) + ")";
                 }
-                hasElement = true;
-                annotation = "@Element(" + toJavaStringLiteral(framePiercing(e.framePath, inner)) + ")";
             } else if (roleLocatable) {
                 hasRole = true;
                 hasAriaRole = true;
@@ -226,6 +232,16 @@ public final class CodegenFieldPlanner {
                 // 自动成组：序号来自用户点的那一项，产物注释写清 get(n) 的来历，评审时不必回看录像。
                 comment = "    // PageElementList: the recorded action targets get(" + listIndex
                         + ") - the item picked during recording";
+            }
+            // P1-06：shadow DOM 内的元素，产物注解不带 shadow 链、框架侧 LocatorFactory 也不解析 shadow。
+            // 无论落到 role / 文本语义 / CSS 哪种定位，都必须在字段上显式标注，避免静默生成脆弱定位器。
+            // 用前置而非覆盖：保留上面更具体的 TODO（如跨 frame 无内层 CSS）。
+            if (!e.shadowHosts.isEmpty()
+                    && (comment == null || !comment.contains("shadow DOM"))) {
+                String shadowTodo = "    // TODO(review): element is inside shadow DOM ("
+                        + String.join(" :: ", e.shadowHosts)
+                        + ") - shadow chain is not encoded in the locator; verify at replay\n";
+                comment = shadowTodo + (comment == null ? "" : comment);
             }
             fields.add(new CodegenFieldSpec(fieldName,
                     isList ? "PageElementList" : "PageElement",
@@ -307,11 +323,15 @@ public final class CodegenFieldPlanner {
      */
     static int listIndexOf(CodegenEntry e, boolean isList) {
         if (!isList || e == null || !e.autoList) return 0;
+        // P2-01：负序号是数据异常（真实录制里 autoList 的 index 来自 nth 序号，恒 >= 0），
+        // 绝不能生成 get(-1)（运行期必抛）；归零到 get(0) 是唯一安全的编译期 fallback。
+        // 正常路径下 e.index 已非负，Math.max 只在异常载荷时兜底。
         return Math.max(0, e.index);
     }
 
     /** 取单项前缀：一组元素 {@code get(n).}，单元素空串。 */
     static String listTarget(boolean isList, int listIndex) {
+        // P2-01：listIndex 由 listIndexOf 保证非负；这里再兜一层，杜绝任何路径生成 get(-1)。
         return isList ? "get(" + Math.max(0, listIndex) + ")." : "";
     }
 
@@ -741,10 +761,13 @@ public final class CodegenFieldPlanner {
     // ------------------------------------------------------------------
 
     /**
-     * Java 字符串字面量转义：反斜杠 / 双引号 / 换行 / 回车 / 制表，其余原样。
+     * Java 字符串字面量转义：所有 C0 控制字符 + 反斜杠 / 双引号 + Unicode 行分隔符。
      *
      * <p>public 供 {@code CodegenLauncher} 在「按本次操作值生成动作」时复用，
      * 避免同一套转义规则出现两份实现（两份必然漂移）。
+     *
+     * <p>P2-06：历史实现只处理 5 类字符，{@code \b}/{@code \f} 及其它 C0 控制字符原样进字面量，
+     * 轻则源码不可读、重则生成非法 Java 字面量（如 U+0000 被某些编译器当作源文件终止）。这里统一转义。
      */
     public static String escapeJava(String s) {
         if (s == null) return "";
@@ -757,13 +780,29 @@ public final class CodegenFieldPlanner {
                 case '\n': sb.append("\\n"); break;
                 case '\r': sb.append("\\r"); break;
                 case '\t': sb.append("\\t"); break;
-                default: sb.append(c);
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                case '\u0000': sb.append("\\0"); break;
+                case '\u001A': sb.append("\\Z"); break;
+                case '\u2028': sb.append("\\u2028"); break;
+                case '\u2029': sb.append("\\u2029"); break;
+                default:
+                    if (c < 0x20 || c == 0x7F) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
             }
         }
         return sb.toString();
     }
 
-    /** 包成合法 Java 字符串字面量（CSS 属性选择器内的双引号换单引号，避免反斜杠转义）。 */
+    /**
+     * 包成合法 Java 字符串字面量：CSS 属性选择器内的双引号换单引号，避免反斜杠转义。
+     *
+     * <p>codegen 产出的 CSS 选择器由注入侧按 id / class / role 等结构化信息拼装，不会出现
+     * 属性值内嵌引号的情形（如 {@code [title="it's"]}），故沿用换单引号的既有口径即可。
+     */
     static String toJavaStringLiteral(String s) {
         if (s == null) return "\"\"";
         s = s.replace("\"", "'");

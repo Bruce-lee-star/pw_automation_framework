@@ -75,7 +75,7 @@ public final class AssertClassGenerator {
                     CodegenFieldSpec spec = specOf(pe.plan, entry);
                     if (spec == null) continue;
                     boolean[] nls = new boolean[1];
-                    body.add(assertLine(pe.target, spec, entry, nlsFiles, nls));
+                    body.add(assertLine(pe.target, spec, entry, pe.sessionFillValues, nlsFiles, nls));
                     hasNlsAssert |= nls[0];
                 }
             }
@@ -98,18 +98,24 @@ public final class AssertClassGenerator {
         return CodegenTemplates.render(TEMPLATE, model);
     }
 
-    /** 按 entry 身份取字段规划（Page/Step/Assert 共用同一份 plan，故字段名严格一致）。 */
+    /**
+     * 按 sigKey 取字段规划（Page/Step/Assert 共用同一份 plan，故字段名严格一致）。
+     *
+     * <p>从「引用相等」改为「sigKey 相等」（P0-2）：断言 entry 现在取本会话末态对象，与 plan.fields
+     * 里的全局 entry 不是同一引用（checked / fill 值不同）。sigKey 是三份产物共用的字段身份，用它匹配
+     * 才能保证字段名 / assertion / listIndex 仍与 Page、Step 严格一致。
+     */
     private static CodegenFieldSpec specOf(CodegenFieldPlanner.Plan plan, CodegenEntry entry) {
-        if (plan == null || plan.fields == null) return null;
+        if (plan == null || plan.fields == null || entry == null || entry.sigKey == null) return null;
         for (CodegenFieldSpec f : plan.fields) {
-            if (f.entry == entry) return f;
+            if (f.entry != null && entry.sigKey.equals(f.entry.sigKey)) return f;
         }
         return null;
     }
 
     /** 单条 action 的断言行；{@code nls[0]} 置位表示该行用到 NLS（决定模板导包）。 */
     private static String assertLine(CodegenTarget target, CodegenFieldSpec f, CodegenEntry entry,
-                                     String[] nlsFiles, boolean[] nls) {
+                                     Map<String, String> sessionFillValues, String[] nlsFiles, boolean[] nls) {
         String pageVar = target == null ? "" : target.pageVar;
         // 与 Step 同源取组内序号：自动成组的 index 是用户实际点的那一项，
         // 断言必须指向同一个 get(n)，否则 Step 点第 5 项、Assert 却断言第 1 项。
@@ -117,18 +123,23 @@ public final class AssertClassGenerator {
 
         if (f.assertion.endsWith("isChecked()")) {
             // checkbox/radio：断言勾选态（无"字符"语义，布尔足够）。
-            // 期望值取录制时刻的真实状态：取消勾选录出来必须是 is(false)，恒 is(true) 会在回放时失败。
+            // 期望值取【本会话】录制时刻的真实状态（P0-2）：末态 entry 已经过会话内修正，
+            // 取消勾选录出来必须是 is(false)，恒 is(true) 会在回放时失败。
             String expected = (entry != null && entry.checked) ? "true" : "false";
             return "        assertThat(" + targetExpr + "isChecked(), is(" + expected + "));";
         }
 
-        // 输入类元素：期望值必须取「录制到的最终输入值」。
-        // entry.name 是 AX 可访问名（label / placeholder / aria-label），拿它跟 getValue() 比对，
-        // 断言从第一次运行就是红的——除非用户恰好把标签文本原样敲进框里（评审 P0-2）。
-        if (isValueRole(entry.role)) {
-            if (f.recordedValue != null) {
+        // 输入类元素：期望值必须取「本会话录制到的最终输入值」（P0-2）。
+        // 优先用会话内 fill 值（多步录制里每步的值不同），再回落 plan 的全局 recordedValue；
+        // 两者都没有时才退化为可见性 + TODO。entry.name 是 AX 可访问名（label / placeholder /
+        // aria-label），拿它跟 getValue() 比对，断言从第一次运行就是红的（评审 P0-2）。
+        if (isValueRole(entry)) {
+            String recorded = (sessionFillValues != null && entry.sigKey != null)
+                    ? sessionFillValues.get(entry.sigKey) : null;
+            if (recorded == null) recorded = f.recordedValue;
+            if (recorded != null) {
                 return "        assertThat(" + targetExpr + "getValue(), is(\""
-                        + CodegenFieldPlanner.escapeJava(f.recordedValue) + "\"));";
+                        + CodegenFieldPlanner.escapeJava(recorded) + "\"));";
             }
             return "        assertThat(" + targetExpr + "isVisible(), is(true));"
                     + "  // TODO(review): no recorded value for this input - value assertion omitted";
@@ -139,16 +150,19 @@ public final class AssertClassGenerator {
         String nlsKey = (hasNls && entry.nlsKey != null && !entry.nlsKey.isEmpty()) ? entry.nlsKey : null;
         if (nlsKey != null) {
             nls[0] = true;
-            String getter = isValueRole(entry.role) ? "getValue()" : "getText()";
+            String getter = isValueRole(entry) ? "getValue()" : "getText()";
             String nlsExpr = nlsValueExpr(nlsKey);
             String stripped = safeVisibleText(nlsKey, nlsFiles);
             if (stripped != null && !name.isBlank() && stripped.equals(name.trim())) {
                 return "        assertThat(" + targetExpr + getter + ", equalTo(" + nlsExpr + "));";
             }
-            return "        assertThat(" + nlsExpr + ", containsString(" + targetExpr + getter + "));";
+            // P1-02：方向必须是「页面文本包含词典文本」。页面常带动态前后缀（如 "Continue (3)"），
+            // 词典文本才是稳定的期望子串。反写 assertThat(NLS, containsString(pageText)) 会假绿/假红：
+            // 页面文本更短时永远通过、更长时永远失败（评审 P1-02）。
+            return "        assertThat(" + targetExpr + getter + ", containsString(" + nlsExpr + "));";
         }
         if (!name.isBlank()) {
-            String getter = isValueRole(entry.role) ? "getValue()" : "getText()";
+            String getter = isValueRole(entry) ? "getValue()" : "getText()";
             return "        assertThat(" + targetExpr + getter + ", is(\""
                     + CodegenFieldPlanner.escapeJava(name) + "\"));";
         }
@@ -156,11 +170,19 @@ public final class AssertClassGenerator {
         return "        assertThat(" + targetExpr + "isVisible(), is(true));";
     }
 
-    /** 取值型角色（输入框/下拉）取 {@code getValue()}，其余取 {@code getText()}。 */
-    private static boolean isValueRole(String role) {
-        String r = role == null ? "" : role.toLowerCase(Locale.ROOT);
-        return r.equals("textbox") || r.equals("searchbox") || r.equals("spinbutton")
-                || r.equals("combobox") || r.equals("listbox");
+    /**
+     * 真正有 {@code value} 语义的元素才取 {@code getValue()}（P1-03）：
+     * textbox/searchbox/spinbutton，以及<b>原生</b> {@code <select>}（role=combobox/listbox 且 tag=select）。
+     *
+     * <p>div 自绘下拉（role=combobox/listbox 但 tag≠select）没有 value 属性，{@code getValue()} 恒为空串，
+     * 断言从第一次运行就是红的；这类元素必须走 {@code getText()}。
+     */
+    private static boolean isValueRole(CodegenEntry entry) {
+        if (entry == null) return false;
+        String r = entry.role == null ? "" : entry.role.toLowerCase(Locale.ROOT);
+        if (r.equals("textbox") || r.equals("searchbox") || r.equals("spinbutton")) return true;
+        if (r.equals("combobox") || r.equals("listbox")) return "select".equals(entry.tag);
+        return false;
     }
 
     /** 运行期按 key 取可见文本的调用：直接用已 bind 的 {@code NLS} 字段。 */

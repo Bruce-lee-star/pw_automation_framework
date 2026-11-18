@@ -50,7 +50,12 @@ final class CodegenExporter {
         int written = 0;
         for (MultiPageCodegen.CodeBlock b : blocks) {
             if (b == null || b.code == null || b.code.isBlank()) continue;
-            String name = uniqueName(sanitize(b.label), used);
+            // P2-04：Java 要求 public 类名 == 文件名。文件名必须以源码里的 public class 名为准，
+            // 不能只净化 label（label 含中文/空格时会被 sanitize 成下划线，产物拷进工程即编译失败）。
+            // 类名是合法 Java 标识符（可含 Unicode 字母），不含路径分隔符，直接用作文件名是安全的。
+            String className = publicClassName(b.code);
+            String base = (className != null && !className.isBlank()) ? className : sanitize(b.label);
+            String name = uniqueName(base, used);
             Path pkgDir = packageDir(dir, b.code);
             Files.createDirectories(pkgDir);
             Files.writeString(pkgDir.resolve(name + ".java"), b.code, StandardCharsets.UTF_8);
@@ -73,6 +78,27 @@ final class CodegenExporter {
         Path p = dir;
         for (String seg : pkg.split("\\.")) p = p.resolve(seg);
         return p;
+    }
+
+    /**
+     * 取源码里的 {@code public class/interface/enum 名}（P2-04）：文件名必须与之同名。
+     * 只接受合法 Java 标识符（可含 Unicode 字母），杜绝由注释/字符串里的伪造声明参与命名。
+     */
+    static String publicClassName(String code) {
+        if (code == null) return null;
+        for (String line : code.split("\\R")) {
+            String t = line.trim();
+            for (String kw : new String[]{"public class ", "public interface ", "public enum "}) {
+                if (!t.startsWith(kw)) continue;
+                String rest = t.substring(kw.length()).trim();
+                int end = 0;
+                while (end < rest.length() && (Character.isJavaIdentifierPart(rest.charAt(end))
+                        || rest.charAt(end) == '$')) end++;
+                String name = rest.substring(0, end);
+                if (!name.isEmpty() && Character.isJavaIdentifierStart(name.charAt(0))) return name;
+            }
+        }
+        return null;
     }
 
     /** 源码首部的 package 声明；没有声明或声明非法时返回空串。 */

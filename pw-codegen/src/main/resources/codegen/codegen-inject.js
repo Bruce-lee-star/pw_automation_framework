@@ -290,7 +290,10 @@
                 }
                 /**
                  * 事件归属 URL：优先取顶层文档的 location.href（元素归属按主页面 path 分组，
-                 * 与框架 PageUrl 口径一致）；跨域 iframe 无法访问 window.top.location 时回退到自身 href。
+                 * 与框架 PageUrl 口径一致）。
+                 * P1-15：跨域 iframe 既读不到 window.top.location，也不应回退到自身 href——
+                 * 那会把元素按 iframe 内容的 URL 归键（挂到与页面无关的类）。回退空串让 Java 侧
+                 * 用 page.url()（被测主页面 URL）兜底，framePath 仍保留元素在 iframe 内的定位链。
                  */
                 function eventUrlOf() {
                     try {
@@ -298,7 +301,9 @@
                             return window.top.location.href;
                         }
                     } catch (e) { /* 跨域 iframe：fall through */ }
-                    try { return location.href; } catch (e) { return ''; }
+                    // 同源 iframe 里 top 可读但就是自己时，也优先用 top.href（=自身，等价于旧行为）。
+                    // 跨域时返回空串，交由 Java 侧 page.url() 兜底，避免 iframe 自身 URL 污染归属。
+                    return '';
                 }
                 // 注意：这里绝不 preventDefault / stopPropagation —— 拾取必须与页面交互共存
                 // （早先版本用 CDP Overlay.setInspectMode 拦截鼠标，导致「一进拾取页面就点不动」）。
@@ -321,15 +326,14 @@
                         // （radio/checkbox）再派发一次「合成 click」（label 默认行为）。该合成 click
                         // 与真实点击几乎同时、目标即控件；若照常上报会生成「label + 控件」两条记录
                         // （用户 2026-11-15 反馈：点 radio 的 label 会产出两个元素定位）。
-                        // 这里抑制被 label 转发的控件 click，仅保留用户真正点的那一次（归一后的控件），
-                        // 绝不 preventDefault —— 真实勾选/聚焦照常发生。
+                        // P1-14：仅按「时间窗 + 控件对象」会在 500ms 内吞掉用户对同一控件的真实二次点击。
+                        // 改用合成 click 的特征位：label 转发的 click 其 detail === 0（无真实鼠标按下计数），
+                        // 而用户真实点击 detail >= 1。只有 detail === 0 才可能是 label 合成事件，避免误吞真实点击。
                         if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
                                 || target.tagName === 'SELECT')) {
                             var now = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-                            // 窗口 500ms：label 的真实 click 与浏览器补发的合成 click 之间会夹一次拾取往返
-                            // （infoOf 归一 + 选择器计算）与布局抖动，冷启动实测可超过 120ms；500ms 仍远小于
-                            // 用户对同一控件两次真实点击的间隔，不足以误吞真实点击。
-                            if (__codegenLastLabel && __codegenLastLabel.ctrl === target
+                            var isSynthetic = (ev.detail === 0);
+                            if (isSynthetic && __codegenLastLabel && __codegenLastLabel.ctrl === target
                                     && (now - __codegenLastLabel.t) < 500) {
                                 __codegenLastLabel = null;
                                 return;
@@ -384,9 +388,17 @@
                 window.addEventListener('input', function (ev) {
                     try {
                         if (isCodegenUi(ev.target)) return;   // 框架自绘 UI 不录制
-                        window.__codegenEvent({ type: 'fill', tag: ev.target && ev.target.tagName,
+                        var el = ev.target;
+                        // P1-12：contenteditable 的 div 没有 value 属性（恒 undefined），必须取 innerText，
+                        // 否则后端 actionValue 为空，产物 fill("") 会在回放时清空富文本正文。
+                        var isEditable = el && (el.isContentEditable === true
+                            || el.getAttribute && el.getAttribute('contenteditable') === 'true');
+                        var value = isEditable ? (el.innerText || el.textContent || '')
+                            : ((typeof el.value === 'string') ? el.value : '');
+                        window.__codegenEvent({ type: 'fill', tag: el && el.tagName,
                             framePath: framePathOf(), url: eventUrlOf(),
-                            value: ev.target.value, info: infoOf(ev.target) });
+                            value: value, contenteditable: isEditable ? true : false,
+                            info: infoOf(el) });
                     } catch (e) {}
                 }, true);
                 // 语义事件（评审 P0-4 最小集）：change 是 select / 文本域 / file 的权威值事件，
@@ -416,15 +428,34 @@
                         window.__codegenEvent({ type: 'fill', semantic: semantic, tag: el && el.tagName,
                             framePath: framePathOf(), url: eventUrlOf(),
                             value: single, valueCount: values ? values.length : 1,
+                            // P1-13：多选 select 上报全部选中值，产物据此一次性回放所有选项；
+                            // 单选 / 非 select 不发该字段（生成侧回退单值路径）。
+                            values: values || undefined,
                             info: infoOf(el) });
                     } catch (e) {}
                 }, true);
-                // 键盘：只有 Enter / Escape / Tab 生成可回放动作，逐字符输入仍由 input 承载，不污染录制。
+                // 键盘：导航键 / 功能键 / Enter·Escape·Tab 生成可回放动作（P1-16），逐字符输入
+                // （字母 / 数字 / 符号）仍由 input 承载，不在 keydown 重复上报，避免一个字符两条动作。
                 // 修饰键按 Playwright 的 "Control+Enter" 形式拼接，否则 Ctrl+Enter 会退化成普通回车。
+                var RECORDED_KEYS = {
+                    'Enter': 1, 'Escape': 1, 'Tab': 1, 'Backspace': 1, 'Delete': 1,
+                    'Home': 1, 'End': 1, 'PageUp': 1, 'PageDown': 1,
+                    'ArrowUp': 1, 'ArrowDown': 1, 'ArrowLeft': 1, 'ArrowRight': 1
+                };
+                for (var fi = 1; fi <= 12; fi++) RECORDED_KEYS['F' + fi] = 1;
                 window.addEventListener('keydown', function (ev) {
                     try {
                         if (isCodegenUi(ev.target)) return;   // 控制条内的按键不录制
-                        var key = (ev.key === 'Enter' || ev.key === 'Escape' || ev.key === 'Tab') ? ev.key : null;
+                        var key = RECORDED_KEYS[ev.key] ? ev.key : null;
+                        // 数字 / 符号键（如 1、/）：在输入框里由 input 承载，避免重复；
+                        // 在按钮 / 容器等非输入元素上按下才是独立按键动作，正常上报（P1-16）。
+                        if (!key && (/^[0-9]$/.test(ev.key) || ev.key === '/')) {
+                            var tag = ev.target && ev.target.tagName;
+                            var editable = ev.target && (ev.target.isContentEditable === true
+                                || (ev.target.getAttribute && ev.target.getAttribute('contenteditable') === 'true'));
+                            var isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || editable;
+                            if (!isInput) key = ev.key;
+                        }
                         if (!key) return;
                         var mods = [];
                         if (ev.ctrlKey) mods.push('Control');

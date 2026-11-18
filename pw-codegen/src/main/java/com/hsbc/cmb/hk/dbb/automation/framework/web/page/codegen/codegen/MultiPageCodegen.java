@@ -4,6 +4,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEn
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 装配层：把「按会话拾取到的元素」翻译成三份产物（Page / Step / Assert）。
@@ -55,11 +56,22 @@ public final class MultiPageCodegen {
         public final List<CodegenEntry> entries;
         /** 该页的全局字段规划（保证断言里的字段名与 Page 类一致）。 */
         public final CodegenFieldPlanner.Plan plan;
+        /**
+         * 本会话内按 sigKey 的末次输入值（P0-2）：取值型元素的断言期望值必须取本会话录到的值，
+         * 而非 plan 里被全局末值覆盖的 {@code spec.recordedValue}。空 map 表示无会话维度信息（兼容旧调用）。
+         */
+        public final Map<String, String> sessionFillValues;
 
         public PageEntries(CodegenTarget target, List<CodegenEntry> entries, CodegenFieldPlanner.Plan plan) {
+            this(target, entries, plan, Map.of());
+        }
+
+        public PageEntries(CodegenTarget target, List<CodegenEntry> entries, CodegenFieldPlanner.Plan plan,
+                           Map<String, String> sessionFillValues) {
             this.target = target;
             this.entries = entries == null ? List.of() : new ArrayList<>(entries);
             this.plan = plan;
+            this.sessionFillValues = sessionFillValues == null ? Map.of() : sessionFillValues;
         }
     }
 

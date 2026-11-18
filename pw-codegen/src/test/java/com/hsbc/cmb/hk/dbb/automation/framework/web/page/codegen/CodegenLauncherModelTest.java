@@ -1,7 +1,9 @@
 package com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen;
 
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.CodegenFieldSpec;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.codegen.MultiPageCodegen;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.model.CodegenEntry;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.recorder.CodegenRecorder;
 import org.junit.Test;
 
 import java.nio.file.Files;
@@ -97,6 +99,48 @@ public class CodegenLauncherModelTest {
         assertFalse(CodegenLauncher.isIncremental(null, "A"));
     }
 
+    /** P1-01：点一下输入框（无值的 click）不得套用字段模板的 fill("末值")，应产出 click()。 */
+    @Test
+    public void clickOnTextboxDoesNotGenerateFillWithLastValue() {
+        CodegenEntry user = new CodegenEntry("textbox|Username#0", "textbox", "Username", "ROLE", 100,
+                "role=textbox[name=\"Username\"]", "#u", null, 0, List.of(), List.of(), 1, "input");
+        CodegenFieldSpec spec = new CodegenFieldSpec("username", "PageElement", "", null,
+                "fill", "fill(\"B\")", "isVisible()", false, true, user, "B");
+
+        assertEquals("聚焦输入框应产出 click()，不能写成 fill(\"末值\")",
+                "click()", CodegenLauncher.actionForPick(spec, pick(user, "click")));
+    }
+
+    /** P1-01：fill 事件但无 actionValue 时产出空串占位，绝不写死历史值。 */
+    @Test
+    public void fillWithoutValueUsesEmptyPlaceholder() {
+        CodegenEntry user = new CodegenEntry("textbox|Username#0", "textbox", "Username", "ROLE", 100,
+                "role=textbox[name=\"Username\"]", "#u", null, 0, List.of(), List.of(), 1, "input");
+        CodegenFieldSpec spec = new CodegenFieldSpec("username", "PageElement", "", null,
+                "fill", "fill(\"历史值\")", "isVisible()", false, true, user, "历史值");
+
+        assertEquals("无录制值的 fill 只能是空串占位 + TODO，不得回填历史值",
+                "fill(\"\")", CodegenLauncher.actionForPick(spec, pick(user, "fill")));
+    }
+
+    /** P1-16：方向键 / 数字键 / 功能键 / 斜杠都是 Playwright 合法键名，白名单不得丢弃。 */
+    @Test
+    public void pressAcceptsArrowsDigitsFunctionKeysAndSlash() {
+        CodegenEntry user = new CodegenEntry("textbox|Username#0", "textbox", "Username", "ROLE", 100,
+                "role=textbox[name=\"Username\"]", "#u", null, 0, List.of(), List.of(), 1, "input");
+        CodegenFieldSpec spec = new CodegenFieldSpec("username", "PageElement", "", null,
+                "fill", "fill(\"\")", "isVisible()", false, true, user, "");
+
+        assertEquals("press(PressKey.ARROW_DOWN)", CodegenLauncher.actionForPick(spec, pick(user, "press:ArrowDown")));
+        assertEquals("press(PressKey.DIGIT_1)", CodegenLauncher.actionForPick(spec, pick(user, "press:1")));
+        assertEquals("press(PressKey.F5)", CodegenLauncher.actionForPick(spec, pick(user, "press:F5")));
+        assertEquals("press(PressKey.SLASH)", CodegenLauncher.actionForPick(spec, pick(user, "press:/")));
+        assertEquals("press(PressKey.CONTROL, PressKey.ARROW_UP)",
+                CodegenLauncher.actionForPick(spec, pick(user, "press:Control+ArrowUp")));
+        // 大小写不一致也归一到枚举，杜绝 "enter"/"Enter" 回放报错
+        assertEquals("press(PressKey.ENTER)", CodegenLauncher.actionForPick(spec, pick(user, "press:enter")));
+    }
+
     @Test
     public void fillActionUsesThisPickValueNotFieldTemplate() {
         CodegenEntry user = new CodegenEntry("textbox|Username#0", "textbox", "Username", "ROLE", 100,
@@ -134,6 +178,47 @@ public class CodegenLauncherModelTest {
         p.actionValue = "HK";
 
         assertEquals("selectByValue(\"HK\")", CodegenLauncher.actionForPick(spec, p));
+    }
+
+    /** P1-13：多选 select 的全部选中值要一次性回放，不能只留首项 + TODO。 */
+    @Test
+    public void multiSelectGeneratesSelectByValuesWithAllValues() {
+        CodegenEntry multi = new CodegenEntry("combobox|Colors#0", "combobox", "Colors", "ROLE", 100,
+                "role=combobox[name=\"Colors\"]", "#colors", null, 0,
+                List.of(), List.of(), 1, "select");
+        CodegenFieldSpec spec = new CodegenFieldSpec("colors", "PageElement", "", null,
+                "select", "selectByValue(\"\")", "isVisible()", false, true, multi, "");
+        CodegenLauncher.Pick p = pick(multi, "fill");
+        p.actionValue = "red";
+        p.selectedValues = List.of("red", "green", "blue");
+        p.valueCount = 3;
+
+        assertEquals("selectByValues(\"red\", \"green\", \"blue\")",
+                CodegenLauncher.actionForPick(spec, p));
+    }
+
+    /** P1-13：载荷缺 values（老脚本）时仍回退单值路径，不猜值。 */
+    @Test
+    public void multiSelectWithoutValuesFallsBackToSingle() {
+        CodegenEntry multi = new CodegenEntry("combobox|Colors#0", "combobox", "Colors", "ROLE", 100,
+                "role=combobox[name=\"Colors\"]", "#colors", null, 0,
+                List.of(), List.of(), 1, "select");
+        CodegenFieldSpec spec = new CodegenFieldSpec("colors", "PageElement", "", null,
+                "select", "selectByValue(\"\")", "isVisible()", false, true, multi, "");
+        CodegenLauncher.Pick p = pick(multi, "fill");
+        p.actionValue = "red";
+        p.valueCount = 3;
+
+        assertEquals("selectByValue(\"red\")", CodegenLauncher.actionForPick(spec, p));
+    }
+
+    /** P1-13：stringListOf 对非法载荷（非数组 / 含非字符串）返回 null，不猜值。 */
+    @Test
+    public void stringListOfRejectsInvalidPayloads() {
+        assertEquals(List.of("A", "B"), CodegenLauncher.stringListOf(List.of("A", "B")));
+        assertEquals(null, CodegenLauncher.stringListOf("A"));
+        assertEquals(null, CodegenLauncher.stringListOf(List.of("A", 2)));
+        assertEquals(null, CodegenLauncher.stringListOf(List.of()));
     }
 
     // ------------------------------------------------------------------
@@ -232,9 +317,9 @@ public class CodegenLauncherModelTest {
         CodegenFieldSpec spec = new CodegenFieldSpec("username", "PageElement", "", null,
                 "fill", "fill(\"\")", "isVisible()", false, true, user, "");
 
-        assertEquals("press(\"Control+Enter\")",
+        assertEquals("press(PressKey.CONTROL, PressKey.ENTER)",
                 CodegenLauncher.actionForPick(spec, pick(user, "press:Control+Enter")));
-        assertEquals("press(\"Shift+Tab\")",
+        assertEquals("press(PressKey.SHIFT, PressKey.TAB)",
                 CodegenLauncher.actionForPick(spec, pick(user, "press:Shift+Tab")));
         assertEquals("非法按键名仍不得拼进源码", "fill(\"\")",
                 CodegenLauncher.actionForPick(spec, pick(user, "press:Enter\";boom")));
@@ -255,9 +340,9 @@ public class CodegenLauncherModelTest {
     @Test
     public void keyboardEventGeneratesPressAction() {
         CodegenFieldSpec spec = spec(checkbox(true), "check()", false);
-        assertEquals("press(\"Enter\")",
+        assertEquals("press(PressKey.ENTER)",
                 CodegenLauncher.actionForPick(spec, pick(checkbox(true), "press:Enter")));
-        assertEquals("press(\"Escape\")",
+        assertEquals("press(PressKey.ESCAPE)",
                 CodegenLauncher.actionForPick(spec, pick(checkbox(true), "press:Escape")));
         assertEquals("非法按键名不得拼进 Java 源码", "check()",
                 CodegenLauncher.actionForPick(spec, pick(checkbox(true), "press:Enter\"); dropTable()")));
@@ -350,5 +435,84 @@ public class CodegenLauncherModelTest {
     private static CodegenLauncher.Pick pickAt(CodegenEntry entry, String actionType, long seq) {
         return new CodegenLauncher.Pick(seq, seq, 1, entry, null, "https://example.test/",
                 null, false, true, actionType);
+    }
+
+    // ------------------------------------------------------------------
+    // T08 夹具① / P0-2：两会话「勾选 → 取消」，断言期望值必须按会话取，不得被全局末态覆盖
+    // ------------------------------------------------------------------
+
+    /**
+     * 会话1 勾选「记住我」→ 会话2 取消。断言类必须产出 {@code assert1=is(true)}、{@code assert2=is(false)}。
+     *
+     * <p>历史实现把字段视图 checked 取成全局末态（false），两个会话的断言都会被覆盖成 is(false)，回放必红。
+     * 这里直接驱动 {@link CodegenLauncher#assembleMultiPage}（package-private），覆盖
+     * Pick → buildSession → Assert 源码的完整链路，而不是只测某个纯函数片段。
+     */
+    @Test
+    public void twoSessionsCheckThenUncheck_assertPerSessionState() {
+        String url = "https://example.test/portalserver/login";
+        // 会话1：勾选（checked=true）；会话2：同一元素取消（checked=false），相同 sigKey
+        CodegenEntry checkedInS1 = new CodegenEntry("checkbox|Remember me#0", "checkbox", "Remember me", "ROLE",
+                100, "role=checkbox[name=\"Remember me\"]", "#rm", null, 0,
+                List.of(), List.of(), 1, "input", true);
+        CodegenEntry uncheckedInS2 = new CodegenEntry("checkbox|Remember me#0", "checkbox", "Remember me", "ROLE",
+                100, "role=checkbox[name=\"Remember me\"]", "#rm", null, 0,
+                List.of(), List.of(), 1, "input", false);
+        List<CodegenLauncher.Pick> picks = List.of(
+                new CodegenLauncher.Pick(1L, 1L, 1, checkedInS1, null, url, null, false, false, "click"),
+                new CodegenLauncher.Pick(2L, 2L, 2, uncheckedInS2, null, url, null, false, true, "click"));
+
+        MultiPageCodegen.MultiPageResult result = CodegenLauncher.assembleMultiPage(
+                picks, new CodegenRecorder(), List.of(), null);
+        String code = result.assertCode;
+
+        assertTrue("应生成 assert1 方法:\n" + code, code.contains("public void assert1() {"));
+        assertTrue("应生成 assert2 方法:\n" + code, code.contains("public void assert2() {"));
+        int a1 = code.indexOf("public void assert1() {");
+        int a2 = code.indexOf("public void assert2() {");
+        assertTrue("assert1 必须在 assert2 之前:\n" + code, a1 >= 0 && a2 > a1);
+        String assert1Body = code.substring(a1, a2);
+        String assert2Body = code.substring(a2);
+        assertTrue("会话1 勾选 ⇒ assert1 期望 is(true):\n" + assert1Body,
+                assert1Body.contains("isChecked(), is(true)"));
+        assertTrue("会话2 取消 ⇒ assert2 期望 is(false):\n" + assert2Body,
+                assert2Body.contains("isChecked(), is(false)"));
+    }
+
+    // ------------------------------------------------------------------
+    // T08 夹具③ / P1-07/08：press 触发 confirm→alert 链式 dialog，两段都绑定触发
+    // ------------------------------------------------------------------
+
+    /**
+     * press:Enter 提交触发 confirm，紧随 alert。
+     * 历史实现只认 click 触发且第一个 dialog 后清空 lastElement*，两段都退化成独立 acceptAlert()
+     * （监听器晚于弹窗，默认 dismiss，回放必错）。修复后两段都应包在 acceptAlert(() -> press(PressKey.ENTER)) 内。
+     */
+    @Test
+    public void pressTriggeredChainedDialogsBothBindTrigger() {
+        String url = "https://example.test/portalserver/login";
+        CodegenEntry submit = new CodegenEntry("button|Submit#0", "button", "Submit", "ROLE", 100,
+                "role=button[name=\"Submit\"]", "#submit", null, 0,
+                List.of(), List.of(), 1, "button", false);
+        List<CodegenLauncher.Pick> picks = List.of(
+                new CodegenLauncher.Pick(1L, 1L, 1, submit, null, url, null, false, false, "press:Enter"));
+        List<CodegenLauncher.DialogOp> dialogs = List.of(
+                new CodegenLauncher.DialogOp(null, "confirm", true, 2L, 1),
+                new CodegenLauncher.DialogOp(null, "alert", true, 3L, 1));
+
+        MultiPageCodegen.MultiPageResult result = CodegenLauncher.assembleMultiPage(
+                picks, new CodegenRecorder(), dialogs, null);
+        String step = result.stepCode;
+
+        int bound = 0;
+        int idx = 0;
+        while ((idx = step.indexOf("acceptAlert(() ->", idx)) >= 0) {
+            bound++;
+            idx += 1;
+        }
+        assertEquals("confirm + alert 两段都应绑定触发:\n" + step, 2, bound);
+        assertTrue("触发动作必须是本步 press(PressKey):\n" + step, step.contains("press(PressKey.ENTER)"));
+        assertFalse("不应出现未绑定触发的独立 acceptAlert():\n" + step,
+                step.matches("(?s).*acceptAlert\\(\\);.*"));
     }
 }

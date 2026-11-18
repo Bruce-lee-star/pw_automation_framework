@@ -80,9 +80,12 @@ public final class StepClassGenerator {
                 }
             }
             if (usesPageSwitch(s)) {
-                // waitForNewPage 返回新页 Page，供 switchToPage(newPage) 显式绑定目标页对象
-                seen.add("Page");
-                imports.add("com.microsoft.playwright.Page");
+                // waitForNewPage 返回新页 Page，供 switchToPage(newPage) 显式绑定目标页对象。
+                // P2-02：判重必须用 FQN——seen 集合里存的是 "包.类名"，混入简单名 "Page" 会与
+                // 名为 Page 的页面类冲突，导致 com.microsoft.playwright.Page 导入被漏掉。
+                if (seen.add("com.microsoft.playwright.Page")) {
+                    imports.add("com.microsoft.playwright.Page");
+                }
             }
 
             List<String> body = new ArrayList<>();
@@ -98,6 +101,14 @@ public final class StepClassGenerator {
             m.put("name", "step" + s.index);
             m.put("bodyLines", body);
             methods.add(m);
+        }
+
+        // press 产物用 PressKey 枚举重载（避免字符串键名大小写不一致回放报错），按需注入 import。
+        boolean usesPressKey = methods.stream()
+                .flatMap(m -> ((List<?>) m.get("bodyLines")).stream())
+                .anyMatch(line -> line instanceof String && ((String) line).contains("PressKey."));
+        if (usesPressKey) {
+            imports.add("com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PressKey");
         }
 
         Map<String, Object> model = new LinkedHashMap<>();
@@ -157,9 +168,16 @@ public final class StepClassGenerator {
                 // 且不依赖任何"全局当前页"隐式状态。同方法多次切页时变量按序编号（newPage1..N）。
                 out.add("        Page newPage" + newPageSeq + " = " + pageVar(a.target) + ".waitForNewPage(() -> "
                         + pageVar(a.target) + "." + a.fieldName + "." + a.action + ");");
-                if (a.toTarget != null && !a.toTarget.equals(a.target)) {
-                    out.add("        " + pageVar(a.toTarget) + ".switchToPage(newPage" + newPageSeq + ");");
-                }
+                // P0-3：新标签与旧标签同 URL 时 toTarget == a.target（PageUrl 忽略标签身份），
+                // 若据此跳过 switchToPage，newPageN 声明后无人使用、后续动作全打在旧页对象上。
+                // 因此【总是生成切页绑定】：不同 URL 绑到新页类 toTarget；同页类新标签绑到来源页自身
+                // 的 pageVar（把其 owner 指向新页）；toTarget 缺失时退回来源页，保证 newPageN 必被使用。
+                CodegenTarget switchTarget = a.toTarget != null ? a.toTarget : a.target;
+                out.add("        " + pageVar(switchTarget) + ".switchToPage(newPage" + newPageSeq + ");"
+                        + (a.toTarget != null && a.toTarget.equals(a.target)
+                           ? "  // TODO(review): same page class in a new tab - this rebinds the single "
+                             + "page object to the new tab; keep both tabs only if the framework supports it"
+                           : ""));
                 break;
             case NAVIGATION:
                 // 同标签页内 URL 跳转：不切页、不等待，仅提示（该页对象已声明为类字段）。

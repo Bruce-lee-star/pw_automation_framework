@@ -21,6 +21,7 @@ import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPa
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.CodegenPanelManager;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.panel.PanelResource;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.page.codegen.recorder.CodegenRecorder;
+import com.hsbc.cmb.hk.dbb.automation.framework.web.page.element.PressKey;
 import com.hsbc.cmb.hk.dbb.automation.framework.web.utils.NLSUtils;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Dialog;
@@ -191,6 +192,11 @@ public final class CodegenLauncher {
         /** 本次动作携带的值的个数（multiple select = 选中项数；其余 = 1），用于产物 TODO 提示。 */
         volatile int valueCount = 1;
         /**
+         * 多选 select 本次选中的<b>全部</b>值（P1-13）。单值 / 非 select 为 null。
+         * 生成侧据此产出可回放全部选项的 {@code selectByValues(...)}，而不是只留首项 + TODO。
+         */
+        volatile java.util.List<String> selectedValues;
+        /**
          * 页面侧元素身份（{@code docId}）：元素所属<b>文档</b>的随机标识（注入脚本每次文档加载生成）。
          *
          * <p>与 {@link #eid} 一起构成「同一文档里的同一个节点」，是
@@ -261,7 +267,8 @@ public final class CodegenLauncher {
     }
 
     /** 一次原生对话框事件（已自动关闭）：记录所属页 / 类型 / accept，供步骤里生成 {@code acceptAlert/dismissAlert}。 */
-    private static final class DialogOp {
+    /** package-private 供端到端 golden 测试直接驱动 assembleMultiPage（不改变行为）。 */
+    static final class DialogOp {
         final Page page;
         final String type;
         final boolean accept;
@@ -1314,7 +1321,10 @@ public final class CodegenLauncher {
                                 : "file".equals(semantic) ? "file" : repeatType;
                         int valueCount = payload.get("valueCount") instanceof Number
                                 ? ((Number) payload.get("valueCount")).intValue() : 1;
-                        Pick lastFill = lastFillPick(picked, matchedKey);
+                        // P1-13：多选 select 的全部选中值随载荷上报，供产物一次性回放所有选项。
+                        java.util.List<String> selectedValues = stringListOf(payload.get("values"));
+                        int pickSession = currentSession(sessionSeq);
+                        Pick lastFill = lastFillPick(picked, matchedKey, pickSession);
                         // 逐键输入合并、重新填写切分（P1 值维度）：
                         // ① 值相同（含 change 在失焦时重报同一值）→ 合并，避免一次选择留两条等价动作；
                         // ② 未盖章且值互为前缀（打字/退格）→ 合并，末次值覆盖；
@@ -1327,6 +1337,7 @@ public final class CodegenLauncher {
                                         && isIncremental(lastFill.actionValue, currentValue)));
                         if (continuousFill) {
                             lastFill.actionValue = currentValue;
+                            if (selectedValues != null) lastFill.selectedValues = selectedValues;
                         } else {
                             CodegenEntry repeatEntry = resolveCheckedState(existing.entry, info, repeatType);
                             // URL 归属与首次拾取一致：用点击捕获阶段的 url，导航型元素重复操作时才不会归到新页面。
@@ -1337,6 +1348,7 @@ public final class CodegenLauncher {
                                     existing.extractor, false, true, actionTag);
                             np.actionValue = fillEvent ? currentValue : null;
                             np.valueCount = Math.max(1, valueCount);
+                            np.selectedValues = selectedValues;
                             // 重复动作同样要带上元素身份：否则「第三次点同一元素」只能靠 role+name 反查，
                             // 又会把同 role+name 的孪生元素并进来。
                             np.identify(docIdOf(info), eidOf(info));
@@ -1344,7 +1356,7 @@ public final class CodegenLauncher {
                         }
                         // change = 「这次填写完成」的语义盖章：下一次出现非增量值必须另起一条动作。
                         if (fillEvent && "change".equals(semantic)) {
-                            Pick committed = continuousFill ? lastFill : lastFillPick(picked, matchedKey);
+                            Pick committed = continuousFill ? lastFill : lastFillPick(picked, matchedKey, pickSession);
                             if (committed != null) committed.fillCommitted = true;
                         }
                     }
@@ -1695,11 +1707,16 @@ public final class CodegenLauncher {
         return null;
     }
 
-    /** 同一元素最近一条动作型 fill（逐键输入合并到这条上；没有则返回 null，表示本次应新建动作）。 */
-    private static Pick lastFillPick(List<Pick> picked, String sigKey) {
+    /**
+     * 同一元素<b>本会话内</b>最近一条动作型 fill（逐键输入合并到这条上；没有则返回 null，表示本次应新建动作）。
+     *
+     * <p>必须限定会话（P1-11）：否则会话2 的第一次输入会被误合并到会话1 的末条 fill 上，
+     * 两条本该独立的填表动作被吞成一条。
+     */
+    private static Pick lastFillPick(List<Pick> picked, String sigKey, int session) {
         Pick last = null;
         for (Pick p : picked) {
-            if (p.actionOnly && p.entry.sigKey.equals(sigKey)) last = p;
+            if (p.actionOnly && p.session == session && p.entry.sigKey.equals(sigKey)) last = p;
         }
         return (last != null && "fill".equals(last.actionType)) ? last : null;
     }
@@ -1800,6 +1817,20 @@ public final class CodegenLauncher {
             path.add(((Number) item).intValue());
         }
         return path;
+    }
+
+    /**
+     * 从事件载荷取多选 select 的全部选中值（P1-13）；缺失 / 非数组 / 含非字符串项一律返回 null
+     * （生成侧据此退回单值 + TODO，不猜值）。
+     */
+    static List<String> stringListOf(Object raw) {
+        if (!(raw instanceof List<?> items) || items.isEmpty()) return null;
+        List<String> out = new ArrayList<>(items.size());
+        for (Object item : items) {
+            if (!(item instanceof String)) return null;
+            out.add((String) item);
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------
@@ -2033,16 +2064,23 @@ public final class CodegenLauncher {
      */
     static List<CodegenEntry> orderBySequence(Collection<CodegenEntry> entries, List<String> actionKeys) {
         List<CodegenEntry> out = new ArrayList<>();
+        // P2-03：原来用 out.contains(e) 去重是 O(n²)（CodegenEntry 未重写 equals，按引用比较）。
+        // 改用身份语义的 Set 保持"同一对象只出现一次"的原有语义，同时降到 O(1) 查找。
+        Set<CodegenEntry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         for (String key : actionKeys) {
             for (CodegenEntry e : entries) {
-                if (e.sigKey.equals(key) && !out.contains(e)) {
+                if (e.sigKey.equals(key) && !seen.contains(e)) {
                     out.add(e);
+                    seen.add(e);
                     break;
                 }
             }
         }
         for (CodegenEntry e : entries) {
-            if (!out.contains(e)) out.add(e);
+            if (!seen.contains(e)) {
+                out.add(e);
+                seen.add(e);
+            }
         }
         return out;
     }
@@ -2294,8 +2332,9 @@ public final class CodegenLauncher {
      * 会话内一旦活动页变化，就把「变化前在上一页的最后一个操作」升级为
      * {@code from.waitForNewPage(() -> from.trigger.action)} —— 触发元素不会在来源页被重复点击。
      */
-    private static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
-                                                                    List<DialogOp> dialogOps, String[] nlsFiles) {
+    /** 装配会话产物。package-private 供端到端 golden 测试直接驱动（不改变行为）。 */
+    static MultiPageCodegen.MultiPageResult assembleMultiPage(List<Pick> picks, CodegenRecorder recorder,
+                                                              List<DialogOp> dialogOps, String[] nlsFiles) {
         // 0) 视图分流：字段视图（每元素一次，供 Page 类 / plan / 断言字段名）与动作视图
         //    （含「对已拾取元素的后续操作」，供 Step 动作时间线）。二者不能混用，否则
         //    「勾 → 取消」「同字段两次不同值提交」会因 sigKey 相同而被吞掉（P0-3）。
@@ -2405,8 +2444,10 @@ public final class CodegenLauncher {
             if (e == null || e.nlsKey == null || e.nlsKey.isEmpty()) continue;
             if (e.name == null || e.name.isBlank()) continue;
             if (!e.framePath.isEmpty() || !e.shadowHosts.isEmpty()) continue;
-            // 缓存键含 role：同名不同角色的唯一定性本来就不同（如 label "Continue" vs button "Continue"）。
-            String cacheKey = e.role + "\u0000" + e.name;
+            // P1-10：缓存键必须含页面 URL 维度——同一个 role+name 在 A 页唯一、在 B 页可能命中多个，
+            // 仅按 role+name 缓存会把 A 的唯一性结论串到 B（产物在 B 页 strict mode 下多命中失败）。
+            // role 也保留：同名不同角色的唯一定性本就不同（label "Continue" vs button "Continue"）。
+            String cacheKey = urlKey(p.url) + "\u0000" + e.role + "\u0000" + e.name;
             boolean unique = byKey.computeIfAbsent(cacheKey, k -> isTextSemanticUnique(p, e));
             if (unique) {
                 out.add(e.sigKey);
@@ -2527,26 +2568,37 @@ public final class CodegenLauncher {
         int lastElementActionIndex = -1;
         for (SessionItem item : items) {
             if (item.dialog != null) {
-                CodegenTarget t = pageToTarget.get(item.dialog.page);
+                // P1-07/08/09：触发动作不再只认 click（press:Enter / fill(select) 同样触发 dialog）；
+                // lastElement* 处理完第一个 dialog 不再清空，链式 confirm→alert 的每一段都能绑定触发；
+                // dialog 目标优先按「触发元素所在 URL」取（同标签页导航后元素归新页类，不能用 page 首个目标）。
+                boolean triggerAvailable = lastElementAction != null && lastElementPick != null
+                        && lastElementActionIndex >= 0 && lastElementActionIndex < actions.size()
+                        && lastElementAction.kind == MultiPageCodegen.ActionKind.ELEMENT  // 不替换 pageSwitch / navigation
+                        && lastElementPick.page == item.dialog.page
+                        && item.dialog.seq > lastElementPick.seq;
+                CodegenTarget t = null;
+                if (triggerAvailable) {
+                    t = targets.get(new PageUrl(lastElementPick.page, lastElementPick.url));
+                }
+                if (t == null) t = pageToTarget.get(item.dialog.page);
                 if (t != null) {
-                    // 触发 dialog 的 click 在捕获阶段先被拾取，dialog 紧随其后（seq 更大）且同页。
-                    // 满足则把那条元素动作升级为 acceptAlert(() -> click())，否则独立成行 + TODO。
-                    boolean triggerAvailable = lastElementAction != null && lastElementPick != null
-                            && lastElementActionIndex >= 0 && lastElementActionIndex < actions.size()
-                            && lastElementPick.page == item.dialog.page
-                            && item.dialog.seq > lastElementPick.seq
-                            && "click".equals(lastElementPick.actionType);
                     if (triggerAvailable) {
-                        actions.set(lastElementActionIndex, MultiPageCodegen.SessionAction.dialogWithTrigger(
-                                t, item.dialog.accept, lastElementAction.fieldName, lastElementAction.action));
+                        MultiPageCodegen.SessionAction bound = MultiPageCodegen.SessionAction.dialogWithTrigger(
+                                t, item.dialog.accept, lastElementAction.fieldName, lastElementAction.action);
+                        // 首个 dialog 就地替换触发动作；链式后续 dialog（confirm→alert）追加新行，
+                        // 各自带同一触发（先武装 onceDialog 再触发），不能反复覆盖同一个下标。
+                        if (actions.get(lastElementActionIndex).kind == MultiPageCodegen.ActionKind.DIALOG) {
+                            actions.add(bound);
+                        } else {
+                            actions.set(lastElementActionIndex, bound);
+                        }
                     } else {
                         actions.add(MultiPageCodegen.SessionAction.dialog(t, item.dialog.accept));
                     }
                 }
+                // P1-08：不清空 lastElement* —— 链式 dialog（confirm→alert）的下一段仍能绑定同一触发；
+                // 仅在真正切换到另一个页面 / 标签页时才失效（由后续 pick 的 page 变化自然覆盖）。
                 prevPick = null;
-                lastElementAction = null;
-                lastElementPick = null;
-                lastElementActionIndex = -1;
                 continue;
             }
             Pick p = item.pick;
@@ -2578,8 +2630,11 @@ public final class CodegenLauncher {
 
             if (triggerIds.contains(p.id)) {
                 lastActionBySig.put(p.entry.sigKey, signature);
+                // P0-1：触发器必须用「本步」动作 action（actionForPick 已按本次 fill 值 / check·uncheck 算好），
+                // 不能用字段模板 spec.action——那是全局末值，会让「填 A 提交切页 / 填 B 提交切页」的
+                // 第一个 waitForNewPage lambda 写成 B；勾选框触发切页还会把 uncheck() 写成 check()。
                 actions.add(MultiPageCodegen.SessionAction.pageSwitch(
-                        t, spec.fieldName, spec.action, triggerToPage.get(p.id)));
+                        t, spec.fieldName, action, triggerToPage.get(p.id)));
                 continue;
             }
             String previous = lastActionBySig.put(p.entry.sigKey, signature);
@@ -2591,7 +2646,10 @@ public final class CodegenLauncher {
                 // fakepath 不可用：产物给可编译的 uploadFile 占位 + TODO，不让假路径蒙混过关。
                 todo = "replace the placeholder with a real classpath/file path, "
                         + "e.g. uploadFile(\"files/xxx.pdf\")";
-            } else if (p.valueCount > 1) {
+            } else if (p.valueCount > 1
+                    && (p.selectedValues == null || p.selectedValues.size() <= 1)) {
+                // P1-13：载荷已带全量值时 selectByValues(...) 会一次回放全部，不再打这条 TODO；
+                // 仅当值没随载荷上来（老脚本 / 载荷缺 values）才提示人工补全。
                 todo = "multiple select: only the first of " + p.valueCount
                         + " values is generated; add the rest manually";
             }
@@ -2603,29 +2661,33 @@ public final class CodegenLauncher {
             lastElementActionIndex = actions.size() - 1;
         }
 
-        // 断言：本会话每页类的元素（保持会话内操作顺序、按 sigKey 去重）。
-        // 必须放 plan.fields 里的「同一个 entry 对象」：AssertClassGenerator.specOf 按引用比较；
-        // 该对象已按末次勾选态修正，因此断言期望值自然取最终状态（P0-3）。
+        // 断言（P0-2）：期望值取【本会话内】该字段的末态，而不是 plan.fields 里被全局末态覆盖过的 entry。
+        // timeline 已按 seq 升序，同一 sigKey 最后一次拾取的 entry 即本会话终态：
+        //   会话1 勾选「记住我」→ assert1 期望 is(true)；会话2 取消 → assert2 期望 is(false)。
+        // entry 不再要求与 plan.fields 同一引用（specOf 改按 sigKey 匹配），字段名规划仍与 Page/Step 共用 plan。
+        Map<String, CodegenEntry> sessionLastBySig = new LinkedHashMap<>();
+        Map<String, String> sessionFillBySig = new LinkedHashMap<>();
+        for (Pick p : timeline) {
+            if (p.entry == null || p.entry.sigKey == null) continue;
+            sessionLastBySig.put(p.entry.sigKey, p.entry);
+            if ("fill".equals(p.actionType) && p.actionValue != null) {
+                sessionFillBySig.put(p.entry.sigKey, p.actionValue);
+            }
+        }
         List<MultiPageCodegen.PageEntries> asserts = new ArrayList<>();
         for (CodegenTarget tgt : pageTargets) {
             List<CodegenEntry> es = new ArrayList<>();
             Set<String> seen = new LinkedHashSet<>();
             CodegenFieldPlanner.Plan plan = planByTarget.get(tgt);
-            Map<String, CodegenEntry> canonical = new LinkedHashMap<>();
-            if (plan != null && plan.fields != null) {
-                for (CodegenFieldSpec f : plan.fields) {
-                    if (f.entry != null && f.entry.sigKey != null) canonical.put(f.entry.sigKey, f.entry);
-                }
-            }
             for (Pick p : timeline) {
                 CodegenTarget t = targets.get(new PageUrl(p.page, p.url));
                 if (t == null || !t.equals(tgt) || p.entry == null || p.entry.sigKey == null) continue;
                 if (!seen.add(p.entry.sigKey)) continue;
-                CodegenEntry e = canonical.get(p.entry.sigKey);
+                CodegenEntry e = sessionLastBySig.get(p.entry.sigKey);
                 if (e != null) es.add(e);
             }
             if (!es.isEmpty()) {
-                asserts.add(new MultiPageCodegen.PageEntries(tgt, es, plan));
+                asserts.add(new MultiPageCodegen.PageEntries(tgt, es, plan, sessionFillBySig));
             }
         }
 
@@ -2848,6 +2910,25 @@ public final class CodegenLauncher {
     }
 
     /**
+     * 把录制键名（如 {@code Enter} / {@code Control+Enter} / {@code arrowdown}）转成
+     * {@link PressKey} 枚举重载表达式 {@code press(PressKey.ENTER, PressKey.CONTROL...)}。
+     *
+     * <p>任一组合段不在枚举中（大小写不敏感）就返回 {@code null}，由调用方回退 String 重载——
+     * 不静默丢动作，也绝不让大小写不一致的字符串进入产物。
+     */
+    static String pressActionExpr(String target, String combo) {
+        String[] parts = combo.split("\\+", -1);
+        StringBuilder expr = new StringBuilder(target).append("press(");
+        for (int i = 0; i < parts.length; i++) {
+            PressKey key = PressKey.parse(parts[i]);
+            if (key == null) return null;
+            if (i > 0) expr.append(", ");
+            expr.append("PressKey.").append(key.name());
+        }
+        return expr.append(')').toString();
+    }
+
+    /**
      * 按「本次操作」而非「字段的固定模板」生成动作：checkbox 连续勾选→取消时，
      * 两次点击必须分别产出 {@code check()} / {@code uncheck()}。
      */
@@ -2875,6 +2956,16 @@ public final class CodegenLauncher {
         // 无法代表历史上每一次填写（填 A 提交 → 填 B 提交，两次的实参必须各自不同）。
         if ("fill".equals(p.actionType) && p.actionValue != null) {
             if ("select".equals(p.entry.tag)) {
+                // P1-13：多选 select 用全部选中值一次性回放（selectOption(values) 语义），
+                // 而不是只留首项 + TODO——否则录制选了 3 项、回放只选 1 项且断言静默通过。
+                if (p.selectedValues != null && p.selectedValues.size() > 1) {
+                    StringBuilder sb = new StringBuilder(target).append("selectByValues(");
+                    for (int i = 0; i < p.selectedValues.size(); i++) {
+                        if (i > 0) sb.append(", ");
+                        sb.append('"').append(CodegenFieldPlanner.escapeJava(p.selectedValues.get(i))).append('"');
+                    }
+                    return sb.append(')').toString();
+                }
                 return p.actionValue.isEmpty() ? spec.action
                         : target + "selectByValue(\"" + CodegenFieldPlanner.escapeJava(p.actionValue) + "\")";
             }
@@ -2882,14 +2973,26 @@ public final class CodegenLauncher {
                 return target + "fill(\"" + CodegenFieldPlanner.escapeJava(p.actionValue) + "\")";
             }
         }
-        // 键盘语义事件（Enter / Escape / Tab）：按本次按键生成可回放的 press(...)，
-        // 而不是复用字段模板里的 fill/click。按键名限定为字母，杜绝拼接注入。
+        // 键盘语义事件（Enter / Escape / Tab / 方向键 / 功能键）：按本次按键生成可回放的 press(...)。
+        // 产物一律用 PressKey 枚举重载——字符串键名大小写/拼写敏感（"enter" vs "Enter"）会回放报错。
         if (p.actionType != null && p.actionType.startsWith("press:")) {
             String key = p.actionType.substring("press:".length());
-            // 允许 "Control+Enter" 这类组合键；仍只接受字母与 '+'，杜绝拼入引号/分号。
-            if (key.matches("[A-Za-z+]+")) {
+            // 组合键用 '+' 连接；仍拒绝引号/分号/括号等非键名字符，杜绝拼入 Java 源码。
+            if (key.matches("[A-Za-z0-9/+]+")) {
+                String enumExpr = pressActionExpr(target, key);
+                if (enumExpr != null) return enumExpr;
+                // 枚举未覆盖的键：回退到废弃的 String 重载仍可回放（兼容），不静默丢弃动作。
                 return target + "press(\"" + key + "\")";
             }
+        }
+        // P1-01：点一下输入框（聚焦 / 开日期选择器）等「非输入事件」不能套用字段模板的 fill(末值)，
+        // 否则回放会先把框重写成历史值，行为与录制完全不同。verb=fill 的字段遇到纯 click 时产出 click()；
+        // 空值 fill（actionValue==null）则产出 fill("") + 由调用方补 TODO，绝不写死历史值。
+        if ("click".equals(p.actionType) && ("fill".equals(spec.verb) || "select".equals(spec.verb))) {
+            return target + "click()";
+        }
+        if ("fill".equals(p.actionType) && p.actionValue == null && "fill".equals(spec.verb)) {
+            return target + "fill(\"\")";
         }
         return spec.action;
     }

@@ -119,6 +119,27 @@ public class CodegenExporterTest {
         }
     }
 
+    /** P2-04：文件名必须与源码里的 public class 同名（含中文类名），否则拷进工程 javac 报错。 */
+    @Test
+    public void fileNameMatchesPublicClassEvenForCjkName() throws Exception {
+        Path dir = Files.createTempDirectory("codegen-export-");
+        try {
+            MultiPageCodegen.MultiPageResult result = new MultiPageCodegen.MultiPageResult(
+                    "public class 登录页 {}", "", "",
+                    List.of(block("登录页", "public class 登录页 {}")), List.of(), List.of());
+            CodegenExporter.export(result, dir);
+
+            assertTrue("必须按 public class 名命名，而不是把中文净化成下划线",
+                    Files.exists(dir.resolve("登录页.java")));
+            assertEquals("public class 登录页 {}", Files.readString(dir.resolve("登录页.java")));
+            assertEquals("登录页", CodegenExporter.publicClassName("public class 登录页 extends Base {}"));
+            assertEquals("LoginPage", CodegenExporter.publicClassName("public class LoginPage {"));
+            assertEquals(null, CodegenExporter.publicClassName("// public class Fake {"));
+        } finally {
+            deleteTree(dir);
+        }
+    }
+
     @Test
     public void missingOrEmptyResultIsRejected() throws Exception {
         assertThrows(IllegalStateException.class, () -> CodegenExporter.export(null, Path.of("target")));

@@ -574,7 +574,35 @@ public class PageElement {
     }
 
     // ==================== Keyboard ====================
+    /**
+     * 按键（枚举重载，推荐）。组合键按顺序传入，如 {@code press(PressKey.CONTROL, PressKey.ENTER)}
+     * 生成 Playwright 的 {@code "Control+Enter"}。
+     *
+     * @throws IllegalArgumentException 未传任何键 / 含 null
+     */
+    public PageElement press(PressKey... keys) {
+        if (keys == null || keys.length == 0) {
+            throw new IllegalArgumentException("press: at least one PressKey is required");
+        }
+        StringBuilder combo = new StringBuilder();
+        for (PressKey k : keys) {
+            if (k == null) throw new IllegalArgumentException("press: null PressKey is not allowed");
+            if (combo.length() > 0) combo.append('+');
+            combo.append(k.keyName());
+        }
+        return pressKeyName(combo.toString());
+    }
+
+    /**
+     * @deprecated 用 {@link #press(PressKey...)}：字符串键名大小写/拼写敏感（如 {@code "enter"} 会抛错），
+     *             枚举在编译期收口合法键名。保留仅为兼容既有调用方。
+     */
+    @Deprecated
     public PageElement press(String key) {
+        return pressKeyName(key);
+    }
+
+    private PageElement pressKeyName(String key) {
         executeWithRetry(() -> {
             locatorInternal().press(key, new Locator.PressOptions().setTimeout(opTimeout()));
             return true;
@@ -829,6 +857,22 @@ public class PageElement {
             locatorInternal().selectOption(value, new Locator.SelectOptionOptions().setTimeout(opTimeout()));
             return true;
         }, "selectByValue");
+        return this;
+    }
+
+    /**
+     * 多选 select 一次性选中全部指定值。
+     *
+     * <p>Playwright 的 {@code selectOption(String)} 是「替换整组选中项」，链式调用
+     * {@code selectByValue("A").selectByValue("B")} 只会保留 B。多值必须用
+     * {@code selectOption(String...)} 重载一次下发，才能同时选中 A 与 B。
+     * 供 codegen 对多选 select 录制产物使用（P1-13）。
+     */
+    public PageElement selectByValues(String... values) {
+        executeWithRetry(() -> {
+            locatorInternal().selectOption(values, new Locator.SelectOptionOptions().setTimeout(opTimeout()));
+            return true;
+        }, "selectByValues");
         return this;
     }
 
