@@ -37,8 +37,11 @@ a { color:var(--primary); }
 .topbar-stack { line-height:1.6; }
 .topbar-side.is-right .topbar-stack { text-align:right; }
 .topbar-stack .topbar-ver { display:block; }
-.topbar-title { flex:0 1 auto; text-align:center; font-size:18px; font-weight:700;
-                letter-spacing:.3px; white-space:nowrap; }
+/* 报告名（project.report.name）：过长时必须自动换行，不能 nowrap 撑破中间栏与右侧 build 信息重叠。
+   min-width:0 覆盖 flex item 默认 min-width:auto（否则不收缩）；overflow-wrap:anywhere 连无空格长串也能断行。 */
+.topbar-title { flex:0 1 auto; min-width:0; text-align:center; font-size:18px; font-weight:700;
+                letter-spacing:.3px; white-space:normal; overflow-wrap:anywhere; word-break:break-word;
+                max-width:100%; }
 .topbar-ver { font-size:12px; opacity:.85; white-space:nowrap; }
 /* CI / 构建链接（顶栏右侧，仅 Jenkins / GitLab CI 运行且存在 BUILD_URL 时渲染）：
    企业级状态条风格的 pill；有构建 URL 才是 <a>（target=_blank + rel=noopener 防反向标签页劫持），

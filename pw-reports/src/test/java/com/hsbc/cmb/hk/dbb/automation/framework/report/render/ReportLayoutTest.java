@@ -298,6 +298,24 @@ class ReportLayoutTest {
     }
 
     @Test
+    @DisplayName("报告名过长时自动换行，不与右侧 build 信息重叠")
+    void topbarTitleWrapsWhenLong() throws Exception {
+        String css;
+        try (var in = ReportLayoutTest.class.getClassLoader()
+                .getResourceAsStream("assets/report-v2.css")) {
+            assertThat(in).isNotNull();
+            css = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        //  不能 nowrap；必须 min-width:0（flex item 默认不收缩）+ 允许断行，长名才能换行而非撑破中栏。
+        assertThat(css)
+                .contains(".topbar-title")
+                .doesNotContain("letter-spacing:.3px; white-space:nowrap")
+                .contains("white-space:normal")
+                .contains("overflow-wrap:anywhere")
+                .contains("min-width:0");
+    }
+
+    @Test
     @DisplayName("截图改为点击放大：shot-zoom + 全屏预览层 + 再点/Esc 恢复")
     void screenshotsZoomOnClickAndRestoreOnSecondClick() throws Exception {
         String html = HtmlRenderer.renderToString(OutcomeFixtures.full());
