@@ -33,22 +33,27 @@ a { color:var(--primary); }
 /* 三栏：左=返回（flex:1）、中=报告名（真正居中）、右=版本（flex:1 右对齐） */
 .topbar-side { flex:1 1 0; display:flex; align-items:center; min-width:0; }
 .topbar-side.is-right { justify-content:flex-end; }
-/* 右侧多行概要：flex 容器里 <br> 会退化成匿名 flex item、不可靠，改用块级堆叠 */
-.topbar-stack { line-height:1.6; }
+/* 右侧多行概要：flex 容器里 <br> 会退化成匿名 flex item、不可靠，改用块级堆叠。
+   min-width:0 让 build 区在空间紧张时可收缩（否则 flex item 默认 min-width:auto 拒绝收缩、撑破标题）。 */
+.topbar-stack { line-height:1.6; min-width:0; }
 .topbar-side.is-right .topbar-stack { text-align:right; }
 .topbar-stack .topbar-ver { display:block; }
-/* 报告名（project.report.name）：过长时必须自动换行，不能 nowrap 撑破中间栏与右侧 build 信息重叠。
-   min-width:0 覆盖 flex item 默认 min-width:auto（否则不收缩）；overflow-wrap:anywhere 连无空格长串也能断行。 */
-.topbar-title { flex:0 1 auto; min-width:0; text-align:center; font-size:18px; font-weight:700;
+/* 报告名（project.report.name）：过长时自动换行 + 字体随视口收缩，不与右侧 build 信息重叠。
+   min-width:0 覆盖 flex item 默认 min-width:auto（否则不收缩）；overflow-wrap:anywhere 连无空格长串也能断行；
+   clamp(13px,1.5vw,18px) 让窄屏/长名时字号从 18px 平滑降到 13px。 */
+.topbar-title { flex:0 1 auto; min-width:0; text-align:center;
+                font-size:clamp(13px,1.5vw,18px); font-weight:700;
                 letter-spacing:.3px; white-space:normal; overflow-wrap:anywhere; word-break:break-word;
                 max-width:100%; }
-.topbar-ver { font-size:12px; opacity:.85; white-space:nowrap; }
+/* build 信息（时间行）允许换行收缩：去掉 nowrap，长 job/build 信息不会撑破右栏。 */
+.topbar-ver { font-size:12px; opacity:.85; white-space:normal; overflow-wrap:anywhere; }
 /* CI / 构建链接（顶栏右侧，仅 Jenkins / GitLab CI 运行且存在 BUILD_URL 时渲染）：
    企业级状态条风格的 pill；有构建 URL 才是 <a>（target=_blank + rel=noopener 防反向标签页劫持），
    hover 微亮。 */
 .topbar .topbar-build { display:inline-flex; align-items:center; gap:6px; margin-top:3px;
                         padding:2px 10px; border:1px solid rgba(255,255,255,.5); border-radius:999px;
-                        font-size:12px; line-height:1.5; color:#fff; opacity:.95; }
+                        font-size:12px; line-height:1.5; color:#fff; opacity:.95;
+                        max-width:100%; flex-wrap:wrap; overflow-wrap:anywhere; }
 .topbar a.topbar-build { text-decoration:none; }
 .topbar a.topbar-build:hover { background:rgba(255,255,255,.18); opacity:1; text-decoration:none; }
 .topbar .topbar-build .tb-ci { font-weight:700; letter-spacing:.04em; text-transform:uppercase; }

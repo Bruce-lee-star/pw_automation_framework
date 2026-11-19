@@ -298,21 +298,26 @@ class ReportLayoutTest {
     }
 
     @Test
-    @DisplayName("报告名过长时自动换行，不与右侧 build 信息重叠")
-    void topbarTitleWrapsWhenLong() throws Exception {
+    @DisplayName("报告名过长时换行+缩小字体，build 信息可收缩，不互相重叠")
+    void topbarTitleWrapsAndShrinksWhenLong() throws Exception {
         String css;
         try (var in = ReportLayoutTest.class.getClassLoader()
                 .getResourceAsStream("assets/report-v2.css")) {
             assertThat(in).isNotNull();
             css = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
-        //  不能 nowrap；必须 min-width:0（flex item 默认不收缩）+ 允许断行，长名才能换行而非撑破中栏。
+        //  标题：不能 nowrap；min-width:0 + 断行 + clamp 字体（窄屏/长名缩小）。
         assertThat(css)
                 .contains(".topbar-title")
                 .doesNotContain("letter-spacing:.3px; white-space:nowrap")
+                .contains("font-size:clamp(13px,1.5vw,18px)")
                 .contains("white-space:normal")
-                .contains("overflow-wrap:anywhere")
-                .contains("min-width:0");
+                .contains("overflow-wrap:anywhere");
+        //  build 区可收缩：stack 有 min-width:0，时间行去掉 nowrap，build pill 可 wrap。
+        assertThat(css)
+                .contains(".topbar-stack { line-height:1.6; min-width:0; }")
+                .doesNotContain(".topbar-ver { font-size:12px; opacity:.85; white-space:nowrap; }")
+                .contains("max-width:100%; flex-wrap:wrap");
     }
 
     @Test
