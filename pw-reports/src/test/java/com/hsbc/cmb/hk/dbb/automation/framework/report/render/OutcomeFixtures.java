@@ -71,6 +71,8 @@ final class OutcomeFixtures {
         o.setTraceStartTime("10:15:30.100");
         o.setTraceEndTime("10:16:00.291");
         o.setTraceDurationMs(30191);
+        // 失败页源码快照（"Page source" Tab 的 iframe 数据源）
+        o.setPageSourcePath("login-12-x/page-source.html");
         o.setTestFailureCause(new FailureCause("expected status 200 but was 401", "FAILURE"));
         o.setTestFailureClassname("java.lang.AssertionError");
         o.setTestFailureMessage("expected status 200 but was 401");

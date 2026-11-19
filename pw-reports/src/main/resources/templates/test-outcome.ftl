@@ -399,6 +399,9 @@
         .btn-action:hover { background: #f1f5f9; }
         .btn-ok { color: #047857; border-color: #a7f3d0; }
         .btn-ok:hover { background: #ecfdf5; }
+        /* 失败页源码 Tab：iframe 独立文档保留页面样式，可看完整渲染页 */
+        .page-source-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+        .page-source-frame { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
     </style>
 </head>
 <body>
@@ -603,11 +606,16 @@
   <#assign hasRecords = (outcome.videoPath??)!false>
   <#assign hasScreenshots = (screenshots?has_content)!false>
   <#assign hasDownloads = (outcome.downloads?has_content)!false>
-  <#if hasConsole || hasTrace || hasRecords || hasScreenshots || hasDownloads>
+  <#assign hasPageSource = (outcome.pageSourcePath??)!false>
+  <#if hasConsole || hasTrace || hasRecords || hasScreenshots || hasDownloads || hasPageSource>
   <div class="card bottom-tabs">
     <div class="tab-bar" role="tablist">
       <button type="button" class="tab-btn is-active" role="tab" data-tab="tab-console"
               aria-selected="true">Console log</button>
+      <#if hasPageSource>
+      <button type="button" class="tab-btn" role="tab" data-tab="tab-source"
+              aria-selected="false">Page source</button>
+      </#if>
       <#if hasScreenshots>
       <button type="button" class="tab-btn" role="tab" data-tab="tab-screenshots"
               aria-selected="false">Screenshots (${screenshots?size})</button>
@@ -777,6 +785,24 @@
         <p class="tab-empty">No video was recorded. To enable it, set <code>playwright.context.recordVideo.enabled=true</code>.</p>
       </#if>
     </div>
+
+    <#-- ⑤ Page source：失败时页面源码快照。iframe 独立文档渲染，保留页面样式、可看整页；
+         源码里已注入 <base href>，外链 CSS/图片按失败现场 URL 加载（保真）。 -->
+    <#if hasPageSource>
+    <div class="tab-pane" id="tab-source" role="tabpanel">
+      <#if baseHref?? && baseHref?has_content>
+        <#assign sourceSrc = baseHref + outcome.pageSourcePath>
+      <#else>
+        <#assign sourceSrc = "../" + outcome.pageSourcePath>
+      </#if>
+      <div class="page-source-toolbar">
+        <span class="sub">Page HTML at failure (rendered with original styles)</span>
+        <a class="btn-trace ghost" href="${sourceSrc?html}" target="_blank" rel="noopener">Open raw source ↗</a>
+      </div>
+      <iframe class="page-source-frame" src="${sourceSrc?html}" title="Page source at failure"
+              sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+    </div>
+    </#if>
   </div>
   </#if>
 

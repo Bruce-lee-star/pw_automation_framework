@@ -127,6 +127,20 @@ public final class ReportingBridgeImpl implements ReportingBridge {
     }
 
     @Override
+    public Path pageSourceTarget() {
+        StepHandle handle = bus.captureHandle();
+        return handle.isNoop() ? null : bus.pageSourceTarget(handle);
+    }
+
+    @Override
+    public void attachPageSource(java.nio.file.Path html) {
+        if (html == null || !java.nio.file.Files.exists(html)) {
+            return;
+        }
+        bus.attachPageSource(bus.captureHandle(), html);
+    }
+
+    @Override
     public Path videoTargetByOutcomeId(String outcomeId) {
         return bus.videoTargetByOutcomeId(outcomeId);
     }

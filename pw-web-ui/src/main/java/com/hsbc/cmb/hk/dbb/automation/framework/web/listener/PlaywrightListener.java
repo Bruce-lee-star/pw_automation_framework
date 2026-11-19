@@ -535,6 +535,8 @@ public class PlaywrightListener implements
 
     /** 包级可见：框架内部失败截图入口（同包单测经 spy 验证仅首个失败步骤调用一次）。 */
     void captureScreenshotOnFailure(Throwable throwable) {
+        // 失败现场三件套：截图 + 页面源码快照（源码走独立链路，不依赖截图结果）。
+        FailurePageSourceHandler.capture();
         try {
             String uniqueName = String.format("%s-failure-%d",
                     FailureScreenshotHandler.sanitizeFilename(

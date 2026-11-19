@@ -115,6 +115,10 @@
       "type": ["string", "null"],
       "description": "Relative path to Playwright trace.zip (<outcomeId>/trace.zip); enables Open Trace Viewer button"
     },
+    "pageSourcePath": {
+      "type": ["string", "null"],
+      "description": "additive: relative path to the failure-time page HTML snapshot (<outcomeId>/page-source.html); rendered in the Page source tab iframe"
+    },
     "traceStartTime": {
       "type": ["string", "null"],
       "description": "additive: trace recording window start (HH:mm:ss.SSS) reported by the recorder; omitted when unknown"

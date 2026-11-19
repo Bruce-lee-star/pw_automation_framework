@@ -80,7 +80,7 @@ public final class ReportBus {
 
     public ReportBus(PwReportsConfig config) {
         this.config = config;
-        this.scrub = new ScrubGate(config.getExtraScrubPatterns(), config.getMaxEvidenceLineBytes(), 256);
+        this.scrub = new ScrubGate(config.getExtraScrubPatterns(), 256);
         this.enabled = config.isEnabled();
         if (this.enabled) {
             ConsoleCapture.install();
@@ -326,8 +326,7 @@ public final class ReportBus {
                 //  重跑同一用例：沿用首轮 outcomeId（产物文件名稳定），整体覆盖为最新一轮结果。
                 //  时间线元数据例外——继承首轮「首次开始时刻」并 attempt+1，否则整个运行的
                 //  Started 会退化成最后一轮的重跑时刻（2026-11-11 用户反馈 index start 不对）。
-                RecordingSession fresh = new RecordingSession(previousId, feature, scenario, tags, featurePath,
-                        config.getMaxEvidenceLines(), config.getMaxApiOperations());
+                RecordingSession fresh = new RecordingSession(previousId, feature, scenario, tags, featurePath);
                 fresh.inheritRunHistory(sessions.get(previousId));
                 sessions.put(previousId, fresh);
                 return fresh;
@@ -336,8 +335,7 @@ public final class ReportBus {
         String id = baseId;
         int suffix = 1;
         while (true) {
-            RecordingSession candidate = new RecordingSession(id, feature, scenario, tags, featurePath,
-                    config.getMaxEvidenceLines(), config.getMaxApiOperations());
+            RecordingSession candidate = new RecordingSession(id, feature, scenario, tags, featurePath);
             RecordingSession prev = sessions.putIfAbsent(id, candidate);
             if (prev == null) {
                 sessionIdentities.put(identity, id);
@@ -704,7 +702,6 @@ public final class ReportBus {
     }
 
     /**
-    /**
      * 当前用例的 trace 落点（{@code <outputDir>/<outcomeId>/trace.zip}）——经 {@code ReportingBridge#traceTarget()}
      * 指导框架<b>直接导出到此</b>，从源头避免"框架 traces/ + per-case"两份（也无须事后移动）。无活动句柄 /
      * 会话不存在时返回 {@code null}（框架落其固定 {@code traces/} 目录作证据兜底，非配置项）。
@@ -760,6 +757,34 @@ public final class ReportBus {
             log.debug("videoTarget dir creation failed for {}: {}", dir, e.toString());
         }
         return dir;
+    }
+
+    /**
+     * 当前用例的失败页源码落点（{@code <outputDir>/<outcomeId>/page-source.html}）——经
+     * {@code ReportingBridge#pageSourceTarget()} 指导框架直接把 {@code page.content()} 写到此处，
+     * 与 trace/video 同源避免两份。无活动句柄 / 会话不存在时返回 {@code null}（框架跳过采集）。
+     */
+    public Path pageSourceTarget(StepHandle handle) {
+        if (!enabled || handle == null || handle.isNoop()) {
+            return null;
+        }
+        RecordingSession session = sessions.get(handle.outcomeId());
+        if (session == null) {
+            return null;
+        }
+        return config.getOutputDir().resolve(session.outcomeId()).resolve("page-source.html");
+    }
+
+    /**
+     * 登记失败页源码：文件已由框架按 {@link #pageSourceTarget} 直接写到 per-case 目录，
+     * 这里只设 {@code pageSourcePath}（文件就位，不拷贝）。兜底：文件在别处则搬入 per-case。
+     */
+    public void attachPageSource(StepHandle handle, java.nio.file.Path html) {
+        if (!enabled || handle == null || handle.isNoop() || html == null) {
+            return;
+        }
+        mountArtifact(handle.outcomeId(), html, "page-source.html", false,
+                session -> session.setPageSourcePath(session.outcomeId() + "/page-source.html"));
     }
 
     /**

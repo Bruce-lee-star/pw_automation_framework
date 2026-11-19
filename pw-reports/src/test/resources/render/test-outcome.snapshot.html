@@ -100,6 +100,9 @@
         .btn-action:hover { background: #f1f5f9; }
         .btn-ok { color: #047857; border-color: #a7f3d0; }
         .btn-ok:hover { background: #ecfdf5; }
+        /* 失败页源码 Tab：iframe 独立文档保留页面样式，可看完整渲染页 */
+        .page-source-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+        .page-source-frame { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
     </style>
 </head>
 <body>
@@ -346,6 +349,8 @@
     <div class="tab-bar" role="tablist">
       <button type="button" class="tab-btn is-active" role="tab" data-tab="tab-console"
               aria-selected="true">Console log</button>
+      <button type="button" class="tab-btn" role="tab" data-tab="tab-source"
+              aria-selected="false">Page source</button>
       <button type="button" class="tab-btn" role="tab" data-tab="tab-screenshots"
               aria-selected="false">Screenshots (2)</button>
       <button type="button" class="tab-btn" role="tab" data-tab="tab-trace"
@@ -422,6 +427,15 @@
 
     <div class="tab-pane" id="tab-records" role="tabpanel">
         <p class="tab-empty">No video was recorded. To enable it, set <code>playwright.context.recordVideo.enabled=true</code>.</p>
+    </div>
+
+    <div class="tab-pane" id="tab-source" role="tabpanel">
+      <div class="page-source-toolbar">
+        <span class="sub">Page HTML at failure (rendered with original styles)</span>
+        <a class="btn-trace ghost" href="../login-12-x/page-source.html" target="_blank" rel="noopener">Open raw source ↗</a>
+      </div>
+      <iframe class="page-source-frame" src="../login-12-x/page-source.html" title="Page source at failure"
+              sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
     </div>
   </div>
 

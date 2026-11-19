@@ -155,6 +155,29 @@ public interface ReportingBridge {
     }
 
     /**
+     * 当前用例的<b>失败页源码</b>落点（{@code <outputDir>/<outcomeId>/page-source.html}）——指导框架
+     * 在失败回调处把 {@code page.content()} 直接写到此处，报告页新增的 "Page source" Tab 用 iframe
+     * 渲染（保留页面样式、可看整页）。
+     *
+     * <p>与 {@link #screenshotTarget()} / {@link #traceTarget()} 同策略：解析不到活动用例句柄时返回
+     * {@code null}，框架跳过采集。默认 no-op（{@code null}），非报告环境无副作用。</p>
+     *
+     * @return 源码落点绝对路径；不需要采集 / 无活动用例时返回 {@code null}
+     */
+    default Path pageSourceTarget() {
+        return null;
+    }
+
+    /**
+     * 登记失败页源码：框架按 {@link #pageSourceTarget()} 写好文件后调用，实现方把路径记到当前用例，
+     * 供报告 Tab 渲染。默认 no-op；文件不存在 / 无活动用例时实现方安全跳过。
+     *
+     * @param html 已落盘的页面源码文件（绝对路径）
+     */
+    default void attachPageSource(Path html) {
+    }
+
+    /**
      * 按显式用例 id 解析 trace 落点，供 context 绑定的异步收尾使用。不得以最近活动用例替代缺失的 id。
      *
      * @param outcomeId 显式用例 id

@@ -63,7 +63,11 @@ class ReportLinkIntegrityTest {
                         || href.startsWith("mailto:") || href.startsWith("data:")) {
                     continue;
                 }
-                // 只校验导航与样式类链接；trace.zip / 录屏 / 截图由框架另写，不在本断言范围
+                // 只校验导航与样式类链接；trace.zip / 录屏 / 截图 / 失败页源码由框架运行时另写，
+                // 不在本断言范围（fixture 里只有路径字段，没有真实工件文件）。
+                if (href.contains("page-source.html")) {
+                    continue;
+                }
                 if (!(href.endsWith(".html") || href.endsWith(".css") || href.endsWith(".svg"))) {
                     continue;
                 }
