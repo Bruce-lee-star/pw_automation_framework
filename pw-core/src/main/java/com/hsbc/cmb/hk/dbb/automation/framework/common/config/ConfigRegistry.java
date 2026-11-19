@@ -81,10 +81,10 @@ public enum ConfigRegistry {
         "",
         "报告浏览器分布（逗号分隔，格式 name:version）"
     ),
-    REPORT_CI_URL(
-        "pw.report.ci.url",
-        "",
-        "覆盖报告中的 CI 构建链接"
+    JENKINS_PUBLISH_HTML_REPORT_NAME(
+        "jenkins.publish.html.report.name",
+        "Test Report",
+        "Jenkins publishHTML 的 reportName（用于推导报告托管 URL；与页面标题 project.report.name 独立）"
     ),
     REPORT_BROWSER_DRIVER(
         "pw.report.browser.driver",
@@ -106,11 +106,7 @@ public enum ConfigRegistry {
         "300",
         "报告渲染超时（秒）"
     ),
-    REPORT_PUBLISH_NAME(
-        "pw.report.publish.name",
-        "Test Report",
-        "Jenkins publishHTML 的 reportName（用于推导报告托管 URL）"
-    ),
+
     CONSOLE_REPORT_ENABLED(
         "playwright.console.report.enabled",
         "true",

@@ -98,30 +98,19 @@ class ReportViewEnvironmentTest {
     }
 
     @Test
-    @DisplayName("pw.report.ci.url 覆盖：BUILD_URL 含错误 /jenkins context 时改用可达链接（占位符展开并优先）")
-    void ciUrlOverrideReplacesBuildUrl() {
-        String prev = System.getProperty("pw.report.ci.url");
-        try {
-            System.setProperty("pw.report.ci.url",
-                    "http://localhost:61438/job/${JOB_NAME}/${BUILD_NUMBER}/");
-            Map<String, String> env = Map.of(
-                    "BUILD_URL", "http://localhost:61438/jenkins/job/team/regression/123/",
-                    "JENKINS_URL", "http://localhost:61438/jenkins/",
-                    "JOB_NAME", "team/regression",
-                    "BUILD_NUMBER", "123");
+    @DisplayName("BUILD_URL 直接取自流水线环境变量（无覆盖配置）：含 /jenkins context 时原样使用")
+    void buildUrlUsedAsIsWithoutOverride() {
+        Map<String, String> env = Map.of(
+                "BUILD_URL", "http://localhost:61438/jenkins/job/team/regression/123/",
+                "JENKINS_URL", "http://localhost:61438/jenkins/",
+                "JOB_NAME", "team/regression",
+                "BUILD_NUMBER", "123");
 
-            Map<String, Object> ci = ReportView.ciBuild(env);
+        Map<String, Object> ci = ReportView.ciBuild(env);
 
-            assertThat(ci.get("present")).isEqualTo(true);
-            assertThat(ci.get("ciName")).isEqualTo("Jenkins");
-            assertThat(ci.get("url"))
-                    .isEqualTo("http://localhost:61438/job/team/regression/123/");
-            assertThat(ci.get("job")).isEqualTo("team/regression");
-            assertThat(ci.get("number")).isEqualTo("123");
-        } finally {
-            if (prev == null) System.clearProperty("pw.report.ci.url");
-            else System.setProperty("pw.report.ci.url", prev);
-        }
+        assertThat(ci.get("present")).isEqualTo(true);
+        assertThat(ci.get("ciName")).isEqualTo("Jenkins");
+        assertThat(ci.get("url")).isEqualTo("http://localhost:61438/jenkins/job/team/regression/123/");
     }
 
     @Test

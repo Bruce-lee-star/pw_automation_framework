@@ -53,17 +53,17 @@ class TraceBarRenderTest {
     void baseUrlDerivedFromJenkinsBuildUrl() {
         String base = PwReportsConfig.baseUrl(Map.of(
                 "BUILD_URL", "https://ci.example/job/run42/",
-                "PW_REPORT_PUBLISH_NAME", "Test Report"));
+                "JENKINS_PUBLISH_HTML_REPORT_NAME", "Test Report"));
 
         assertThat(base).isEqualTo("https://ci.example/job/run42/Test%20Report/");
     }
 
     @Test
-    @DisplayName("CI：Jenkinsfile 改了 reportName 时可用 PW_REPORT_PUBLISH_NAME 覆盖")
+    @DisplayName("CI：Jenkinsfile 改了 reportName 时可用 JENKINS_PUBLISH_HTML_REPORT_NAME 覆盖")
     void baseUrlHonorsPublishNameOverride() {
         String base = PwReportsConfig.baseUrl(Map.of(
                 "BUILD_URL", "https://ci.example/job/run42/",
-                "PW_REPORT_PUBLISH_NAME", "PW Report"));
+                "JENKINS_PUBLISH_HTML_REPORT_NAME", "PW Report"));
 
         assertThat(base).isEqualTo("https://ci.example/job/run42/PW%20Report/");
     }

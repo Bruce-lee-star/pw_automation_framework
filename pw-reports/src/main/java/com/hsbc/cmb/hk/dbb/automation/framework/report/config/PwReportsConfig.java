@@ -38,8 +38,8 @@ import java.util.regex.PatternSyntaxException;
  * </table>
  *
  * <p>其余三项<b>通常不用动</b>，只在特殊场景覆盖：{@code pw.report.scrub.extra-patterns}
- * （补脱敏规则）、{@code pw.report.limits}（限额档位）、{@code pw.report.publish.name}
- * （Jenkins publishHTML 的 reportName，默认 {@code Test Report}）。</p>
+ * （补脱敏规则）、{@code pw.report.limits}（限额档位）、{@code jenkins.publish.html.report.name}
+ * （Jenkins publishHTML 的 reportName，默认 {@code Test Report}；与页面标题 {@code project.report.name} 独立）。</p>
  *
  * <p>历史兼容：旧的 {@code push.enabled} / {@code history.enabled} / {@code screenshot.mode}
  * / {@code max-evidence-lines} 等平铺旋钮已收敛为上述形态——旧键被<b>忽略</b>而非报错
@@ -213,9 +213,10 @@ public final class PwReportsConfig {
      *
      * <p>推导规则：Jenkins 通过 {@code publishHTML}（HTML Publisher）把报告发布到
      * {@code BUILD_URL/<reportName>/}；{@code reportName} 取自配置项
-     * {@code pw.report.publish.name}（环境变量 {@code PW_REPORT_PUBLISH_NAME}），默认
-     * {@code Test Report}（URL 段编码为 {@code Test%20Report}），故基准为
-     * {@code https://jenkins.example/job/regression/123/Test%20Report/}。</p>
+     * {@code jenkins.publish.html.report.name}（环境变量 {@code JENKINS_PUBLISH_HTML_REPORT_NAME}），
+     * 默认 {@code Test Report}（URL 段编码为 {@code Test%20Report}），故基准为
+     * {@code https://jenkins.example/job/regression/123/Test%20Report/}。
+     * 该键专指 Jenkins publishHTML 的 reportName，与页面标题 {@code project.report.name} 相互独立。</p>
      *
      * <p>非空时，渲染器会在每个 HTML 页 {@code <head>} 注入 {@code <base href>}，使页内相对链接
      * （index.html / feature-*.html / 用例页 / 截图）解析为绝对地址；值被规范化成以 {@code /} 结尾。</p>
@@ -234,9 +235,9 @@ public final class PwReportsConfig {
             return "";
         }
         String base = buildUrl.endsWith("/") ? buildUrl : buildUrl + "/";
-        String reportName = firstNonBlank(env.get("PW_REPORT_PUBLISH_NAME"),
-                ConfigReader.resolve(ConfigRegistry.REPORT_PUBLISH_NAME.key(),
-                        ConfigRegistry.REPORT_PUBLISH_NAME.defaultValue()));
+        String reportName = firstNonBlank(env.get("JENKINS_PUBLISH_HTML_REPORT_NAME"),
+                ConfigReader.resolve(ConfigRegistry.JENKINS_PUBLISH_HTML_REPORT_NAME.key(),
+                        ConfigRegistry.JENKINS_PUBLISH_HTML_REPORT_NAME.defaultValue()));
         return base + encodeSegment(reportName) + "/";
     }
 

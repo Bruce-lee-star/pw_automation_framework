@@ -208,11 +208,8 @@ public final class ReportView {
      * <p>链接由模板以 {@code target="_blank" rel="noopener noreferrer"} 打开，避免反向标签页劫持。
      * 字段：ciName(Jenkins/CI) / url / job / number / commit(全) / commitShort(前 7) / node / branch。</p>
      *
-     * <p><b>URL 覆盖</b>：当 Jenkins 的 {@code BUILD_URL} 自带错误/过时的 context path
-     * （如多余 {@code /jenkins} 前缀）导致直连 404 时，可用 {@code pw.report.ci.url}
-     * （环境变量 {@code PW_REPORT_CI_URL}）提供一个可达的等价链接，优先级高于 {@code BUILD_URL}；
-     * 支持占位符 {@code ${BUILD_NUMBER}} / {@code ${JOB_NAME}} / {@code ${BUILD_URL}}。
-     * 例：{@code -Dpw.report.ci.url=http://jenkins/job/${JOB_NAME}/${BUILD_NUMBER}/}。</p>
+     * <p>构建链接直接取自流水线环境变量 {@code BUILD_URL} / {@code CI_JOB_URL}（Built-in 自动注入），
+     * 无需任何覆盖配置：CI 环境自动获取，本地 IDE 无这些变量则不显示。</p>
      */
     public static Map<String, Object> ciBuild() {
         return ciBuild(System.getenv());
@@ -228,20 +225,8 @@ public final class ReportView {
         String branch = firstNonBlank(env.get("BRANCH_NAME"), env.get("GIT_BRANCH"),
                 env.get("CI_COMMIT_REF_NAME"));
 
-        //  允许经 pw.report.ci.url / PW_REPORT_CI_URL 覆盖构建链接：某些 Jenkins 部署的
-        //  BUILD_URL 自带过时/错误的 context path（如多余 /jenkins 前缀），直连即 404；
-        //  业务填一个可达的等价链接即可，无需改动 Jenkins 系统配置。
-        //  支持占位符 ${BUILD_NUMBER} / ${JOB_NAME} / ${BUILD_URL}（取自本环境）。
-        String override = firstNonBlank(ConfigReader.getProperty(ConfigRegistry.REPORT_CI_URL.key()),
-                env.get("PW_REPORT_CI_URL"));
-        if (override != null) {
-            override = override
-                    .replace("${BUILD_URL}", env.get("BUILD_URL") == null ? "" : env.get("BUILD_URL"))
-                    .replace("${JOB_NAME}", job == null ? "" : job)
-                    .replace("${BUILD_NUMBER}", number == null ? "" : number);
-        }
-
-        String buildUrl = firstNonBlank(override, env.get("BUILD_URL"), env.get("CI_JOB_URL"));
+        //  构建链接直接取流水线自动注入的 BUILD_URL / CI_JOB_URL，无需覆盖配置。
+        String buildUrl = firstNonBlank(env.get("BUILD_URL"), env.get("CI_JOB_URL"));
 
         //  Jenkins 提供 JENKINS_URL 但未给 BUILD_URL 时，按约定拼出构建页链接
         if (buildUrl == null && jenkinsUrl != null && job != null && number != null) {
