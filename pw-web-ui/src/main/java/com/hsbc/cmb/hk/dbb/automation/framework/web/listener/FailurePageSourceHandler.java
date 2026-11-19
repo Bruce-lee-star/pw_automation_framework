@@ -55,7 +55,12 @@ final class FailurePageSourceHandler {
             }
             String pageUrl = safeUrl(page);
             String withBase = injectBase(html, pageUrl);
-            Files.createDirectories(target.getParent());
+            // getParent() 对无目录的单文件名返回 null（SpotBugs NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE）：
+            // 报告侧给的落点是绝对路径必然有父目录；这里兜底 null 用当前目录，避免 NPE。
+            Path parent = target.toAbsolutePath().getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
             Files.writeString(target, withBase, StandardCharsets.UTF_8);
             bridge.attachPageSource(target);
             logger.debug("Failure page source captured: {}", target.getFileName());
