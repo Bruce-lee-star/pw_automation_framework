@@ -65,13 +65,19 @@ public enum PressKey {
      * 无法识别返回 {@code null}，由调用方决定是否抛错——不静默替换成别的键。
      */
     public static PressKey parse(String text) {
-        if (text == null || text.isBlank()) return null;
+        if (text == null || text.isBlank()) {
+            return null;
+        }
         String normalized = text.trim().toUpperCase(Locale.ROOT).replace('-', '_');
         for (PressKey k : values()) {
-            if (k.name().equals(normalized)) return k;
+            if (k.name().equals(normalized)) {
+                return k;
+            }
         }
         for (PressKey k : values()) {
-            if (k.keyName.equalsIgnoreCase(text.trim())) return k;
+            if (k.keyName.equalsIgnoreCase(text.trim())) {
+                return k;
+            }
         }
         return null;
     }

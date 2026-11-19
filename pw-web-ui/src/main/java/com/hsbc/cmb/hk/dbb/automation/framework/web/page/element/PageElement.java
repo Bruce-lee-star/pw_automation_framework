@@ -586,8 +586,12 @@ public class PageElement {
         }
         StringBuilder combo = new StringBuilder();
         for (PressKey k : keys) {
-            if (k == null) throw new IllegalArgumentException("press: null PressKey is not allowed");
-            if (combo.length() > 0) combo.append('+');
+            if (k == null) {
+                throw new IllegalArgumentException("press: null PressKey is not allowed");
+            }
+            if (combo.length() > 0) {
+                combo.append('+');
+            }
             combo.append(k.keyName());
         }
         return pressKeyName(combo.toString());
