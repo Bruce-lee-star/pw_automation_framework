@@ -19,8 +19,8 @@ import java.util.regex.Pattern;
  *   <li>URL query 敏感参数名（token/sig/signature/key/secret/password/pwd/code/state）值 → {@link #MASK}；</li>
  *   <li>敏感头名（Authorization/Cookie/Set-Cookie/X-Api-Key/X-CSRF-Token/Proxy-Authorization）值 → {@link #MASK}；</li>
  *   <li>模式匹配：{@code Bearer <token>}、JWT（{@code eyJ…}）、{@code sk-…}、长 base64 串 → {@link #MASK}；</li>
- *   <li>行长 ≤ maxLineBytes（UTF-8 边界安全截断，尾部同样追加 {@link #MASK}）；</li>
- *   <li>body 永不内联：sha256 摘要 + 脱敏后 256B 预览。</li>
+ *   <li>行长<b>不设上限</b>：只脱敏、不截断——排障要求看到全量现场，任何裁剪都可能丢关键线索；</li>
+ *   <li>body 永不内联：sha256 摘要 + 脱敏后 256B 预览（摘要预览是安全设计，非数据截断）。</li>
  * </ol>
  *
  * <p>规则集可配置扩展（{@code pw.report.scrub.extra-patterns}，逗号分隔正则）；
@@ -43,7 +43,7 @@ public final class ScrubGate {
     /** 敏感 query 参数 / 敏感头值替换后的占位符。 */
     public static final String MASK_MARKER = MASK;
 
-    /** 行超过 {@code maxLineBytes} 时追加的截断标记（UTF-8 边界安全）。 */
+    /** body 预览超过 {@code previewBytes} 时追加的截断标记（UTF-8 边界安全）。 */
     public static final String TRUNCATION_MARKER = MASK;
 
     private static final byte[] MARKER_BYTES = TRUNCATION_MARKER.getBytes(StandardCharsets.UTF_8);
@@ -77,43 +77,34 @@ public final class ScrubGate {
             "\\b(?!(?:[0-9a-f]{40,}|[0-9]{40,})\\b)[A-Za-z0-9+/]{40,}={0,2}\\b");
 
     private final List<Pattern> extraPatterns;
-    private final int maxLineBytes;
     private final int previewBytes;
 
-    public ScrubGate(List<Pattern> extraPatterns, int maxLineBytes, int previewBytes) {
+    public ScrubGate(List<Pattern> extraPatterns, int previewBytes) {
         this.extraPatterns = extraPatterns == null ? List.of() : List.copyOf(extraPatterns);
-        this.maxLineBytes = Math.max(64, maxLineBytes);
         this.previewBytes = Math.max(32, previewBytes);
     }
 
-    /** 默认配置（2048B / 256B 预览）。 */
+    /** 默认配置（256B body 预览；行长不设上限）。 */
     public static ScrubGate defaults() {
-        return new ScrubGate(List.of(), 2048, 256);
+        return new ScrubGate(List.of(), 256);
     }
 
     /**
-     * 脱敏 + 截断单行文本。null 安全（→ 空串）。
+     * 脱敏单行文本（<b>不截断</b>）。null 安全（→ 空串）。
      *
-     * <p>顺序固定：URL query → 敏感头 → 模式匹配（Bearer/JWT/sk-/base64/扩展）→ 截断。
+     * <p>顺序固定：URL query → 敏感头 → 模式匹配（Bearer/JWT/sk-/base64/扩展）。
      * URL 先行保证 query 里的 token 先被参数名规则吃掉，避免被 base64 规则误伤成掩码
-     * （两种结果都安全，但参数名规则信息量更高）。
+     * （两种结果都安全，但参数名规则信息量更高）。行长不设上限——脱敏后原样返回。</p>
      */
     public String scrubLine(String raw) {
-        String s = scrubText(raw);
-        return s.isEmpty() ? "" : truncateUtf8(s, maxLineBytes);
+        return scrubText(raw);
     }
 
     /**
-     * 只脱敏、不截断（展示层专用）。
+     * 脱敏实现（{@link #scrubLine(String)} 与展示层 {@code scrub(...)} 共用）。
      *
-     * <p>证据入 bus 时已经过 {@link #scrubLine(String)} 按 <b>配置的</b>
-     * {@code maxEvidenceLineBytes} 做过一次有界截断；渲染时若再调 {@code scrubLine}
-     * 会用 {@link #defaults()} 的 2048B <b>二次截断</b>，把本该完整可见的堆栈/消息
-     * 再砍一刀（配置放宽后尤其明显）。
-     * 本方法保留全部脱敏规则（不绕过闸门）、只去掉长度裁剪，供 FreeMarker 的
-     * {@code scrub(...)} 与失败消息分段使用：展示层绝不能改变已入库数据的信息量。
-     *
-     * <p>null / 空串安全返回空串；与 {@link #scrubLine(String)} 同规则同幂等。
+     * <p>全部脱敏规则都在此，不绕过闸门、不做任何长度裁剪：展示层调用时绝不改变已入库数据的信息量。
+     * null / 空串安全返回空串；同规则、同幂等。
      */
     public String scrubText(String raw) {
         if (raw == null || raw.isEmpty()) {

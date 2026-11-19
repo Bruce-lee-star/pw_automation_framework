@@ -77,13 +77,13 @@ public final class TestOutcome {
     /** 脱敏后的完整堆栈（镜像 Serenity testFailureSummary 语义）。 */
     private String testFailureSummary;
 
-    /** 用例级证据（脱敏后，≤50 行）：hook 失败告警、@After 失败 warning 等。 */
+    /** 用例级证据（脱敏后，完整保留不设上限）：hook 失败告警、@After 失败 warning 等。 */
     private List<String> evidence = new CopyOnWriteArrayList<>();
 
-    /** API 操作记录（脱敏后，≤500 条）——承接 SerenityReporter.recordApiOperation。 */
+    /** API 操作记录（脱敏后，完整保留不设上限）——承接 SerenityReporter.recordApiOperation。 */
     private List<String> apiOperations = new CopyOnWriteArrayList<>();
 
-    /** API 监控失败条目（脱敏后，≤200 条）。additive-only。 */
+    /** API 监控失败条目（脱敏后，完整保留不设上限）。additive-only。 */
     private List<String> apiMonitorFailures = new CopyOnWriteArrayList<>();
 
     /** RouteDsl 路由注册（API 注册）描述行（脱敏后）。additive-only。 */
@@ -98,7 +98,7 @@ public final class TestOutcome {
     /** 用例级捕获的 stdout（hook 输出等，脱敏，限行）。additive-only。 */
     private List<String> consoleOutput = new CopyOnWriteArrayList<>();
 
-    /** 用例级捕获的 stderr（脱敏，限行）。additive-only。 */
+    /** 用例级捕获的 stderr（脱敏，完整保留不设上限）。additive-only。 */
     private List<String> consoleError = new CopyOnWriteArrayList<>();
 
     /** Playwright trace.zip 相对路径（&lt;outcomeId&gt;/trace.zip），有值则渲染 Trace Viewer 按钮。 */
@@ -111,6 +111,15 @@ public final class TestOutcome {
      * 时为 null，报告 Tab 显示空态提示。additive-only。
      */
     private String videoPath;
+
+    /**
+     * 失败时当前页面的源码快照相对路径（{@code <outcomeId>/page-source.html}）。
+     *
+     * <p>采集方在失败回调处用 {@code page.content()} 抓全量 HTML、注入 {@code <base href>} 保留
+     * 外链样式后写入该路径，报告页「Page source」Tab 用 iframe 渲染，既能看源码也能看带样式的整页。
+     * 非失败 / 未采集到时为 null，Tab 显示空态提示。additive-only。</p>
+     */
+    private String pageSourcePath;
 
     /** trace 录制起始时刻（{@code HH:mm:ss.SSS}）；采集方未提供窗口时为 null。additive-only。 */
     private String traceStartTime;
@@ -401,6 +410,14 @@ public final class TestOutcome {
 
     public void setVideoPath(String videoPath) {
         this.videoPath = videoPath;
+    }
+
+    public String getPageSourcePath() {
+        return pageSourcePath;
+    }
+
+    public void setPageSourcePath(String pageSourcePath) {
+        this.pageSourcePath = pageSourcePath;
     }
 
     public String getTraceStartTime() {

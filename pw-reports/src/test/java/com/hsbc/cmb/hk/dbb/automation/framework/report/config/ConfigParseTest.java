@@ -13,9 +13,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 配置解析门禁：默认值、系统属性覆盖、非法值回退、旧键忽略、开关由值推导。
  *
- * <p>配置面刻意压到 4 项决策（enabled/output/screenshot/push.url）+ 2 项低频覆盖
- * （scrub.extra-patterns/limits），本类把「压到什么程度、怎么回退」
- * 钉死，防止后续新增旋钮时无声破坏兼容约定。</p>
+ * <p>配置面刻意压到 4 项决策（enabled/output/screenshot/push.url）+ 1 项低频覆盖
+ * （scrub.extra-patterns），本类把「压到什么程度、怎么回退」
+ * 钉死，防止后续新增旋钮时无声破坏兼容约定。产物体量不设上限，故无 limits 类旋钮。</p>
  */
 class ConfigParseTest {
 
@@ -50,13 +50,9 @@ class ConfigParseTest {
         }
 
         @Test
-        @DisplayName("三项低频覆盖也取默认：限额档位、无额外脱敏、历史 30 条")
+        @DisplayName("低频覆盖取默认：无额外脱敏规则（产物不设体量上限）")
         void secondaryDefaults() {
             PwReportsConfig c = PwReportsConfig.builder().build();
-            assertThat(c.getLimits()).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(c.getMaxEvidenceLines()).isEqualTo(50);
-            assertThat(c.getMaxEvidenceLineBytes()).isEqualTo(2048);
-            assertThat(c.getMaxApiOperations()).isEqualTo(500);
             assertThat(c.getExtraScrubPatterns()).isEmpty();
         }
     }
@@ -76,49 +72,6 @@ class ConfigParseTest {
                     .isFalse();
         }
 
-    }
-
-    @Nested
-    @DisplayName("Limits 档位解析（位置参数，缺项沿用默认）")
-    class LimitsParsing {
-
-        @Test
-        @DisplayName("三值全给 -> 逐位生效")
-        void allThreeValues() {
-            PwReportsConfig.Limits l = PwReportsConfig.Limits.parse("80,4096,1000");
-            assertThat(l.evidenceLines()).isEqualTo(80);
-            assertThat(l.evidenceBytes()).isEqualTo(4096);
-            assertThat(l.apiOperations()).isEqualTo(1000);
-        }
-
-        @Test
-        @DisplayName("缺项沿用默认（\"80\" 只改行数，其余不动）")
-        void missingPartsFallBackToDefault() {
-            PwReportsConfig.Limits l = PwReportsConfig.Limits.parse("80");
-            assertThat(l.evidenceLines()).isEqualTo(80);
-            assertThat(l.evidenceBytes()).isEqualTo(PwReportsConfig.Limits.DEFAULT.evidenceBytes());
-            assertThat(l.apiOperations()).isEqualTo(PwReportsConfig.Limits.DEFAULT.apiOperations());
-        }
-
-        @Test
-        @DisplayName("非法输入整体回退默认（非数字/非正/个数超限/空）--绝不半途生效半个值")
-        void invalidInputFallsBackWholesale() {
-            assertThat(PwReportsConfig.Limits.parse("abc")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse("80,0,1000")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse("-1,4096,1000")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse("1,2,3,4")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse("")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse(null)).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-        }
-
-        @Test
-        @DisplayName("空片段跳过（\"80,,1000\" 中间空 = 用默认）")
-        void blankSegmentUsesDefault() {
-            PwReportsConfig.Limits l = PwReportsConfig.Limits.parse("80,,1000");
-            assertThat(l.evidenceLines()).isEqualTo(80);
-            assertThat(l.evidenceBytes()).isEqualTo(PwReportsConfig.Limits.DEFAULT.evidenceBytes());
-            assertThat(l.apiOperations()).isEqualTo(1000);
-        }
     }
 
     @Nested
@@ -152,24 +105,22 @@ class ConfigParseTest {
     class SystemProperties {
 
         @Test
-        @DisplayName("新键生效：enabled/output/screenshot/limits/push.url")
+        @DisplayName("新键生效：enabled/output/screenshot/push.url")
         void newKeysAreHonoured() {
             withProps(
                     "pw.report.enabled", "false",
                     "pw.report.output", "target/custom-report",
                     "pw.report.screenshot", "AFTER_EACH_STEP",
-                    "pw.report.limits", "10,256,20",
                     "pw.report.push.url", "https://collector/reports");
             try {
                 PwReportsConfig c = PwReportsConfig.load();
                 assertThat(c.isEnabled()).isFalse();
                 assertThat(c.getOutputDir()).isEqualTo(Paths.get("target/custom-report"));
                 assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.AFTER_EACH_STEP);
-                assertThat(c.getLimits()).isEqualTo(new PwReportsConfig.Limits(10, 256, 20));
                 assertThat(c.isPushEnabled()).isTrue();
             } finally {
                 for (String k : Set.of("pw.report.enabled", "pw.report.output", "pw.report.screenshot",
-                        "pw.report.limits", "pw.report.push.url")) {
+                        "pw.report.push.url")) {
                     System.clearProperty(k);
                 }
             }
@@ -184,29 +135,19 @@ class ConfigParseTest {
                     "pw.report.screenshot.mode", "AFTER_EACH_STEP",
                     "pw.report.screenshot.max-bytes", "999",
                     "pw.report.screenshot.mask-inputs", "false",
-                    "pw.report.max-evidence-lines", "999");
+                    "pw.report.max-evidence-lines", "999",
+                    "pw.report.limits", "10,256,20");
             try {
                 PwReportsConfig c = PwReportsConfig.load();   // 不得抛异常
                 assertThat(c.isPushEnabled()).as("旧 push.enabled 不再被识别").isFalse();
                 assertThat(c.getScreenshotMode()).isEqualTo(ScreenshotMode.FOR_FAILURES);
-                assertThat(c.getMaxEvidenceLines()).isEqualTo(50);
             } finally {
                 for (String k : Set.of("pw.report.push.enabled", "pw.report.history.enabled",
                         "pw.report.screenshot.mode", "pw.report.screenshot.max-bytes",
-                        "pw.report.screenshot.mask-inputs", "pw.report.max-evidence-lines")) {
+                        "pw.report.screenshot.mask-inputs", "pw.report.max-evidence-lines",
+                        "pw.report.limits")) {
                     System.clearProperty(k);
                 }
-            }
-        }
-
-        @Test
-        @DisplayName("非法数字回退默认而非 0（否则截断/限额会变成「什么都不留」）")
-        void invalidNumberFallsBackToDefault() {
-            withProps("pw.report.limits", "not-a-number");
-            try {
-                assertThat(PwReportsConfig.load().getLimits()).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            } finally {
-                System.clearProperty("pw.report.limits");
             }
         }
 
@@ -262,13 +203,5 @@ class ConfigParseTest {
             assertThat(c.getExtraScrubPatterns()).hasSize(1);
         }
 
-        @Test
-        @DisplayName("Limits 构造器拒绝非正值（记录构造即刻失败，不留到运行时）")
-        void limitsRejectNonPositive() {
-            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                    () -> new PwReportsConfig.Limits(0, 2048, 500));
-            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                    () -> new PwReportsConfig.Limits(50, 2048, -1));
-        }
     }
 }

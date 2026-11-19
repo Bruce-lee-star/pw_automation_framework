@@ -25,8 +25,8 @@ import java.util.regex.PatternSyntaxException;
  *
  * <h2>配置面设计：只有 4 项需要决策</h2>
  * <p>本类刻意把配置面压到最小——<b>开关与参数不分离</b>（没有 {@code x.enabled} + {@code x.url}
- * 这种二连），<b>同族旋钮合并成档位</b>（三个 {@code max-*} 收为一个 {@code limits}）。
- * 零配置即可跑，剩下 4 项各管一件事：</p>
+ * 这种二连）。报告产物<b>不设体量上限</b>：console / 证据 / API 记录全部完整保留，
+ * 不给"数据被悄悄截断"留任何可能（排障要求看到全量现场）。零配置即可跑，4 项各管一件事：</p>
  *
  * <table border="1">
  *   <caption>配置项（4 项）</caption>
@@ -37,82 +37,20 @@ import java.util.regex.PatternSyntaxException;
  *   <tr><td>{@code pw.report.push.url}</td><td>空</td><td>非空即启用推送（不再需要单独的 enabled）</td></tr>
  * </table>
  *
- * <p>其余三项<b>通常不用动</b>，只在特殊场景覆盖：{@code pw.report.scrub.extra-patterns}
- * （补脱敏规则）、{@code pw.report.limits}（限额档位）、{@code jenkins.publish.html.report.name}
+ * <p>其余两项<b>通常不用动</b>，只在特殊场景覆盖：{@code pw.report.scrub.extra-patterns}
+ * （补脱敏规则）、{@code jenkins.publish.html.report.name}
  * （Jenkins publishHTML 的 reportName，默认 {@code Test Report}；与页面标题 {@code project.report.name} 独立）。</p>
  *
  * <p>历史兼容：旧的 {@code push.enabled} / {@code history.enabled} / {@code screenshot.mode}
- * / {@code max-evidence-lines} 等平铺旋钮已收敛为上述形态——旧键被<b>忽略</b>而非报错
- * （不认识的键静默是配置系统的常态，避免升级即崩），需要迁移的见 README。</p>
+ * / {@code max-evidence-lines} / {@code pw.report.limits} 等体量限制旋钮<b>已移除</b>——证据与日志
+ * 现在一律完整保留；旧键被<b>忽略</b>而非报错（不认识的键静默是配置系统的常态，避免升级即崩），
+ * 需要迁移的见 README。</p>
  */
 public final class PwReportsConfig {
 
     private static final Logger log = LoggerFactory.getLogger(PwReportsConfig.class);
 
     private static final String PREFIX = "pw.report.";
-
-    /**
-     * 产物体量限额：三合一档位（原先是 {@code max-evidence-lines} / {@code max-evidence-bytes} /
-     * {@code max-api-operations} 三个独立旋钮）。这三个值同属「防单例报告爆量」这一个目的，
-     * 放三个旋钮只会诱导逐项微调；实践中它们总是同向调整，故收为一个档位。
-     *
-     * @param evidenceLines 单步骤证据最大行数
-     * @param evidenceBytes 单行证据最大字节（超长截断）
-     * @param apiOperations 单用例 API 操作记录最大条数
-     *
-     * <p>console 输出（stdout/stderr、步骤级/用例级、浏览器 console）不在此限额内：
-     * 它是排障第一手资料，完整保留、不设行数上限。</p>
-     */
-    public record Limits(int evidenceLines, int evidenceBytes, int apiOperations) {
-
-        public static final Limits DEFAULT = new Limits(50, 2048, 500);
-
-        public Limits {
-            if (evidenceLines <= 0 || evidenceBytes <= 0 || apiOperations <= 0) {
-                throw new IllegalArgumentException("limits must be positive: " + evidenceLines
-                        + "/" + evidenceBytes + "/" + apiOperations);
-            }
-        }
-
-        /**
-         * 解析 {@code lines,bytes,apis}（逗号分隔，缺项沿用默认）。
-         *
-         * <p>格式故意做成<b>位置参数</b>而非 {@code key=value}：值域窄（三个正整数），
-         * 写 {@code 80,4096,1000} 比 {@code evidenceLines=80,evidenceBytes=4096} 省一半字符，
-         * 而非法输入（个数不对/非数字/非正）一律整体回退默认并告警——不会半途生效半个值。</p>
-         */
-        static Limits parse(String raw) {
-            if (raw == null || raw.isBlank()) {
-                return DEFAULT;
-            }
-            String[] parts = raw.split(",");
-            if (parts.length > 3) {
-                log.warn("pw.report.limits: expected up to 3 values 'lines,bytes,apis' but got {} - using default {}",
-                        raw, DEFAULT);
-                return DEFAULT;
-            }
-            int[] vals = new int[] {
-                    DEFAULT.evidenceLines, DEFAULT.evidenceBytes, DEFAULT.apiOperations };
-            for (int i = 0; i < parts.length; i++) {
-                String t = parts[i].trim();
-                if (t.isEmpty()) {
-                    continue;
-                }
-                try {
-                    vals[i] = Integer.parseInt(t);
-                } catch (NumberFormatException e) {
-                    log.warn("pw.report.limits: invalid number '{}' - using default {}", raw, DEFAULT);
-                    return DEFAULT;
-                }
-            }
-            try {
-                return new Limits(vals[0], vals[1], vals[2]);
-            } catch (IllegalArgumentException e) {
-                log.warn("pw.report.limits: {} (must be positive) - using default {}", raw, DEFAULT);
-                return DEFAULT;
-            }
-        }
-    }
 
     private final boolean enabled;
 
@@ -122,8 +60,6 @@ public final class PwReportsConfig {
 
     private final List<Pattern> extraScrubPatterns;
 
-    private final Limits limits;
-
     private final String pushUrl;
 
     private PwReportsConfig(Builder b) {
@@ -131,7 +67,6 @@ public final class PwReportsConfig {
         this.outputDir = b.outputDir;
         this.screenshotMode = b.screenshotMode;
         this.extraScrubPatterns = List.copyOf(b.extraScrubPatterns);
-        this.limits = b.limits;
         this.pushUrl = b.pushUrl;
     }
 
@@ -143,7 +78,6 @@ public final class PwReportsConfig {
         b.screenshotMode = ScreenshotMode.parse(str("screenshot", null),
                 msg -> log.warn("pw.report.screenshot: {}", msg));
         b.extraScrubPatterns = parsePatterns(str("scrub.extra-patterns", null));
-        b.limits = Limits.parse(str("limits", null));
         b.pushUrl = str("push.url", null);
         return new PwReportsConfig(b);
     }
@@ -181,22 +115,6 @@ public final class PwReportsConfig {
 
     public List<Pattern> getExtraScrubPatterns() {
         return extraScrubPatterns;
-    }
-
-    public Limits getLimits() {
-        return limits;
-    }
-
-    public int getMaxEvidenceLines() {
-        return limits.evidenceLines();
-    }
-
-    public int getMaxEvidenceLineBytes() {
-        return limits.evidenceBytes();
-    }
-
-    public int getMaxApiOperations() {
-        return limits.apiOperations();
     }
 
     /** 推送目标；<b>非空即启用</b>（原 {@code push.enabled} 冗余开关已移除）。 */
@@ -334,7 +252,6 @@ public final class PwReportsConfig {
         private Path outputDir = Paths.get("target/reports");
         private ScreenshotMode screenshotMode = ScreenshotMode.FOR_FAILURES;
         private List<Pattern> extraScrubPatterns = new ArrayList<>();
-        private Limits limits = Limits.DEFAULT;
         private String pushUrl;
 
         public Builder enabled(boolean v) {
@@ -355,17 +272,6 @@ public final class PwReportsConfig {
         public Builder extraScrubPatterns(List<Pattern> v) {
             this.extraScrubPatterns = new ArrayList<>(v);
             return this;
-        }
-
-        /** 三合一限额（见 {@link Limits}）。 */
-        public Builder limits(Limits v) {
-            this.limits = Objects.requireNonNull(v);
-            return this;
-        }
-
-        /** 三合一限额的便捷重载（位置参数）。 */
-        public Builder limits(int evidenceLines, int evidenceBytes, int apiOperations) {
-            return limits(new Limits(evidenceLines, evidenceBytes, apiOperations));
         }
 
         public Builder pushUrl(String v) {

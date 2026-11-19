@@ -51,8 +51,8 @@ public final class HtmlRenderer {
         //  模板可直接调 ${scrub(text)}：把 ScrubGate（脱敏唯一实现）暴露给 FreeMarker，
         //   避免在 FTL 里另写一份敏感键正则（两份规则必然漂移）。
         //   典型用途：失败消息/堆栈里内联的 URL（含 key/token/username）。
-        //   【只脱敏、不再限长】：数据入 bus 时已按配置做过有界处理，展示层再做一次会
-        //   用 defaults() 的 2048B 砍掉本该可见的堆栈尾部。
+        //   【只脱敏、不截断】：证据/日志现在一律完整保留、不设长度上限；展示层只脱敏，
+        //   绝不改变已入库数据的信息量。
         FREEMARKER.setSharedVariable("scrub", (TemplateMethodModelEx) args ->
                 args.isEmpty() ? "" : SCRUB_GATE.scrubText(String.valueOf(args.get(0))));
         //  模板可直接调 ${failureLines(text)}：把一条失败消息拆成可读的多行。

@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ScrubGate 规则回归（R3）——每条规则一个用例。
  *
  * <p>覆盖：URL query 敏感参数 / 敏感头 / 模式匹配（Bearer、JWT、sk-、长 base64、
- * 扩展模式）/ 行长截断 / UTF-8 边界 / body 摘要 / null 安全。
+ * 扩展模式）/ 行长不截断 / UTF-8 边界 / body 摘要 / null 安全。
  */
 class ScrubGateTest {
 
@@ -148,32 +148,31 @@ class ScrubGateTest {
 
         @Test
         void extraPatternsFromConfigApplied() {
-            ScrubGate custom = new ScrubGate(List.of(Pattern.compile("PII-\\d+")), 2048, 256);
+            ScrubGate custom = new ScrubGate(List.of(Pattern.compile("PII-\\d+")), 256);
             assertThat(custom.scrubLine("record PII-12345 done")).isEqualTo("record ***** done");
         }
     }
 
     @Nested
-    @DisplayName("截断与编码")
+    @DisplayName("不截断（全量保留）与编码")
     class Truncation {
 
         @Test
-        void longLineTruncatedWithMarker() {
-            // 注意：内容必须是「不构成泄漏形态」的长文本（如带空格的句子）。
-            // 5000 个连续 x 会被 base64 规则整体打码成掩码——那是正确行为，另见 Patterns 测试。
+        void longLineKeptWhole() {
+            // 行长不设上限：只脱敏、不截断。内容用带空格的句子，避免被 base64 规则整体打码。
             String raw = "user input payload ".repeat(500);
             String out = gate.scrubLine(raw);
-            assertThat(out).endsWith("*****");
-            assertThat(out.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(2048);
+            assertThat(out).isEqualTo(raw);
+            assertThat(out.getBytes(StandardCharsets.UTF_8).length).isGreaterThan(2048);
         }
 
         @Test
-        void multibyteNotCutIntoReplacementChar() {
-            // 2000 个汉字 = 6000 字节 > 2048 → 截断点必须落在字符边界
+        void multibyteKeptWhole() {
             String raw = "测".repeat(2000);
             String out = gate.scrubLine(raw);
+            assertThat(out).isEqualTo(raw);
             assertThat(out).doesNotContain("\uFFFD");
-            assertThat(out.getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(2048);
+            assertThat(out.getBytes(StandardCharsets.UTF_8).length).isGreaterThan(2048);
         }
 
         @Test
@@ -182,16 +181,12 @@ class ScrubGateTest {
         }
 
         @Test
-        @DisplayName("展示层 scrubText 只脱敏不再二次截断")
-        void scrubTextKeepsFullLineButStillScrubs() {
-            //  纯小写 hex 长串被白名单放行（traceId），不会被 base64 规则整体打码
+        @DisplayName("scrubLine 与 scrubText 同规则：都只脱敏、都不截断")
+        void scrubLineAndScrubTextBothKeepFullLine() {
+            //  纯小写 hex/字母长串被白名单放行，不会被 base64 规则整体打码
             String raw = "Bearer abc.def.ghi " + "a".repeat(3000);
-            String scrubbed = gate.scrubText(raw);
-            assertThat(scrubbed).startsWith("***** ");
-            assertThat(scrubbed).endsWith("a");
-            assertThat(scrubbed.length()).isGreaterThan(3000);
-            //  入库通道仍然按配置有界截断（两条路径共用同一套脱敏规则）
-            assertThat(gate.scrubLine(raw)).endsWith("*****");
+            assertThat(gate.scrubText(raw)).isEqualTo("***** " + "a".repeat(3000));
+            assertThat(gate.scrubLine(raw)).isEqualTo("***** " + "a".repeat(3000));
         }
 
         @Test
@@ -251,16 +246,15 @@ class ScrubGateTest {
     }
 
     @Test
-    @DisplayName("配置化的行上限与扩展模式经由 PwReportsConfig 贯通")
+    @DisplayName("扩展模式经由 PwReportsConfig 贯通；行长不设上限")
     void configWiring() {
         PwReportsConfig config = PwReportsConfig.builder()
-                .limits(50, 128, 500)
                 .extraScrubPatterns(List.of(Pattern.compile("SECRET-\\d+")))
                 .build();
-        ScrubGate configured = new ScrubGate(config.getExtraScrubPatterns(),
-                config.getMaxEvidenceLineBytes(), 256);
+        ScrubGate configured = new ScrubGate(config.getExtraScrubPatterns(), 256);
         assertThat(configured.scrubLine("SECRET-99")).isEqualTo("*****");
-        assertThat(configured.scrubLine("y".repeat(500))
-                .getBytes(StandardCharsets.UTF_8).length).isLessThanOrEqualTo(128);
+        // 长行（带空格避免命中 base64 规则）原样保留，不被任何上限裁剪
+        String longLine = "step detail ".repeat(200);
+        assertThat(configured.scrubLine(longLine)).isEqualTo(longLine);
     }
 }

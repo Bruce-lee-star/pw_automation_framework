@@ -37,8 +37,6 @@ final class RecordingSession {
     private final String scenario;
     private final List<String> tags;
     private final String featurePath;
-    private final int maxEvidenceLines;
-    private final int maxApiOperations;
 
     private final List<TestStep> rootSteps = new CopyOnWriteArrayList<>();
     private final Map<String, TestStep> stepIndex = new ConcurrentHashMap<>();
@@ -52,13 +50,14 @@ final class RecordingSession {
      * {@code TestStep#routeRegistrations}，非步骤上下文（钩子等）才落本列表。
      */
     private final List<String> routeRegistrations = new CopyOnWriteArrayList<>();
-    private final AtomicInteger routeDropped = new AtomicInteger();
     private final List<TestAttachment> attachments = new CopyOnWriteArrayList<>();
     /** 挂载到报告的下载文件（{@link DownloadRecord}）；对应 per-case 报告「Downloads」Tab。 */
     private final List<DownloadRecord> downloads = new CopyOnWriteArrayList<>();
     private volatile String tracePath;
     /** 场景录屏相对路径（{@code <outcomeId>/records/<name>.webm}），未采集到时保持 null。 */
     private volatile String videoPath;
+    /** 失败时页面源码快照相对路径（{@code <outcomeId>/page-source.html}），未采集到时保持 null。 */
+    private volatile String pageSourcePath;
     /** trace 录制窗口起点（{@code HH:mm:ss.SSS}），未提供时保持 null。 */
     private volatile String traceStartTime;
     /** trace 录制窗口终点（{@code HH:mm:ss.SSS}），未提供时保持 null。 */
@@ -69,16 +68,12 @@ final class RecordingSession {
     private final List<String> consoleError = new CopyOnWriteArrayList<>();
     private final AtomicInteger stepCounter = new AtomicInteger();
     private final AtomicInteger screenshotCounter = new AtomicInteger();
-    private final AtomicInteger evidenceDropped = new AtomicInteger();
-    private final AtomicInteger apiDropped = new AtomicInteger();
-    private final AtomicInteger monitorDropped = new AtomicInteger();
-
 
     /** 手工用例标记（标签 @manual）：不执行、报告记录为手工。 */
     private volatile boolean manual;
-    /** 浏览器控制台输出（page console，脱敏，限行）。additive-only。 */
+    /** 浏览器控制台输出（page console，脱敏，完整保留）。additive-only。 */
     private final List<String> browserConsole = new CopyOnWriteArrayList<>();
-    /** 浏览器错误（page-error，脱敏，限行）。additive-only。 */
+    /** 浏览器错误（page-error，脱敏，完整保留）。additive-only。 */
     private final List<String> browserErrors = new CopyOnWriteArrayList<>();
 
     private final long startTimeMs = System.currentTimeMillis();
@@ -103,14 +98,12 @@ final class RecordingSession {
     private volatile int exampleRowNumber = -1;
 
     RecordingSession(String outcomeId, String feature, String scenario, List<String> tags,
-                     String featurePath, int maxEvidenceLines, int maxApiOperations) {
+                     String featurePath) {
         this.outcomeId = outcomeId;
         this.feature = feature;
         this.scenario = scenario;
         this.tags = tags == null ? List.of() : List.copyOf(tags);
         this.featurePath = featurePath;
-        this.maxEvidenceLines = maxEvidenceLines;
-        this.maxApiOperations = maxApiOperations;
     }
 
     String outcomeId() {
@@ -163,7 +156,7 @@ final class RecordingSession {
     // ---------------------------------------------------------------- evidence / api
 
     void appendEvidence(String scrubbedLine) {
-        appendBounded(evidence, scrubbedLine, maxEvidenceLines, evidenceDropped, "evidence");
+        evidence.add(scrubbedLine);
     }
 
     void appendStepEvidence(String stepId, String scrubbedLine) {
@@ -172,38 +165,38 @@ final class RecordingSession {
             appendEvidence(scrubbedLine);
             return;
         }
-        appendBounded(step.getEvidence(), scrubbedLine, maxEvidenceLines, evidenceDropped, "evidence");
+        step.getEvidence().add(scrubbedLine);
     }
 
     /**
      * API 操作记录：若已知所属步骤（{@code stepId} 非 null 且该步骤存在）则归位到步骤级，
-     * 否则回落用例级列表（脱敏、限行）。
+     * 否则回落用例级列表（脱敏）。全部完整保留，不设上限。
      */
     void appendApiOperation(String stepId, String scrubbedLine) {
         TestStep step = (stepId != null) ? stepIndex.get(stepId) : null;
         if (step != null) {
-            appendBounded(step.getApiOperations(), scrubbedLine, maxApiOperations, apiDropped, "apiOperation");
+            step.getApiOperations().add(scrubbedLine);
         } else {
-            appendBounded(apiOperations, scrubbedLine, maxApiOperations, apiDropped, "apiOperation");
+            apiOperations.add(scrubbedLine);
         }
     }
 
-    /** API 监控失败条目：用例级（监控失败是端点级事实，不挂步骤树），上限 200。 */
+    /** API 监控失败条目：用例级（监控失败是端点级事实，不挂步骤树）。完整保留。 */
     void appendApiMonitorFailure(String scrubbedLine) {
-        appendBounded(apiMonitorFailures, scrubbedLine, 200, monitorDropped, "apiMonitorFailure");
+        apiMonitorFailures.add(scrubbedLine);
     }
 
     /**
      * RouteDsl 路由注册（API 注册）行：注册发生在哪个步骤就归到哪个步骤
      * （{@code stepId} 为 null 或步骤不存在 → 回落用例级列表，如 {@code @Before} 钩子内注册）。
-     * 上限同 apiOperations。
+     * 完整保留，不设上限。
      */
     void appendRouteRegistration(String stepId, String scrubbedLine) {
         TestStep step = (stepId != null) ? stepIndex.get(stepId) : null;
         if (step != null) {
-            appendBounded(step.getRouteRegistrations(), scrubbedLine, maxApiOperations, routeDropped, "routeRegistration");
+            step.getRouteRegistrations().add(scrubbedLine);
         } else {
-            appendBounded(routeRegistrations, scrubbedLine, maxApiOperations, routeDropped, "routeRegistration");
+            routeRegistrations.add(scrubbedLine);
         }
     }
 
@@ -259,6 +252,10 @@ final class RecordingSession {
         this.videoPath = path;
     }
 
+    void setPageSourcePath(String path) {
+        this.pageSourcePath = path;
+    }
+
     /**
      * 登记 trace 录制窗口（起止时刻 + 时长）。任一时点为 {@code null} 表示采集方未提供窗口，
      * 报告侧相应省略该行，不影响 path / 播放按钮。
@@ -273,14 +270,6 @@ final class RecordingSession {
         if (durationMs > 0) {
             this.traceDurationMs = durationMs;
         }
-    }
-
-    private void appendBounded(List<String> target, String line, int max, AtomicInteger dropped, String kind) {
-        if (target.size() >= max) {
-            dropped.incrementAndGet();
-            return;
-        }
-        target.add(line);
     }
 
     // ---------------------------------------------------------------- screenshots
@@ -399,6 +388,7 @@ final class RecordingSession {
         o.setBrowserErrors(browserErrors);
         o.setTracePath(tracePath);
         o.setVideoPath(videoPath);
+        o.setPageSourcePath(pageSourcePath);
         o.setTraceStartTime(traceStartTime);
         o.setTraceEndTime(traceEndTime);
         o.setTraceDurationMs(traceDurationMs);
@@ -440,13 +430,5 @@ final class RecordingSession {
         StringWriter sw = new StringWriter();
         t.printStackTrace(new PrintWriter(sw));
         return sw.toString();
-    }
-
-    int evidenceDropped() {
-        return evidenceDropped.get();
-    }
-
-    int apiDropped() {
-        return apiDropped.get();
     }
 }

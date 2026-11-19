@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * recordApiMonitorFailure 通道门禁——旧 RouteMonitorFailureReportSink 跨进程通道的
- * 用例内形态：用例级（不挂步骤树）、入 bus 必经 ScrubGate、NOOP/未激活静默、≤200 条。
+ * 用例内形态：用例级（不挂步骤树）、入 bus 必经 ScrubGate、NOOP/未激活静默、不设条数上限。
  */
 class ApiMonitorFailureRecordingTest {
 
@@ -89,8 +89,8 @@ class ApiMonitorFailureRecordingTest {
     }
 
     @Test
-    @DisplayName("上限 200：超限静默丢弃（fail-open，不影响测试）")
-    void boundedAt200() throws Exception {
+    @DisplayName("不设上限：250 条监控失败全部保留")
+    void notBounded() throws Exception {
         StepHandle handle = bus.startCase("m-40-cap", "feat", "case", List.of());
         for (int i = 0; i < 250; i++) {
             bus.recordApiMonitorFailure(handle, "MONITOR FAIL item-" + i);
@@ -99,8 +99,8 @@ class ApiMonitorFailureRecordingTest {
 
         Path json = tempDir.resolve("m-40-cap").resolve("m-40-cap.json");
         TestOutcome o = JsonWriter.mapper().readValue(json.toFile(), TestOutcome.class);
-        assertThat(o.getApiMonitorFailures()).hasSize(200);
-        assertThat(o.getApiMonitorFailures().get(199)).isEqualTo("MONITOR FAIL item-199");
+        assertThat(o.getApiMonitorFailures()).hasSize(250);
+        assertThat(o.getApiMonitorFailures().get(249)).isEqualTo("MONITOR FAIL item-249");
     }
 
     @Test
