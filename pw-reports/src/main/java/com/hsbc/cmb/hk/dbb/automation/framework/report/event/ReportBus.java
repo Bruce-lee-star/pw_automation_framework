@@ -327,7 +327,7 @@ public final class ReportBus {
                 //  时间线元数据例外——继承首轮「首次开始时刻」并 attempt+1，否则整个运行的
                 //  Started 会退化成最后一轮的重跑时刻（2026-11-11 用户反馈 index start 不对）。
                 RecordingSession fresh = new RecordingSession(previousId, feature, scenario, tags, featurePath,
-                        config.getMaxEvidenceLines(), config.getMaxApiOperations());
+                        config.getMaxEvidenceLines(), config.getMaxApiOperations(), config.getMaxConsoleLines());
                 fresh.inheritRunHistory(sessions.get(previousId));
                 sessions.put(previousId, fresh);
                 return fresh;
@@ -337,7 +337,7 @@ public final class ReportBus {
         int suffix = 1;
         while (true) {
             RecordingSession candidate = new RecordingSession(id, feature, scenario, tags, featurePath,
-                    config.getMaxEvidenceLines(), config.getMaxApiOperations());
+                    config.getMaxEvidenceLines(), config.getMaxApiOperations(), config.getMaxConsoleLines());
             RecordingSession prev = sessions.putIfAbsent(id, candidate);
             if (prev == null) {
                 sessionIdentities.put(identity, id);

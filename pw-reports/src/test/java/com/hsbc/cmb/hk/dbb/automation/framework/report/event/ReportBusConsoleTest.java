@@ -54,6 +54,23 @@ class ReportBusConsoleTest {
     }
 
     @Test
+    @DisplayName("console 上限独立于 evidence：超过旧 50 行的输出仍完整保留（默认 1000）")
+    void consoleKeepsMoreThanFiftyLines() throws Exception {
+        Path dir = Files.createTempDirectory("pw-report-console-limit");
+        ReportBus bus = new ReportBus(PwReportsConfig.builder().enabled(true).outputDir(dir).build());
+
+        StepHandle c = bus.startCase("c3", "feature", "scenario", List.of("t"), "feature.feature");
+        for (int i = 0; i < 120; i++) {
+            System.out.println("CONSOLE_LINE_" + i);
+        }
+        bus.finishCase(c, TestResult.SUCCESS, null, -1);
+
+        List<String> out = bus.outcomeSnapshots().get(0).getConsoleOutput();
+        assertThat(out).hasSize(120);
+        assertThat(out).contains("CONSOLE_LINE_0", "CONSOLE_LINE_119");
+    }
+
+    @Test
     @DisplayName("脚本中写敏感串经 ScrubGate 脱敏后入报告")
     void sensitiveConsoleIsScrubbed() throws Exception {
         Path dir = Files.createTempDirectory("pw-report-console-scrub");

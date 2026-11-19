@@ -39,6 +39,8 @@ final class RecordingSession {
     private final String featurePath;
     private final int maxEvidenceLines;
     private final int maxApiOperations;
+    /** console 列表独立上限（默认 1000），远高于 evidence 的 50——console 是排障第一手资料。 */
+    private final int maxConsoleLines;
 
     private final List<TestStep> rootSteps = new CopyOnWriteArrayList<>();
     private final Map<String, TestStep> stepIndex = new ConcurrentHashMap<>();
@@ -103,7 +105,7 @@ final class RecordingSession {
     private volatile int exampleRowNumber = -1;
 
     RecordingSession(String outcomeId, String feature, String scenario, List<String> tags,
-                     String featurePath, int maxEvidenceLines, int maxApiOperations) {
+                     String featurePath, int maxEvidenceLines, int maxApiOperations, int maxConsoleLines) {
         this.outcomeId = outcomeId;
         this.feature = feature;
         this.scenario = scenario;
@@ -111,6 +113,7 @@ final class RecordingSession {
         this.featurePath = featurePath;
         this.maxEvidenceLines = maxEvidenceLines;
         this.maxApiOperations = maxApiOperations;
+        this.maxConsoleLines = maxConsoleLines;
     }
 
     String outcomeId() {
@@ -212,7 +215,7 @@ final class RecordingSession {
     /** 用例级控制台输出（stdout/stderr 经 ScrubGate 脱敏后入此）。 */
     void appendConsole(boolean isError, String scrubbedLine) {
         appendBounded(isError ? consoleError : consoleOutput, scrubbedLine,
-                maxEvidenceLines, consoleDropped, "console");
+                maxConsoleLines, consoleDropped, "console");
     }
 
     /** 步骤级控制台输出：归到指定步骤；步骤不存在则降级到用例级。 */
@@ -223,7 +226,7 @@ final class RecordingSession {
             return;
         }
         appendBounded(isError ? step.getConsoleError() : step.getConsoleOutput(),
-                scrubbedLine, maxEvidenceLines, consoleDropped, "console");
+                scrubbedLine, maxConsoleLines, consoleDropped, "console");
     }
 
     /** 标注本 case 为手工用例（标签 @manual）：不执行、报告记录为手工。 */
@@ -234,7 +237,7 @@ final class RecordingSession {
     /** 浏览器控制台输出（page console / page-error，经脱敏入此，限行）。 */
     void appendBrowserConsole(boolean isError, String scrubbedLine) {
         appendBounded(isError ? browserErrors : browserConsole, scrubbedLine,
-                maxEvidenceLines, consoleDropped, "browserLog");
+                maxConsoleLines, consoleDropped, "browserLog");
     }
 
     // ---------------------------------------------------------------- attachments
