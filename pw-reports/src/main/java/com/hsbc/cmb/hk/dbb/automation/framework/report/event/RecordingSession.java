@@ -39,8 +39,6 @@ final class RecordingSession {
     private final String featurePath;
     private final int maxEvidenceLines;
     private final int maxApiOperations;
-    /** console 列表独立上限（默认 1000），远高于 evidence 的 50——console 是排障第一手资料。 */
-    private final int maxConsoleLines;
 
     private final List<TestStep> rootSteps = new CopyOnWriteArrayList<>();
     private final Map<String, TestStep> stepIndex = new ConcurrentHashMap<>();
@@ -74,7 +72,7 @@ final class RecordingSession {
     private final AtomicInteger evidenceDropped = new AtomicInteger();
     private final AtomicInteger apiDropped = new AtomicInteger();
     private final AtomicInteger monitorDropped = new AtomicInteger();
-    private final AtomicInteger consoleDropped = new AtomicInteger();
+
 
     /** 手工用例标记（标签 @manual）：不执行、报告记录为手工。 */
     private volatile boolean manual;
@@ -105,7 +103,7 @@ final class RecordingSession {
     private volatile int exampleRowNumber = -1;
 
     RecordingSession(String outcomeId, String feature, String scenario, List<String> tags,
-                     String featurePath, int maxEvidenceLines, int maxApiOperations, int maxConsoleLines) {
+                     String featurePath, int maxEvidenceLines, int maxApiOperations) {
         this.outcomeId = outcomeId;
         this.feature = feature;
         this.scenario = scenario;
@@ -113,7 +111,6 @@ final class RecordingSession {
         this.featurePath = featurePath;
         this.maxEvidenceLines = maxEvidenceLines;
         this.maxApiOperations = maxApiOperations;
-        this.maxConsoleLines = maxConsoleLines;
     }
 
     String outcomeId() {
@@ -212,21 +209,19 @@ final class RecordingSession {
 
     // ---------------------------------------------------------------- console
 
-    /** 用例级控制台输出（stdout/stderr 经 ScrubGate 脱敏后入此）。 */
+    /** 用例级控制台输出（stdout/stderr 经 ScrubGate 脱敏后入此）。console 不设行数上限，完整保留。 */
     void appendConsole(boolean isError, String scrubbedLine) {
-        appendBounded(isError ? consoleError : consoleOutput, scrubbedLine,
-                maxConsoleLines, consoleDropped, "console");
+        (isError ? consoleError : consoleOutput).add(scrubbedLine);
     }
 
-    /** 步骤级控制台输出：归到指定步骤；步骤不存在则降级到用例级。 */
+    /** 步骤级控制台输出：归到指定步骤；步骤不存在则降级到用例级。不设上限。 */
     void appendStepConsole(String stepId, boolean isError, String scrubbedLine) {
         TestStep step = stepIndex.get(stepId);
         if (step == null) {
             appendConsole(isError, scrubbedLine);
             return;
         }
-        appendBounded(isError ? step.getConsoleError() : step.getConsoleOutput(),
-                scrubbedLine, maxConsoleLines, consoleDropped, "console");
+        (isError ? step.getConsoleError() : step.getConsoleOutput()).add(scrubbedLine);
     }
 
     /** 标注本 case 为手工用例（标签 @manual）：不执行、报告记录为手工。 */
@@ -234,10 +229,9 @@ final class RecordingSession {
         this.manual = true;
     }
 
-    /** 浏览器控制台输出（page console / page-error，经脱敏入此，限行）。 */
+    /** 浏览器控制台输出（page console / page-error，经脱敏入此）。不设上限，完整保留。 */
     void appendBrowserConsole(boolean isError, String scrubbedLine) {
-        appendBounded(isError ? browserErrors : browserConsole, scrubbedLine,
-                maxConsoleLines, consoleDropped, "browserLog");
+        (isError ? browserErrors : browserConsole).add(scrubbedLine);
     }
 
     // ---------------------------------------------------------------- attachments

@@ -83,20 +83,12 @@ class ConfigParseTest {
     class LimitsParsing {
 
         @Test
-        @DisplayName("三值全给 -> 逐位生效，consoleLines 取默认 1000")
+        @DisplayName("三值全给 -> 逐位生效")
         void allThreeValues() {
             PwReportsConfig.Limits l = PwReportsConfig.Limits.parse("80,4096,1000");
             assertThat(l.evidenceLines()).isEqualTo(80);
             assertThat(l.evidenceBytes()).isEqualTo(4096);
             assertThat(l.apiOperations()).isEqualTo(1000);
-            assertThat(l.consoleLines()).isEqualTo(1000);
-        }
-
-        @Test
-        @DisplayName("四值全给 -> consoleLines 按第 4 位生效")
-        void allFourValues() {
-            PwReportsConfig.Limits l = PwReportsConfig.Limits.parse("50,2048,500,2000");
-            assertThat(l.consoleLines()).isEqualTo(2000);
         }
 
         @Test
@@ -106,7 +98,6 @@ class ConfigParseTest {
             assertThat(l.evidenceLines()).isEqualTo(80);
             assertThat(l.evidenceBytes()).isEqualTo(PwReportsConfig.Limits.DEFAULT.evidenceBytes());
             assertThat(l.apiOperations()).isEqualTo(PwReportsConfig.Limits.DEFAULT.apiOperations());
-            assertThat(l.consoleLines()).isEqualTo(1000);
         }
 
         @Test
@@ -115,8 +106,7 @@ class ConfigParseTest {
             assertThat(PwReportsConfig.Limits.parse("abc")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
             assertThat(PwReportsConfig.Limits.parse("80,0,1000")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
             assertThat(PwReportsConfig.Limits.parse("-1,4096,1000")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse("1,2,3,4,5")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
-            assertThat(PwReportsConfig.Limits.parse("1,2,3,0")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
+            assertThat(PwReportsConfig.Limits.parse("1,2,3,4")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
             assertThat(PwReportsConfig.Limits.parse("")).isEqualTo(PwReportsConfig.Limits.DEFAULT);
             assertThat(PwReportsConfig.Limits.parse(null)).isEqualTo(PwReportsConfig.Limits.DEFAULT);
         }

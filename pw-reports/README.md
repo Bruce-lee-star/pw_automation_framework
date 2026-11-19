@@ -103,7 +103,7 @@ cucumber.object-factory=com.hsbc.cmb.hk.dbb.automation.framework.report.step.PwR
 
 | 属性 | 默认 | 说明 |
 |---|---|---|
-| `pw.report.limits` | `50,2048,500,1000` | 四合一限额档位 `证据行数,单行字节,API条数,console行数`；console 独立上限（默认 1000，远高于证据的 50，避免整场 console log 被截）；缺项沿用默认，非法值整体回退并告警 |
+| `pw.report.limits` | `50,2048,500` | 三合一限额档位 `证据行数,单行字节,API条数`；console 输出（stdout/stderr、浏览器日志）不设上限、完整保留；缺项沿用默认，非法值整体回退并告警 |
 | `pw.report.scrub.extra-patterns` | 空 | 逗号分隔正则，追加脱敏规则；非法正则跳过不炸 |
 
 **设计取舍**：刻意不做「开关与参数分离」（没有 `x.enabled` + `x.url` 二连——写了 url

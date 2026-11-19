@@ -59,45 +59,40 @@ public final class PwReportsConfig {
      * @param evidenceLines 单步骤证据最大行数
      * @param evidenceBytes 单行证据最大字节（超长截断）
      * @param apiOperations 单用例 API 操作记录最大条数
-     * @param consoleLines  单个 console 列表最大行数（stdout/stderr、步骤级/用例级、浏览器日志各自独立）
+     *
+     * <p>console 输出（stdout/stderr、步骤级/用例级、浏览器 console）不在此限额内：
+     * 它是排障第一手资料，完整保留、不设行数上限。</p>
      */
-    public record Limits(int evidenceLines, int evidenceBytes, int apiOperations, int consoleLines) {
+    public record Limits(int evidenceLines, int evidenceBytes, int apiOperations) {
 
-        public static final Limits DEFAULT = new Limits(50, 2048, 500, 1000);
+        public static final Limits DEFAULT = new Limits(50, 2048, 500);
 
         public Limits {
-            if (evidenceLines <= 0 || evidenceBytes <= 0 || apiOperations <= 0 || consoleLines <= 0) {
+            if (evidenceLines <= 0 || evidenceBytes <= 0 || apiOperations <= 0) {
                 throw new IllegalArgumentException("limits must be positive: " + evidenceLines
-                        + "/" + evidenceBytes + "/" + apiOperations + "/" + consoleLines);
+                        + "/" + evidenceBytes + "/" + apiOperations);
             }
         }
 
-        /** 兼容三参构造：consoleLines 取默认（1000）。 */
-        public Limits(int evidenceLines, int evidenceBytes, int apiOperations) {
-            this(evidenceLines, evidenceBytes, apiOperations, DEFAULT.consoleLines);
-        }
-
         /**
-         * 解析 {@code lines,bytes,apis[,consoleLines]}（逗号分隔，缺项沿用默认）。
+         * 解析 {@code lines,bytes,apis}（逗号分隔，缺项沿用默认）。
          *
-         * <p>格式故意做成<b>位置参数</b>而非 {@code key=value}：值域窄（正整数），
-         * 写 {@code 80,4096,1000,2000} 比 {@code evidenceLines=80,...} 省一半字符，
-         * 而非法输入（个数不对/非数字/非正）一律整体回退默认并告警——不会半途生效半个值。
-         * 第 4 位 consoleLines 是后加项（默认 1000，远高于 evidenceLines），
-         * 兼容只写前三位的既有配置。</p>
+         * <p>格式故意做成<b>位置参数</b>而非 {@code key=value}：值域窄（三个正整数），
+         * 写 {@code 80,4096,1000} 比 {@code evidenceLines=80,evidenceBytes=4096} 省一半字符，
+         * 而非法输入（个数不对/非数字/非正）一律整体回退默认并告警——不会半途生效半个值。</p>
          */
         static Limits parse(String raw) {
             if (raw == null || raw.isBlank()) {
                 return DEFAULT;
             }
             String[] parts = raw.split(",");
-            if (parts.length > 4) {
-                log.warn("pw.report.limits: expected up to 4 values 'lines,bytes,apis,consoleLines' but got {} - using default {}",
+            if (parts.length > 3) {
+                log.warn("pw.report.limits: expected up to 3 values 'lines,bytes,apis' but got {} - using default {}",
                         raw, DEFAULT);
                 return DEFAULT;
             }
             int[] vals = new int[] {
-                    DEFAULT.evidenceLines, DEFAULT.evidenceBytes, DEFAULT.apiOperations, DEFAULT.consoleLines };
+                    DEFAULT.evidenceLines, DEFAULT.evidenceBytes, DEFAULT.apiOperations };
             for (int i = 0; i < parts.length; i++) {
                 String t = parts[i].trim();
                 if (t.isEmpty()) {
@@ -111,7 +106,7 @@ public final class PwReportsConfig {
                 }
             }
             try {
-                return new Limits(vals[0], vals[1], vals[2], vals[3]);
+                return new Limits(vals[0], vals[1], vals[2]);
             } catch (IllegalArgumentException e) {
                 log.warn("pw.report.limits: {} (must be positive) - using default {}", raw, DEFAULT);
                 return DEFAULT;
@@ -202,11 +197,6 @@ public final class PwReportsConfig {
 
     public int getMaxApiOperations() {
         return limits.apiOperations();
-    }
-
-    /** 单个 console 列表上限（stdout/stderr、步骤级/用例级、浏览器日志各自独立），默认 1000。 */
-    public int getMaxConsoleLines() {
-        return limits.consoleLines();
     }
 
     /** 推送目标；<b>非空即启用</b>（原 {@code push.enabled} 冗余开关已移除）。 */
@@ -373,14 +363,9 @@ public final class PwReportsConfig {
             return this;
         }
 
-        /** 三合一限额的便捷重载（位置参数），consoleLines 取默认 1000。 */
+        /** 三合一限额的便捷重载（位置参数）。 */
         public Builder limits(int evidenceLines, int evidenceBytes, int apiOperations) {
             return limits(new Limits(evidenceLines, evidenceBytes, apiOperations));
-        }
-
-        /** 四合一限额的便捷重载（位置参数，含 consoleLines）。 */
-        public Builder limits(int evidenceLines, int evidenceBytes, int apiOperations, int consoleLines) {
-            return limits(new Limits(evidenceLines, evidenceBytes, apiOperations, consoleLines));
         }
 
         public Builder pushUrl(String v) {

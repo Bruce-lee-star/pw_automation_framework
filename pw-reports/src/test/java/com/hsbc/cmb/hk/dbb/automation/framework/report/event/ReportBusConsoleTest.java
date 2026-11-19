@@ -54,20 +54,35 @@ class ReportBusConsoleTest {
     }
 
     @Test
-    @DisplayName("console 上限独立于 evidence：超过旧 50 行的输出仍完整保留（默认 1000）")
-    void consoleKeepsMoreThanFiftyLines() throws Exception {
+    @DisplayName("console 不设行数上限：1200 行输出全部保留（用例级 / 步骤级 / 浏览器日志同理）")
+    void consoleHasNoLineLimit() throws Exception {
         Path dir = Files.createTempDirectory("pw-report-console-limit");
         ReportBus bus = new ReportBus(PwReportsConfig.builder().enabled(true).outputDir(dir).build());
 
         StepHandle c = bus.startCase("c3", "feature", "scenario", List.of("t"), "feature.feature");
-        for (int i = 0; i < 120; i++) {
-            System.out.println("CONSOLE_LINE_" + i);
+        // 用例级 stdout：步骤外输出，1200 行全保留
+        for (int i = 0; i < 1200; i++) {
+            System.out.println("CASE_LINE_" + i);
         }
+        StepHandle s = bus.stepStarted("a step");
+        // 步骤级 stdout：步骤内输出，1200 行全保留
+        for (int i = 0; i < 1200; i++) {
+            System.out.println("STEP_LINE_" + i);
+        }
+        // 浏览器 console：case 级，1200 行全保留
+        for (int i = 0; i < 1200; i++) {
+            bus.appendBrowserConsole(s, false, "BROWSER_LINE_" + i);
+        }
+        bus.stepFinished(s, TestResult.SUCCESS, null);
         bus.finishCase(c, TestResult.SUCCESS, null, -1);
 
-        List<String> out = bus.outcomeSnapshots().get(0).getConsoleOutput();
-        assertThat(out).hasSize(120);
-        assertThat(out).contains("CONSOLE_LINE_0", "CONSOLE_LINE_119");
+        TestOutcome o = bus.outcomeSnapshots().get(0);
+        assertThat(o.getConsoleOutput()).hasSize(1200);
+        assertThat(o.getConsoleOutput()).contains("CASE_LINE_0", "CASE_LINE_1199");
+        assertThat(o.getTestSteps().get(0).getConsoleOutput()).hasSize(1200);
+        assertThat(o.getTestSteps().get(0).getConsoleOutput()).contains("STEP_LINE_0", "STEP_LINE_1199");
+        assertThat(o.getBrowserConsole()).hasSize(1200);
+        assertThat(o.getBrowserConsole()).contains("BROWSER_LINE_0", "BROWSER_LINE_1199");
     }
 
     @Test
